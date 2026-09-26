@@ -19,38 +19,75 @@ const CATEGORIES: Record<Mode, { key: string; label: string }[]> = {
   ],
 }
 
-type LoadState = { uid: string; result: CompatibilityResult | null }
+// Revealed scores for this browser session. Module-level rather than component
+// state: the block remounts per profile, and "Maybe" can bring a profile back.
+const revealedScores = new Map<string, CompatibilityResult>()
+
+type Status = 'hidden' | 'loading' | 'revealed' | 'error'
 
 export default function CompatibilityBlock({ targetUid, mode }: { targetUid: string; mode: Mode }) {
-  const [state, setState] = useState<LoadState | null>(null)
-  const theme = discoverTheme(mode)
+  const cached = revealedScores.get(targetUid)
+  const [status, setStatus] = useState<Status>(cached ? 'revealed' : 'hidden')
+  const [result, setResult] = useState<CompatibilityResult | null>(cached ?? null)
 
-  useEffect(() => {
-    let cancelled = false
-    fetchCompatibility(targetUid)
-      .then((result) => {
-        if (!cancelled) setState({ uid: targetUid, result })
-      })
-      .catch(() => {
-        if (!cancelled) setState({ uid: targetUid, result: null })
-      })
-    return () => {
-      cancelled = true
+  // onTap runs only here, on an explicit click — never on mount.
+  async function reveal() {
+    setStatus('loading')
+    try {
+      const data = await fetchCompatibility(targetUid)
+      revealedScores.set(targetUid, data)
+      setResult(data)
+      setStatus('revealed')
+    } catch {
+      setStatus('error')
     }
-  }, [targetUid])
-
-  if (state?.uid !== targetUid) {
-    return (
-      <div className="mt-4" aria-busy="true">
-        <div className="h-12 w-24 animate-pulse rounded-lg bg-white/10" />
-        <div className="mt-2 h-3 w-24 animate-pulse rounded bg-white/5" />
-      </div>
-    )
   }
 
-  const result = state.result
-  const score = mode === 'play' ? result?.playScore : result?.sparkScore
-  if (!result || typeof score !== 'number') return null
+  if (status === 'revealed' && result) {
+    return <RevealedScore result={result} mode={mode} animate={!cached} />
+  }
+
+  return (
+    <div className="mt-4">
+      <div className="relative flex h-24 max-w-xs items-center overflow-hidden rounded-xl">
+        <span className="select-none pl-4 text-5xl font-bold text-white/30" aria-hidden>
+          ✦
+        </span>
+        <div className="absolute inset-0 flex items-center justify-center bg-white/5 backdrop-blur-md">
+          {status === 'loading' ? (
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+          ) : (
+            <button
+              type="button"
+              onClick={reveal}
+              className="cursor-pointer rounded-full border border-white/20 bg-white/5 px-5 py-2 text-sm font-medium text-white/70 transition-all hover:border-white/40 hover:bg-white/10 hover:text-white"
+            >
+              {status === 'error' ? 'Try again ✦' : 'Reveal your score ✦'}
+            </button>
+          )}
+        </div>
+      </div>
+      <p className="mt-2 max-w-xs text-center text-xs text-white/30">
+        {status === 'error' ? "Couldn't load your score." : 'See how compatible you really are'}
+      </p>
+    </div>
+  )
+}
+
+function RevealedScore({ result, mode, animate }: { result: CompatibilityResult; mode: Mode; animate: boolean }) {
+  const theme = discoverTheme(mode)
+  // Start hidden only when freshly revealed, then fade/slide in on the next frame.
+  const [visible, setVisible] = useState(!animate)
+  useEffect(() => {
+    if (!animate) return
+    const frame = requestAnimationFrame(() => setVisible(true))
+    return () => cancelAnimationFrame(frame)
+  }, [animate])
+
+  const score = mode === 'play' ? result.playScore : result.sparkScore
+  if (typeof score !== 'number') {
+    return <p className="mt-4 text-sm text-white/40">No compatibility score available yet.</p>
+  }
 
   const breakdown = mode === 'play' ? result.breakdown?.play : result.breakdown?.spark
   const bars = CATEGORIES[mode]
@@ -59,7 +96,9 @@ export default function CompatibilityBlock({ targetUid, mode }: { targetUid: str
   const dealbreakers = result.triggeredDealbreakers ?? []
 
   return (
-    <div className="mt-4">
+    <div
+      className={`mt-4 transition-all duration-500 ${visible ? 'translate-y-0 opacity-100 blur-0' : 'translate-y-1 opacity-0 blur-sm'}`}
+    >
       <p className={`text-5xl font-bold ${theme.scoreText}`}>{Math.round(score)}%</p>
       <p className="mt-1 text-xs uppercase tracking-widest text-white/30">Compatibility</p>
 
@@ -70,8 +109,8 @@ export default function CompatibilityBlock({ targetUid, mode }: { targetUid: str
               <p className="mb-1.5 text-xs text-white/40">{b.label}</p>
               <div className="h-1 overflow-hidden rounded-full bg-white/10">
                 <div
-                  className={`h-full rounded-full ${theme.barFill}`}
-                  style={{ width: `${Math.min(100, Math.max(0, b.value))}%` }}
+                  className={`h-full rounded-full transition-all duration-500 ${theme.barFill}`}
+                  style={{ width: visible ? `${Math.min(100, Math.max(0, b.value))}%` : '0%' }}
                 />
               </div>
             </div>
