@@ -14,7 +14,7 @@ import {
 
 function SectionHeading({ children }: { children: ReactNode }) {
   return (
-    <h3 className="mb-4 border-b border-white/5 pb-2 text-[10px] uppercase tracking-[0.2em] text-white/25">
+    <h3 className="mb-4 border-b border-white/5 pb-2 text-[10px] uppercase tracking-[0.2em] text-white/45">
       {children}
     </h3>
   )
@@ -58,7 +58,7 @@ export default function ProfileDetails({ profile, mode }: { profile: DiscoverPro
           </span>
         </div>
         {profile.locationLabel && <p className="mt-1 text-sm text-white/40">{profile.locationLabel}</p>}
-        <CompatibilityBlock key={profile.uid} targetUid={profile.uid} mode={mode} />
+        <CompatibilityBlock key={profile.uid} profile={profile} mode={mode} />
       </header>
 
       {bio && (

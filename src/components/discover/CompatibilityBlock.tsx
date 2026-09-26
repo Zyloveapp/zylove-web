@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchCompatibility, type CompatibilityResult } from '../../services/discover'
+import { fetchCompatibility, type CompatibilityResult, type DiscoverProfile } from '../../services/discover'
 import type { Mode } from '../../store/modeStore'
 import { discoverTheme } from './theme'
 
@@ -38,13 +38,28 @@ function insightFor(value: number): string {
   return 'Moderate'
 }
 
+// Categories scored from data the viewed profile may not have filled in.
+// With nothing to score against, the server returns a neutral default, so
+// these are hidden rather than shown as a misleading number.
+function emptyCategories(p: DiscoverProfile): Set<string> {
+  const empty = new Set<string>()
+  const hasPhysical = (p.seekingBodyTypes?.length ?? 0) > 0 || Boolean(p.seekingHeightMinCm) || Boolean(p.seekingHeightMaxCm)
+  if (!hasPhysical) {
+    empty.add('physicalPrefs')
+    empty.add('physicalCompatibility')
+  }
+  if (!p.loveLangGive?.length && !p.loveLangReceive?.length) empty.add('loveLanguages')
+  return empty
+}
+
 // Revealed scores for this browser session. Module-level rather than component
 // state: the block remounts per profile, and "Maybe" can bring a profile back.
 const revealedScores = new Map<string, CompatibilityResult>()
 
 type Status = 'hidden' | 'loading' | 'revealed' | 'error'
 
-export default function CompatibilityBlock({ targetUid, mode }: { targetUid: string; mode: Mode }) {
+export default function CompatibilityBlock({ profile, mode }: { profile: DiscoverProfile; mode: Mode }) {
+  const targetUid = profile.uid
   const cached = revealedScores.get(targetUid)
   const [status, setStatus] = useState<Status>(cached ? 'revealed' : 'hidden')
   const [result, setResult] = useState<CompatibilityResult | null>(cached ?? null)
@@ -63,7 +78,7 @@ export default function CompatibilityBlock({ targetUid, mode }: { targetUid: str
   }
 
   if (status === 'revealed' && result) {
-    return <RevealedScore result={result} mode={mode} animate={!cached} />
+    return <RevealedScore result={result} mode={mode} animate={!cached} hidden={emptyCategories(profile)} />
   }
 
   return (
@@ -93,7 +108,17 @@ export default function CompatibilityBlock({ targetUid, mode }: { targetUid: str
   )
 }
 
-function RevealedScore({ result, mode, animate }: { result: CompatibilityResult; mode: Mode; animate: boolean }) {
+function RevealedScore({
+  result,
+  mode,
+  animate,
+  hidden,
+}: {
+  result: CompatibilityResult
+  mode: Mode
+  animate: boolean
+  hidden: Set<string>
+}) {
   const theme = discoverTheme(mode)
   // Start hidden only when freshly revealed, then fade/slide in on the next frame.
   const [visible, setVisible] = useState(!animate)
@@ -109,7 +134,7 @@ function RevealedScore({ result, mode, animate }: { result: CompatibilityResult;
   }
 
   const breakdown = mode === 'play' ? result.breakdown?.play : result.breakdown?.spark
-  const withValue = (c: { key: string; label: string }) => ({ ...c, value: breakdown?.[c.key] })
+  const withValue = (c: { key: string; label: string }) => ({ ...c, value: hidden.has(c.key) ? undefined : breakdown?.[c.key] })
   const hasValue = (c: { key: string; label: string; value?: number }): c is { key: string; label: string; value: number } =>
     typeof c.value === 'number'
   const bars = CATEGORIES[mode].map(withValue).filter(hasValue)
@@ -144,7 +169,7 @@ function RevealedScore({ result, mode, animate }: { result: CompatibilityResult;
 
       {insights.length > 0 && (
         <div className="mt-6">
-          <p className="mb-3 text-[10px] uppercase tracking-[0.2em] text-white/25">Why you match</p>
+          <p className="mb-3 text-[10px] uppercase tracking-[0.2em] text-white/45">Why you match</p>
           <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {insights.map((c) => (
               <li key={c.key} className="text-sm">
