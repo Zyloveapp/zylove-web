@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import { displayAge, type DiscoverProfile } from '../../services/discover'
 import type { Mode } from '../../store/modeStore'
 import CompatibilityBlock from './CompatibilityBlock'
-import { discoverTheme } from './theme'
 import {
   goDeeperRows,
   lifeDetails,
@@ -13,19 +12,19 @@ import {
   valueLabel,
 } from './labels'
 
-function SectionHeading({ children, className }: { children: ReactNode; className: string }) {
+function SectionHeading({ children }: { children: ReactNode }) {
   return (
-    <h3 className={`mb-4 border-b border-white/5 pb-2 text-[10px] uppercase tracking-[0.2em] ${className}`}>
+    <h3 className="mb-4 border-b border-white/5 pb-2 text-[10px] uppercase tracking-[0.2em] text-white/25">
       {children}
     </h3>
   )
 }
 
-function Pills({ items, icon, className }: { items: string[]; icon?: string; className: string }) {
+function Pills({ items, icon }: { items: string[]; icon?: string }) {
   return (
     <div className="flex flex-wrap gap-2">
       {items.map((item) => (
-        <span key={item} className={`rounded-full px-4 py-2 text-sm ${className}`}>
+        <span key={item} className="rounded-full border border-white/10 bg-white/[0.08] px-4 py-1.5 text-sm text-white/70">
           {icon && <span className="mr-1.5 opacity-70">{icon}</span>}
           {item}
         </span>
@@ -45,8 +44,6 @@ export default function ProfileDetails({ profile, mode }: { profile: DiscoverPro
   const loveGive = (profile.loveLangGive ?? []).map(loveLanguageLabel)
   const loveReceive = (profile.loveLangReceive ?? []).map(loveLanguageLabel)
   const details = lifeDetails(profile)
-  const promptBorder = mode === 'play' ? 'border-white/10' : 'border-[#1B4FD8]/40'
-  const theme = discoverTheme(mode)
 
   return (
     <div className="space-y-8">
@@ -66,17 +63,17 @@ export default function ProfileDetails({ profile, mode }: { profile: DiscoverPro
 
       {bio && (
         <section>
-          <SectionHeading className={theme.heading}>About</SectionHeading>
+          <SectionHeading>About</SectionHeading>
           <p className="whitespace-pre-line text-lg leading-relaxed text-white/80">{bio}</p>
         </section>
       )}
 
       {prompts.length > 0 && (
         <section>
-          <SectionHeading className={theme.heading}>In their own words</SectionHeading>
+          <SectionHeading>In their own words</SectionHeading>
           <div className="space-y-5">
             {prompts.map((p) => (
-              <div key={p.promptId} className={`border-l-2 pl-4 ${promptBorder}`}>
+              <div key={p.promptId} className="border-l-2 border-white/10 pl-4">
                 <p className="text-sm text-white/30">{promptQuestion(p.promptId)}</p>
                 <p className="mt-1 text-base text-white">{p.answer}</p>
               </div>
@@ -87,12 +84,12 @@ export default function ProfileDetails({ profile, mode }: { profile: DiscoverPro
 
       {deeper.length > 0 && (
         <section>
-          <SectionHeading className={theme.heading}>How they operate</SectionHeading>
+          <SectionHeading>How they operate</SectionHeading>
           <ul className="flex flex-col gap-y-2 text-sm">
             {deeper.map((r) => (
               <li key={r.label}>
-                <span className={theme.operateLabel}>{r.label}</span>
-                <span className={`mx-2 ${theme.operateLabel}`}>·</span>
+                <span className="text-white/40">{r.label}</span>
+                <span className="mx-2 text-white/20">·</span>
                 <span className="text-white">{r.value}</span>
               </li>
             ))}
@@ -102,8 +99,8 @@ export default function ProfileDetails({ profile, mode }: { profile: DiscoverPro
 
       {traits.length > 0 && (
         <section>
-          <SectionHeading className={theme.heading}>Personality</SectionHeading>
-          <Pills items={traits} className={theme.pill} />
+          <SectionHeading>Personality</SectionHeading>
+          <Pills items={traits} />
         </section>
       )}
 
@@ -111,14 +108,14 @@ export default function ProfileDetails({ profile, mode }: { profile: DiscoverPro
         <section className="grid gap-8 md:grid-cols-2">
           {values.length > 0 && (
             <div>
-              <SectionHeading className={theme.heading}>Values</SectionHeading>
-              <Pills items={values} className={theme.pill} />
+              <SectionHeading>Values</SectionHeading>
+              <Pills items={values} />
             </div>
           )}
           {lifestyle.length > 0 && (
             <div>
-              <SectionHeading className={theme.heading}>Lifestyle</SectionHeading>
-              <Pills items={lifestyle} className={theme.pill} />
+              <SectionHeading>Lifestyle</SectionHeading>
+              <Pills items={lifestyle} />
             </div>
           )}
         </section>
@@ -128,14 +125,14 @@ export default function ProfileDetails({ profile, mode }: { profile: DiscoverPro
         <section className="grid gap-8 md:grid-cols-2">
           {loveGive.length > 0 && (
             <div>
-              <SectionHeading className={theme.heading}>Shows love by</SectionHeading>
-              <Pills items={loveGive} icon="♥" className={theme.pill} />
+              <SectionHeading>Shows love by</SectionHeading>
+              <Pills items={loveGive} icon="♥" />
             </div>
           )}
           {loveReceive.length > 0 && (
             <div>
-              <SectionHeading className={theme.heading}>Feels loved when</SectionHeading>
-              <Pills items={loveReceive} icon="♥" className={theme.pill} />
+              <SectionHeading>Feels loved when</SectionHeading>
+              <Pills items={loveReceive} icon="♥" />
             </div>
           )}
         </section>
@@ -143,7 +140,7 @@ export default function ProfileDetails({ profile, mode }: { profile: DiscoverPro
 
       {details.length > 0 && (
         <section>
-          <SectionHeading className={theme.heading}>Life details</SectionHeading>
+          <SectionHeading>Life details</SectionHeading>
           <dl className="grid grid-cols-2 gap-x-8 gap-y-5">
             {details.map((d) => (
               <div key={d.label}>

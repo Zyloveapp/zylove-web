@@ -19,6 +19,25 @@ const CATEGORIES: Record<Mode, { key: string; label: string }[]> = {
   ],
 }
 
+// Every category, in scoring-weight order — used for "Why you match".
+const ALL_CATEGORIES: Record<Mode, { key: string; label: string }[]> = {
+  spark: [
+    ...CATEGORIES.spark,
+    { key: 'lifestyle', label: 'Lifestyle' },
+    { key: 'personality', label: 'Personality' },
+  ],
+  play: CATEGORIES.play,
+}
+
+const INSIGHT_THRESHOLD = 60
+
+function insightFor(value: number): string {
+  if (value >= 90) return 'Strong alignment'
+  if (value >= 80) return 'High compatibility'
+  if (value >= 70) return 'Good match'
+  return 'Moderate'
+}
+
 // Revealed scores for this browser session. Module-level rather than component
 // state: the block remounts per profile, and "Maybe" can bring a profile back.
 const revealedScores = new Map<string, CompatibilityResult>()
@@ -90,9 +109,14 @@ function RevealedScore({ result, mode, animate }: { result: CompatibilityResult;
   }
 
   const breakdown = mode === 'play' ? result.breakdown?.play : result.breakdown?.spark
-  const bars = CATEGORIES[mode]
-    .map((c) => ({ ...c, value: breakdown?.[c.key] }))
-    .filter((c): c is { key: string; label: string; value: number } => typeof c.value === 'number')
+  const withValue = (c: { key: string; label: string }) => ({ ...c, value: breakdown?.[c.key] })
+  const hasValue = (c: { key: string; label: string; value?: number }): c is { key: string; label: string; value: number } =>
+    typeof c.value === 'number'
+  const bars = CATEGORIES[mode].map(withValue).filter(hasValue)
+  const insights = ALL_CATEGORIES[mode]
+    .map(withValue)
+    .filter(hasValue)
+    .filter((c) => c.value > INSIGHT_THRESHOLD)
   const dealbreakers = result.triggeredDealbreakers ?? []
 
   return (
@@ -100,13 +124,13 @@ function RevealedScore({ result, mode, animate }: { result: CompatibilityResult;
       className={`mt-4 transition-all duration-500 ${visible ? 'translate-y-0 opacity-100 blur-0' : 'translate-y-1 opacity-0 blur-sm'}`}
     >
       <p className={`text-5xl font-bold ${theme.scoreText}`}>{Math.round(score)}%</p>
-      <p className="mt-1 text-xs uppercase tracking-widest text-white/30">Compatibility</p>
+      <p className="mt-1 text-xs uppercase tracking-widest text-white/30">Zylove Score</p>
 
       {bars.length > 0 && (
         <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
           {bars.map((b) => (
             <div key={b.key}>
-              <p className="mb-1.5 text-xs text-white/40">{b.label}</p>
+              <p className="mb-1.5 text-xs font-medium text-white/60">{b.label}</p>
               <div className="h-1 overflow-hidden rounded-full bg-white/10">
                 <div
                   className={`h-full rounded-full transition-all duration-500 ${theme.barFill}`}
@@ -118,7 +142,27 @@ function RevealedScore({ result, mode, animate }: { result: CompatibilityResult;
         </div>
       )}
 
-      {dealbreakers.length > 0 && <p className="mt-4 text-xs text-amber-400/60">⚠ Some dealbreakers flagged</p>}
+      {insights.length > 0 && (
+        <div className="mt-6">
+          <p className="mb-3 text-[10px] uppercase tracking-[0.2em] text-white/25">Why you match</p>
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {insights.map((c) => (
+              <li key={c.key} className="text-sm">
+                <span className="text-white/55">{c.label}</span>
+                <span className="mx-2 text-white/20">·</span>
+                <span className="text-white/80">{insightFor(c.value)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {dealbreakers.length > 0 && (
+        <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3">
+          <p className="text-sm text-amber-400">⚠ Some dealbreakers flagged</p>
+          <p className="mt-1 text-xs text-amber-400/60">Consider reviewing their profile carefully</p>
+        </div>
+      )}
     </div>
   )
 }
