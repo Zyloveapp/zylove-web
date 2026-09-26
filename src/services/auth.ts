@@ -1,39 +1,36 @@
-import {
-  RecaptchaVerifier,
-  signInWithPhoneNumber,
-  type ConfirmationResult,
-  type UserCredential,
-} from 'firebase/auth'
-import { auth } from './firebase'
+import { auth } from './firebase';
+import { signInWithPhoneNumber, RecaptchaVerifier, type ConfirmationResult, type UserCredential } from 'firebase/auth';
 
-const RECAPTCHA_CONTAINER_ID = 'recaptcha-container'
+let recaptchaVerifier: RecaptchaVerifier | null = null;
 
-let verifier: RecaptchaVerifier | null = null
-
-function getVerifier(): RecaptchaVerifier {
-  if (!verifier) {
-    verifier = new RecaptchaVerifier(auth, RECAPTCHA_CONTAINER_ID, { size: 'invisible' })
+export function initRecaptcha(): void {
+  if (recaptchaVerifier) {
+    recaptchaVerifier.clear();
+    recaptchaVerifier = null;
   }
-  return verifier
-}
-
-// Resets the verifier so the next sendOtp builds a fresh one. Call after a
-// failed send (a used or expired token can't be retried) and when the
-// container element unmounts.
-export function clearRecaptcha(): void {
-  verifier?.clear()
-  verifier = null
+  recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+    size: 'invisible',
+    callback: () => {},
+    'error-callback': () => {},
+  });
 }
 
 export async function sendOtp(phoneNumber: string): Promise<ConfirmationResult> {
+  if (!recaptchaVerifier) initRecaptcha();
   try {
-    return await signInWithPhoneNumber(auth, phoneNumber, getVerifier())
+    return await signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier!);
   } catch (err) {
-    clearRecaptcha()
-    throw err
+    recaptchaVerifier?.clear();
+    recaptchaVerifier = null;
+    throw err;
   }
 }
 
-export function confirmOtp(confirmation: ConfirmationResult, code: string): Promise<UserCredential> {
-  return confirmation.confirm(code)
+export async function confirmOtp(confirmation: ConfirmationResult, code: string): Promise<UserCredential> {
+  return confirmation.confirm(code);
+}
+
+export function clearRecaptcha(): void {
+  recaptchaVerifier?.clear();
+  recaptchaVerifier = null;
 }

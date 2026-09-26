@@ -14,5 +14,14 @@ const firebaseConfig = {
 
 export const app = initializeApp(firebaseConfig)
 export const auth = getAuth(app)
+
+if (import.meta.env.DEV) {
+  auth.settings.appVerificationDisabledForTesting = true
+}
+
+if (import.meta.env.DEV) {
+  (self as any).FIREBASE_APPCHECK_DEBUG_TOKEN = true
+}
+
 export const db = getFirestore(app)
 export const storage = getStorage(app)

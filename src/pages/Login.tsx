@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { ConfirmationResult } from 'firebase/auth'
+import { signInWithEmailAndPassword, type ConfirmationResult } from 'firebase/auth'
 import { FirebaseError } from 'firebase/app'
-import { clearRecaptcha, confirmOtp, sendOtp } from '../services/auth'
+import { clearRecaptcha, confirmOtp, initRecaptcha, sendOtp } from '../services/auth'
+import { auth } from '../services/firebase'
 
 // Accepts "+<country><number>" as-is; bare 10-digit or 1-prefixed 11-digit
 // numbers are treated as US. Returns null if it can't be made valid E.164.
@@ -34,6 +35,7 @@ function errorMessage(err: unknown): string {
   if (err instanceof FirebaseError) {
     return ERROR_MESSAGES[err.code] ?? `Something went wrong (${err.code}).`
   }
+  if (err instanceof Error) return err.message
   return 'Something went wrong. Try again.'
 }
 
@@ -45,8 +47,32 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  // The verifier is bound to #recaptcha-container, which goes away with this page.
-  useEffect(() => clearRecaptcha, [])
+  // Dev-only shortcut past phone auth. Defined behind the DEV check so the
+  // handler and its credentials are dropped from production builds entirely.
+  const handleDevLogin = import.meta.env.DEV
+    ? async () => {
+        const email = import.meta.env.VITE_DEV_EMAIL
+        const password = import.meta.env.VITE_DEV_PASSWORD
+        if (!email || !password) {
+          setError('Set VITE_DEV_EMAIL and VITE_DEV_PASSWORD in .env.local.')
+          return
+        }
+        setError(null)
+        setSubmitting(true)
+        try {
+          await signInWithEmailAndPassword(auth, email, password)
+          navigate('/discover', { replace: true })
+        } catch (err) {
+          setError(errorMessage(err))
+          setSubmitting(false)
+        }
+      }
+    : null
+
+  useEffect(() => {
+    initRecaptcha()
+    return clearRecaptcha
+  }, [])
 
   async function handleSendCode(e: FormEvent) {
     e.preventDefault()
@@ -118,7 +144,11 @@ export default function Login() {
               />
             </label>
             {error && <p className="text-sm text-red-600">{error}</p>}
-            <button type="submit" disabled={submitting || !phone.trim()} className={buttonClass}>
+            <button
+              type="submit"
+              disabled={submitting || !toE164(phone)}
+              className={buttonClass}
+            >
               {submitting ? 'Sending…' : 'Send code'}
             </button>
           </form>
@@ -150,7 +180,18 @@ export default function Login() {
             </button>
           </form>
         )}
-        <div id="recaptcha-container" className="hidden" />
+        {import.meta.env.DEV && handleDevLogin && (
+          <button
+            type="button"
+            onClick={handleDevLogin}
+            disabled={submitting}
+            className="mt-4 w-full rounded-lg border border-dashed border-gray-400 px-4 py-1.5 text-sm text-gray-600 disabled:opacity-50"
+          >
+            Dev login
+          </button>
+        )}
+        {/* Mount point for the invisible reCAPTCHA; renders nothing visible. */}
+        <div id="recaptcha-container" />
       </div>
     </div>
   )
