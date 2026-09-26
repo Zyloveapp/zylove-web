@@ -299,12 +299,25 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
     batch.set(doc(db, `users/${uid}/seekingPreferences/prefs`), seeking)
 
     await batch.commit()
-
-    // Server-side tier elevation for women (rules block client writes to
-    // subscriptionTier). Fire-and-forget: never blocks or fails the save.
-    httpsCallable(functions, 'claimWomenElite')({}).catch(() => {})
   } catch (err) {
     await deletePhotos(refs)
     throw err
   }
+
+  // Everything below runs after a successful commit, outside the photo
+  // cleanup above — a failure here must never delete a saved profile's photos.
+
+  // Server sets the trust/safety fields clients can't write (isSuspended etc.).
+  // Awaited so the profile is discoverable before the user reaches Discover.
+  // A failure leaves the profile saved; the callable is idempotent and safe
+  // to retry later.
+  try {
+    await httpsCallable(functions, 'initUserDefaults')({})
+  } catch (err) {
+    console.warn('initUserDefaults failed; profile saved but may be hidden from Discover', err)
+  }
+
+  // Server-side tier elevation for women (rules block client writes to
+  // subscriptionTier). Fire-and-forget: never blocks or fails the save.
+  httpsCallable(functions, 'claimWomenElite')({}).catch(() => {})
 }

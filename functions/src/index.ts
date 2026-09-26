@@ -1,7 +1,11 @@
-import { onCall } from 'firebase-functions/v2/https'
+import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
+import { initializeApp } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
 import { buildBioPrompt, parseBioRequest } from './bioPrompt'
+
+initializeApp()
 
 const anthropicKey = defineSecret('ANTHROPIC_API_KEY')
 
@@ -57,5 +61,41 @@ export const generateSparkBio = onCall(
       logger.error('generateSparkBio failed', { message: err instanceof Error ? err.message : String(err) })
       return { bio: '' }
     }
+  },
+)
+
+// Trust/safety defaults. Firestore rules reject any client write to these, so
+// profiles created by the web onboarding lack them — and Discover queries
+// isSuspended == false, which never matches a missing field.
+const TRUST_DEFAULTS = {
+  isSuspended: false,
+  reportCount: 0,
+  verificationStatus: 'unverified',
+  subscriptionTier: 'free',
+  sparkScore: 50,
+} as const
+
+// Fills in whichever trust/safety fields are missing on the caller's own
+// users/{uid} doc. Only missing fields are written, so values set elsewhere
+// (e.g. Elite from a founder code) are never overwritten. Idempotent.
+export const initUserDefaults = onCall(
+  { timeoutSeconds: 30, memory: '128MiB', invoker: 'public' },
+  async (request): Promise<{ success: true }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+
+    const ref = getFirestore().collection('users').doc(request.auth.uid)
+    const snap = await ref.get()
+    // Never create a stub profile — onboarding must have saved the doc first.
+    if (!snap.exists) throw new HttpsError('failed-precondition', 'Profile not found')
+
+    const data = snap.data() ?? {}
+    const missing = Object.fromEntries(
+      Object.entries(TRUST_DEFAULTS).filter(([field]) => data[field] === undefined),
+    )
+    if (Object.keys(missing).length > 0) {
+      await ref.set(missing, { merge: true })
+      logger.info('initUserDefaults: filled missing trust fields', { fields: Object.keys(missing) })
+    }
+    return { success: true }
   },
 )
