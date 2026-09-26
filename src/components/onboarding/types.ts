@@ -1,8 +1,53 @@
-import type { AttractedTo, Dealbreaker, GenderIdentity, RelationshipValue, SeekingTrait } from '../../types/profile'
-import type { PromptAnswer } from '../../types/dualProfile'
-import type { BodyTypePreference, HeightPreference } from '../../types/preferences'
+import type {
+  AttractedTo,
+  BodyType,
+  DatingIntent,
+  Dealbreaker,
+  DrinkingHabit,
+  GenderIdentity,
+  HabitTag,
+  HairColor,
+  LifestyleTag,
+  LoveLanguage,
+  OpenTo,
+  ParentalStatus,
+  PersonalityTrait,
+  PoliticalView,
+  RelationshipStatus,
+  RelationshipValue,
+  Religion,
+  SeekingTrait,
+  WeekendVibe,
+} from '../../types/profile'
 
-export type IntentChoice = 'spark' | 'play' | 'both'
+// ─── Go Deeper (web-defined; not in the mobile app yet) ──────────────────────
+
+export type ConflictStyle = 'direct' | 'process_first' | 'avoid' | 'situational'
+export type TogethernessStyle = 'entwined' | 'separate_plus_deep' | 'independent' | 'in_between'
+export type StressResponse = 'power_through' | 'step_back' | 'talk_it_out' | 'get_quiet'
+
+export const CONFLICT_STYLE_LABELS: Record<ConflictStyle, string> = {
+  direct: 'Talks it through right away',
+  process_first: 'Takes space, then comes back',
+  avoid: 'Avoids if possible',
+  situational: 'Depends on the situation',
+}
+
+export const TOGETHERNESS_STYLE_LABELS: Record<TogethernessStyle, string> = {
+  entwined: 'I love an entwined life',
+  separate_plus_deep: 'Independent, but deeply connected',
+  independent: 'I need a lot of independence',
+  in_between: 'Somewhere in between',
+}
+
+export const STRESS_RESPONSE_LABELS: Record<StressResponse, string> = {
+  power_through: 'I power through',
+  step_back: 'I step back to reset',
+  talk_it_out: 'I talk it out',
+  get_quiet: 'I get quiet and internal',
+}
+
+// ─── Draft ───────────────────────────────────────────────────────────────────
 
 export interface PhotoDraft {
   id: string
@@ -10,37 +55,129 @@ export interface PhotoDraft {
   previewUrl: string
 }
 
-export interface SeekingDraft {
-  heightPreference: HeightPreference
-  bodyTypePreference: BodyTypePreference[]
-  seekingTraits: SeekingTrait[]
-  topValues: RelationshipValue[]
-  dealbreakers: Dealbreaker[]
+export interface HeightFtIn {
+  feet: number
+  inches: number
 }
 
 export interface OnboardingDraft {
-  intent: IntentChoice | null
+  termsAccepted: boolean
   displayName: string
-  age: string
+  birthdayRaw: string
+  photos: PhotoDraft[]
   genderIdentity: GenderIdentity | null
   genderSelfDescribe: string
+  pronouns: string
   attractedTo: AttractedTo[]
-  photos: PhotoDraft[]
-  prompts: PromptAnswer[]
-  seeking: SeekingDraft
+  relationshipStatus: RelationshipStatus | null
+  openTo: OpenTo[]
+  bodyType: BodyType | null
+  height: HeightFtIn
+  lifestyleTags: LifestyleTag[]
+  habitTags: HabitTag[]
+  drinkingHabit: DrinkingHabit | null
+  personalityTraits: PersonalityTrait[]
+  relationshipValues: RelationshipValue[]
+  weekendVibes: WeekendVibe[]
+  loveLangGive: LoveLanguage[]
+  loveLangReceive: LoveLanguage[]
+  religion: Religion | null
+  politicalView: PoliticalView | null
+  parentalStatus: ParentalStatus | null
+  seekingHeightNoPreference: boolean
+  seekingHeightMin: HeightFtIn
+  seekingHeightMax: HeightFtIn
+  seekingBodyTypes: BodyType[]
+  seekingHairColors: HairColor[]
+  seekingTraits: SeekingTrait[]
+  dealbreakers: Dealbreaker[]
+  intent: DatingIntent | null
+  radiusMiles: number
+  ageMin: number
+  ageMax: number
+  selectedPromptIds: string[]
+  promptAnswers: Record<string, string>
+  conflictStyle: ConflictStyle | null
+  togethernessStyle: TogethernessStyle | null
+  stressResponse: StressResponse | null
+  bio: string
+  bioGeneratedAt: number | null
 }
 
-export const MIN_AGE = 18
-export const MAX_AGE = 99
-export const MAX_PHOTOS = 6
-export const PROMPT_COUNT = 3
-export const PROMPT_MAX_LENGTH = 200
-export const MAX_PHOTO_BYTES = 10 * 1024 * 1024 // matches storage.rules
+export const INITIAL_DRAFT: OnboardingDraft = {
+  termsAccepted: false,
+  displayName: '',
+  birthdayRaw: '',
+  photos: [],
+  genderIdentity: null,
+  genderSelfDescribe: '',
+  pronouns: '',
+  attractedTo: [],
+  relationshipStatus: null,
+  openTo: [],
+  bodyType: null,
+  height: { feet: 5, inches: 6 },
+  lifestyleTags: [],
+  habitTags: [],
+  drinkingHabit: null,
+  personalityTraits: [],
+  relationshipValues: [],
+  weekendVibes: [],
+  loveLangGive: [],
+  loveLangReceive: [],
+  religion: null,
+  politicalView: null,
+  parentalStatus: null,
+  seekingHeightNoPreference: true,
+  seekingHeightMin: { feet: 5, inches: 0 },
+  seekingHeightMax: { feet: 6, inches: 6 },
+  seekingBodyTypes: [],
+  seekingHairColors: [],
+  seekingTraits: [],
+  dealbreakers: [],
+  intent: null,
+  radiusMiles: 25,
+  ageMin: 21,
+  ageMax: 45,
+  selectedPromptIds: [],
+  promptAnswers: {},
+  conflictStyle: null,
+  togethernessStyle: null,
+  stressResponse: null,
+  bio: '',
+  bioGeneratedAt: null,
+}
 
-export function parseAge(raw: string): number | null {
-  if (!/^\d{1,3}$/.test(raw.trim())) return null
-  const n = Number(raw)
-  return n >= MIN_AGE && n <= MAX_AGE ? n : null
+// ─── Limits ──────────────────────────────────────────────────────────────────
+
+export const MIN_AGE = 18
+export const MAX_RANGE_AGE = 80
+export const MAX_PHOTOS = 6
+export const MAX_PHOTO_BYTES = 10 * 1024 * 1024 // matches storage.rules
+export const PROMPT_COUNT = 3
+export const MIN_PROMPT_ANSWERS = 2
+export const PROMPT_MAX_LENGTH = 200
+export const BIO_MAX_LENGTH = 500
+export const RADIUS_OPTIONS = [5, 10, 25, 50, 100] as const
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+export interface Option<T extends string> {
+  value: T
+  label: string
+  description?: string
+}
+
+export function toOptions<K extends string, V>(
+  record: Record<K, V>,
+  label: (v: V) => string,
+  description?: (v: V) => string | undefined,
+): Option<K>[] {
+  return (Object.keys(record) as K[]).map((k) => ({
+    value: k,
+    label: label(record[k]),
+    description: description?.(record[k]),
+  }))
 }
 
 // Toggles value in list; when max is set, adding past it is a no-op.
@@ -50,6 +187,44 @@ export function toggleIn<T>(list: T[], value: T, max?: number): T[] {
   return [...list, value]
 }
 
-export function includesPlay(intent: IntentChoice | null): boolean {
-  return intent === 'play' || intent === 'both'
+// Parses MM/DD/YYYY into an ISO date and whole-years age. Null if not a real date.
+export function parseBirthday(raw: string): { iso: string; age: number } | null {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(raw)
+  if (!m) return null
+  const [month, day, year] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const date = new Date(year, month - 1, day)
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null
+
+  const today = new Date()
+  if (date > today || year < 1900) return null
+  let age = today.getFullYear() - year
+  if (today.getMonth() < month - 1 || (today.getMonth() === month - 1 && today.getDate() < day)) age--
+
+  const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  return { iso, age }
+}
+
+// Formats digits as MM/DD/YYYY while typing.
+export function formatBirthdayInput(raw: string): string {
+  const d = raw.replace(/\D/g, '').slice(0, 8)
+  if (d.length <= 2) return d
+  if (d.length <= 4) return `${d.slice(0, 2)}/${d.slice(2)}`
+  return `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`
+}
+
+export function heightToInches(h: HeightFtIn): number {
+  return h.feet * 12 + h.inches
+}
+
+export function answeredPromptCount(d: OnboardingDraft): number {
+  return d.selectedPromptIds.filter((id) => (d.promptAnswers[id] ?? '').trim().length > 0).length
+}
+
+export function includesPlay(intent: DatingIntent | null): boolean {
+  return intent === 'play' || intent === 'open'
+}
+
+export interface StepProps {
+  draft: OnboardingDraft
+  update: (patch: Partial<OnboardingDraft>) => void
 }

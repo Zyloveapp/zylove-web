@@ -1,74 +1,99 @@
-import { doc, getDoc, writeBatch } from 'firebase/firestore'
+import {
+  deleteField,
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+  writeBatch,
+  type FieldValue,
+} from 'firebase/firestore'
 import { deleteObject, getDownloadURL, ref, uploadBytes, type StorageReference } from 'firebase/storage'
 import { db, storage } from './firebase'
-import type {
-  AttractedTo,
-  DatingIntent,
-  DatingProfile,
-  Dealbreaker,
-  GenderIdentity,
-  RelationshipValue,
-  SeekingTrait,
-} from '../types/profile'
+import { feetInchesToCm, type BodyType, type DatingProfile, type Dealbreaker, type HairColor, type SeekingTrait } from '../types/profile'
 import type { PromptAnswer, SparkProfile } from '../types/dualProfile'
-import type { BodyTypePreference, HeightPreference } from '../types/preferences'
 import { computeSparkCompleteness } from '../types/scorecard'
+import {
+  parseBirthday,
+  type ConflictStyle,
+  type OnboardingDraft,
+  type StressResponse,
+  type TogethernessStyle,
+} from '../components/onboarding/types'
 
-// Private, owner-only doc at users/{uid}/seekingPreferences/prefs. Field names
-// follow the mobile app's seeking flow where they overlap.
-export interface SeekingPreferencesDoc {
-  uid: string
-  heightPreference: HeightPreference
-  bodyTypePreference: BodyTypePreference[]
-  personalityPriorities: SeekingTrait[]
-  topValues: RelationshipValue[]
-  dealbreakers: Dealbreaker[]
-  _lastUpdated: number
+// ─── Legal acceptance ────────────────────────────────────────────────────────
+
+export const CONSENT_IDS = ['age', 'terms', 'privacy', 'matching', 'conduct', 'safety'] as const
+export type ConsentId = (typeof CONSENT_IDS)[number]
+
+export async function recordLegalAcceptance(uid: string): Promise<void> {
+  await setDoc(doc(db, `users/${uid}/legalAcceptance/main`), {
+    uid,
+    acceptedAt: serverTimestamp(),
+    mode: 'main',
+    consentsAccepted: [...CONSENT_IDS],
+  })
 }
 
-export interface SparkOnboardingInput {
-  intent: DatingIntent
-  displayName: string
-  age: number
-  genderIdentity: GenderIdentity
-  genderSelfDescribe: string
-  attractedTo: AttractedTo[]
-  photos: File[]
-  promptAnswers: PromptAnswer[]
-  seeking: Omit<SeekingPreferencesDoc, 'uid' | '_lastUpdated'>
-}
+// ─── Document shapes ─────────────────────────────────────────────────────────
 
 // Trust/safety fields. Firestore rules reject any client create or update that
 // includes them — only Cloud Functions (admin SDK) may set them.
 type ServerOnlyField = 'isSuspended' | 'reportCount' | 'verificationStatus' | 'subscriptionTier'
-type NewUserDoc = Omit<DatingProfile, ServerOnlyField>
 
-// Defaults for fields mobile onboarding collects but web onboarding doesn't yet.
-// Only applied when creating a brand-new users/{uid} doc.
-const NEW_PROFILE_DEFAULTS = {
-  relationshipStatus: 'prefer_not_to_say',
-  openTo: [],
-  openToCrossover: false,
-  lifestyleTags: [],
-  habitTags: [],
-  personalityTraits: [],
-  relationshipValues: [],
-  weekendVibes: [],
-  loveLangGive: [],
-  loveLangReceive: [],
-  bio: '',
-  seekingBodyTypes: [],
-  seekingHairColors: [],
-  seekingTraits: [],
-  dealbreakers: [],
-  geohash: '',
-  locationLabel: '',
-  radiusMiles: 25,
-  ageMin: 21,
-  ageMax: 45,
-  phoneVerified: false,
-  publicKey: '',
-} satisfies Partial<NewUserDoc>
+interface GoDeeperFields {
+  conflictStyle?: ConflictStyle
+  togethernessStyle?: TogethernessStyle
+  stressResponse?: StressResponse
+}
+
+type RootProfileDoc = Omit<DatingProfile, ServerOnlyField> &
+  GoDeeperFields & { sparkVisibility: 'active' | 'hidden' }
+
+// Optional root fields: written only when answered, deleted on re-onboarding
+// when cleared, never written as null.
+type OptionalRootField =
+  | 'genderSelfDescribe'
+  | 'pronouns'
+  | 'bodyType'
+  | 'drinkingHabit'
+  | 'religion'
+  | 'politicalView'
+  | 'parentalStatus'
+  | 'bioGeneratedAt'
+  | keyof GoDeeperFields
+
+type OptionalRootFields = Pick<RootProfileDoc, OptionalRootField>
+
+const OPTIONAL_ROOT_FIELDS: OptionalRootField[] = [
+  'genderSelfDescribe',
+  'pronouns',
+  'bodyType',
+  'drinkingHabit',
+  'religion',
+  'politicalView',
+  'parentalStatus',
+  'bioGeneratedAt',
+  'conflictStyle',
+  'togethernessStyle',
+  'stressResponse',
+]
+
+// Private, owner-only doc at users/{uid}/seekingPreferences/prefs.
+export interface SeekingPreferencesDoc {
+  uid: string
+  seekingBodyTypes: BodyType[]
+  seekingHairColors: HairColor[]
+  seekingTraits: SeekingTrait[]
+  dealbreakers: Dealbreaker[]
+  seekingHeightNoPreference: boolean
+  seekingHeightMinCm?: number
+  seekingHeightMaxCm?: number
+  _lastUpdated: number
+}
+
+type SparkProfileDoc = Partial<SparkProfile> & { sparkPromptAnswers: Record<string, string> }
+
+// ─── Photos ──────────────────────────────────────────────────────────────────
 
 async function uploadPhotos(uid: string, files: File[]): Promise<{ refs: StorageReference[]; urls: string[] }> {
   const stamp = Date.now()
@@ -94,63 +119,150 @@ async function deletePhotos(refs: StorageReference[]): Promise<void> {
   await Promise.allSettled(refs.map((r) => deleteObject(r)))
 }
 
+// ─── Save ────────────────────────────────────────────────────────────────────
+
+function required<T>(value: T | null, field: string): T {
+  if (value === null) throw new Error(`Onboarding incomplete: ${field}`)
+  return value
+}
+
 // Uploads photos, then writes the root profile, Spark profile and private
 // seeking prefs in a single batch so the user never ends up half-onboarded.
-export async function saveSparkOnboarding(uid: string, input: SparkOnboardingInput): Promise<void> {
-  const { refs, urls: photoURLs } = await uploadPhotos(uid, input.photos)
+export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Promise<void> {
+  const birthday = parseBirthday(d.birthdayRaw)
+  if (!birthday) throw new Error('Onboarding incomplete: birthday')
+  const genderIdentity = required(d.genderIdentity, 'genderIdentity')
+  const relationshipStatus = required(d.relationshipStatus, 'relationshipStatus')
+  const intent = required(d.intent, 'intent')
+
+  const promptAnswers: PromptAnswer[] = d.selectedPromptIds
+    .map((promptId) => ({ promptId, answer: (d.promptAnswers[promptId] ?? '').trim() }))
+    .filter((p) => p.answer)
+  const sparkPromptAnswers = Object.fromEntries(promptAnswers.map((p) => [p.promptId, p.answer]))
+  const heightCm = feetInchesToCm(d.height.feet, d.height.inches)
+  const bio = d.bio.trim()
+
+  const { refs, urls: photoURLs } = await uploadPhotos(uid, d.photos.map((p) => p.file))
 
   try {
     const now = Date.now()
     const rootRef = doc(db, 'users', uid)
     const existing = await getDoc(rootRef)
 
-    const onboardingFields = {
+    const coreFields = {
       uid,
-      displayName: input.displayName.trim(),
-      age: input.age,
-      genderIdentity: input.genderIdentity,
-      ...(input.genderIdentity === 'self_describe' && {
-        genderSelfDescribe: input.genderSelfDescribe.trim(),
-      }),
-      attractedTo: input.attractedTo,
-      intent: input.intent,
+      displayName: d.displayName.trim(),
+      age: birthday.age,
+      birthday: birthday.iso,
+      genderIdentity,
+      attractedTo: d.attractedTo,
+      relationshipStatus,
+      openTo: d.openTo,
+      heightCm,
+      lifestyleTags: d.lifestyleTags,
+      habitTags: d.habitTags,
+      personalityTraits: d.personalityTraits,
+      relationshipValues: d.relationshipValues,
+      weekendVibes: d.weekendVibes,
+      loveLangGive: d.loveLangGive,
+      loveLangReceive: d.loveLangReceive,
+      promptAnswers,
       photoURLs,
-      promptAnswers: input.promptAnswers,
+      intent,
+      radiusMiles: d.radiusMiles,
+      ageMin: d.ageMin,
+      ageMax: d.ageMax,
       lastActive: now,
-    } satisfies Partial<DatingProfile>
+    } satisfies Partial<RootProfileDoc>
+
+    const optional: Partial<OptionalRootFields> = {
+      ...(genderIdentity === 'self_describe' && d.genderSelfDescribe.trim() && {
+        genderSelfDescribe: d.genderSelfDescribe.trim(),
+      }),
+      ...(d.pronouns.trim() && { pronouns: d.pronouns.trim() }),
+      ...(d.bodyType && { bodyType: d.bodyType }),
+      ...(d.drinkingHabit && { drinkingHabit: d.drinkingHabit }),
+      ...(d.religion && { religion: d.religion }),
+      ...(d.politicalView && { politicalView: d.politicalView }),
+      ...(d.parentalStatus && { parentalStatus: d.parentalStatus }),
+      ...(bio && d.bioGeneratedAt !== null && { bioGeneratedAt: d.bioGeneratedAt }),
+      ...(d.conflictStyle && { conflictStyle: d.conflictStyle }),
+      ...(d.togethernessStyle && { togethernessStyle: d.togethernessStyle }),
+      ...(d.stressResponse && { stressResponse: d.stressResponse }),
+    }
+    const sparkVisibility = photoURLs.length > 0 ? 'active' : 'hidden'
 
     const batch = writeBatch(db)
 
     if (existing.exists()) {
-      // Merge so fields collected elsewhere (location, bio, lifestyle…) survive,
-      // and never touch the trust/safety fields the rules lock down on update.
-      batch.set(rootRef, { ...onboardingFields, sparkVisibility: 'active' }, { merge: true })
+      // Merge so fields owned elsewhere (location, keys, trust fields) survive.
+      // Optional answers the user cleared this time are removed.
+      const deletions: Partial<Record<OptionalRootField, FieldValue>> = Object.fromEntries(
+        OPTIONAL_ROOT_FIELDS.filter((k) => optional[k] === undefined).map((k) => [k, deleteField()]),
+      )
+      batch.set(
+        rootRef,
+        { ...coreFields, ...(bio && { bio }), ...optional, ...deletions, sparkVisibility },
+        { merge: true },
+      )
     } else {
-      const profile: NewUserDoc = { ...NEW_PROFILE_DEFAULTS, ...onboardingFields, createdAt: now }
-      batch.set(rootRef, { ...profile, sparkVisibility: 'active' })
+      const profile: RootProfileDoc = {
+        ...coreFields,
+        ...optional,
+        bio,
+        openToCrossover: false,
+        // Seeking data lives in the private seekingPreferences doc, not here.
+        seekingBodyTypes: [],
+        seekingHairColors: [],
+        seekingTraits: [],
+        dealbreakers: [],
+        geohash: '',
+        locationLabel: '',
+        phoneVerified: false,
+        publicKey: '',
+        createdAt: now,
+        sparkVisibility,
+      }
+      batch.set(rootRef, profile)
     }
 
-    const spark: Partial<SparkProfile> = {
+    const spark: SparkProfileDoc = {
       uid,
-      displayName: onboardingFields.displayName,
-      age: input.age,
-      genderIdentity: input.genderIdentity,
-      attractedTo: input.attractedTo,
+      displayName: coreFields.displayName,
+      age: birthday.age,
+      ...(optional.pronouns && { pronouns: optional.pronouns }),
+      genderIdentity,
+      attractedTo: d.attractedTo,
       photoURLs,
-      promptAnswers: input.promptAnswers,
+      ...(bio && { bio }),
+      promptAnswers,
+      sparkPromptAnswers,
+      lifestyleTags: d.lifestyleTags,
+      personalityTags: d.personalityTraits,
+      topValues: d.relationshipValues,
       intent: 'spark',
+      height: heightCm,
+      ...(d.bodyType && { bodyType: d.bodyType }),
+      radiusMiles: d.radiusMiles,
+      ageMin: d.ageMin,
+      ageMax: d.ageMax,
       isActive: photoURLs.length > 0,
-      completeness: computeSparkCompleteness(onboardingFields),
+      completeness: computeSparkCompleteness({ ...coreFields, ...optional, bio }),
       lastUpdated: now,
     }
     batch.set(doc(db, `users/${uid}/sparkProfile/data`), spark, { merge: true })
 
     const seeking: SeekingPreferencesDoc = {
       uid,
-      ...input.seeking,
-      bodyTypePreference: input.seeking.bodyTypePreference.length
-        ? input.seeking.bodyTypePreference
-        : ['no_preference'],
+      seekingBodyTypes: d.seekingBodyTypes,
+      seekingHairColors: d.seekingHairColors,
+      seekingTraits: d.seekingTraits,
+      dealbreakers: d.dealbreakers,
+      seekingHeightNoPreference: d.seekingHeightNoPreference,
+      ...(!d.seekingHeightNoPreference && {
+        seekingHeightMinCm: feetInchesToCm(d.seekingHeightMin.feet, d.seekingHeightMin.inches),
+        seekingHeightMaxCm: feetInchesToCm(d.seekingHeightMax.feet, d.seekingHeightMax.inches),
+      }),
       _lastUpdated: now,
     }
     batch.set(doc(db, `users/${uid}/seekingPreferences/prefs`), seeking)
