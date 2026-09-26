@@ -38,7 +38,7 @@ function str(v: unknown): string | null {
   return typeof v === 'string' && v ? v : null
 }
 
-function toEntry(matchId: string, data: DocumentData, uid: string): MatchEntry | null {
+export function toEntry(matchId: string, data: DocumentData, uid: string): MatchEntry | null {
   // 'participants' is the legacy name for 'users'.
   const users: unknown = data.users ?? data.participants
   const partnerUid = Array.isArray(users) ? users.find((u): u is string => typeof u === 'string' && u !== uid) : undefined

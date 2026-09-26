@@ -2,11 +2,10 @@ import { useEffect, useState } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import MatchRow from '../components/matches/MatchRow'
-import ChatPlaceholder from '../components/matches/ChatPlaceholder'
+import ChatView from '../components/chat/ChatView'
 import NoMatches from '../components/matches/NoMatches'
 import {
   isUnread,
-  markMatchRead,
   subscribeLastRead,
   subscribeMatches,
   type MatchEntry,
@@ -55,10 +54,9 @@ export default function Matches() {
   const active = matches.find((m) => m.matchId === activeId) ?? null
   const unreadCount = matches.filter((m) => isUnread(m, uid, lastRead)).length
 
+  // ChatView marks the conversation read when it opens.
   function select(m: MatchEntry) {
     setActiveId(m.matchId)
-    // Same per-user read marker the mobile chat writes; clears the unread dot.
-    markMatchRead(uid, m.matchId).catch(() => {})
   }
 
   if (!error && matches.length === 0) {
@@ -104,7 +102,7 @@ export default function Matches() {
 
       <main className={`flex-1 ${active ? 'block' : 'hidden lg:block'}`}>
         {active ? (
-          <ChatPlaceholder match={active} onBack={() => setActiveId(null)} />
+          <ChatView key={active.matchId} uid={uid} match={active} onBack={() => setActiveId(null)} />
         ) : (
           <div className="flex h-full items-center justify-center text-white/30">Select a match to start chatting</div>
         )}
