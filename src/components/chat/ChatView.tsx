@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { MAX_MESSAGE_LENGTH, markMessagesRead, sendMessage, subscribeMessages, type ChatMessage } from '../../services/chat'
+import { decryptMessage } from '../../services/encryption'
+import { getPrivateKey, keysReady, subscribePublicKey } from '../../services/keys'
 import { markMatchRead, type MatchEntry } from '../../services/matches'
 
 function introKey(matchId: string): string {
@@ -40,14 +42,20 @@ interface ChatViewProps {
 }
 
 type Loaded = { matchId: string; messages: ChatMessage[]; error: boolean }
+// key is '' when the partner has no real key (bots, mobile-only users).
+type PartnerKey = { partnerUid: string; key: string; error: boolean }
+
+const UNDECRYPTABLE = 'Unable to decrypt message'
 
 export default function ChatView({ uid, match, onBack }: ChatViewProps) {
-  const { matchId } = match
+  const { matchId, partnerUid } = match
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const [introHidden, setIntroHidden] = useState(() => introDismissed(matchId))
+  const [partnerKeyState, setPartnerKeyState] = useState<PartnerKey | null>(null)
+  const [myKeyState, setMyKeyState] = useState<{ uid: string; key: string | null } | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -68,7 +76,42 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     )
   }, [matchId, uid])
 
-  const messages = loaded?.matchId === matchId ? loaded.messages : null
+  useEffect(
+    () =>
+      subscribePublicKey(
+        partnerUid,
+        (key) => setPartnerKeyState({ partnerUid, key, error: false }),
+        () => setPartnerKeyState({ partnerUid, key: '', error: true }),
+      ),
+    [partnerUid],
+  )
+
+  useEffect(() => {
+    let cancelled = false
+    keysReady(uid)
+      .then(() => getPrivateKey(uid))
+      .then((key) => {
+        if (!cancelled) setMyKeyState({ uid, key })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [uid])
+
+  const partnerKey = partnerKeyState?.partnerUid === partnerUid ? partnerKeyState : null
+  const myPrivateKey = myKeyState?.uid === uid ? myKeyState.key : undefined
+  const keysLoaded = partnerKey !== null && myPrivateKey !== undefined
+  const rawMessages = loaded?.matchId === matchId ? loaded.messages : null
+
+  // Both sides decrypt with (partner public key, own private key); nacl.box's
+  // shared secret is the same in either direction.
+  const messages = useMemo(() => {
+    if (rawMessages === null || !keysLoaded) return null
+    return rawMessages.map((m) => ({
+      ...m,
+      text: decryptMessage(m.ciphertext, m.nonce, partnerKey.key, myPrivateKey ?? '') ?? UNDECRYPTABLE,
+    }))
+  }, [rawMessages, keysLoaded, partnerKey, myPrivateKey])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' })
@@ -77,14 +120,16 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const trimmed = text.trim()
   const ownBubble = match.mode === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
   const showIntro = messages !== null && messages.length === 0 && !introHidden
+  // Never fall back to plaintext just because the partner's key failed to load.
+  const canSend = partnerKey !== null && !partnerKey.error
 
   async function handleSend(e?: FormEvent) {
     e?.preventDefault()
-    if (!trimmed || sending) return
+    if (!trimmed || sending || !canSend) return
     setSending(true)
     setSendError(null)
     try {
-      await sendMessage(matchId, uid, trimmed)
+      await sendMessage(matchId, uid, trimmed, partnerKey.key)
       setText('')
       dismissIntro(matchId)
       setIntroHidden(true)
@@ -171,6 +216,9 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           </p>
         )}
         {sendError && <p className="mb-2 text-center text-sm text-red-400">{sendError}</p>}
+        {partnerKey?.error && (
+          <p className="mb-2 text-center text-sm text-red-400">Couldn't load encryption keys. Reopen the chat to retry.</p>
+        )}
         <form onSubmit={handleSend} className="flex items-end gap-2">
           <textarea
             rows={1}
@@ -183,7 +231,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           />
           <button
             type="submit"
-            disabled={!trimmed || sending}
+            disabled={!trimmed || sending || !canSend}
             className={`rounded-xl px-5 py-2.5 font-medium text-white transition-opacity disabled:opacity-30 ${ownBubble}`}
           >
             Send

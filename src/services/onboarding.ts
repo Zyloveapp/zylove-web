@@ -10,6 +10,7 @@ import {
 import { deleteObject, getDownloadURL, ref, uploadBytes, type StorageReference } from 'firebase/storage'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions, storage } from './firebase'
+import { keysReady, resolveKeypair } from './keys'
 import {
   OFF_MAP_GENDER_IDENTITIES,
   feetInchesToCm,
@@ -168,6 +169,11 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
     const rootRef = doc(db, 'users', uid)
     const existing = await getDoc(rootRef)
 
+    // Private key goes to IndexedDB now; the public key rides in the batch below.
+    await keysReady(uid)
+    const existingKey: unknown = existing.data()?.publicKey
+    const keys = await resolveKeypair(uid, typeof existingKey === 'string' ? existingKey : undefined)
+
     const coreFields = {
       uid,
       displayName: d.displayName.trim(),
@@ -234,7 +240,15 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
       )
       batch.set(
         rootRef,
-        { ...coreFields, ...(bio && { bio }), ...optional, ...matchable, ...deletions, ...meta },
+        {
+          ...coreFields,
+          ...(bio && { bio }),
+          ...optional,
+          ...matchable,
+          ...deletions,
+          ...(keys.changed && { publicKey: keys.publicKey }),
+          ...meta,
+        },
         { merge: true },
       )
     } else {
@@ -251,7 +265,7 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
         geohash: '',
         locationLabel: '',
         phoneVerified: false,
-        publicKey: '',
+        publicKey: keys.publicKey,
         createdAt: now,
         ...meta,
       }

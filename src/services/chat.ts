@@ -11,14 +11,16 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from './firebase'
+import { encryptMessage } from './encryption'
+import { getPrivateKey, keysReady } from './keys'
 
-// Message format shared with the mobile app. Messages are currently stored as
-// plaintext in `ciphertext` with nonce 'stub' (mobile's encryption module is a
-// stub) — field names are kept so both apps read each other's messages.
+// Message format shared with the mobile app. `ciphertext` holds a base64
+// nacl.box payload, or plaintext when the nonce is 'stub' / 'stub-nonce' /
+// 'system' (bots, the mobile app's stubbed encryption, system notes).
 export interface ChatMessage {
   id: string
   senderId: string
-  text: string
+  ciphertext: string
   nonce: string
   sentAt: number | null // null while the server timestamp is pending
   status: string
@@ -55,13 +57,13 @@ export function subscribeMessages(
         const data = d.data()
         const deletedFor: unknown = data.deletedFor
         if (Array.isArray(deletedFor) && deletedFor.includes(uid)) continue
-        const text = typeof data.ciphertext === 'string' ? data.ciphertext : ''
+        const ciphertext = typeof data.ciphertext === 'string' ? data.ciphertext : ''
         const messageType = typeof data.messageType === 'string' ? data.messageType : 'text'
-        if (text.startsWith(CONSENT_PREFIX) || HIDDEN_TYPES.has(messageType)) continue
+        if (ciphertext.startsWith(CONSENT_PREFIX) || HIDDEN_TYPES.has(messageType)) continue
         messages.push({
           id: d.id,
           senderId: typeof data.senderId === 'string' ? data.senderId : '',
-          text,
+          ciphertext,
           nonce: typeof data.nonce === 'string' ? data.nonce : '',
           sentAt: toMillis(data.sentAt),
           status: typeof data.status === 'string' ? data.status : 'sent',
@@ -74,18 +76,31 @@ export function subscribeMessages(
   )
 }
 
-export async function sendMessage(matchId: string, uid: string, text: string): Promise<void> {
+// Encrypts to the recipient's public key. Falls back to plaintext (nonce
+// 'stub') when either side has no real key — bots and mobile-only users.
+export async function sendMessage(
+  matchId: string,
+  uid: string,
+  text: string,
+  recipientPublicKey: string,
+): Promise<void> {
+  await keysReady(uid)
+  const privateKey = await getPrivateKey(uid)
+  const { ciphertext, nonce } = privateKey
+    ? encryptMessage(text, recipientPublicKey, privateKey)
+    : { ciphertext: text, nonce: 'stub' }
   await addDoc(collection(db, `matches/${matchId}/messages`), {
-    ciphertext: text,
-    nonce: 'stub',
+    ciphertext,
+    nonce,
     senderId: uid,
     sentAt: serverTimestamp(),
     status: 'sent',
     messageType: 'text',
   })
   // Same fields the mobile chat updates; lastSenderId drives unread state.
+  // The preview is generic so message content never sits unencrypted on the match doc.
   await updateDoc(doc(db, 'matches', matchId), {
-    lastMessagePreview: text,
+    lastMessagePreview: 'New message',
     lastMessageAt: serverTimestamp(),
     lastSenderId: uid,
     hasUnread: true,

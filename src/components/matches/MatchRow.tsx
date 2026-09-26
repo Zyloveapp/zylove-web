@@ -48,7 +48,7 @@ export default function MatchRow({ match, unread, active, onSelect }: MatchRowPr
           {time && <span className="shrink-0 text-xs text-white/35">{time}</span>}
         </span>
         <span className={`block truncate text-sm ${unread ? 'text-white/80' : 'text-white/40'}`}>
-          {match.lastMessagePreview ?? 'Say hello 👋'}
+          {match.lastMessagePreview || match.lastMessageAt > 0 ? 'New message' : 'Say hello 👋'}
         </span>
       </span>
     </button>
