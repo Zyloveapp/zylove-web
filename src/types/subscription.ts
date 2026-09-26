@@ -47,8 +47,9 @@ export interface TierFeatures {
   selfDestructPhotos: boolean
 
   // Insights
-  canSeeCompatibilityScore: boolean
-  fullScorecardAccess: boolean
+  canSeeCompatibilityScore: boolean   // headline % number is visible at all
+  fullScorecardAccess: boolean        // category breakdown rows / commons / challenges
+  bilateralBreakdown: boolean         // Elite — Deep fit pill + combined-score callout prominent
   profileViewers: boolean
   likeAnalytics: boolean
 
@@ -91,8 +92,9 @@ export const TIER_FEATURES: Record<SubscriptionTier, TierFeatures> = {
     playProfileActive:        false,
     unlimitedPlayLikes:       false,
     selfDestructPhotos:       false,
-    canSeeCompatibilityScore: false,
+    canSeeCompatibilityScore: true,   // headline number visible to all tiers per design
     fullScorecardAccess:      false,
+    bilateralBreakdown:       false,
     profileViewers:           false,
     likeAnalytics:            false,
     aiProfileFeedback:        false,  // Spark+ for men
@@ -101,7 +103,7 @@ export const TIER_FEATURES: Record<SubscriptionTier, TierFeatures> = {
     zyloveScoreInsights:      false,  // Elite for men
     aiPhotoScanning:          false,  // Elite for men, requires opt-in
     incognitoMode:            false,
-    instantViewNotifications: false,
+    instantViewNotifications: false, // TODO: post-TestFlight — push infrastructure pending
     prioritySupportAccess:    false,
     earlyFeatureAccess:       false,
   },
@@ -124,6 +126,7 @@ export const TIER_FEATURES: Record<SubscriptionTier, TierFeatures> = {
     selfDestructPhotos:       false,
     canSeeCompatibilityScore: true,
     fullScorecardAccess:      true,
+    bilateralBreakdown:       false,
     profileViewers:           true,
     likeAnalytics:            false,
     aiProfileFeedback:        true,  // unlocked at Spark+
@@ -132,7 +135,7 @@ export const TIER_FEATURES: Record<SubscriptionTier, TierFeatures> = {
     zyloveScoreInsights:      false, // Elite only
     aiPhotoScanning:          false, // Elite only
     incognitoMode:            false,
-    instantViewNotifications: false,
+    instantViewNotifications: false, // TODO: post-TestFlight — push infrastructure pending
     prioritySupportAccess:    false,
     earlyFeatureAccess:       false,
   },
@@ -155,6 +158,7 @@ export const TIER_FEATURES: Record<SubscriptionTier, TierFeatures> = {
     selfDestructPhotos:       true,
     canSeeCompatibilityScore: true,
     fullScorecardAccess:      true,
+    bilateralBreakdown:       true,
     profileViewers:           true,
     likeAnalytics:            true,
     aiProfileFeedback:        true,
@@ -163,7 +167,7 @@ export const TIER_FEATURES: Record<SubscriptionTier, TierFeatures> = {
     zyloveScoreInsights:      true,
     aiPhotoScanning:          true,  // Elite only, requires opt-in
     incognitoMode:            true,
-    instantViewNotifications: true,
+    instantViewNotifications: true, // TODO: post-TestFlight — push infrastructure pending
     prioritySupportAccess:    true,
     earlyFeatureAccess:       true,
   },
@@ -173,35 +177,23 @@ export const TIER_FEATURES: Record<SubscriptionTier, TierFeatures> = {
 
 export interface TierPricing {
   monthlyPrice: string
-  annualPrice: string
-  annualMonthlyEquiv: string
-  annualSavingsPct: number
   trialDays: number
-  revenueCatMonthlyId: string
-  revenueCatAnnualId: string
-  trialEntitlementId: string
+  revenueCatMonthlyId: string  // App Store Connect / Google Play product ID
+  revenueCatEntitlement: string  // RC dashboard entitlement key checked by webhook
 }
 
 export const TIER_PRICING: Record<Exclude<SubscriptionTier, 'free'>, TierPricing> = {
   spark_plus: {
-    monthlyPrice:        '$9.99',
-    annualPrice:         '$79.99',
-    annualMonthlyEquiv:  '$6.67',
-    annualSavingsPct:    33,
-    trialDays:           7,
-    revenueCatMonthlyId: 'zylove_spark_plus_monthly',
-    revenueCatAnnualId:  'zylove_spark_plus_annual',
-    trialEntitlementId:  'spark_plus_trial',
+    monthlyPrice:          '$14.99',
+    trialDays:             7,
+    revenueCatMonthlyId:   'zylove_spark_plus_monthly',
+    revenueCatEntitlement: 'spark_plus',
   },
   elite: {
-    monthlyPrice:        '$19.99',
-    annualPrice:         '$149.99',
-    annualMonthlyEquiv:  '$12.50',
-    annualSavingsPct:    38,
-    trialDays:           14,
-    revenueCatMonthlyId: 'zylove_elite_monthly',
-    revenueCatAnnualId:  'zylove_elite_annual',
-    trialEntitlementId:  'elite_trial',
+    monthlyPrice:          '$24.99',
+    trialDays:             7,
+    revenueCatMonthlyId:   'zylove_elite_monthly',
+    revenueCatEntitlement: 'elite',
   },
 }
 
@@ -236,71 +228,6 @@ export const TIER_META: Record<SubscriptionTier, {
     badge:   'Elite',
   },
 }
-
-// ─── Feature display groups for paywall ───────────────────────────────────────
-
-export const PAYWALL_FEATURE_GROUPS = [
-  {
-    label: 'Discovery',
-    features: [
-      { key: 'dailyLikes',        label: 'Daily likes',          free: '8 per day',  sparkPlus: 'Unlimited', elite: 'Unlimited' },
-      { key: 'discoveryRadius',   label: 'Discovery radius',     free: '10 miles',   sparkPlus: 'Unlimited', elite: 'Unlimited' },
-      { key: 'yourFiveActive',    label: 'Your 5 curated',       free: '—',          sparkPlus: '✓',         elite: '✓'         },
-      { key: 'advancedFilters',   label: 'Advanced filters',     free: 'Basic only', sparkPlus: '✓',         elite: '✓'         },
-      { key: 'priorityPlacement', label: 'Priority placement',   free: '—',          sparkPlus: '✓',         elite: '✓'         },
-    ],
-  },
-  {
-    label: 'Likes & Matches',
-    features: [
-      { key: 'canSeeWhoLikesYou', label: 'See who likes you',    free: '—',          sparkPlus: '✓',         elite: '✓'         },
-      { key: 'profileBoosts',     label: 'Profile boosts',       free: '—',          sparkPlus: '1/month',   elite: '5/month'   },
-    ],
-  },
-  {
-    label: 'Messaging',
-    features: [
-      { key: 'readReceipts',       label: 'Read receipts',        free: '—', sparkPlus: '✓', elite: '✓' },
-      { key: 'photoSharing',       label: 'Photo sharing',        free: '—', sparkPlus: '✓', elite: '✓' },
-      { key: 'selfDestructPhotos', label: 'Self-destruct photos', free: '—', sparkPlus: '—', elite: '✓' },
-    ],
-  },
-  {
-    label: 'AI Coaching',
-    features: [
-      { key: 'aiProfileFeedback',    label: 'AI profile feedback',       free: 'Women free / Men Spark+', sparkPlus: '✓',            elite: '✓'              },
-      { key: 'aiConversationSparks', label: 'AI conversation sparks',    free: 'Women free / Men Spark+', sparkPlus: '✓',            elite: '✓'              },
-      { key: 'zyloveScore',          label: 'Zylove Score',              free: 'Women free / Men Spark+', sparkPlus: '✓',            elite: '✓'              },
-      { key: 'zyloveScoreInsights',  label: 'Zylove Score breakdown',    free: '—',                       sparkPlus: '—',            elite: '✓'              },
-      { key: 'aiPhotoScanning',      label: 'AI photo analysis',         free: 'Women free / Men Elite',  sparkPlus: 'Women free',   elite: '✓ (opt-in)'    },
-    ],
-  },
-  {
-    label: 'Insights',
-    features: [
-      { key: 'scorecard',      label: 'Compatibility score', free: 'Blurred', sparkPlus: 'Full', elite: 'Full' },
-      { key: 'profileViewers', label: 'Profile viewers',     free: '—',       sparkPlus: '✓',    elite: '✓'    },
-      { key: 'likeAnalytics',  label: 'Like analytics',      free: '—',       sparkPlus: '—',    elite: '✓'    },
-    ],
-  },
-  {
-    label: 'Play',
-    features: [
-      { key: 'playMode',           label: 'Play mode',            free: '—', sparkPlus: '—', elite: '✓' },
-      { key: 'unlimitedPlayLikes', label: 'Unlimited Play likes', free: '—', sparkPlus: '—', elite: '✓' },
-      { key: 'selfDestructPhotos', label: 'Self-destruct photos', free: '—', sparkPlus: '—', elite: '✓' },
-    ],
-  },
-  {
-    label: 'Elite only',
-    features: [
-      { key: 'incognitoMode',            label: 'Incognito browsing',   free: '—', sparkPlus: '—', elite: '✓' },
-      { key: 'instantViewNotifications', label: 'Instant view alerts',  free: '—', sparkPlus: '—', elite: '✓' },
-      { key: 'prioritySupport',          label: 'Priority support',     free: '—', sparkPlus: '—', elite: '✓' },
-      { key: 'earlyAccess',              label: 'Early feature access', free: '—', sparkPlus: '—', elite: '✓' },
-    ],
-  },
-]
 
 // ─── Gate check helpers ────────────────────────────────────────────────────────
 
@@ -355,5 +282,5 @@ export function hasAiFeature(
 export function isWomanIdentity(genderIdentity: string | undefined): boolean {
   if (!genderIdentity) return false
   const g = genderIdentity.toLowerCase().trim()
-  return g === 'woman' || g === 'cis woman' || g === 'trans woman'
+  return g === 'woman' || g === 'cis woman' || g === 'trans_woman'
 }

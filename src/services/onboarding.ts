@@ -8,8 +8,16 @@ import {
   type FieldValue,
 } from 'firebase/firestore'
 import { deleteObject, getDownloadURL, ref, uploadBytes, type StorageReference } from 'firebase/storage'
-import { db, storage } from './firebase'
-import { feetInchesToCm, type BodyType, type DatingProfile, type Dealbreaker, type HairColor, type SeekingTrait } from '../types/profile'
+import { httpsCallable } from 'firebase/functions'
+import { db, functions, storage } from './firebase'
+import {
+  OFF_MAP_GENDER_IDENTITIES,
+  feetInchesToCm,
+  type BodyType,
+  type DatingProfile,
+  type Dealbreaker,
+  type SeekingTrait,
+} from '../types/profile'
 import type { PromptAnswer, SparkProfile } from '../types/dualProfile'
 import { computeSparkCompleteness } from '../types/scorecard'
 import {
@@ -46,8 +54,18 @@ interface GoDeeperFields {
   stressResponse?: StressResponse
 }
 
-type RootProfileDoc = Omit<DatingProfile, ServerOnlyField> &
-  GoDeeperFields & { sparkVisibility: 'active' | 'hidden' }
+// Root fields the web writes on every save, beyond DatingProfile. Mirrors the
+// mobile onboarding finish(): onboardingComplete gates AuthGuard/mobile
+// routing, and a changed profileUpdatedAt triggers onProfileWrite rescoring.
+interface OnboardingMetaFields {
+  sparkVisibility: 'active' | 'hidden'
+  onboardingComplete: true
+  profileUpdatedAt: FieldValue
+  mode: 'spark' | 'play'
+  aiPhotoScanningConsent: boolean
+}
+
+type RootProfileDoc = Omit<DatingProfile, ServerOnlyField> & GoDeeperFields & OnboardingMetaFields
 
 // Optional root fields: written only when answered, deleted on re-onboarding
 // when cleared, never written as null.
@@ -58,7 +76,8 @@ type OptionalRootField =
   | 'drinkingHabit'
   | 'religion'
   | 'politicalView'
-  | 'parentalStatus'
+  | 'parentalCurrent'
+  | 'parentalIntent'
   | 'bioGeneratedAt'
   | keyof GoDeeperFields
 
@@ -71,7 +90,8 @@ const OPTIONAL_ROOT_FIELDS: OptionalRootField[] = [
   'drinkingHabit',
   'religion',
   'politicalView',
-  'parentalStatus',
+  'parentalCurrent',
+  'parentalIntent',
   'bioGeneratedAt',
   'conflictStyle',
   'togethernessStyle',
@@ -82,7 +102,6 @@ const OPTIONAL_ROOT_FIELDS: OptionalRootField[] = [
 export interface SeekingPreferencesDoc {
   uid: string
   seekingBodyTypes: BodyType[]
-  seekingHairColors: HairColor[]
   seekingTraits: SeekingTrait[]
   dealbreakers: Dealbreaker[]
   seekingHeightNoPreference: boolean
@@ -184,13 +203,26 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
       ...(d.drinkingHabit && { drinkingHabit: d.drinkingHabit }),
       ...(d.religion && { religion: d.religion }),
       ...(d.politicalView && { politicalView: d.politicalView }),
-      ...(d.parentalStatus && { parentalStatus: d.parentalStatus }),
+      ...(d.parentalCurrent && { parentalCurrent: d.parentalCurrent }),
+      ...(d.parentalIntent && { parentalIntent: d.parentalIntent }),
       ...(bio && d.bioGeneratedAt !== null && { bioGeneratedAt: d.bioGeneratedAt }),
       ...(d.conflictStyle && { conflictStyle: d.conflictStyle }),
       ...(d.togethernessStyle && { togethernessStyle: d.togethernessStyle }),
       ...(d.stressResponse && { stressResponse: d.stressResponse }),
     }
-    const sparkVisibility = photoURLs.length > 0 ? 'active' : 'hidden'
+    // Only off-map identities declare matchableAs. Never deleted on re-save:
+    // it's identity-locked by the rules once identityLockedAt is set.
+    const matchable =
+      OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) && d.matchableAs.length > 0
+        ? { matchableAs: d.matchableAs }
+        : {}
+    const meta: OnboardingMetaFields = {
+      sparkVisibility: photoURLs.length > 0 ? 'active' : 'hidden',
+      onboardingComplete: true,
+      profileUpdatedAt: serverTimestamp(),
+      mode: intent === 'play' ? 'play' : 'spark',
+      aiPhotoScanningConsent: true,
+    }
 
     const batch = writeBatch(db)
 
@@ -202,18 +234,18 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
       )
       batch.set(
         rootRef,
-        { ...coreFields, ...(bio && { bio }), ...optional, ...deletions, sparkVisibility },
+        { ...coreFields, ...(bio && { bio }), ...optional, ...matchable, ...deletions, ...meta },
         { merge: true },
       )
     } else {
       const profile: RootProfileDoc = {
         ...coreFields,
         ...optional,
+        ...matchable,
         bio,
         openToCrossover: false,
         // Seeking data lives in the private seekingPreferences doc, not here.
         seekingBodyTypes: [],
-        seekingHairColors: [],
         seekingTraits: [],
         dealbreakers: [],
         geohash: '',
@@ -221,7 +253,7 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
         phoneVerified: false,
         publicKey: '',
         createdAt: now,
-        sparkVisibility,
+        ...meta,
       }
       batch.set(rootRef, profile)
     }
@@ -255,7 +287,6 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
     const seeking: SeekingPreferencesDoc = {
       uid,
       seekingBodyTypes: d.seekingBodyTypes,
-      seekingHairColors: d.seekingHairColors,
       seekingTraits: d.seekingTraits,
       dealbreakers: d.dealbreakers,
       seekingHeightNoPreference: d.seekingHeightNoPreference,
@@ -268,6 +299,10 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
     batch.set(doc(db, `users/${uid}/seekingPreferences/prefs`), seeking)
 
     await batch.commit()
+
+    // Server-side tier elevation for women (rules block client writes to
+    // subscriptionTier). Fire-and-forget: never blocks or fails the save.
+    httpsCallable(functions, 'claimWomenElite')({}).catch(() => {})
   } catch (err) {
     await deletePhotos(refs)
     throw err

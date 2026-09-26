@@ -1,9 +1,9 @@
 import {
   BODY_TYPE_LABELS,
   DEALBREAKER_LABELS,
-  HAIR_COLOR_LABELS,
   SEEKING_TRAIT_LABELS,
   type DatingIntent,
+  type Dealbreaker,
 } from '../../types/profile'
 import {
   MAX_RANGE_AGE,
@@ -20,9 +20,18 @@ import { CardSelect, ChipMultiSelect, FieldLabel, HeightPicker, NumberSelect, St
 const SEEKING_BODY_OPTIONS = toOptions(BODY_TYPE_LABELS, (l) => `${l.emoji} ${l.label}`).filter(
   (o) => o.value !== 'prefer_not_to_say',
 )
-const HAIR_OPTIONS = toOptions(HAIR_COLOR_LABELS, (l) => l)
 const SEEKING_TRAIT_OPTIONS = toOptions(SEEKING_TRAIT_LABELS, (l) => l)
+// Legacy kids keys (has_kids, wants_kids, doesnt_want_kids) score identically to
+// their partner_* replacements, so only the partner_* keys are offered.
+const LEGACY_KIDS_DEALBREAKERS: Dealbreaker[] = ['has_kids', 'wants_kids', 'doesnt_want_kids']
+const DEALBREAKER_LABEL_OVERRIDES: Partial<Record<Dealbreaker, string>> = {
+  partner_doesnt_want_kids: "Doesn't want kids",
+  partner_wants_kids: 'Wants kids',
+  partner_has_kids: 'Has kids',
+}
 const DEALBREAKER_OPTIONS = toOptions(DEALBREAKER_LABELS, (l) => l)
+  .filter((o) => !LEGACY_KIDS_DEALBREAKERS.includes(o.value))
+  .map((o) => ({ ...o, label: DEALBREAKER_LABEL_OVERRIDES[o.value] ?? o.label }))
 
 const INTENT_OPTIONS: Option<DatingIntent>[] = [
   { value: 'spark', label: '🔵 Spark — Here for something real.', description: 'Serious dating, genuine connections.' },
@@ -75,14 +84,6 @@ export function PhysicalPrefsStep({ draft, update }: StepProps) {
         options={SEEKING_BODY_OPTIONS}
         value={draft.seekingBodyTypes}
         onChange={(seekingBodyTypes) => update({ seekingBodyTypes })}
-      />
-
-      <FieldLabel>Hair color preference</FieldLabel>
-      <ChipMultiSelect
-        options={HAIR_OPTIONS}
-        value={draft.seekingHairColors}
-        onChange={(seekingHairColors) => update({ seekingHairColors })}
-        exclusive="no_preference"
       />
     </div>
   )

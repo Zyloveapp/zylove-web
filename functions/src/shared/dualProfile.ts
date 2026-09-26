@@ -49,7 +49,7 @@ export const PLAY_COLORS = {
   textTertiary:   '#555555',
   tabBar:         '#111111',
   border:         'rgba(224,49,49,0.18)',
-  statusBar:      'light-content' as const,
+  statusBar:      'light-content' as 'dark-content' | 'light-content',
   rippleTo:       '#F8FAFF',
 }
 
@@ -71,6 +71,27 @@ export const SPICE_META: Record<SpiceLevel, {
   blindfold:  { label: 'Blindfold',  emoji: '🎭', color: '#BA7517', description: 'Into anticipation and light power play — trust is everything' },
   unleashed:  { label: 'Unleashed',  emoji: '⛓',  color: '#E03131', description: 'Full spectrum, no holding back — bring your imagination' },
   no_limits:  { label: 'No limits',  emoji: '🔑', color: '#6B0000', description: 'No limits, no judgment — if you know, you know' },
+}
+
+export type PlayNonNegotiable =
+  | 'recent_sti_screening'
+  | 'safe_sex_only'
+  | 'singles_only'
+  | 'no_chems'
+  | 'discreet_required'
+  | 'no_emotional_attachment'
+  | 'no_threesomes'
+  | 'condoms_always'
+
+export const PLAY_NON_NEGOTIABLE_LABELS: Record<PlayNonNegotiable, string> = {
+  recent_sti_screening:    'Recent STI screening',
+  safe_sex_only:           'Safe sex only',
+  singles_only:            'Singles only',
+  no_chems:                'No substances',
+  discreet_required:       'Discretion required',
+  no_emotional_attachment: 'No emotional attachment',
+  no_threesomes:           'No threesomes',
+  condoms_always:          'Condoms always',
 }
 
 // ─── Play Interest Tags ───────────────────────────────────────────────────────
@@ -271,6 +292,10 @@ export interface PlayProfile {
   radiusMiles: number
   ageMin: number
   ageMax: number
+  playNonNegotiables?: PlayNonNegotiable[]
+  isActive?: boolean
+  completeness?: number
+  lastUpdated?: number
 }
 
 export interface PromptAnswer {

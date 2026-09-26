@@ -7,7 +7,9 @@ import {
   LIFESTYLE_TAG_LABELS,
   LOVE_LANGUAGE_LABELS,
   OPEN_TO_LABELS,
-  PARENTAL_STATUS_LABELS,
+  OFF_MAP_GENDER_IDENTITIES,
+  PARENTAL_CURRENT_LABELS,
+  PARENTAL_INTENT_LABELS,
   PERSONALITY_TRAIT_LABELS,
   POLITICAL_VIEW_LABELS,
   RELATIONSHIP_STATUS_LABELS,
@@ -16,6 +18,8 @@ import {
   WEEKEND_VIBE_LABELS,
   feetInchesToCm,
   type DrinkingHabit,
+  type ParentalCurrent,
+  type ParentalIntent,
 } from '../../types/profile'
 import { toOptions, type StepProps } from './types'
 import {
@@ -44,7 +48,23 @@ const LOVE_GIVE_OPTIONS = toOptions(LOVE_LANGUAGE_LABELS, (l) => `${l.emoji} ${l
 const LOVE_RECEIVE_OPTIONS = toOptions(LOVE_LANGUAGE_LABELS, (l) => `${l.emoji} ${l.label}`, (l) => l.receiveDescription)
 const RELIGION_OPTIONS = toOptions(RELIGION_LABELS, (l) => l)
 const POLITICS_OPTIONS = toOptions(POLITICAL_VIEW_LABELS, (l) => l.label, (l) => l.description)
-const PARENTAL_OPTIONS = toOptions(PARENTAL_STATUS_LABELS, (l) => l.label, (l) => l.description)
+const PARENTAL_CURRENT_OPTIONS = toOptions(PARENTAL_CURRENT_LABELS, (l) => l.label, (l) => l.description || undefined)
+
+// Follow-up options depend on whether they already have kids (mirrors mobile).
+const PARENTAL_INTENTS_BY_CURRENT: Record<ParentalCurrent, ParentalIntent[]> = {
+  has_kids: ['wants_more', 'open_to_more', 'doesnt_want_more', 'undecided'],
+  no_kids: ['wants_first', 'doesnt_want_any', 'undecided'],
+}
+const PARENTAL_INTENT_QUESTION: Record<ParentalCurrent, string> = {
+  has_kids: 'Are you open to more kids with the right partner?',
+  no_kids: "What's your take on having kids?",
+}
+
+function parentalIntentOptions(current: ParentalCurrent) {
+  return toOptions(PARENTAL_INTENT_LABELS, (l) => l.label, (l) => l.description).filter((o) =>
+    PARENTAL_INTENTS_BY_CURRENT[current].includes(o.value),
+  )
+}
 
 const textInputClass = 'w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-800 focus:outline-none'
 
@@ -52,7 +72,17 @@ export function GenderStep({ draft, update }: StepProps) {
   return (
     <div>
       <StepHeader title="I am…" subtitle="This helps us show you to the right people." />
-      <ChipSelect options={GENDER_OPTIONS} value={draft.genderIdentity} onChange={(genderIdentity) => update({ genderIdentity })} />
+      <ChipSelect
+        options={GENDER_OPTIONS}
+        value={draft.genderIdentity}
+        onChange={(genderIdentity) =>
+          update({
+            genderIdentity,
+            // matchableAs only applies to off-map identities.
+            ...(genderIdentity && !OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) && { matchableAs: [] }),
+          })
+        }
+      />
       {draft.genderIdentity === 'self_describe' && (
         <input
           type="text"
@@ -62,6 +92,18 @@ export function GenderStep({ draft, update }: StepProps) {
           onChange={(e) => update({ genderSelfDescribe: e.target.value })}
           className={`${textInputClass} mt-3`}
         />
+      )}
+      {draft.genderIdentity && OFF_MAP_GENDER_IDENTITIES.includes(draft.genderIdentity) && (
+        <>
+          <FieldLabel hint="Select at least one. This is how you'll be surfaced in Discover.">
+            Show my profile to people attracted to…
+          </FieldLabel>
+          <ChipMultiSelect
+            options={ATTRACTED_TO_OPTIONS}
+            value={draft.matchableAs}
+            onChange={(matchableAs) => update({ matchableAs })}
+          />
+        </>
       )}
       <FieldLabel>Pronouns (optional)</FieldLabel>
       <input
@@ -296,15 +338,33 @@ export function KidsStep({ draft, update, onSkip }: StepProps & { onSkip: () => 
   return (
     <div>
       <StepHeader title="Kids?" subtitle="Optional. This helps match you with people who want the same things." />
+      <FieldLabel>Do you have kids?</FieldLabel>
       <CardSelect
-        options={PARENTAL_OPTIONS}
-        value={draft.parentalStatus}
-        onChange={(parentalStatus) => update({ parentalStatus })}
+        options={PARENTAL_CURRENT_OPTIONS}
+        value={draft.parentalCurrent}
+        onChange={(parentalCurrent) =>
+          update({
+            parentalCurrent,
+            // Drop a follow-up answer that doesn't apply to the new choice.
+            ...(draft.parentalIntent &&
+              !PARENTAL_INTENTS_BY_CURRENT[parentalCurrent].includes(draft.parentalIntent) && { parentalIntent: null }),
+          })
+        }
       />
+      {draft.parentalCurrent && (
+        <>
+          <FieldLabel>{PARENTAL_INTENT_QUESTION[draft.parentalCurrent]}</FieldLabel>
+          <CardSelect
+            options={parentalIntentOptions(draft.parentalCurrent)}
+            value={draft.parentalIntent}
+            onChange={(parentalIntent) => update({ parentalIntent })}
+          />
+        </>
+      )}
       <SkipLink
         label="Skip for now"
         onClick={() => {
-          update({ parentalStatus: null })
+          update({ parentalCurrent: null, parentalIntent: null })
           onSkip()
         }}
       />

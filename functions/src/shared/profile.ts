@@ -10,18 +10,23 @@ export type DatingIntent = 'spark' | 'play' | 'open'
 
 export type GenderIdentity =
   | 'man' | 'woman' | 'nonbinary' | 'trans_man' | 'trans_woman'
-  | 'genderfluid' | 'agender' | 'prefer_not_to_say' | 'self_describe'
+  | 'genderfluid' | 'agender' | 'self_describe'
 
 export const GENDER_LABELS: Record<GenderIdentity, string> = {
   man: 'Man', woman: 'Woman', nonbinary: 'Non-binary',
   trans_man: 'Trans man', trans_woman: 'Trans woman',
   genderfluid: 'Genderfluid', agender: 'Agender',
-  prefer_not_to_say: 'Prefer not to say', self_describe: 'Self-describe',
+  self_describe: 'Self-describe',
 }
 export const GENDER_PRIMARY: GenderIdentity[] = ['man', 'woman']
 export const GENDER_MORE: GenderIdentity[] = [
-  'nonbinary', 'trans_man', 'trans_woman', 'genderfluid', 'agender', 'prefer_not_to_say', 'self_describe',
+  'nonbinary', 'trans_man', 'trans_woman', 'genderfluid', 'agender', 'self_describe',
 ]
+
+// Off-map identities explicitly declare which attraction categories they want
+// to be surfaced to — "show me to users who are attracted to [men/women/…]".
+// Only set when genderIdentity is one of: genderfluid, agender, self_describe.
+export const OFF_MAP_GENDER_IDENTITIES: GenderIdentity[] = ['genderfluid', 'agender', 'self_describe']
 
 // ─── Orientation ──────────────────────────────────────────────────────────────
 
@@ -226,12 +231,61 @@ export const RELATIONSHIP_VALUE_LABELS: Record<RelationshipValue, string> = {
 
 export type ParentalStatus = 'has_kids' | 'wants_kids' | 'open_to_kids' | 'child_free' | 'prefer_not_to_say'
 
+export type ConflictStyle = 'direct' | 'process_first' | 'avoid' | 'situational'
+export type TogethernessStyle = 'entwined' | 'separate_plus_deep' | 'independent' | 'in_between'
+export type StressResponse = 'power_through' | 'step_back' | 'talk_it_out' | 'get_quiet'
+
+export const CONFLICT_STYLE_LABELS: Record<ConflictStyle, string> = {
+  direct:         'Talks it through right away',
+  process_first:  'Takes space, then comes back',
+  avoid:          'Avoids if possible',
+  situational:    'Depends on the situation',
+}
+
+export const TOGETHERNESS_STYLE_LABELS: Record<TogethernessStyle, string> = {
+  entwined:           'Loves entwined lives',
+  separate_plus_deep: 'Strong independence + deep connection',
+  independent:        'Highly independent',
+  in_between:         'Somewhere in between',
+}
+
+export const STRESS_RESPONSE_LABELS: Record<StressResponse, string> = {
+  power_through: 'Powers through',
+  step_back:     'Steps back to reset',
+  talk_it_out:   'Talks it out',
+  get_quiet:     'Gets quiet and internal',
+}
+
 export const PARENTAL_STATUS_LABELS: Record<ParentalStatus, { label: string; description: string }> = {
   has_kids:          { label: 'I have kids',         description: 'Kids are part of my life.' },
   wants_kids:        { label: 'I want kids someday', description: 'Looking for someone who wants the same.' },
   open_to_kids:      { label: 'Open to kids',        description: 'Not a dealbreaker either way.' },
   child_free:        { label: 'Child-free',          description: "Not for me — and that's firm." },
   prefer_not_to_say: { label: 'Prefer not to say',   description: 'Keeping this private for now.' },
+}
+
+export type ParentalCurrent = 'has_kids' | 'no_kids'
+
+export const PARENTAL_CURRENT_LABELS: Record<ParentalCurrent, { label: string; description: string }> = {
+  has_kids: { label: 'I have kids',       description: 'Kids are part of my life.' },
+  no_kids:  { label: "I don't have kids", description: '' },
+}
+
+export type ParentalIntent =
+  | 'wants_first'
+  | 'wants_more'
+  | 'open_to_more'
+  | 'doesnt_want_any'
+  | 'doesnt_want_more'
+  | 'undecided'
+
+export const PARENTAL_INTENT_LABELS: Record<ParentalIntent, { label: string; description: string }> = {
+  wants_first:      { label: 'I want them',                        description: 'Looking for someone who wants the same.' },
+  wants_more:       { label: 'Yes, I want more',                   description: 'Open to growing the family.' },
+  open_to_more:     { label: 'Open to more, not actively seeking', description: 'Depends on the right person.' },
+  doesnt_want_any:  { label: "I don't want them",                  description: "That's firm for me." },
+  doesnt_want_more: { label: 'No, my family feels complete',       description: "We're good where we are." },
+  undecided:        { label: "I'm open but unsure",                description: 'Depends on the partner.' },
 }
 
 // ─── Love Languages ───────────────────────────────────────────────────────────
@@ -280,7 +334,7 @@ export type WeekendVibe =
 
 export const WEEKEND_VIBE_LABELS: Record<WeekendVibe, { label: string; emoji: string; description: string }> = {
   slow_mornings:        { label: 'Slow mornings',        emoji: '🌅', description: 'No alarm, nowhere to be.' },
-  cook_something_good:  { label: 'Cook something good',  emoji: '🍳', description: "Farmers market, kitchen, or really good takeout." },
+  cook_something_good:  { label: 'Cook something good',  emoji: '🍳', description: "Home cooked meals, trying new recipes, or really good takeout." },
   out_in_the_city:      { label: 'Out in the city',      emoji: '🏙️', description: 'New spot, walk around, see what happens.' },
   get_outside:          { label: 'Get outside',          emoji: '🥾', description: 'Hike, trail, lake, fresh air.' },
   live_something:       { label: 'Live something',       emoji: '🎵', description: 'Concert, show, comedy, event.' },
@@ -318,40 +372,29 @@ export type Dealbreaker =
   | 'cigarette_smoker'
   | 'vaper'
   | 'heavy_drinker'
-  | 'unemployed'
-  | 'lives_with_parents'
   | 'has_kids'
   | 'wants_kids'
   | 'doesnt_want_kids'
   | 'non_exclusive'
-  | 'rude_to_service_staff'
-  | 'heavy_social_media'
   | 'different_religion'
   | 'different_politics'
+  | 'partner_doesnt_want_kids'
+  | 'partner_wants_kids'
+  | 'partner_has_kids'
 
 export const DEALBREAKER_LABELS: Record<Dealbreaker, string> = {
   cigarette_smoker:    'Cigarette smoker',
   vaper:               'Vaper',
   heavy_drinker:       'Heavy drinker',
-  unemployed:          'Unemployed',
-  lives_with_parents:  'Lives with parents',
   has_kids:            'Has kids',
   wants_kids:          'Wants kids',
   doesnt_want_kids:    "Doesn't want kids",
   non_exclusive:       'Non-exclusive only',
-  rude_to_service_staff: 'Rude to service staff',
-  heavy_social_media:  'Heavy social media use',
   different_religion:  'Very different religious views',
-  different_politics:  'Very different political views',
-}
-
-// ─── Hair Color Preference ────────────────────────────────────────────────────
-
-export type HairColor = 'blonde' | 'brunette' | 'black' | 'red' | 'grey_silver' | 'colored' | 'bald' | 'no_preference'
-
-export const HAIR_COLOR_LABELS: Record<HairColor, string> = {
-  blonde: 'Blonde', brunette: 'Brunette', black: 'Black', red: 'Red',
-  grey_silver: 'Grey / Silver', colored: 'Colored', bald: 'Bald', no_preference: 'No preference',
+  different_politics:       'Very different political views',
+  partner_doesnt_want_kids: "Partner doesn't want kids",
+  partner_wants_kids:       'Partner wants kids',
+  partner_has_kids:         'Partner has kids from a prior relationship',
 }
 
 // ─── Relationship + Play Styles ───────────────────────────────────────────────
@@ -391,6 +434,32 @@ export interface DatingProfile {
   genderSelfDescribe?: string
   pronouns?: string
   attractedTo: AttractedTo[]
+  // Off-map identities (genderfluid / agender / self_describe) declare which
+  // attraction categories they want to be surfaced to. Consulted by
+  // prefMatchesGender in scoring when target's genderIdentity is off-map.
+  matchableAs?: AttractedTo[]
+  // Whether to surface "Interested in: X" on this user's Discover card.
+  // Default false (opt-in). Set via profile edit screen.
+  showOrientation?: boolean
+  // Expo push notification token. Registered on app launch after auth.
+  // null = permission declined; undefined = not yet prompted.
+  expoPushToken?: string | null
+  pushPermissionDeclined?: boolean
+  onboardingFeedbackSeen?: boolean
+  playNonNegotiables?: import('./dualProfile').PlayNonNegotiable[]
+  // Photos flagged by Sightengine moderation (onPhotoUpload Cloud Function).
+  // Hidden from Discover until approved by trust-safety review.
+  pendingPhotoURLs?: Array<{
+    url: string
+    flaggedAt: any
+    reason: { nudity: number; gore: number; offensive: number }
+    approved: boolean
+  }>;
+  // Timestamp set exactly once — on Slide 2 confirmation modal or via silent
+  // retroactive lock on next login for pre-existing users. After it is set,
+  // Firestore rules reject any write to birthday, genderIdentity, matchableAs,
+  // or identityLockedAt itself. See Commit D (identity immutability).
+  identityLockedAt?: any // Firestore Timestamp — loose-typed to avoid admin/client import split
   relationshipStatus: RelationshipStatus
   openTo: OpenTo[]
   bodyType?: BodyType
@@ -415,10 +484,14 @@ export interface DatingProfile {
   promptAnswers: PromptAnswer[]
   photoURLs: string[]
   parentalStatus?: ParentalStatus
+  parentalCurrent?: ParentalCurrent
+  parentalIntent?: ParentalIntent
+  conflictStyle?: ConflictStyle
+  togethernessStyle?: TogethernessStyle
+  stressResponse?: StressResponse
   seekingBodyTypes: BodyType[]
   seekingHeightMinCm?: number
   seekingHeightMaxCm?: number
-  seekingHairColors: HairColor[]
   seekingTraits: SeekingTrait[]
   dealbreakers: Dealbreaker[]
   geohash: string

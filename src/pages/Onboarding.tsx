@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { FirebaseError } from 'firebase/app'
 import { useAuthStore } from '../store/authStore'
+import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
 import { recordLegalAcceptance, saveSparkOnboarding } from '../services/onboarding'
 import { generateSparkBio } from '../services/bio'
 import TermsStep from '../components/onboarding/TermsStep'
@@ -89,7 +90,11 @@ function isStepValid(id: StepId, d: OnboardingDraft, bioGenerating: boolean): bo
     case 'photos':
       return d.photos.length >= 1 && d.photos.length <= MAX_PHOTOS
     case 'gender':
-      return d.genderIdentity !== null && (d.genderIdentity !== 'self_describe' || d.genderSelfDescribe.trim() !== '')
+      return (
+        d.genderIdentity !== null &&
+        (d.genderIdentity !== 'self_describe' || d.genderSelfDescribe.trim() !== '') &&
+        (!OFF_MAP_GENDER_IDENTITIES.includes(d.genderIdentity) || d.matchableAs.length > 0)
+      )
     case 'attractedTo':
       return d.attractedTo.length > 0
     case 'relationship':

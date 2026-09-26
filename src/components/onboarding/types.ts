@@ -6,11 +6,11 @@ import type {
   DrinkingHabit,
   GenderIdentity,
   HabitTag,
-  HairColor,
   LifestyleTag,
   LoveLanguage,
   OpenTo,
-  ParentalStatus,
+  ParentalCurrent,
+  ParentalIntent,
   PersonalityTrait,
   PoliticalView,
   RelationshipStatus,
@@ -67,6 +67,7 @@ export interface OnboardingDraft {
   photos: PhotoDraft[]
   genderIdentity: GenderIdentity | null
   genderSelfDescribe: string
+  matchableAs: AttractedTo[]
   pronouns: string
   attractedTo: AttractedTo[]
   relationshipStatus: RelationshipStatus | null
@@ -83,12 +84,12 @@ export interface OnboardingDraft {
   loveLangReceive: LoveLanguage[]
   religion: Religion | null
   politicalView: PoliticalView | null
-  parentalStatus: ParentalStatus | null
+  parentalCurrent: ParentalCurrent | null
+  parentalIntent: ParentalIntent | null
   seekingHeightNoPreference: boolean
   seekingHeightMin: HeightFtIn
   seekingHeightMax: HeightFtIn
   seekingBodyTypes: BodyType[]
-  seekingHairColors: HairColor[]
   seekingTraits: SeekingTrait[]
   dealbreakers: Dealbreaker[]
   intent: DatingIntent | null
@@ -111,6 +112,7 @@ export const INITIAL_DRAFT: OnboardingDraft = {
   photos: [],
   genderIdentity: null,
   genderSelfDescribe: '',
+  matchableAs: [],
   pronouns: '',
   attractedTo: [],
   relationshipStatus: null,
@@ -127,12 +129,12 @@ export const INITIAL_DRAFT: OnboardingDraft = {
   loveLangReceive: [],
   religion: null,
   politicalView: null,
-  parentalStatus: null,
+  parentalCurrent: null,
+  parentalIntent: null,
   seekingHeightNoPreference: true,
   seekingHeightMin: { feet: 5, inches: 0 },
   seekingHeightMax: { feet: 6, inches: 6 },
   seekingBodyTypes: [],
-  seekingHairColors: [],
   seekingTraits: [],
   dealbreakers: [],
   intent: null,

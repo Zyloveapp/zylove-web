@@ -12,7 +12,8 @@ import {
   LIFESTYLE_TAG_LABELS,
   LOVE_LANGUAGE_LABELS,
   OPEN_TO_LABELS,
-  PARENTAL_STATUS_LABELS,
+  PARENTAL_CURRENT_LABELS,
+  PARENTAL_INTENT_LABELS,
   PERSONALITY_TRAIT_LABELS,
   POLITICAL_VIEW_LABELS,
   RELATIONSHIP_STATUS_LABELS,
@@ -44,7 +45,8 @@ export interface BioRequest {
   weekendVibes: string[]
   loveLangGive: string[]
   loveLangReceive: string[]
-  parentalStatus: string | null
+  parentalCurrent: string | null
+  parentalIntent: string | null
   seekingTraits: string[]
   dealbreakers: string[]
   sparkPromptAnswers: Record<string, string>
@@ -120,7 +122,8 @@ export function parseBioRequest(raw: unknown): BioRequest {
     weekendVibes: keys(d, 'weekendVibes', WEEKEND_VIBE_LABELS),
     loveLangGive: keys(d, 'loveLangGive', LOVE_LANGUAGE_LABELS),
     loveLangReceive: keys(d, 'loveLangReceive', LOVE_LANGUAGE_LABELS),
-    parentalStatus: key(d, 'parentalStatus', PARENTAL_STATUS_LABELS),
+    parentalCurrent: key(d, 'parentalCurrent', PARENTAL_CURRENT_LABELS),
+    parentalIntent: key(d, 'parentalIntent', PARENTAL_INTENT_LABELS),
     seekingTraits: keys(d, 'seekingTraits', SEEKING_TRAIT_LABELS),
     dealbreakers: keys(d, 'dealbreakers', DEALBREAKER_LABELS),
     sparkPromptAnswers: answers(d),
@@ -146,7 +149,20 @@ export function buildBioPrompt(s: BioRequest): string {
     'a mix of things'
   const give = s.loveLangGive.map((l) => LOVE_LANGUAGE_LABELS[l as keyof typeof LOVE_LANGUAGE_LABELS].label).join(', ')
   const receive = s.loveLangReceive.map((l) => LOVE_LANGUAGE_LABELS[l as keyof typeof LOVE_LANGUAGE_LABELS].label).join(', ')
-  const parental = label<{ label: string }>(PARENTAL_STATUS_LABELS, s.parentalStatus)?.label.toLowerCase() ?? null
+  const kidsLine = (() => {
+    if (!s.parentalCurrent) return undefined
+    const currentLabel = s.parentalCurrent === 'has_kids' ? 'Has kids' : 'No kids'
+    const intentLabels: Record<string, string> = {
+      wants_first: 'wants them',
+      wants_more: 'open to more',
+      open_to_more: 'open to more, not actively seeking',
+      doesnt_want_any: "doesn't want kids",
+      doesnt_want_more: 'family feels complete',
+      undecided: 'undecided',
+    }
+    const intentPart = s.parentalIntent ? ` · ${intentLabels[s.parentalIntent] ?? s.parentalIntent}` : ''
+    return `${currentLabel}${intentPart}`
+  })()
   const drinking = label<{ label: string }>(DRINKING_HABIT_LABELS, s.drinkingHabit)?.label.toLowerCase() ?? null
   const religion = label<string>(RELIGION_LABELS, s.religion)
   const politics = label<{ label: string }>(POLITICAL_VIEW_LABELS, s.politicalView)?.label ?? null
@@ -187,7 +203,7 @@ export function buildBioPrompt(s: BioRequest): string {
     drinking ? `Drinking: ${drinking}` : '',
     religion ? `Faith / religion: ${religion}` : '',
     politics ? `Political views: ${politics}` : '',
-    parental ? `Kids situation: ${parental}` : '',
+    kidsLine ? `Kids situation: ${kidsLine}` : '',
     '',
     '── HOW THEY SHOW UP ──',
     traits ? `Personality: ${traits}` : '',

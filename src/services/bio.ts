@@ -24,7 +24,8 @@ export interface SparkBioRequest {
   weekendVibes: string[]
   loveLangGive: string[]
   loveLangReceive: string[]
-  parentalStatus: string | null
+  parentalCurrent: string | null
+  parentalIntent: string | null
   seekingTraits: string[]
   dealbreakers: string[]
   sparkPromptAnswers: Record<string, string>
@@ -75,7 +76,8 @@ function toRequest(d: OnboardingDraft): SparkBioRequest {
     weekendVibes: d.weekendVibes,
     loveLangGive: d.loveLangGive,
     loveLangReceive: d.loveLangReceive,
-    parentalStatus: d.parentalStatus,
+    parentalCurrent: d.parentalCurrent,
+    parentalIntent: d.parentalIntent,
     seekingTraits: d.seekingTraits,
     dealbreakers: d.dealbreakers,
     sparkPromptAnswers,

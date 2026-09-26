@@ -140,67 +140,55 @@ export interface ScoreHistoryEntry {
 // ─── Perks System ─────────────────────────────────────────────────────────────
 
 export type SparkPerk =
-  | 'priority_placement'    // boosted in discovery — unlocks at 75
-  | 'trusted_badge'         // visible to matches — unlocks at 85
-  | 'expanded_likes'        // 2x daily like limit — unlocks at 80
-  | 'play_pass_trial'       // free monthly trial — unlocks at 90
+  | 'vibe_recognition'      // unlocks at 60
+  | 'reputation_visible'    // unlocks at 70
+  | 'glow_border'           // unlocks at 80
+  | 'expanded_likes'        // 2x daily like limit — unlocks at 85
   | 'early_features'        // beta access — unlocks at 95
 
 export interface SparkPerkMeta {
   id: SparkPerk
   label: string
   description: string
-  emoji: string
-  requiredScore: number
-  requiredTier: ZyloveScoreTier
-  visibleToOthers: boolean    // does it show on profile/in conversation?
+  icon: string              // empty string = no icon rendered
+  pointsRequired: number
 }
 
 export const SPARK_PERKS: SparkPerkMeta[] = [
   {
-    id: 'priority_placement',
-    label: 'Priority placement',
-    description: 'Your profile gets boosted to the top of local discovery.',
-    emoji: '⚡',
-    requiredScore: 75,
-    requiredTier: 'great',
-    visibleToOthers: false,
+    id: 'vibe_recognition',
+    label: 'Vibe recognition',
+    description: 'Your vibe check responses shape your score — honesty here compounds over time.',
+    icon: '',
+    pointsRequired: 60,
+  },
+  {
+    id: 'reputation_visible',
+    label: 'Reputation signal',
+    description: 'Matches can see you show up consistently — your engagement speaks for itself.',
+    icon: '',
+    pointsRequired: 70,
+  },
+  {
+    id: 'glow_border',
+    label: 'Glow border',
+    description: 'A glow activates on your profile — a signal others notice without being told why.',
+    icon: '',
+    pointsRequired: 80,
   },
   {
     id: 'expanded_likes',
     label: 'Expanded likes',
-    description: '2× your daily like limit — more connections, less waiting.',
-    emoji: '♾️',
-    requiredScore: 80,
-    requiredTier: 'great',
-    visibleToOthers: false,
-  },
-  {
-    id: 'trusted_badge',
-    label: 'Trusted',
-    description: 'A badge visible to your matches signalling you\'re a quality connector.',
-    emoji: '🛡',
-    requiredScore: 85,
-    requiredTier: 'trusted',
-    visibleToOthers: true,     // shown in match list + chat header
-  },
-  {
-    id: 'play_pass_trial',
-    label: 'Monthly Play Pass',
-    description: 'A free Play Pass trial every month — on us.',
-    emoji: '🎁',
-    requiredScore: 90,
-    requiredTier: 'trusted',
-    visibleToOthers: false,
+    description: '2× your daily like limit — earned through how you show up, not what you pay.',
+    icon: '',
+    pointsRequired: 85,
   },
   {
     id: 'early_features',
     label: 'Early access',
     description: 'First to try new features before anyone else.',
-    emoji: '🔬',
-    requiredScore: 95,
-    requiredTier: 'elite',
-    visibleToOthers: false,
+    icon: '',
+    pointsRequired: 95,
   },
 ]
 
@@ -226,9 +214,8 @@ export function scoreToTier(score: number, reviewCount: number): ZyloveScoreTier
   return 'building'
 }
 
-export function getUnlockedPerks(score: number, reviewCount: number): SparkPerk[] {
-  if (reviewCount < 5) return []
-  return SPARK_PERKS.filter(p => score >= p.requiredScore).map(p => p.id)
+export function getUnlockedPerks(score: number, _reviewCount?: number): SparkPerk[] {
+  return SPARK_PERKS.filter(p => score >= p.pointsRequired).map(p => p.id)
 }
 
 // ─── Score Calculation ────────────────────────────────────────────────────────

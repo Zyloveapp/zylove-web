@@ -23,14 +23,16 @@ export default function AuthGuard() {
   const [result, setResult] = useState<{ uid: string; status: ProfileStatus } | null>(null)
   const [attempt, setAttempt] = useState(0)
 
-  // A profile counts as complete once users/{uid} exists — both web and mobile
-  // onboarding create it, and nothing sets a profileComplete flag yet.
+  // Onboarding is complete only when users/{uid} has onboardingComplete: true.
+  // Mobile creates the doc early (identity lock at slide 2), so existence alone
+  // would let half-onboarded users through.
   useEffect(() => {
     if (!uid) return
     let cancelled = false
     getDoc(doc(db, 'users', uid))
       .then((snap) => {
-        if (!cancelled) setResult({ uid, status: snap.exists() ? 'complete' : 'incomplete' })
+        const complete = snap.exists() && snap.data().onboardingComplete === true
+        if (!cancelled) setResult({ uid, status: complete ? 'complete' : 'incomplete' })
       })
       .catch(() => {
         if (!cancelled) setResult({ uid, status: 'error' })

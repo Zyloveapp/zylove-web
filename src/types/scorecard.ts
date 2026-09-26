@@ -41,123 +41,24 @@ export interface CompatibilityScorecard {
   computedAt: number
   publicScore: number         // rounded to nearest 5 for mystery
   matchRevealUnlocked: boolean
-}
 
-// ─── Simplified Visibility ────────────────────────────────────────────────────
-//
-// 8 section-level toggles.
-// Always visible: displayName, age, intent, photoURLs — these cannot be hidden.
-
-export type ProfileFieldId =
-  | 'location'              // City / area
-  | 'relationship_style'    // Monogamous, ENM, exploring
-  | 'about_me'              // Height, body type, personality, lifestyle tags, values
-  | 'lifestyle'             // Smoking, drinking, cannabis, kids, pets
-  | 'prompts'               // All prompt answers as a group
-  | 'what_i_seek'           // Seeking preferences + dealbreakers
-  | 'compatibility'         // Show/hide scorecard section on profile card
-  | 'pronouns'              // Pronouns
-
-export interface FieldVisibilitySetting {
-  fieldId: ProfileFieldId
-  visible: boolean
-}
-
-export interface ProfileVisibilityConfig {
-  uid: string
-  fields: Record<ProfileFieldId, FieldVisibilitySetting>
-  lastUpdated: number
-}
-
-// ─── Field metadata ───────────────────────────────────────────────────────────
-
-export interface FieldMeta {
-  id: ProfileFieldId
-  label: string
-  description: string
-  emoji: string
-}
-
-export const FIELD_META: FieldMeta[] = [
-  {
-    id: 'location',
-    label: 'Location',
-    description: 'Your city or area',
-    emoji: '📍',
-  },
-  {
-    id: 'relationship_style',
-    label: 'Relationship style',
-    description: 'Monogamous, ENM, exploring, etc.',
-    emoji: '🎯',
-  },
-  {
-    id: 'about_me',
-    label: 'About me',
-    description: 'Height, body type, personality, lifestyle tags, values',
-    emoji: '✨',
-  },
-  {
-    id: 'lifestyle',
-    label: 'Lifestyle',
-    description: 'Smoking, drinking, cannabis, kids, pets',
-    emoji: '🌿',
-  },
-  {
-    id: 'prompts',
-    label: 'My answers',
-    description: 'Your prompt responses',
-    emoji: '💬',
-  },
-  {
-    id: 'what_i_seek',
-    label: 'What I seek',
-    description: 'Your preferences and dealbreakers',
-    emoji: '🔍',
-  },
-  {
-    id: 'compatibility',
-    label: 'Compatibility breakdown',
-    description: 'Show the scorecard section on your profile card',
-    emoji: '💡',
-  },
-  {
-    id: 'pronouns',
-    label: 'Pronouns',
-    description: 'e.g. she/her, they/them',
-    emoji: '🗣️',
-  },
-]
-
-// ─── Always visible ───────────────────────────────────────────────────────────
-
-export const ALWAYS_VISIBLE: string[] = ['displayName', 'age', 'intent', 'photoURLs']
-
-// ─── Default visibility ───────────────────────────────────────────────────────
-// Conservative defaults — location, about_me, and prompts on by default.
-
-export function defaultVisibilityConfig(uid: string): ProfileVisibilityConfig {
-  const fields = {} as Record<ProfileFieldId, FieldVisibilitySetting>
- const onByDefault: ProfileFieldId[] = ['location', 'relationship_style', 'about_me', 'lifestyle', 'prompts', 'what_i_seek', 'pronouns']
-
-  for (const meta of FIELD_META) {
-    fields[meta.id] = {
-      fieldId: meta.id,
-      visible: onByDefault.includes(meta.id),
+  sparkScore?: number
+  playScore?: number
+  tier1?: {
+    archetype?: {
+      id: string
+      label: string
+      copy: string
+      confidence: number
     }
+    combinedScore?: number
+    asymmetryGap?: number
+    dataConfidence?: number
+  } | null
+  breakdown?: {
+    spark?: Record<string, number>
+    play?: Record<string, number>
   }
-
-  return { uid, fields, lastUpdated: Date.now() }
-}
-
-// ─── Helper ───────────────────────────────────────────────────────────────────
-
-export function isSectionVisible(
-  config: ProfileVisibilityConfig | null | undefined,
-  fieldId: ProfileFieldId
-): boolean {
-  if (!config) return true
-  return config.fields[fieldId]?.visible ?? false
 }
 
 // ─── Completeness scoring ─────────────────────────────────────────────────────
