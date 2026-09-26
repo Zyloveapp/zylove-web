@@ -1,4 +1,5 @@
 import { initializeApp } from 'firebase/app'
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check'
 import { browserLocalPersistence, initializeAuth } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
 import { getFunctions } from 'firebase/functions'
@@ -17,6 +18,13 @@ export const app = initializeApp(firebaseConfig)
 export const auth = initializeAuth(app, {
   persistence: browserLocalPersistence,
 })
+
+if (!import.meta.env.DEV) {
+  initializeAppCheck(app, {
+    provider: new ReCaptchaEnterpriseProvider(import.meta.env.VITE_RECAPTCHA_SITE_KEY ?? ''),
+    isTokenAutoRefreshEnabled: true,
+  })
+}
 
 if (import.meta.env.DEV) {
   auth.settings.appVerificationDisabledForTesting = true
