@@ -169,7 +169,7 @@ function RevealedScore({
 
       {insights.length > 0 && (
         <div className="mt-6">
-          <p className="mb-3 text-[10px] uppercase tracking-[0.2em] text-white/45">Why you match</p>
+          <p className="text-[11px] uppercase tracking-widest text-white font-semibold mb-4">Why you match</p>
           <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {insights.map((c) => (
               <li key={c.key} className="text-sm">

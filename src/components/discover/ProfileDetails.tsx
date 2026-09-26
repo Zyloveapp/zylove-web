@@ -14,7 +14,7 @@ import {
 
 function SectionHeading({ children }: { children: ReactNode }) {
   return (
-    <h3 className="mb-4 border-b border-white/5 pb-2 text-[10px] uppercase tracking-[0.2em] text-white/45">
+    <h3 className="text-[11px] uppercase tracking-widest text-white font-semibold mb-4">
       {children}
     </h3>
   )
