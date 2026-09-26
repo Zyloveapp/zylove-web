@@ -135,6 +135,28 @@ export interface OnLikeResponse {
   matchId: string | null
 }
 
+// ─── Compatibility (onTap Callable) ──────────────────────────────────────────
+
+// Category scores are 0–100. Spark: coreFit, valuesIntentions, physicalPrefs,
+// loveLanguages, lifestyle, personality. Play: nonNegotiables,
+// physicalCompatibility, energyVibe, intentionsLimits.
+export interface CompatibilityResult {
+  pairId: string
+  sparkScore?: number
+  playScore?: number
+  breakdown?: { spark?: Record<string, number>; play?: Record<string, number> }
+  triggeredDealbreakers?: string[]
+  tier1?: unknown
+}
+
+// Computes (or returns the cached) pairs/{a_b} score for the viewer + target.
+export async function fetchCompatibility(targetUid: string): Promise<CompatibilityResult> {
+  const { data } = await httpsCallable<{ tappedUserId: string }, CompatibilityResult>(functions, 'onTap')({
+    tappedUserId: targetUid,
+  })
+  return data
+}
+
 // Safety net for profiles saved without trust/safety defaults (e.g. the
 // post-onboarding initUserDefaults call failed). Idempotent server-side.
 // Fire-and-forget: never blocks or fails the Discover load.

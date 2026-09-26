@@ -1,0 +1,96 @@
+import {
+  CONFLICT_STYLE_LABELS,
+  LIFESTYLE_TAG_LABELS,
+  LOVE_LANGUAGE_LABELS,
+  OPEN_TO_LABELS,
+  PARENTAL_CURRENT_LABELS,
+  PARENTAL_INTENT_LABELS,
+  PARENTAL_STATUS_LABELS,
+  PERSONALITY_TRAIT_LABELS,
+  PLAY_PROMPTS as LEGACY_PLAY_PROMPTS,
+  POLITICAL_VIEW_LABELS,
+  RELATIONSHIP_STATUS_LABELS,
+  RELATIONSHIP_VALUE_LABELS,
+  RELIGION_LABELS,
+  SPARK_PROMPTS as LEGACY_SPARK_PROMPTS,
+  STRESS_RESPONSE_LABELS,
+  TOGETHERNESS_STYLE_LABELS,
+  UNIVERSAL_PROMPTS,
+} from '../../types/profile'
+import { PLAY_PROMPT_BANK, SPARK_PROMPT_BANK } from '../../types/dualProfile'
+import type { DiscoverProfile } from '../../services/discover'
+
+// Profiles are written by several app versions, so stored keys may not exist
+// in today's label maps. Unknown keys fall back to a readable version of the key.
+function lookup<V>(record: object, key: string): V | undefined {
+  return Object.prototype.hasOwnProperty.call(record, key) ? (record as Record<string, V>)[key] : undefined
+}
+
+function humanize(key: string): string {
+  const s = key.replace(/_/g, ' ')
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+function labelOf(record: object, key: string): string {
+  const v = lookup<unknown>(record, key)
+  if (typeof v === 'string') return v
+  if (typeof v === 'object' && v !== null && 'label' in v && typeof v.label === 'string') return v.label
+  return humanize(key)
+}
+
+export const personalityLabel = (k: string) => labelOf(PERSONALITY_TRAIT_LABELS, k)
+export const valueLabel = (k: string) => labelOf(RELATIONSHIP_VALUE_LABELS, k)
+export const loveLanguageLabel = (k: string) => labelOf(LOVE_LANGUAGE_LABELS, k)
+
+export function lifestyleLabel(k: string): string {
+  const v = lookup<{ label: string; emoji: string }>(LIFESTYLE_TAG_LABELS, k)
+  return v ? `${v.emoji} ${v.label}` : humanize(k)
+}
+
+const PROMPT_TEXT = new Map<string, string>(
+  [...SPARK_PROMPT_BANK, ...PLAY_PROMPT_BANK, ...UNIVERSAL_PROMPTS, ...LEGACY_SPARK_PROMPTS, ...LEGACY_PLAY_PROMPTS].map(
+    (p) => [p.id, p.text],
+  ),
+)
+
+// Mobile stores its AI-written "just for you" question under 'dynamic'
+// without the question text.
+export function promptQuestion(id: string): string {
+  if (id === 'dynamic') return 'A question just for them'
+  return PROMPT_TEXT.get(id) ?? humanize(id)
+}
+
+export function goDeeperRows(p: DiscoverProfile): { label: string; value: string }[] {
+  return [
+    p.conflictStyle && { label: 'Conflict', value: labelOf(CONFLICT_STYLE_LABELS, p.conflictStyle) },
+    p.togethernessStyle && { label: 'Together time', value: labelOf(TOGETHERNESS_STYLE_LABELS, p.togethernessStyle) },
+    p.stressResponse && { label: 'Under stress', value: labelOf(STRESS_RESPONSE_LABELS, p.stressResponse) },
+  ].filter((r): r is { label: string; value: string } => Boolean(r))
+}
+
+function kidsDetail(p: DiscoverProfile): string | null {
+  if (p.parentalCurrent) {
+    const current = labelOf(PARENTAL_CURRENT_LABELS, p.parentalCurrent)
+    return p.parentalIntent ? `${current} · ${labelOf(PARENTAL_INTENT_LABELS, p.parentalIntent)}` : current
+  }
+  // Older profiles only have the single legacy field.
+  return p.parentalStatus && p.parentalStatus !== 'prefer_not_to_say'
+    ? labelOf(PARENTAL_STATUS_LABELS, p.parentalStatus)
+    : null
+}
+
+export function lifeDetails(p: DiscoverProfile): { label: string; value: string }[] {
+  const openTo = (p.openTo ?? []).map((k) => labelOf(OPEN_TO_LABELS, k)).join(', ')
+  const kids = kidsDetail(p)
+  const skip = (k: string | undefined) => !k || k === 'prefer_not_to_say'
+  return [
+    !skip(p.relationshipStatus) && {
+      label: 'Relationship status',
+      value: labelOf(RELATIONSHIP_STATUS_LABELS, p.relationshipStatus ?? ''),
+    },
+    openTo && { label: 'Open to', value: openTo },
+    kids && { label: 'Kids', value: kids },
+    !skip(p.religion) && { label: 'Religion', value: labelOf(RELIGION_LABELS, p.religion ?? '') },
+    !skip(p.politicalView) && { label: 'Politics', value: labelOf(POLITICAL_VIEW_LABELS, p.politicalView ?? '') },
+  ].filter((r): r is { label: string; value: string } => Boolean(r))
+}
