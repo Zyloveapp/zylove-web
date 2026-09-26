@@ -72,8 +72,11 @@ function isStepValid(step: number, d: OnboardingDraft): boolean {
 
 function saveErrorMessage(err: unknown): string {
   if (err instanceof FirebaseError) {
-    if (err.code === 'permission-denied' || err.code === 'storage/unauthorized') {
-      return "You don't have permission to save this profile. Try signing in again."
+    if (err.code === 'storage/unauthorized') {
+      return "Couldn't upload your photos — the server rejected them (storage/unauthorized)."
+    }
+    if (err.code === 'permission-denied') {
+      return "Couldn't save your profile — the server rejected the write (permission-denied)."
     }
     return `Couldn't save your profile (${err.code}). Try again.`
   }

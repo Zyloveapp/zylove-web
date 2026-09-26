@@ -38,6 +38,11 @@ export interface SparkOnboardingInput {
   seeking: Omit<SeekingPreferencesDoc, 'uid' | '_lastUpdated'>
 }
 
+// Trust/safety fields. Firestore rules reject any client create or update that
+// includes them — only Cloud Functions (admin SDK) may set them.
+type ServerOnlyField = 'isSuspended' | 'reportCount' | 'verificationStatus' | 'subscriptionTier'
+type NewUserDoc = Omit<DatingProfile, ServerOnlyField>
+
 // Defaults for fields mobile onboarding collects but web onboarding doesn't yet.
 // Only applied when creating a brand-new users/{uid} doc.
 const NEW_PROFILE_DEFAULTS = {
@@ -61,13 +66,9 @@ const NEW_PROFILE_DEFAULTS = {
   radiusMiles: 25,
   ageMin: 21,
   ageMax: 45,
-  verificationStatus: 'unverified',
   phoneVerified: false,
-  reportCount: 0,
-  isSuspended: false,
-  subscriptionTier: 'free',
   publicKey: '',
-} satisfies Partial<DatingProfile>
+} satisfies Partial<NewUserDoc>
 
 async function uploadPhotos(uid: string, files: File[]): Promise<{ refs: StorageReference[]; urls: string[] }> {
   const stamp = Date.now()
@@ -125,8 +126,8 @@ export async function saveSparkOnboarding(uid: string, input: SparkOnboardingInp
       // and never touch the trust/safety fields the rules lock down on update.
       batch.set(rootRef, { ...onboardingFields, sparkVisibility: 'active' }, { merge: true })
     } else {
-      const profile: DatingProfile = { ...NEW_PROFILE_DEFAULTS, ...onboardingFields, createdAt: now }
-      batch.set(rootRef, { ...profile, sparkScore: 0, sparkVisibility: 'active' })
+      const profile: NewUserDoc = { ...NEW_PROFILE_DEFAULTS, ...onboardingFields, createdAt: now }
+      batch.set(rootRef, { ...profile, sparkVisibility: 'active' })
     }
 
     const spark: Partial<SparkProfile> = {
