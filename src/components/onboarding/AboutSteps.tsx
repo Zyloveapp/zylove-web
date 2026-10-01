@@ -95,7 +95,7 @@ export function GenderStep({ draft, update }: StepProps) {
       )}
       {draft.genderIdentity && OFF_MAP_GENDER_IDENTITIES.includes(draft.genderIdentity) && (
         <>
-          <FieldLabel hint="Select at least one. This is how you'll be surfaced in Discover.">
+          <FieldLabel hint="Select at least one. This is how you'll be surfaced in Explore.">
             Show my profile to people attracted to…
           </FieldLabel>
           <ChipMultiSelect

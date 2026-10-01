@@ -296,3 +296,65 @@ export function actionErrorMessage(err: unknown): string {
   }
   return 'Something went wrong. Check your connection and try again.'
 }
+
+// ─── Displayed score ─────────────────────────────────────────────────────────
+
+// Deep Fit (tier1) inflates thin profiles — empty data reads as a perfect
+// facet match — so it only becomes the headline score once both people have
+// filled in most of the seven tag lists it's built from (5 of 7 ≈ 0.71).
+const DEEP_FIT_MIN_CONFIDENCE = 0.6
+
+export interface DisplayScore {
+  value: number // 0–100, rounded
+  deep: boolean // true when this is the Deep Fit (tier1) score
+}
+
+// The one compatibility number shown anywhere: Deep Fit when it's trustworthy
+// (Spark only), otherwise the base score. Always capped at 100.
+export function displayScore(result: CompatibilityResult, mode: Mode): DisplayScore | null {
+  const t = mode === 'spark' ? result.tier1 : null
+  if (t && t.combinedScore !== null && (t.dataConfidence ?? 0) >= DEEP_FIT_MIN_CONFIDENCE) {
+    return { value: clampScore(t.combinedScore), deep: true }
+  }
+  const base = mode === 'play' ? result.playScore : result.sparkScore
+  return typeof base === 'number' ? { value: clampScore(base), deep: false } : null
+}
+
+function clampScore(n: number): number {
+  return Math.max(0, Math.min(100, Math.round(n)))
+}
+
+// ─── Top Picks ───────────────────────────────────────────────────────────────
+
+export interface TopPick {
+  profile: DiscoverProfile
+  score: DisplayScore
+}
+
+// The three best-scoring unswiped Explore profiles, ranked only by pair scores
+// that already exist (pairs/{a_b}, written when a profile was opened or
+// prefetched). Never calls onTap, so ranking creates no new pair docs.
+export async function fetchTopPicks(uid: string, mode: Mode): Promise<TopPick[]> {
+  const candidates = await fetchCandidates(uid, mode)
+  const scored = await Promise.all(
+    candidates.map(async (profile): Promise<TopPick | null> => {
+      const snap = await getDoc(doc(db, 'pairs', [uid, profile.uid].sort().join('_'))).catch(() => null)
+      const data = snap?.data()
+      if (!data) return null
+      const score = displayScore(
+        {
+          pairId: snap!.id,
+          sparkScore: num(data.sparkScore) ?? undefined,
+          playScore: num(data.playScore) ?? undefined,
+          tier1: parseTier1(data.tier1Spark),
+        },
+        mode,
+      )
+      return score ? { profile, score } : null
+    }),
+  )
+  return scored
+    .filter((p): p is TopPick => p !== null)
+    .sort((a, b) => b.score.value - a.score.value)
+    .slice(0, 3)
+}

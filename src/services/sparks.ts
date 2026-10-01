@@ -82,6 +82,37 @@ export function subscribeSparks(
   )
 }
 
+// Live queue plus the entries the user passed on ("Viewed"), for one mode.
+// Same client-side filtering as subscribeSparks; expired entries are dropped
+// from both.
+export function subscribeSparkQueue(
+  uid: string,
+  mode: Mode,
+  onChange: (queue: { live: SparkEntry[]; viewed: SparkEntry[] }) => void,
+  onError: (err: Error) => void,
+): Unsubscribe {
+  const q = query(collection(db, `users/${uid}/likeQueue`), orderBy('likedAt', 'desc'))
+  return onSnapshot(
+    q,
+    (snap) => {
+      const now = Date.now()
+      const live: SparkEntry[] = []
+      const viewed: SparkEntry[] = []
+      for (const d of snap.docs) {
+        const data = d.data()
+        if (data.isExpired === true) continue
+        const s = toSpark(d.id, data)
+        if (s.mode !== mode || (s.expiresAt !== null && s.expiresAt <= now)) continue
+        ;(data.dismissed === true ? viewed : live).push(s)
+      }
+      // Stable sort keeps the likedAt order within each group.
+      live.sort((a, b) => Number(b.isWeeklySpark) - Number(a.isWeeklySpark))
+      onChange({ live, viewed })
+    },
+    onError,
+  )
+}
+
 // Same fields mobile's dismissLike writes.
 export async function dismissSpark(uid: string, likerUid: string): Promise<void> {
   await updateDoc(doc(db, `users/${uid}/likeQueue/${likerUid}`), { dismissed: true, dismissedAt: Date.now() })

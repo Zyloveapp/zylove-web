@@ -13,19 +13,20 @@ import {
   type MatchEntry,
 } from '../services/matches'
 
-interface MatchesState {
+interface LinksState {
   key: string
   matches: MatchEntry[]
   error: boolean
 }
 
-export default function Matches() {
+// Links (Spark) / Chats (Play): new links up top, then conversations.
+export default function Links() {
   // AuthGuard guarantees a signed-in user on this route.
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const mode = useModeStore((s) => s.mode)
   const key = `${uid}:${mode}`
 
-  const [state, setState] = useState<MatchesState | null>(null)
+  const [state, setState] = useState<LinksState | null>(null)
   const [lastRead, setLastRead] = useState<Map<string, number>>(new Map())
   const [activeId, setActiveId] = useState<string | null>(null)
 
@@ -60,6 +61,9 @@ export default function Matches() {
     .filter((m) => !hasMessages(m) && !m.ended)
     .sort((a, b) => b.matchedAt - a.matchedAt)
   const conversations = matches.filter(hasMessages)
+  const isPlay = mode === 'play'
+  const title = isPlay ? '✦ Chats ✦' : '✦ Links ✦'
+  const accent = isPlay ? 'text-[#E03131]' : 'text-[#1B4FD8]'
 
   // ChatView marks the conversation read when it opens.
   function select(m: MatchEntry) {
@@ -70,7 +74,7 @@ export default function Matches() {
     return (
       <div className="h-[calc(100dvh-7rem)] bg-gray-950 lg:flex">
         <aside className="hidden w-80 shrink-0 border-r border-white/10 lg:block">
-          <h1 className="px-4 py-5 text-xl font-bold text-white">Matches</h1>
+          <h1 className="px-4 py-5 text-2xl font-extrabold text-white">{title}</h1>
         </aside>
         <main className="h-full flex-1">
           <NoMatches />
@@ -84,21 +88,30 @@ export default function Matches() {
       <aside
         className={`w-full shrink-0 flex-col border-white/10 lg:flex lg:w-80 lg:border-r ${active ? 'hidden' : 'flex'}`}
       >
-        <header className="flex items-center gap-2 px-4 py-5">
-          <h1 className="text-xl font-bold text-white">Matches</h1>
-          {unreadCount > 0 && (
-            <span className="rounded-full bg-[#1B4FD8] px-2 py-0.5 text-xs font-semibold text-white">{unreadCount}</span>
-          )}
+        <header className="flex items-center justify-between px-4 py-5">
+          <h1 className="text-2xl font-extrabold text-white">
+            {title}
+            {unreadCount > 0 && <span className="sr-only">, {unreadCount} unread</span>}
+          </h1>
+          <span className={`text-3xl font-bold ${accent}`}>{ignited.length + conversations.length}</span>
         </header>
         {error ? (
           <p className="px-4 text-sm text-white/50">Couldn't load your matches.</p>
         ) : (
           <div className="flex-1 overflow-y-auto">
-            {ignited.length > 0 && <IgnitedRow matches={ignited} mode={mode} activeId={activeId} onSelect={select} />}
+            {ignited.length > 0 && (
+              <IgnitedRow
+                title={isPlay ? '🔴 Entangled' : '✦ The spark is lit'}
+                matches={ignited}
+                mode={mode}
+                activeId={activeId}
+                onSelect={select}
+              />
+            )}
             {conversations.length > 0 ? (
               <section>
                 <h2 className="px-4 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-widest text-white/40">
-                  Conversations
+                  {isPlay ? 'Chats' : 'Connections'} · {conversations.length}
                 </h2>
                 {conversations.map((m) => (
                   <MatchRow

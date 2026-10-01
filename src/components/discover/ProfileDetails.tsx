@@ -38,10 +38,13 @@ export default function ProfileDetails({
   profile,
   mode,
   autoRevealScore = false,
+  match,
 }: {
   profile: DiscoverProfile
   mode: Mode
   autoRevealScore?: boolean
+  // Viewing a linked profile: the report ends with a "Break the ice" opener.
+  match?: { matchId: string }
 }) {
   const age = displayAge(profile)
   const bio = profile.bio?.trim()
@@ -76,6 +79,7 @@ export default function ProfileDetails({
           mode={mode}
           autoReveal={autoRevealScore}
           fullReport={autoRevealScore}
+          match={match}
         />
       </header>
 

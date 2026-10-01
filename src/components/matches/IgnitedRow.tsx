@@ -2,19 +2,20 @@ import type { MatchEntry } from '../../services/matches'
 import type { Mode } from '../../store/modeStore'
 
 interface IgnitedRowProps {
+  title: string
   matches: MatchEntry[]
   mode: Mode
   activeId: string | null
   onSelect: (m: MatchEntry) => void
 }
 
-// New matches nobody has written to yet: "IGNITED" in Spark, "LIT" in Play.
-export default function IgnitedRow({ matches, mode, activeId, onSelect }: IgnitedRowProps) {
+// New links nobody has written to yet ("The spark is lit" / "Entangled").
+export default function IgnitedRow({ title, matches, mode, activeId, onSelect }: IgnitedRowProps) {
   const ring = mode === 'play' ? 'ring-[#E03131]' : 'ring-[#1B4FD8]'
   return (
     <section className="pb-2">
-      <h2 className="px-4 text-[11px] font-semibold uppercase tracking-widest text-white/40">
-        {mode === 'play' ? 'Lit' : 'Ignited'}
+      <h2 className="px-4 text-sm font-semibold text-white/70">
+        {title} <span className="text-white/40">· {matches.length}</span>
       </h2>
       <ul className="flex gap-4 overflow-x-auto px-4 pt-3 pb-2 [scrollbar-width:none]">
         {matches.map((m) => (

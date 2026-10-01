@@ -38,18 +38,41 @@ function PersonIcon() {
   )
 }
 
-const LINKS: { to: string; label: string; icon: ReactNode }[] = [
-  { to: '/discover', label: 'Discover', icon: <CompassIcon /> },
-  { to: '/matches', label: 'Matches', icon: <HeartIcon /> },
-  { to: '/sparks', label: 'Sparks', icon: <SparkleIcon /> },
-  { to: '/profile', label: 'Profile', icon: <PersonIcon /> },
-]
+function FlameIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-6 w-6" aria-hidden>
+      <path
+        d="M12 21c-3.9 0-6.5-2.6-6.5-6.2 0-3.3 2.3-5.4 3.8-7.6.4 1.6 1.4 2.8 2.6 3.2C11.6 7.3 13 4.6 15.5 3c-.4 2.9 3 5.6 3 10.2 0 4.6-2.7 7.8-6.5 7.8Z"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function ChatIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-6 w-6" aria-hidden>
+      <path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-8l-4.5 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+// Tab names and icons per mode. Routes stay /discover, /sparks, /matches, /profile.
+function navLinks(mode: Mode): { to: string; label: string; icon: ReactNode }[] {
+  const play = mode === 'play'
+  return [
+    { to: '/discover', label: 'Explore', icon: <CompassIcon /> },
+    { to: '/sparks', label: play ? 'Flames' : 'Sparks', icon: play ? <FlameIcon /> : <SparkleIcon /> },
+    { to: '/matches', label: play ? 'Chats' : 'Links', icon: play ? <ChatIcon /> : <HeartIcon /> },
+    { to: '/profile', label: 'Me', icon: <PersonIcon /> },
+  ]
+}
 
 // Live dot flags for the current mode, using the same listeners as the
 // Matches and Sparks pages.
-//   Sparks:  any live (not dismissed or expired) like in the queue.
-//   Matches: any unread conversation, or a match from the last 7 days that
-//            nobody has written to yet.
+//   Sparks/Flames: any live (not dismissed or expired) like in the queue.
+//   Links/Chats:   any unread conversation, or a link from the last 7 days
+//                  that nobody has written to yet.
 function useBadges(uid: string, mode: Mode): { sparks: boolean; matches: boolean } {
   const key = `${uid}:${mode}`
   const [sparks, setSparks] = useState<{ key: string; any: boolean } | null>(null)
@@ -102,7 +125,7 @@ export default function Nav() {
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 h-16 border-t border-white/10 bg-gray-950">
       <div className="mx-auto flex h-full max-w-xl">
-        {LINKS.map((l) => (
+        {navLinks(mode).map((l) => (
           <NavLink
             key={l.to}
             to={l.to}

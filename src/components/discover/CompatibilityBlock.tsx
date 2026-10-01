@@ -1,10 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
+  displayScore,
   fetchCompatibility,
   fetchMyProfile,
   type CompatibilityResult,
   type DiscoverProfile,
 } from '../../services/discover'
+import BreakTheIce from './BreakTheIce'
 import { useAuthStore } from '../../store/authStore'
 import ProfileComparison from './ProfileComparison'
 import { DEALBREAKER_LABELS, type Dealbreaker } from '../../types/profile'
@@ -107,9 +109,12 @@ export default function CompatibilityBlock({
   mode,
   autoReveal = false,
   fullReport = false,
+  match,
 }: {
   profile: DiscoverProfile
   mode: Mode
+  // Set when viewing someone you're already linked with: adds "Break the ice".
+  match?: { matchId: string }
   // Sparks: the score was already earned, so it loads and shows without a click.
   autoReveal?: boolean
   // Why you match, Things in common, Worth a conversation and the love
@@ -168,6 +173,7 @@ export default function CompatibilityBlock({
         hidden={emptyCategories(profile)}
         fullReport={fullReport}
         comparison={comparison}
+        breakTheIce={match ? <BreakTheIce matchId={match.matchId} otherUid={targetUid} /> : null}
       />
     )
   }
@@ -210,6 +216,7 @@ function RevealedScore({
   hidden,
   fullReport,
   comparison,
+  breakTheIce,
 }: {
   result: CompatibilityResult
   mode: Mode
@@ -217,6 +224,7 @@ function RevealedScore({
   hidden: Set<string>
   fullReport: boolean
   comparison: ReactNode
+  breakTheIce: ReactNode
 }) {
   const theme = discoverTheme(mode)
   // Start hidden only when freshly revealed, then fade/slide in on the next frame.
@@ -227,8 +235,8 @@ function RevealedScore({
     return () => cancelAnimationFrame(frame)
   }, [animate])
 
-  const score = mode === 'play' ? result.playScore : result.sparkScore
-  if (typeof score !== 'number') {
+  const score = displayScore(result, mode)
+  if (!score) {
     return <p className="mt-4 text-sm text-white/40">No compatibility score available yet.</p>
   }
 
@@ -247,11 +255,8 @@ function RevealedScore({
   // tier1 is computed from Spark data only, so it never shows in Play mode.
   const tier1 = mode === 'spark' ? (result.tier1 ?? null) : null
   const archetype = tier1?.archetype && tier1.archetype.confidence > 0.4 ? tier1.archetype : null
-  const deepFit =
-    tier1 && tier1.combinedScore !== null && (tier1.dataConfidence ?? 0) > 0
-      ? Math.min(100, Math.round(tier1.combinedScore))
-      : null
-  const rounded = Math.round(score)
+  // Deep Fit replaces the base score as the headline when it's trustworthy.
+  const rounded = score.value
   const qualifier = scoreQualifier(rounded)
 
   return (
@@ -265,14 +270,10 @@ function RevealedScore({
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-3">
-        <p className={`text-5xl font-bold ${scoreColor(rounded)}`}>{rounded}%</p>
-        {deepFit !== null && (
-          <span className="rounded-full bg-[#1B4FD8]/20 px-3 py-1 text-xs text-[#1B4FD8]">✦ Deep Fit {deepFit}%</span>
-        )}
-      </div>
+      <p className={`text-5xl font-bold ${scoreColor(rounded)}`}>{rounded}%</p>
       <p className="mt-1 text-xs uppercase tracking-widest text-white/30">{mode === 'play' ? 'Play Odds' : 'Spark Odds'}</p>
       {qualifier && <p className="mt-0.5 text-xs text-white/50">{qualifier}</p>}
+      <p className="mt-1 text-xs text-white/35">{score.deep ? '✦ Deep compatibility score' : 'Compatibility estimate'}</p>
 
       {bars.length > 0 && (
         <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
@@ -314,6 +315,8 @@ function RevealedScore({
           </p>
         </div>
       )}
+
+      {breakTheIce}
     </div>
   )
 }

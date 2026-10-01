@@ -5,10 +5,31 @@ import { useModeStore } from '../store/modeStore'
 import { setVisibility, subscribeVisibility, type Visibility, type VisibilityState } from '../services/visibility'
 import PlayPinFlow from './PlayPinFlow'
 
-const VISIBILITY: { value: Visibility; label: string; description: string; dot: string }[] = [
-  { value: 'active', label: 'Active', description: "You're visible in discovery", dot: 'bg-emerald-500' },
-  { value: 'hidden', label: 'Hidden', description: 'Hidden from discovery. Matches can still reach you.', dot: 'bg-gray-400' },
-  { value: 'paused', label: 'On a break', description: 'Your profile is on a break.', dot: 'bg-amber-500' },
+const VISIBILITY: { value: Visibility; label: string; pill: string; description: string; dot: string; tone: string }[] = [
+  {
+    value: 'active',
+    label: 'Active',
+    pill: '🟢 Active',
+    description: "You're visible in Explore",
+    dot: 'bg-emerald-500',
+    tone: 'border-emerald-500/30 bg-emerald-500/15 text-emerald-400',
+  },
+  {
+    value: 'hidden',
+    label: 'Hidden',
+    pill: '👻 Hidden',
+    description: 'Hidden from Explore. Your links can still reach you.',
+    dot: 'bg-gray-400',
+    tone: 'border-white/20 bg-white/10 text-white/70',
+  },
+  {
+    value: 'paused',
+    label: 'On a break',
+    pill: '☕ Break',
+    description: 'Your profile is on a break.',
+    dot: 'bg-amber-500',
+    tone: 'border-amber-500/30 bg-amber-500/15 text-amber-400',
+  },
 ]
 
 // Drops down under the header; any tap outside closes it.
@@ -114,9 +135,11 @@ export default function Header() {
             disabled={current === null}
             aria-label={`Visibility: ${dot?.label ?? 'loading'}`}
             aria-expanded={sheetOpen}
-            className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-white/10"
+            className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold transition-opacity hover:opacity-80 ${
+              dot?.tone ?? 'border-white/10 bg-white/5 text-white/30'
+            }`}
           >
-            <span className={`h-3 w-3 rounded-full ${dot?.dot ?? 'bg-white/20'}`} />
+            {dot?.pill ?? '…'}
           </button>
           <Link
             to="/settings"

@@ -8,7 +8,7 @@ import Home from './pages/Home'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
 import Discover from './pages/Discover'
-import Matches from './pages/Matches'
+import Links from './pages/Links'
 import Sparks from './pages/Sparks'
 import Profile from './pages/Profile'
 import EditProfile from './pages/EditProfile'
@@ -42,7 +42,7 @@ export default function App() {
           <Route element={<PauseGuard />}>
             <Route element={<AppLayout />}>
               <Route path="/discover" element={<Discover />} />
-              <Route path="/matches" element={<Matches />} />
+              <Route path="/matches" element={<Links />} />
               <Route path="/sparks" element={<Sparks />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/profile/edit" element={<EditProfile />} />

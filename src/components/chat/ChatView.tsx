@@ -13,6 +13,7 @@ import {
 } from '../../services/zyloveScore'
 import ConversationNudge from './ConversationNudge'
 import FirstChatModal from './FirstChatModal'
+import MatchProfileView from './MatchProfileView'
 import ReviewModal from './ReviewModal'
 import VibeCheckModal from './VibeCheckModal'
 import { firstChatSeen, firstChatSeenRemotely } from './firstChatSeen'
@@ -55,6 +56,8 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const vibeCheckFired = useRef(false)
   const vibeCheckTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [showReview, setShowReview] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
   const reviewChecked = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -210,10 +213,43 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
             {match.name.charAt(0).toUpperCase()}
           </span>
         )}
-        <h2 className="font-semibold">
+        <h2 className="min-w-0 flex-1 truncate font-semibold">
           {match.name}
           {match.age !== null && <span className="font-normal text-white/50">, {match.age}</span>}
         </h2>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-label="More"
+            aria-expanded={menuOpen}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-lg text-white/60 hover:bg-white/10 hover:text-white"
+          >
+            •••
+          </button>
+          {menuOpen && (
+            <>
+              <button
+                type="button"
+                aria-label="Close menu"
+                onClick={() => setMenuOpen(false)}
+                className="fixed inset-0 z-10 cursor-default"
+              />
+              <div className="absolute right-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-xl border border-white/10 bg-gray-900 shadow-2xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    setShowProfile(true)
+                  }}
+                  className="w-full px-4 py-3 text-left text-sm text-white hover:bg-white/5"
+                >
+                  ✦ View compatibility
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 lg:px-6">
@@ -302,6 +338,8 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           onUseOpener={setText}
         />
       )}
+
+      {showProfile && <MatchProfileView match={match} onClose={() => setShowProfile(false)} />}
 
       {showReview && (
         <ReviewModal matchId={matchId} partnerUid={partnerUid} name={match.name} onClose={() => setShowReview(false)} />

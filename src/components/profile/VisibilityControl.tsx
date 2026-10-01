@@ -4,12 +4,12 @@ import { useModeStore } from '../../store/modeStore'
 import { setVisibility, subscribeVisibility, type Visibility, type VisibilityState } from '../../services/visibility'
 
 const OPTIONS: { value: Visibility; emoji: string; label: string; description: string; dot: string }[] = [
-  { value: 'active', emoji: '🟢', label: 'Active', description: "You're visible in discovery", dot: 'bg-emerald-500' },
+  { value: 'active', emoji: '🟢', label: 'Active', description: "You're visible in Explore", dot: 'bg-emerald-500' },
   {
     value: 'hidden',
     emoji: '👻',
     label: 'Hidden',
-    description: 'Hidden from discovery. Matches can still reach you.',
+    description: 'Hidden from Explore. Your links can still reach you.',
     dot: 'bg-gray-400',
   },
   { value: 'paused', emoji: '☕', label: 'On a break', description: 'Your profile is on a break.', dot: 'bg-amber-500' },

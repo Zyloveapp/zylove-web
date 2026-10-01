@@ -40,7 +40,7 @@ export default function Chat() {
       <div className={`flex flex-col items-center justify-center gap-3 text-white ${container}`}>
         <p className="text-white/60">This conversation isn't available.</p>
         <Link to="/matches" className="text-sm text-white/40 underline hover:text-white/60">
-          Back to Matches
+          Back to Links
         </Link>
       </div>
     )

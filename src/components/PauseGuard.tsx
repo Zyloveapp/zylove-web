@@ -54,7 +54,7 @@ export default function PauseGuard() {
             You're on a break.
           </h1>
           <p className="mt-3 max-w-sm leading-relaxed text-white/60">
-            Everything is right where you left it — your matches, your conversations, your profile.
+            Everything is right where you left it — your links, your conversations, your profile.
           </p>
           <p className="mt-4 max-w-sm leading-relaxed text-white/60">Nobody new will see you while you're gone.</p>
           <button
