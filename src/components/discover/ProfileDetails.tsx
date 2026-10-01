@@ -92,7 +92,7 @@ export default function ProfileDetails({
           <div className="space-y-5">
             {prompts.map((p) => (
               <div key={p.promptId} className="border-l-2 border-white/10 pl-4">
-                <p className="text-sm text-white/30">{promptQuestion(p.promptId)}</p>
+                <p className="text-sm text-white/30">{promptQuestion(p.promptId, (profile as Record<string, unknown>).dynamicPrompt)}</p>
                 <p className="mt-1 text-base text-white">{p.answer}</p>
               </div>
             ))}

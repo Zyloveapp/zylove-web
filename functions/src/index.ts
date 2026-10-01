@@ -22,7 +22,8 @@ initializeApp()
 const anthropicKey = defineSecret('ANTHROPIC_API_KEY')
 
 const MODEL = 'claude-sonnet-4-6'
-const MAX_BIO_LENGTH = 500
+// Same cap as both profile editors (mobile and web).
+const MAX_BIO_LENGTH = 300
 
 interface BioResponse {
   bio: string
@@ -36,6 +37,14 @@ function extractText(body: unknown): string {
   if (typeof first !== 'object' || first === null || !('text' in first)) return ''
   const { text } = first as { text: unknown }
   return typeof text === 'string' ? text.trim() : ''
+}
+
+// Cuts at the last whole word that fits, so the text never ends mid-word.
+function truncateAtWord(text: string, max: number): string {
+  if (text.length <= max) return text
+  // One extra char shows whether the cut lands exactly on a word boundary.
+  const lastSpace = text.slice(0, max + 1).lastIndexOf(' ')
+  return (lastSpace > 0 ? text.slice(0, lastSpace) : text.slice(0, max)).trimEnd()
 }
 
 // Writes a Spark bio from onboarding answers. Never throws: any failure
@@ -68,7 +77,7 @@ export const generateSparkBio = onCall(
       }
 
       const bio = extractText(await response.json())
-      return { bio: bio.slice(0, MAX_BIO_LENGTH) }
+      return { bio: truncateAtWord(bio, MAX_BIO_LENGTH) }
     } catch (err) {
       logger.error('generateSparkBio failed', { message: err instanceof Error ? err.message : String(err) })
       return { bio: '' }
@@ -740,6 +749,210 @@ export const generateConversationStarter = onCall(
     } catch (err) {
       logger.error('generateConversationStarter failed', { message: err instanceof Error ? err.message : String(err) })
       return { starters: FALLBACK_STARTERS }
+    }
+  },
+)
+
+// ─── Profile AI: shared helpers ──────────────────────────────────────────────
+
+// One-turn Claude call. Returns '' on any API failure (logged); callers fall back.
+async function askClaude(label: string, prompt: string, maxTokens: number): Promise<string> {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': anthropicKey.value(),
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] }),
+  })
+  if (!response.ok) {
+    logger.error(`${label}: Anthropic API error`, { status: response.status })
+    return ''
+  }
+  return extractText(await response.json())
+}
+
+function humanizeKey(key: string): string {
+  return key.replace(/_/g, ' ')
+}
+
+function humanList(v: unknown): string {
+  return strings(v).map(humanizeKey).join(', ') || 'none listed'
+}
+
+interface OwnAnswer {
+  question: string
+  answer: string
+}
+
+// Prompt answers from wherever this profile keeps them: sparkProfile/data's
+// sparkPromptAnswers map (web) or promptAnswers array, else the root doc.
+function ownPromptAnswers(root: DocumentData, spark: DocumentData): OwnAnswer[] {
+  const fromList = (v: unknown) =>
+    Array.isArray(v)
+      ? v
+          .filter((a) => typeof a?.promptId === 'string' && typeof a?.answer === 'string' && a.answer.trim())
+          .map((a) => ({ promptId: a.promptId as string, answer: (a.answer as string).trim() }))
+      : []
+  const map: unknown = spark.sparkPromptAnswers
+  const fromMap =
+    typeof map === 'object' && map !== null && !Array.isArray(map)
+      ? Object.entries(map)
+          .filter((e): e is [string, string] => typeof e[1] === 'string' && e[1].trim() !== '')
+          .map(([promptId, answer]) => ({ promptId, answer: answer.trim() }))
+      : []
+  const raw = fromMap.length > 0 ? fromMap : fromList(spark.promptAnswers).length > 0 ? fromList(spark.promptAnswers) : fromList(root.promptAnswers)
+  const dynamic = typeof spark.dynamicPrompt === 'string' ? spark.dynamicPrompt : typeof root.dynamicPrompt === 'string' ? root.dynamicPrompt : ''
+  return raw.map((a) => ({
+    question: a.promptId === 'dynamic' && dynamic ? dynamic : (STARTER_PROMPT_TEXT.get(a.promptId) ?? humanizeKey(a.promptId)),
+    answer: a.answer,
+  }))
+}
+
+async function loadOwnProfileDocs(uid: string): Promise<{ root: DocumentData; spark: DocumentData }> {
+  const db = getFirestore()
+  const [root, spark] = await Promise.all([
+    db.collection('users').doc(uid).get(),
+    db.doc(`users/${uid}/sparkProfile/data`).get(),
+  ])
+  if (!root.exists) throw new HttpsError('failed-precondition', 'Profile not found')
+  return { root: root.data() ?? {}, spark: spark.data() ?? {} }
+}
+
+function ownBio(root: DocumentData, spark: DocumentData): string {
+  // Mobile's editor saves the bio only to sparkProfile/data.
+  const bio = typeof spark.bio === 'string' && spark.bio.trim() ? spark.bio : root.bio
+  return typeof bio === 'string' ? bio.trim() : ''
+}
+
+// ─── generateProfileQuestion ─────────────────────────────────────────────────
+
+const QUESTION_FALLBACKS: Record<string, string> = {
+  ambitious: 'What does building something meaningful look like to you?',
+  creative: "What's the last thing you made that you're proud of?",
+  adventurous: "What's the trip that changed how you see things?",
+}
+const DEFAULT_QUESTION = "What's something most people don't know about you?"
+
+function cleanQuestion(text: string): string | null {
+  const line = text.split('\n').map((l) => l.trim()).find(Boolean) ?? ''
+  const q = line.replace(/^["'“”]+|["'“”]+$/g, '').trim()
+  return q.length >= 10 && q.length <= 150 && q.endsWith('?') ? q : null
+}
+
+// A "✦ Just for you" prompt question written from the caller's own profile.
+// Never throws after the auth check: failures return a trait-based fallback.
+export const generateProfileQuestion = onCall(
+  { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
+  async (request): Promise<{ question: string }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    const uid = request.auth.uid
+    let fallback = DEFAULT_QUESTION
+    try {
+      const { root, spark } = await loadOwnProfileDocs(uid)
+      fallback = QUESTION_FALLBACKS[strings(root.personalityTraits)[0] ?? ''] ?? DEFAULT_QUESTION
+      const answered = ownPromptAnswers(root, spark).map((a) => a.question)
+      const prompt = `Based on this person's dating profile, generate ONE unique, thoughtful question they could answer to help potential matches understand them better. The question should be specific to their actual interests, values and personality — not generic. It should be something that reveals character and sparks conversation.
+
+Profile: Name: ${typeof root.displayName === 'string' ? root.displayName : 'Unknown'}, Personality: ${humanList(root.personalityTraits)}, Values: ${humanList(root.relationshipValues)}, Lifestyle: ${humanList(root.lifestyleTags)}, Bio: ${ownBio(root, spark) || 'none'}, Prompts already answered: ${answered.join(' | ') || 'none'}
+
+Rules: under 12 words, conversational, specific to this person, not a question they already answered, no yes/no questions.
+Return only the question text, nothing else.`
+      return { question: cleanQuestion(await askClaude('generateProfileQuestion', prompt, 100)) ?? fallback }
+    } catch (err) {
+      logger.error('generateProfileQuestion failed', { message: err instanceof Error ? err.message : String(err) })
+      return { question: fallback }
+    }
+  },
+)
+
+// ─── reviewProfile ───────────────────────────────────────────────────────────
+
+interface ProfileReview {
+  strengths: string[]
+  improvements: string[]
+  headline: string
+}
+
+const FALLBACK_REVIEW: ProfileReview = {
+  strengths: ['Your bio shows personality'],
+  improvements: ['Add more specific details'],
+  headline: 'A profile with potential',
+}
+
+// The fields a match actually sees — never birthday, contact or location data.
+function profileForReview(root: DocumentData, spark: DocumentData): string {
+  const photoCount = strings(root.photoURLs).length
+  const answers = ownPromptAnswers(root, spark)
+  const gender = Array.isArray(root.genderIdentity) ? root.genderIdentity[0] : root.genderIdentity
+  return [
+    `Name: ${typeof root.displayName === 'string' ? root.displayName : 'Unknown'}`,
+    typeof root.age === 'number' ? `Age: ${root.age}` : '',
+    typeof gender === 'string' ? `Gender: ${humanizeKey(gender)}` : '',
+    `Photos: ${photoCount}`,
+    `Bio: ${ownBio(root, spark) || 'none'}`,
+    `Open to: ${humanList(root.openTo)}`,
+    `Personality: ${humanList(root.personalityTraits)}`,
+    `Values: ${humanList(root.relationshipValues)}`,
+    `Lifestyle: ${humanList(root.lifestyleTags)}`,
+    `Habits: ${humanList(root.habitTags)}`,
+    `Weekends: ${humanList(root.weekendVibes)}`,
+    `Love languages (gives): ${humanList(root.loveLangGive)}; (receives): ${humanList(root.loveLangReceive)}`,
+    typeof root.conflictStyle === 'string' ? `Conflict style: ${humanizeKey(root.conflictStyle)}` : '',
+    typeof root.togethernessStyle === 'string' ? `Together time: ${humanizeKey(root.togethernessStyle)}` : '',
+    typeof root.stressResponse === 'string' ? `Under stress: ${humanizeKey(root.stressResponse)}` : '',
+    answers.length > 0 ? `Prompts:\n${answers.map((a) => `- ${a.question} "${a.answer.slice(0, 200)}"`).join('\n')}` : 'Prompts: none',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+// Reads the STRENGTHS / IMPROVE / HEADLINE sections, tolerating bullets,
+// numbering and items on the header line itself.
+function parseReview(text: string): ProfileReview | null {
+  const sections: Record<string, string[]> = { STRENGTHS: [], IMPROVE: [], HEADLINE: [] }
+  let current: string | null = null
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.replace(/\*\*/g, '').trim()
+    const header = /^(STRENGTHS|IMPROVE|HEADLINE)\s*:?\s*(.*)$/i.exec(line)
+    if (header) {
+      current = header[1].toUpperCase()
+      if (header[2].trim()) sections[current].push(header[2].trim())
+      continue
+    }
+    const item = line.replace(/^([-•*]|\d+[.)])\s*/, '').trim()
+    if (current && item) sections[current].push(item)
+  }
+  const strengths = sections.STRENGTHS.slice(0, 3)
+  const improvements = sections.IMPROVE.slice(0, 3)
+  const headline = sections.HEADLINE[0]?.replace(/^["“]|["”]$/g, '') ?? ''
+  return strengths.length > 0 && improvements.length > 0 && headline ? { strengths, improvements, headline } : null
+}
+
+// "How's my profile?" — honest AI feedback on the caller's own Spark profile.
+// Never throws after the auth check: failures return FALLBACK_REVIEW.
+export const reviewProfile = onCall(
+  { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
+  async (request): Promise<ProfileReview> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    try {
+      const { root, spark } = await loadOwnProfileDocs(request.auth.uid)
+      const prompt = `Review this dating profile and give honest, constructive feedback. Be direct but kind. Focus on what's working and what could be stronger.
+
+Profile:
+${profileForReview(root, spark)}
+
+Give feedback in exactly this format:
+STRENGTHS: 2-3 things working well (1 sentence each)
+IMPROVE: 2-3 specific suggestions (1 sentence each)
+HEADLINE: One line summary of their profile's overall vibe
+
+Keep the whole response under 200 words. Be specific to their actual profile, not generic advice.`
+      return parseReview(await askClaude('reviewProfile', prompt, 500)) ?? FALLBACK_REVIEW
+    } catch (err) {
+      logger.error('reviewProfile failed', { message: err instanceof Error ? err.message : String(err) })
+      return FALLBACK_REVIEW
     }
   },
 )

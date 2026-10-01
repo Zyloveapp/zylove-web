@@ -5,8 +5,19 @@ import type { Mode } from '../../store/modeStore'
 import { fetchCompatibility, fetchMyProfile, type ArchetypeMatch } from '../../services/discover'
 import SparkleIcon from '../icons/SparkleIcon'
 
-const AUTO_DISMISS_MS = 8000
-const SPARKLE_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315]
+// First wave: 16 sparkles as the photos meet. Second wave, 300ms later:
+// smaller and shorter, on the angles between the first.
+const FIRST_WAVE = Array.from({ length: 16 }, (_, i) => i * 22.5)
+const SECOND_WAVE = FIRST_WAVE.map((a) => a + 11.25)
+// Background drift: [left %, top %, delay ms], staggered across the 3s loop.
+const FLOATERS: [number, number, number][] = [
+  [12, 70, 0],
+  [28, 40, 500],
+  [46, 82, 1000],
+  [64, 55, 1500],
+  [80, 75, 2000],
+  [90, 35, 2500],
+]
 
 export interface NewMatch {
   // null while the match is still being created (Sparks shows the overlay
@@ -18,30 +29,30 @@ export interface NewMatch {
   mode: Mode
 }
 
+// The wrapper slides in; the photo inside pulses its glow (separate elements
+// because each needs its own CSS animation).
 function Avatar({ photo, name, className }: { photo: string | null; name: string; className: string }) {
-  const base = `h-[120px] w-[120px] shrink-0 rounded-full ring-4 ring-[#1B4FD8] ${className}`
-  return photo ? (
-    <img src={photo} alt="" className={`${base} object-cover`} />
-  ) : (
-    <span className={`${base} flex items-center justify-center bg-white/10 text-4xl font-semibold text-white/70`}>
-      {name.charAt(0).toUpperCase() || '✦'}
+  const base = 'zy-glow h-[120px] w-[120px] rounded-full'
+  return (
+    <span className={`shrink-0 ${className}`}>
+      {photo ? (
+        <img src={photo} alt="" className={`${base} block object-cover`} />
+      ) : (
+        <span className={`${base} flex items-center justify-center bg-white/10 text-4xl font-semibold text-white/70`}>
+          {name.charAt(0).toUpperCase() || '✦'}
+        </span>
+      )}
     </span>
   )
 }
 
 // Full-screen "Sparks are flying" celebration (web version of mobile's
-// MatchAnimation). Leads to the chat or the matches list; with no action it
-// goes to the matches list when the timer bar runs out.
+// MatchAnimation). Stays up until the user picks "Chat now" or "Chat later".
 export default function MatchOverlay({ match }: { match: NewMatch }) {
   const navigate = useNavigate()
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const [myPhoto, setMyPhoto] = useState<string | null>(null)
   const [archetype, setArchetype] = useState<ArchetypeMatch | null>(null)
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => navigate('/matches'), AUTO_DISMISS_MS)
-    return () => window.clearTimeout(timer)
-  }, [navigate])
 
   useEffect(() => {
     if (!uid) return
@@ -77,12 +88,23 @@ export default function MatchOverlay({ match }: { match: NewMatch }) {
       role="dialog"
       aria-modal="true"
       aria-label="Sparks are flying"
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-gray-950 bg-[radial-gradient(circle_at_50%_40%,rgba(27,79,216,0.2),transparent_65%)] px-6 text-center"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden bg-gray-950 bg-[radial-gradient(circle_at_50%_40%,rgba(27,79,216,0.2),transparent_65%)] px-6 text-center"
     >
-      <div className="flex items-center gap-4">
+      {FLOATERS.map(([left, top, delay]) => (
+        <span
+          key={left}
+          aria-hidden
+          className="zy-float pointer-events-none absolute text-xs text-[#7C9BFF]"
+          style={{ left: `${left}%`, top: `${top}%`, '--zy-delay': `${delay}ms` } as CSSProperties}
+        >
+          ✦
+        </span>
+      ))}
+
+      <div className="relative flex items-center gap-4">
         <Avatar photo={myPhoto} name="You" className="zy-slide-from-left" />
         <div className="relative flex h-8 w-8 items-center justify-center">
-          {SPARKLE_ANGLES.map((angle) => (
+          {FIRST_WAVE.map((angle) => (
             <span
               key={angle}
               aria-hidden
@@ -92,12 +114,22 @@ export default function MatchOverlay({ match }: { match: NewMatch }) {
               ✦
             </span>
           ))}
+          {SECOND_WAVE.map((angle) => (
+            <span
+              key={angle}
+              aria-hidden
+              className="zy-burst pointer-events-none absolute text-[10px] text-white/80"
+              style={{ '--zy-angle': `${angle}deg`, '--zy-distance': '60px', '--zy-delay': '700ms' } as CSSProperties}
+            >
+              ✦
+            </span>
+          ))}
           <SparkleIcon className="zy-pulse h-8 w-8 text-[#1B4FD8]" />
         </div>
         <Avatar photo={match.theirPhoto} name={match.theirName} className="zy-slide-from-right" />
       </div>
 
-      <h2 className="mt-10 text-3xl font-bold text-white">Sparks are flying ✦</h2>
+      <h2 className="zy-shimmer mt-10 text-3xl font-bold">Sparks are flying ✦</h2>
       <p className="mt-2 text-lg text-white/60">You both felt it.</p>
 
       {archetype && (
@@ -125,9 +157,6 @@ export default function MatchOverlay({ match }: { match: NewMatch }) {
         </button>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 h-1 bg-white/5">
-        <div className="zy-timer h-full bg-[#1B4FD8]" style={{ animationDuration: `${AUTO_DISMISS_MS}ms` }} />
-      </div>
     </div>
   )
 }

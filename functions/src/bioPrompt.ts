@@ -229,7 +229,7 @@ export function buildBioPrompt(s: BioRequest): string {
     promptText || 'none provided',
     '',
     '── RULES ──',
-    '- 3–5 sentences, max 450 characters',
+    '- 2–4 sentences, max 280 characters (hard limit 300)',
     '- First person, warm, confident, and specific to THIS person',
     '- Let their actual voice come through — use their prompt answers as the primary tone guide',
     '- Weave in who they are and what they want without sounding like a resume',

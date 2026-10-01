@@ -80,8 +80,9 @@ const PROMPT_TEXT = new Map<string, string>(
 
 // Mobile stores its AI-written "just for you" question under 'dynamic'
 // without the question text.
-export function promptQuestion(id: string): string {
-  if (id === 'dynamic') return 'A question just for them'
+// dynamicText: the profile's own dynamicPrompt, when it has one.
+export function promptQuestion(id: string, dynamicText?: unknown): string {
+  if (id === 'dynamic') return typeof dynamicText === 'string' && dynamicText ? dynamicText : 'A question just for them'
   return PROMPT_TEXT.get(id) ?? humanize(id)
 }
 

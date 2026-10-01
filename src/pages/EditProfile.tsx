@@ -323,7 +323,7 @@ export default function EditProfile() {
           {prompts.map((p, i) => (
             <div key={p.promptId} className="rounded-xl border border-white/10 border-l-[#1B4FD8] border-l-2 bg-white/5 p-4">
               <div className="flex items-start justify-between gap-3">
-                <p className="text-sm text-white/60">{promptQuestion(p.promptId)}</p>
+                <p className="text-sm text-white/60">{promptQuestion(p.promptId, (profile as Record<string, unknown>).dynamicPrompt)}</p>
                 <button
                   type="button"
                   onClick={() => setPicker({ swapIndex: i })}

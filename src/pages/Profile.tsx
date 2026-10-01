@@ -5,6 +5,8 @@ import { displayAge } from '../services/discover'
 import { loadOwnProfile, profileCompleteness, type OwnProfile } from '../services/profile'
 import { cmToFeetInches } from '../types/profile'
 import VisibilityControl from '../components/profile/VisibilityControl'
+import JustForYouCard from '../components/profile/JustForYouCard'
+import ProfileReviewModal from '../components/profile/ProfileReviewModal'
 import HowIOperate from '../components/profile/HowIOperate'
 import { goDeeperAnswers } from '../components/profile/goDeeper'
 import TierBadge, { badgeTier, type BadgeTier } from '../components/TierBadge'
@@ -142,6 +144,7 @@ type Loaded = { uid: string; data: OwnProfile | null }
 export default function Profile() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const [loaded, setLoaded] = useState<Loaded | null>(null)
+  const [showReview, setShowReview] = useState(false)
   // e.g. "✦ Profile refreshed." after Reimagine my profile. Read once, then
   // cleared from history so a reload doesn't show it again.
   const location = useLocation()
@@ -310,16 +313,22 @@ export default function Profile() {
           </section>
         )}
 
-        {own.prompts.length > 0 && (
-          <section className="space-y-3">
-            {own.prompts.map((q) => (
-              <div key={q.promptId} className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                <p className="text-sm text-white/40">{promptQuestion(q.promptId)}</p>
-                <p className="mt-2 text-lg text-white">{q.answer}</p>
-              </div>
-            ))}
-          </section>
-        )}
+        <section className="space-y-3">
+          {own.prompts.map((q) => (
+            <div key={q.promptId} className="rounded-2xl border border-white/10 bg-white/5 p-5">
+              <p className="text-sm text-white/40">{promptQuestion(q.promptId, own.dynamicPrompt)}</p>
+              <p className="mt-2 text-lg text-white">{q.answer}</p>
+            </div>
+          ))}
+          <JustForYouCard
+            uid={uid}
+            prompts={own.prompts}
+            dynamicPrompt={own.dynamicPrompt}
+            onSaved={(prompts, question) =>
+              setLoaded((l) => (l?.data ? { ...l, data: { ...l.data, prompts, dynamicPrompt: question } } : l))
+            }
+          />
+        </section>
 
         <Completeness percent={profileCompleteness(own)} />
         <VisibilityControl />
@@ -327,21 +336,30 @@ export default function Profile() {
 
       {/* Sits above the mobile bottom nav (h-16); flush on desktop. */}
       <div className="sticky bottom-16 border-t border-white/10 bg-gray-950 px-4 py-3 lg:bottom-0">
-        <div className="mx-auto flex max-w-xl gap-3">
+        <div className="mx-auto grid max-w-xl grid-cols-3 gap-2 text-sm leading-tight">
           <Link
             to="/profile/edit"
-            className="flex-1 rounded-xl border border-[#1B4FD8] py-3 text-center font-semibold text-white transition-colors hover:bg-[#1B4FD8]/15"
+            className="flex items-center justify-center rounded-xl border border-[#1B4FD8] px-2 py-3 text-center font-semibold text-white transition-colors hover:bg-[#1B4FD8]/15"
           >
             ✏ Edit my profile
           </Link>
+          <button
+            type="button"
+            onClick={() => setShowReview(true)}
+            className="flex items-center justify-center rounded-xl border border-[#1B4FD8]/60 px-2 py-3 text-center font-semibold text-[#B4C6FF] transition-colors hover:bg-[#1B4FD8]/15"
+          >
+            ✦ How's my profile?
+          </button>
           <Link
             to="/zylove-score"
-            className="flex-1 rounded-xl border border-white/20 py-3 text-center font-semibold text-white/80 transition-colors hover:bg-white/10"
+            className="flex items-center justify-center rounded-xl border border-white/20 px-2 py-3 text-center font-semibold text-white/80 transition-colors hover:bg-white/10"
           >
             🛡 Zylove Score
           </Link>
         </div>
       </div>
+
+      {showReview && <ProfileReviewModal onClose={() => setShowReview(false)} />}
     </div>
   )
 }

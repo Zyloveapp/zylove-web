@@ -20,6 +20,9 @@ export interface OwnProfile {
   dealbreakers: string[]
   // Traits they want in a partner; same two sources as dealbreakers.
   seekingTraits: string[]
+  // Question text for the AI-written prompt, stored under promptId 'dynamic'
+  // (mobile's convention for its Play "just for you" question).
+  dynamicPrompt: string | null
 }
 
 function strings(v: unknown): string[] {
@@ -63,6 +66,7 @@ export async function loadOwnProfile(uid: string): Promise<OwnProfile | null> {
     prompts: prompts.length > 0 ? prompts : promptList(profile.promptAnswers),
     dealbreakers: [...new Set([...strings(profile.dealbreakers), ...strings(seeking?.data()?.dealbreakers)])],
     seekingTraits: [...new Set([...strings(profile.seekingTraits), ...strings(seeking?.data()?.seekingTraits)])],
+    dynamicPrompt: str(sp.dynamicPrompt) ?? str((profile as Record<string, unknown>).dynamicPrompt),
   }
 }
 
@@ -214,4 +218,80 @@ export async function regenerateBio(p: DiscoverProfile, displayName: string, pro
   } catch {
     return null
   }
+}
+
+// ─── AI: "Just for you" question ─────────────────────────────────────────────
+
+export const DYNAMIC_PROMPT_ID = 'dynamic'
+
+function questionKey(uid: string): string {
+  return `zylove_profile_question_${uid}`
+}
+
+const questionRequests = new Map<string, Promise<string>>()
+
+// One generated question per browser session; concurrent callers share a request.
+export function fetchProfileQuestion(uid: string): Promise<string> {
+  try {
+    const cached = sessionStorage.getItem(questionKey(uid))
+    if (cached) return Promise.resolve(cached)
+  } catch {
+    // Storage unavailable — generate a fresh one.
+  }
+  let request = questionRequests.get(uid)
+  if (!request) {
+    request = httpsCallable<void, { question: string }>(functions, 'generateProfileQuestion', { timeout: 60_000 })()
+      .then(({ data }) => {
+        try {
+          sessionStorage.setItem(questionKey(uid), data.question)
+        } catch {
+          // Not cached; the next load asks again.
+        }
+        return data.question
+      })
+      .finally(() => questionRequests.delete(uid))
+    questionRequests.set(uid, request)
+  }
+  return request
+}
+
+// Saves the answer as the profile's one 'dynamic' prompt, replacing any
+// earlier one, in the same places saveSparkEdits writes. Returns the new list.
+export async function saveDynamicPrompt(
+  uid: string,
+  prompts: PromptAnswer[],
+  question: string,
+  answer: string,
+): Promise<PromptAnswer[]> {
+  const promptAnswers = [
+    ...prompts.filter((p) => p.promptId !== DYNAMIC_PROMPT_ID && p.answer.trim()),
+    { promptId: DYNAMIC_PROMPT_ID, answer: answer.trim() },
+  ]
+  const batch = writeBatch(db)
+  batch.update(doc(db, 'users', uid), { promptAnswers, dynamicPrompt: question, profileUpdatedAt: serverTimestamp() })
+  batch.set(
+    doc(db, `users/${uid}/sparkProfile/data`),
+    {
+      promptAnswers,
+      sparkPromptAnswers: Object.fromEntries(promptAnswers.map((p) => [p.promptId, p.answer])),
+      dynamicPrompt: question,
+      lastUpdated: Date.now(),
+    },
+    { merge: true },
+  )
+  await batch.commit()
+  return promptAnswers
+}
+
+// ─── AI: profile review ──────────────────────────────────────────────────────
+
+export interface ProfileReview {
+  strengths: string[]
+  improvements: string[]
+  headline: string
+}
+
+export async function fetchProfileReview(): Promise<ProfileReview> {
+  const { data } = await httpsCallable<void, ProfileReview>(functions, 'reviewProfile', { timeout: 60_000 })()
+  return data
 }

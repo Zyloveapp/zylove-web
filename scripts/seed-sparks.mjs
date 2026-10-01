@@ -1,7 +1,10 @@
 // One-time dev seed: bot likes in the dev account's Sparks queue.
 //
-//   node scripts/seed-sparks.mjs            write 5 entries
-//   node scripts/seed-sparks.mjs --dry-run  show what would be written
+//   node scripts/seed-sparks.mjs                   write 5 entries
+//   node scripts/seed-sparks.mjs --dry-run         show what would be written
+//   node scripts/seed-sparks.mjs --range=11-20     pick from zbot-w-011…020 (default 1-10)
+//   node scripts/seed-sparks.mjs --pick=zbot-w-012,zbot-w-017
+//                                                  write exactly these bots (e.g. a dry run's picks)
 //
 // Writes users/{TARGET_UID}/likeQueue/{botUid} in the same shape botEngine's
 // botLikeOnly uses. Credentials: the service account below if present,
@@ -19,7 +22,16 @@ const { getFirestore } = require('firebase-admin/firestore')
 
 const PROJECT_ID = 'zylove'
 const TARGET_UID = 'ipKWm5GSY6VrGLIErDBA6Zj61W62'
-const BOT_POOL = Array.from({ length: 10 }, (_, i) => `zbot-w-${String(i + 1).padStart(3, '0')}`)
+function arg(name) {
+  const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
+  return hit ? hit.slice(name.length + 3) : null
+}
+const [RANGE_FROM, RANGE_TO] = (arg('range') ?? '1-10').split('-').map(Number)
+if (!(RANGE_FROM >= 1 && RANGE_TO >= RANGE_FROM)) throw new Error('--range must look like 11-20')
+const PICKS = arg('pick')?.split(',').filter(Boolean) ?? null
+const BOT_POOL =
+  PICKS ??
+  Array.from({ length: RANGE_TO - RANGE_FROM + 1 }, (_, i) => `zbot-w-${String(RANGE_FROM + i).padStart(3, '0')}`)
 const COUNT = 5
 const SERVICE_ACCOUNT = join(homedir(), 'Desktop/Zylove/dating-app-2/firebase/zylove-service-account.json')
 const DRY_RUN = process.argv.includes('--dry-run')
@@ -56,7 +68,7 @@ for (const botUid of BOT_POOL) {
   else candidates.push({ botUid, bot: botSnap.data() })
 }
 
-const picked = shuffle(candidates).slice(0, COUNT)
+const picked = PICKS ? candidates : shuffle(candidates).slice(0, COUNT)
 if (picked.length < COUNT) console.log(`Only ${picked.length} eligible bots (wanted ${COUNT})`)
 
 for (const { botUid, bot } of picked) {
