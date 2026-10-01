@@ -106,11 +106,16 @@ export default function CompatibilityBlock({
   profile,
   mode,
   autoReveal = false,
+  fullReport = false,
 }: {
   profile: DiscoverProfile
   mode: Mode
   // Sparks: the score was already earned, so it loads and shows without a click.
   autoReveal?: boolean
+  // Why you match, Things in common, Worth a conversation and the love
+  // languages grid. Discover only teases (score, archetype, bars); the full
+  // report is the reward in Sparks.
+  fullReport?: boolean
 }) {
   const targetUid = profile.uid
   const cached = revealedScores.get(targetUid)
@@ -120,7 +125,7 @@ export default function CompatibilityBlock({
   const [me, setMe] = useState<{ uid: string; profile: DiscoverProfile } | null>(null)
 
   // The side-by-side sections compare Spark data, so they're Spark-only.
-  const showComparison = status === 'revealed' && mode === 'spark' && uid !== ''
+  const showComparison = fullReport && status === 'revealed' && mode === 'spark' && uid !== ''
   useEffect(() => {
     if (!showComparison) return
     let cancelled = false
@@ -161,6 +166,7 @@ export default function CompatibilityBlock({
         mode={mode}
         animate={!cached}
         hidden={emptyCategories(profile)}
+        fullReport={fullReport}
         comparison={comparison}
       />
     )
@@ -202,12 +208,14 @@ function RevealedScore({
   mode,
   animate,
   hidden,
+  fullReport,
   comparison,
 }: {
   result: CompatibilityResult
   mode: Mode
   animate: boolean
   hidden: Set<string>
+  fullReport: boolean
   comparison: ReactNode
 }) {
   const theme = discoverTheme(mode)
@@ -229,10 +237,12 @@ function RevealedScore({
   const hasValue = (c: { key: string; label: string; value?: number }): c is { key: string; label: string; value: number } =>
     typeof c.value === 'number'
   const bars = CATEGORIES[mode].map(withValue).filter(hasValue)
-  const insights = ALL_CATEGORIES[mode]
-    .map(withValue)
-    .filter(hasValue)
-    .filter((c) => c.value > INSIGHT_THRESHOLD)
+  const insights = fullReport
+    ? ALL_CATEGORIES[mode]
+        .map(withValue)
+        .filter(hasValue)
+        .filter((c) => c.value > INSIGHT_THRESHOLD)
+    : []
   const dealbreakers = result.triggeredDealbreakers ?? []
   // tier1 is computed from Spark data only, so it never shows in Play mode.
   const tier1 = mode === 'spark' ? (result.tier1 ?? null) : null

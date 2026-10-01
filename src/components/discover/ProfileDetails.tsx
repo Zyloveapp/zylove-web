@@ -66,7 +66,13 @@ export default function ProfileDetails({
           </span>
         </div>
         {profile.locationLabel && <p className="mt-1 text-sm text-white/40">{profile.locationLabel}</p>}
-        <CompatibilityBlock key={profile.uid} profile={profile} mode={mode} autoReveal={autoRevealScore} />
+        <CompatibilityBlock
+          key={profile.uid}
+          profile={profile}
+          mode={mode}
+          autoReveal={autoRevealScore}
+          fullReport={autoRevealScore}
+        />
       </header>
 
       {bio && (
