@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import ProfileDetails from '../discover/ProfileDetails'
 import SparkleIcon from '../icons/SparkleIcon'
 import { actionErrorMessage, type DiscoverProfile } from '../../services/discover'
@@ -28,6 +29,8 @@ export default function SparkProfileView({
 }: SparkProfileViewProps) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [busy, setBusy] = useState(false)
+  // Linked during this view (the parent's `matched` updates via its listener).
+  const [linked, setLinked] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -54,6 +57,7 @@ export default function SparkProfileView({
     onMatchStart(profile.displayName ?? 'someone')
     try {
       const matchId = await likeBackSpark(uid, spark, profile)
+      setLinked(true)
       onMatched(matchId)
     } catch (err) {
       onMatchFailed()
@@ -95,7 +99,15 @@ export default function SparkProfileView({
         </div>
       </div>
 
-      {!matched && (
+      {(matched || linked) && (
+        <div className="shrink-0 border-t border-white/10 px-6 py-4 text-center">
+          <Link to={`/profile/${spark.likerUid}`} className="text-sm font-semibold text-[#7C9BFF] hover:text-white">
+            View their profile →
+          </Link>
+        </div>
+      )}
+
+      {!matched && !linked && (
         <div className="shrink-0 border-t border-white/10 px-6 py-4">
           <div className="mx-auto flex max-w-sm flex-col items-center gap-3">
             {error && <p className="text-center text-sm text-red-400">{error}</p>}

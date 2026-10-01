@@ -11,7 +11,7 @@ import {
 } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
-import { displayScore, likeProfile, parseTier1, type DiscoverProfile, type DisplayScore } from './discover'
+import { displayScore, likeProfile, parseTier1, passProfile, type DiscoverProfile, type DisplayScore } from './discover'
 import type { Mode } from '../store/modeStore'
 
 // users/{uid}/likeQueue/{likerUid} — people who liked this user. Written by
@@ -181,4 +181,34 @@ export async function fetchSentSparks(mode: Mode): Promise<SentSpark[]> {
     ),
     likedAt: s.likedAt,
   }))
+}
+
+// ─── From a profile page ─────────────────────────────────────────────────────
+
+// Sends a spark from outside Explore and Sparks (/profile/:uid). If they're
+// already in your queue the like is mutual, so it links through likeBack the
+// way the Sparks page does; otherwise it's an ordinary Explore like.
+export async function sparkFromProfile(
+  uid: string,
+  mode: Mode,
+  profile: DiscoverProfile,
+): Promise<{ matched: boolean; matchId: string | null }> {
+  const queued = await getDoc(doc(db, `users/${uid}/likeQueue/${profile.uid}`)).catch(() => null)
+  if (queued?.exists()) {
+    const matchId = await likeBackSpark(uid, toSpark(queued.id, queued.data()), profile)
+    return { matched: true, matchId }
+  }
+  const result = await likeProfile(uid, mode, profile)
+  return {
+    matched: result.matched,
+    // Same fallback as Explore: the match id is the sorted uid pair.
+    matchId: result.matched ? (result.matchId ?? [uid, profile.uid].sort().join('_')) : null,
+  }
+}
+
+// Passing also clears them from your Sparks queue if they were in it.
+export async function passFromProfile(uid: string, mode: Mode, targetUid: string): Promise<void> {
+  await passProfile(uid, mode, targetUid)
+  const queued = await getDoc(doc(db, `users/${uid}/likeQueue/${targetUid}`)).catch(() => null)
+  if (queued?.exists()) await dismissSpark(uid, targetUid).catch(() => {})
 }

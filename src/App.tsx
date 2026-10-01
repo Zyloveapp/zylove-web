@@ -12,6 +12,7 @@ import Links from './pages/Links'
 import Sparks from './pages/Sparks'
 import Profile from './pages/Profile'
 import EditProfile from './pages/EditProfile'
+import ViewProfile from './pages/ViewProfile'
 import GoDeeper from './pages/GoDeeper'
 import ZyloveScore from './pages/ZyloveScore'
 import Settings from './pages/Settings'
@@ -46,6 +47,7 @@ export default function App() {
               <Route path="/sparks" element={<Sparks />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/profile/edit" element={<EditProfile />} />
+              <Route path="/profile/:uid" element={<ViewProfile />} />
               <Route path="/profile/go-deeper" element={<GoDeeper />} />
               <Route path="/zylove-score" element={<ZyloveScore />} />
               <Route path="/settings" element={<Settings />} />

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import MatchRow from '../components/matches/MatchRow'
@@ -29,6 +30,8 @@ export default function Links() {
   const [state, setState] = useState<LinksState | null>(null)
   const [lastRead, setLastRead] = useState<Map<string, number>>(new Map())
   const [activeId, setActiveId] = useState<string | null>(null)
+  const navigate = useNavigate()
+  const openProfile = (m: MatchEntry) => navigate(`/profile/${m.partnerUid}`)
 
   useEffect(() => {
     if (!uid) return
@@ -105,7 +108,7 @@ export default function Links() {
                 matches={ignited}
                 mode={mode}
                 activeId={activeId}
-                onSelect={select}
+                onSelect={openProfile}
               />
             )}
             {conversations.length > 0 ? (
@@ -120,6 +123,7 @@ export default function Links() {
                     unread={isUnread(m, uid, lastRead)}
                     active={m.matchId === activeId}
                     onSelect={() => select(m)}
+                    onOpenProfile={() => openProfile(m)}
                   />
                 ))}
               </section>

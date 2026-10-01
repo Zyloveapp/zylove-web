@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ENCRYPTION_KEY_MISSING, MAX_MESSAGE_LENGTH, markMessagesRead, sendMessage, subscribeMessages, type ChatMessage } from '../../services/chat'
 import { decryptMessage } from '../../services/encryption'
 import { getPrivateKey, keysReady, subscribePublicKey } from '../../services/keys'
@@ -58,6 +59,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const [showReview, setShowReview] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
+  const navigate = useNavigate()
   const reviewChecked = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -245,6 +247,16 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
                   className="w-full px-4 py-3 text-left text-sm text-white hover:bg-white/5"
                 >
                   ✦ View compatibility
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    navigate(`/profile/${partnerUid}`)
+                  }}
+                  className="w-full border-t border-white/5 px-4 py-3 text-left text-sm text-white hover:bg-white/5"
+                >
+                  View profile →
                 </button>
               </div>
             </>
