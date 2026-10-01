@@ -1,5 +1,9 @@
 import {
+  BODY_TYPE_LABELS,
   CONFLICT_STYLE_LABELS,
+  DEALBREAKER_LABELS,
+  GENDER_LABELS,
+  HABIT_TAG_LABELS,
   LIFESTYLE_TAG_LABELS,
   LOVE_LANGUAGE_LABELS,
   OPEN_TO_LABELS,
@@ -16,6 +20,7 @@ import {
   STRESS_RESPONSE_LABELS,
   TOGETHERNESS_STYLE_LABELS,
   UNIVERSAL_PROMPTS,
+  WEEKEND_VIBE_LABELS,
 } from '../../types/profile'
 import { PLAY_PROMPT_BANK, SPARK_PROMPT_BANK } from '../../types/dualProfile'
 import type { DiscoverProfile } from '../../services/discover'
@@ -42,10 +47,28 @@ export const personalityLabel = (k: string) => labelOf(PERSONALITY_TRAIT_LABELS,
 export const valueLabel = (k: string) => labelOf(RELATIONSHIP_VALUE_LABELS, k)
 export const loveLanguageLabel = (k: string) => labelOf(LOVE_LANGUAGE_LABELS, k)
 
-export function lifestyleLabel(k: string): string {
-  const v = lookup<{ label: string; emoji: string }>(LIFESTYLE_TAG_LABELS, k)
+export const openToLabel = (k: string) => labelOf(OPEN_TO_LABELS, k)
+export const dealbreakerLabel = (k: string) => labelOf(DEALBREAKER_LABELS, k)
+export const genderLabel = (k: string) => labelOf(GENDER_LABELS, k)
+// genderIdentity is a string from Spark onboarding, an array from Play.
+export function profileGenderLabel(p: DiscoverProfile): string | null {
+  const raw: unknown = p.genderIdentity
+  const g = Array.isArray(raw) ? raw[0] : raw
+  if (typeof g !== 'string' || !g) return null
+  return g === 'self_describe' ? p.genderSelfDescribe?.trim() || null : genderLabel(g)
+}
+
+export const relationshipStatusLabel = (k: string) => labelOf(RELATIONSHIP_STATUS_LABELS, k)
+
+function emojiLabel(record: object, k: string): string {
+  const v = lookup<{ label: string; emoji: string }>(record, k)
   return v ? `${v.emoji} ${v.label}` : humanize(k)
 }
+
+export const lifestyleLabel = (k: string) => emojiLabel(LIFESTYLE_TAG_LABELS, k)
+export const habitLabel = (k: string) => emojiLabel(HABIT_TAG_LABELS, k)
+export const weekendLabel = (k: string) => emojiLabel(WEEKEND_VIBE_LABELS, k)
+export const bodyTypeLabel = (k: string) => emojiLabel(BODY_TYPE_LABELS, k)
 
 const PROMPT_TEXT = new Map<string, string>(
   [...SPARK_PROMPT_BANK, ...PLAY_PROMPT_BANK, ...UNIVERSAL_PROMPTS, ...LEGACY_SPARK_PROMPTS, ...LEGACY_PLAY_PROMPTS].map(
@@ -68,7 +91,7 @@ export function goDeeperRows(p: DiscoverProfile): { label: string; value: string
   ].filter((r): r is { label: string; value: string } => Boolean(r))
 }
 
-function kidsDetail(p: DiscoverProfile): string | null {
+export function kidsDetail(p: DiscoverProfile): string | null {
   if (p.parentalCurrent) {
     const current = labelOf(PARENTAL_CURRENT_LABELS, p.parentalCurrent)
     return p.parentalIntent ? `${current} · ${labelOf(PARENTAL_INTENT_LABELS, p.parentalIntent)}` : current

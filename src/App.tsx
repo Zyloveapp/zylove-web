@@ -9,6 +9,8 @@ import Discover from './pages/Discover'
 import Matches from './pages/Matches'
 import Sparks from './pages/Sparks'
 import Profile from './pages/Profile'
+import EditProfile from './pages/EditProfile'
+import ZyloveScore from './pages/ZyloveScore'
 import Chat from './pages/Chat'
 
 // Protected pages share the nav. Leaves room for the mobile bottom bar.
@@ -37,6 +39,8 @@ export default function App() {
               <Route path="/matches" element={<Matches />} />
               <Route path="/sparks" element={<Sparks />} />
               <Route path="/profile" element={<Profile />} />
+              <Route path="/profile/edit" element={<EditProfile />} />
+              <Route path="/zylove-score" element={<ZyloveScore />} />
               <Route path="/chat/:matchId" element={<Chat />} />
             </Route>
           </Route>

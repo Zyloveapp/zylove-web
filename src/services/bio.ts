@@ -10,7 +10,7 @@ export interface SparkBioRequest {
   genderIdentity: string | null
   pronouns: string | null
   age: number | null
-  heightCm: number
+  heightCm: number | null
   bodyType: string | null
   drinkingHabit: string | null
   religion: string | null

@@ -1,57 +1,59 @@
 import { doc, onSnapshot, type Unsubscribe } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
-import { TIER_FEATURES, hasAiFeature, type SubscriptionTier } from '../types/subscription'
 import type { ReviewCategory, ZyloveScoreTier } from '../types/zyloveScore'
 
 // users/{uid}/zyloveScore/current — written only by the submitReview callable,
 // readable only by its owner.
-export interface ScoreSummary {
+export interface ScoreDetail {
   score: number
   tier: ZyloveScoreTier
   reviewCount: number
-  history: number[] // scores after each recent review, oldest first
+  positiveCount: number
+  negativeCount: number
+  flagCount: number
+  topPositiveCategories: ReviewCategory[]
 }
 
 const TIERS: ZyloveScoreTier[] = ['new', 'building', 'good', 'great', 'trusted', 'elite']
 
+// Mobile's default for a user nobody has reviewed yet.
+export const DEFAULT_SCORE: ScoreDetail = {
+  score: 50,
+  tier: 'new',
+  reviewCount: 0,
+  positiveCount: 0,
+  negativeCount: 0,
+  flagCount: 0,
+  topPositiveCategories: [],
+}
+
+function count(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0
+}
+
+// Emits DEFAULT_SCORE when the doc doesn't exist yet.
 export function subscribeScore(
   uid: string,
-  onChange: (score: ScoreSummary | null) => void,
+  onChange: (score: ScoreDetail) => void,
   onError: (err: Error) => void,
 ): Unsubscribe {
   return onSnapshot(
     doc(db, `users/${uid}/zyloveScore/current`),
     (snap) => {
       const data = snap.data()
-      if (!data || typeof data.score !== 'number') return onChange(null)
-      const history: unknown = data.history
+      if (!data || typeof data.score !== 'number') return onChange(DEFAULT_SCORE)
       onChange({
         score: data.score,
         tier: TIERS.includes(data.tier) ? data.tier : 'new',
-        reviewCount: typeof data.reviewCount === 'number' ? data.reviewCount : 0,
-        history: Array.isArray(history)
-          ? history.map((h: { score?: unknown }) => h?.score).filter((s): s is number => typeof s === 'number')
-          : [],
+        reviewCount: count(data.reviewCount),
+        positiveCount: count(data.positiveCount),
+        negativeCount: count(data.negativeCount),
+        flagCount: count(data.flagCount),
+        topPositiveCategories: Array.isArray(data.topPositiveCategories) ? data.topPositiveCategories : [],
       })
     },
     onError,
-  )
-}
-
-// Zylove Score is free for women, Spark+ and up for everyone else.
-export function subscribeScoreAccess(uid: string, onChange: (unlocked: boolean) => void): Unsubscribe {
-  return onSnapshot(
-    doc(db, 'users', uid),
-    (snap) => {
-      const data = snap.data() ?? {}
-      // Profile docs can carry tiers this table doesn't know ('play_pass').
-      const tier: SubscriptionTier = data.subscriptionTier in TIER_FEATURES ? data.subscriptionTier : 'free'
-      // genderIdentity is a string in Spark onboarding, an array in Play.
-      const gender: unknown = Array.isArray(data.genderIdentity) ? data.genderIdentity[0] : data.genderIdentity
-      onChange(hasAiFeature(tier, 'zyloveScore', typeof gender === 'string' ? gender : undefined))
-    },
-    () => onChange(false),
   )
 }
 
