@@ -33,6 +33,8 @@ export default function SparkProfileView({ uid, spark, matched, onClose, onMatch
 
   const profile = loaded?.likerUid === spark.likerUid ? loaded.profile : spark.profile
   const photo = profile.photoURLs?.[0]
+  // Name from the like snapshot; only bots and matched people are named.
+  const headerName = ((spark.isBot || matched) && spark.profile.displayName?.trim()) || 'Someone'
 
   async function handleMatch() {
     if (busy) return
@@ -67,7 +69,7 @@ export default function SparkProfileView({ uid, spark, matched, onClose, onMatch
           ← Back
         </button>
         <span className={`text-sm ${spark.isWeeklySpark ? 'text-[#F59E0B]' : 'text-white/40'}`}>
-          {spark.isWeeklySpark ? '✦ Weekly Spark' : 'Your compatibility report is ready ✦'}
+          {spark.isWeeklySpark ? '✦ Weekly Spark' : `${headerName} feels a Spark.. Do you?`}
         </span>
       </div>
 
