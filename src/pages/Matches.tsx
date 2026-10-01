@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import MatchRow from '../components/matches/MatchRow'
@@ -43,7 +44,14 @@ export default function Matches() {
   const [sparksState, setSparksState] = useState<SparksState | null>(null)
   const [lastRead, setLastRead] = useState<Map<string, number>>(new Map())
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [tab, setTab] = useState<Tab>('matches')
+  // The tab lives in the URL (?tab=sparks) so the nav's Sparks item can link
+  // straight to it and highlight correctly.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab: Tab = searchParams.get('tab') === 'sparks' ? 'sparks' : 'matches'
+  const setTab = useCallback(
+    (t: Tab) => setSearchParams(t === 'sparks' ? { tab: 'sparks' } : {}, { replace: true }),
+    [setSearchParams],
+  )
   const [selectedSpark, setSelectedSpark] = useState<SparkEntry | null>(null)
   const [newMatch, setNewMatch] = useState<{ matchId: string; name: string } | null>(null)
 
@@ -83,7 +91,7 @@ export default function Matches() {
     setTab('matches')
     setActiveId(newMatch.matchId)
     setNewMatch(null)
-  }, [newMatch])
+  }, [newMatch, setTab])
 
   if (state?.key !== key) {
     return (

@@ -9,6 +9,12 @@ interface SparksListProps {
   onSelect: (spark: SparkEntry) => void
 }
 
+function expiresIn(expiresAt: number): string {
+  const ms = expiresAt - Date.now()
+  const hours = Math.floor(ms / 3_600_000)
+  return hours >= 1 ? `Expires in ${hours}h` : `Expires in ${Math.max(1, Math.floor(ms / 60_000))}m`
+}
+
 export default function SparksList({ sparks, matchedUids, onSelect }: SparksListProps) {
   if (sparks.length === 0) {
     return (
@@ -23,8 +29,11 @@ export default function SparksList({ sparks, matchedUids, onSelect }: SparksList
     <ul>
       {sparks.map((s) => {
         const matched = matchedUids.has(s.likerUid)
+        // Matched people and bots (house profiles) are shown unblurred.
+        const revealed = matched || s.isBot
         const photo = s.profile.photoURLs?.[0]
         const age = displayAge(s.profile)
+        const subtitle = matched ? "You're matched" : 'Tap to see their profile'
         return (
           <li key={s.likerUid}>
             <button
@@ -37,28 +46,38 @@ export default function SparksList({ sparks, matchedUids, onSelect }: SparksList
                   <img
                     src={photo}
                     alt=""
-                    className={`h-full w-full object-cover ${matched ? '' : 'scale-125 blur-md'}`}
+                    className={`h-full w-full object-cover ${revealed ? '' : 'scale-125 blur-md'}`}
                   />
                 )}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline justify-between gap-2">
                   <span className="truncate font-medium text-white/90">
-                    {matched ? (
+                    {revealed ? (
                       <>
                         {s.profile.displayName ?? 'Someone'}
                         {age !== null && <span className="font-normal text-white/50">, {age}</span>}
                       </>
+                    ) : s.isWeeklySpark ? (
+                      <span className="text-[#F59E0B]">✦ Weekly Spark</span>
                     ) : (
                       'Someone likes you ✦'
                     )}
                   </span>
                   {s.likedAt > 0 && <span className="shrink-0 text-xs text-white/35">{relativeTime(s.likedAt)}</span>}
                 </span>
-                <span className="block truncate text-sm text-white/40">
-                  {matched ? "You're matched" : 'Tap to see their profile'}
-                </span>
+                {revealed && s.isWeeklySpark && <span className="block text-xs text-[#F59E0B]">✦ Weekly Spark</span>}
+                <span className="block truncate text-sm text-white/40">{subtitle}</span>
+                {s.expiresAt !== null && <span className="block text-xs text-amber-400">{expiresIn(s.expiresAt)}</span>}
               </span>
+              {s.compatibilityScore !== null && (
+                <span className="shrink-0 text-center">
+                  <span className="block text-2xl font-bold leading-none text-[#1B4FD8]">
+                    {Math.round(s.compatibilityScore)}%
+                  </span>
+                  <span className="mt-1 block text-[10px] uppercase tracking-widest text-white/30">match</span>
+                </span>
+              )}
             </button>
           </li>
         )

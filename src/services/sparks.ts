@@ -25,6 +25,11 @@ export interface SparkEntry {
   mode: Mode
   // Snapshot of the liker taken at like time, shaped like a profile doc.
   profile: DiscoverProfile
+  compatibilityScore: number | null
+  expiresAt: number | null // epoch ms
+  isWeeklySpark: boolean
+  // Bots (uid prefix 'zbot-') are shown unblurred, as normal profiles.
+  isBot: boolean
 }
 
 function toSpark(id: string, data: DocumentData): SparkEntry {
@@ -40,10 +45,16 @@ function toSpark(id: string, data: DocumentData): SparkEntry {
     likedAt: typeof data.likedAt === 'number' ? data.likedAt : 0,
     mode: data.mode === 'play' ? 'play' : 'spark',
     profile: { ...(snap as Partial<DiscoverProfile>), uid: likerUid, photoURLs },
+    compatibilityScore:
+      typeof data.compatibilityScore === 'number' && data.compatibilityScore > 0 ? data.compatibilityScore : null,
+    expiresAt: typeof data.expiresAt === 'number' ? data.expiresAt : null,
+    isWeeklySpark: data.isWeeklySpark === true,
+    isBot: likerUid.startsWith('zbot-'),
   }
 }
 
-// Live queue for one mode, newest first. Dismissed/expired entries are
+// Live queue for one mode: Weekly Spark first, then newest first.
+// Dismissed/expired entries (including ones past expiresAt) are
 // filtered here rather than in the query (same as mobile's getLikeQueue):
 // older docs lack the flags, and an inequality filter would drop them and
 // conflict with ordering by likedAt.
@@ -57,13 +68,16 @@ export function subscribeSparks(
   return onSnapshot(
     q,
     (snap) => {
+      const now = Date.now()
       const sparks = snap.docs
         .filter((d) => {
           const data = d.data()
           return data.dismissed !== true && data.isExpired !== true
         })
         .map((d) => toSpark(d.id, d.data()))
-        .filter((s) => s.mode === mode)
+        .filter((s) => s.mode === mode && (s.expiresAt === null || s.expiresAt > now))
+        // Stable sort keeps the likedAt order within each group.
+        .sort((a, b) => Number(b.isWeeklySpark) - Number(a.isWeeklySpark))
       onChange(sparks)
     },
     onError,

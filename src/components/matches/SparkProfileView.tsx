@@ -32,6 +32,7 @@ export default function SparkProfileView({ uid, spark, matched, onClose, onMatch
 
   const profile = loaded?.likerUid === spark.likerUid ? loaded.profile : spark.profile
   const photo = profile.photoURLs?.[0]
+  const revealed = matched || spark.isBot
 
   async function handleMatch() {
     if (busy) return
@@ -65,7 +66,9 @@ export default function SparkProfileView({ uid, spark, matched, onClose, onMatch
         <button type="button" onClick={onClose} className="text-sm text-white/60 hover:text-white">
           ← Back
         </button>
-        <span className="text-sm text-white/40">Someone likes you ✦</span>
+        <span className={`text-sm ${spark.isWeeklySpark ? 'text-[#F59E0B]' : 'text-white/40'}`}>
+          {spark.isWeeklySpark ? '✦ Weekly Spark' : 'Someone likes you ✦'}
+        </span>
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -75,10 +78,10 @@ export default function SparkProfileView({ uid, spark, matched, onClose, onMatch
               <img
                 src={photo}
                 alt=""
-                className={`h-full w-full object-cover ${matched ? '' : 'scale-110 blur-2xl'}`}
+                className={`h-full w-full object-cover ${revealed ? '' : 'scale-110 blur-2xl'}`}
               />
             )}
-            {!matched && (
+            {!revealed && (
               <span className="absolute inset-0 flex items-center justify-center text-sm text-white/70">
                 Photos unlock when you match
               </span>
