@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import SparksList from '../components/matches/SparksList'
 import SparkProfileView from '../components/matches/SparkProfileView'
-import MatchOverlay from '../components/discover/MatchOverlay'
+import MatchOverlay, { type NewMatch } from '../components/discover/MatchOverlay'
 import { subscribeMatches, type MatchEntry } from '../services/matches'
 import { subscribeSparks, type SparkEntry } from '../services/sparks'
 
@@ -15,7 +14,6 @@ interface SparksState {
 }
 
 export default function Sparks() {
-  const navigate = useNavigate()
   // AuthGuard guarantees a signed-in user on this route.
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const mode = useModeStore((s) => s.mode)
@@ -25,7 +23,7 @@ export default function Sparks() {
   // Matches are only needed to know which likers are already matched.
   const [matches, setMatches] = useState<{ key: string; list: MatchEntry[] } | null>(null)
   const [selected, setSelected] = useState<SparkEntry | null>(null)
-  const [newMatch, setNewMatch] = useState<{ matchId: string; name: string } | null>(null)
+  const [newMatch, setNewMatch] = useState<NewMatch | null>(null)
 
   useEffect(() => {
     if (!uid) return
@@ -52,10 +50,6 @@ export default function Sparks() {
     [matches, key],
   )
 
-  // After the overlay, go straight to the new conversation.
-  const openNewMatch = useCallback(() => {
-    if (newMatch) navigate(`/chat/${newMatch.matchId}`)
-  }, [newMatch, navigate])
 
   const loaded = state?.key === key ? state : null
 
@@ -87,11 +81,19 @@ export default function Sparks() {
           spark={selected}
           matched={matchedUids.has(selected.likerUid)}
           onClose={() => setSelected(null)}
-          onMatched={(matchId, name) => setNewMatch({ matchId, name })}
+          onMatched={(matchId, name) =>
+            setNewMatch({
+              matchId,
+              theirUid: selected.likerUid,
+              theirName: name,
+              theirPhoto: selected.profile.photoURLs?.[0] ?? null,
+              mode: selected.mode,
+            })
+          }
         />
       )}
 
-      {newMatch && <MatchOverlay name={newMatch.name} onDone={openNewMatch} />}
+      {newMatch && <MatchOverlay match={newMatch} />}
     </div>
   )
 }

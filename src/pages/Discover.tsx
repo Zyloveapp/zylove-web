@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import PhotoGallery from '../components/discover/PhotoGallery'
 import ProfileDetails from '../components/discover/ProfileDetails'
 import DiscoverActions, { type DiscoverAction } from '../components/discover/DiscoverActions'
-import MatchOverlay from '../components/discover/MatchOverlay'
+import MatchOverlay, { type NewMatch } from '../components/discover/MatchOverlay'
 import {
   actionErrorMessage,
   ensureUserDefaults,
@@ -27,7 +26,6 @@ function Spinner() {
 }
 
 export default function Discover() {
-  const navigate = useNavigate()
   // AuthGuard guarantees a signed-in user on this route.
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const mode = useModeStore((s) => s.mode)
@@ -36,7 +34,7 @@ export default function Discover() {
   const [queue, setQueue] = useState<QueueState | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [matchName, setMatchName] = useState<string | null>(null)
+  const [newMatch, setNewMatch] = useState<NewMatch | null>(null)
   const [reload, setReload] = useState(0)
 
   useEffect(() => {
@@ -54,8 +52,6 @@ export default function Discover() {
       cancelled = true
     }
   }, [uid, mode, key, reload])
-
-  const goToMatches = useCallback(() => navigate('/matches'), [navigate])
 
   const loading = queue?.key !== key
   const current = loading ? undefined : queue.profiles[0]
@@ -86,7 +82,15 @@ export default function Discover() {
     try {
       if (action === 'interested') {
         const result = await likeProfile(uid, mode, current)
-        if (result.matched) setMatchName(current.displayName ?? 'someone')
+        if (result.matched) {
+          setNewMatch({
+            matchId: result.matchId ?? [uid, current.uid].sort().join('_'),
+            theirUid: current.uid,
+            theirName: current.displayName ?? 'Someone',
+            theirPhoto: current.photoURLs?.[0] ?? null,
+            mode,
+          })
+        }
       } else {
         await passProfile(uid, mode, current.uid)
       }
@@ -150,7 +154,7 @@ export default function Discover() {
 
       <div className="px-6 pb-10 lg:hidden">{actions}</div>
 
-      {matchName && <MatchOverlay name={matchName} onDone={goToMatches} />}
+      {newMatch && <MatchOverlay match={newMatch} />}
     </div>
   )
 }
