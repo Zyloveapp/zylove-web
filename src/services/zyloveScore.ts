@@ -1,7 +1,7 @@
 import { doc, onSnapshot, type Unsubscribe } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
-import type { ReviewCategory, ZyloveScoreTier } from '../types/zyloveScore'
+import type { ZyloveScoreTier } from '../types/zyloveScore'
 
 // users/{uid}/zyloveScore/current — written only by the submitReview callable,
 // readable only by its owner.
@@ -12,7 +12,7 @@ export interface ScoreDetail {
   positiveCount: number
   negativeCount: number
   flagCount: number
-  topPositiveCategories: ReviewCategory[]
+  topPositiveCategories: string[]
 }
 
 const TIERS: ZyloveScoreTier[] = ['new', 'building', 'good', 'great', 'trusted', 'elite']
@@ -50,47 +50,87 @@ export function subscribeScore(
         positiveCount: count(data.positiveCount),
         negativeCount: count(data.negativeCount),
         flagCount: count(data.flagCount),
-        topPositiveCategories: Array.isArray(data.topPositiveCategories) ? data.topPositiveCategories : [],
+        topPositiveCategories: Array.isArray(data.topPositiveCategories)
+          ? data.topPositiveCategories.filter((c: unknown): c is string => typeof c === 'string')
+          : [],
       })
     },
     onError,
   )
 }
 
-export async function submitReview(matchId: string, reviewedUid: string, categories: ReviewCategory[]): Promise<void> {
-  await httpsCallable<{ matchId: string; reviewedUid: string; categories: ReviewCategory[] }, { success: true }>(
+export async function submitReview(matchId: string, reviewedUid: string, categories: string[]): Promise<void> {
+  await httpsCallable<{ matchId: string; reviewedUid: string; categories: string[] }, { success: true }>(
     functions,
     'submitReview',
   )({ matchId, reviewedUid, categories })
 }
 
-// ─── Review prompt ───────────────────────────────────────────────────────────
+// ─── Review prompts ──────────────────────────────────────────────────────────
+// Reviews are never requested mid-conversation. Two triggers:
+//   1. The match ended (blocked, unmatched, or deleted by mobile's unmatch) —
+//      ReviewPrompter, app-wide.
+//   2. The conversation went cold: 30+ days quiet after 10+ messages — ChatView.
 
-export const REVIEW_MIN_MESSAGES = 20
-// A conversation counts as ended when nobody has written for a day.
-const ENDED_AFTER_MS = 24 * 60 * 60 * 1000
+export const COLD_MIN_MESSAGES = 10
+const COLD_AFTER_MS = 30 * 24 * 60 * 60 * 1000
 
-function shownKey(matchId: string): string {
-  return `zylove_review_shown_${matchId}`
+export function isBotUid(uid: string): boolean {
+  return uid.startsWith('zbot-') || uid.startsWith('seed-')
 }
 
-export function reviewPromptShown(matchId: string): boolean {
+function readFlag(key: string): boolean {
   try {
-    return localStorage.getItem(shownKey(matchId)) === '1'
+    return localStorage.getItem(key) === '1'
   } catch {
     // Storage unavailable — don't risk asking on every visit.
     return true
   }
 }
 
-export function markReviewPromptShown(matchId: string): void {
+function writeFlag(key: string): void {
   try {
-    localStorage.setItem(shownKey(matchId), '1')
+    localStorage.setItem(key, '1')
   } catch {
     // Storage unavailable — the prompt may show again next visit.
   }
 }
 
-export function conversationEnded(lastMessageAt: number | null): boolean {
-  return lastMessageAt !== null && Date.now() - lastMessageAt > ENDED_AFTER_MS
+// Set on submit and on dismissing the ended-match prompt: it asks once.
+export const reviewed = (matchId: string) => readFlag(`zylove_reviewed_${matchId}`)
+export const markReviewed = (matchId: string) => writeFlag(`zylove_reviewed_${matchId}`)
+export const coldReviewShown = (matchId: string) => readFlag(`zylove_cold_review_${matchId}`)
+export const markColdReviewShown = (matchId: string) => writeFlag(`zylove_cold_review_${matchId}`)
+
+export function conversationCold(lastMessageAt: number | null, messageCount: number): boolean {
+  return messageCount >= COLD_MIN_MESSAGES && lastMessageAt !== null && Date.now() - lastMessageAt >= COLD_AFTER_MS
+}
+
+// Matches seen on this device, so ones that vanish (mobile's unmatch deletes
+// the doc) can still be offered for review on the next visit.
+export interface KnownMatch {
+  partnerUid: string
+  name: string
+  hadMessages: boolean
+}
+
+function knownKey(uid: string): string {
+  return `zylove_known_matches_${uid}`
+}
+
+export function loadKnownMatches(uid: string): Record<string, KnownMatch> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(knownKey(uid)) ?? '{}')
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, KnownMatch>) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function saveKnownMatches(uid: string, known: Record<string, KnownMatch>): void {
+  try {
+    localStorage.setItem(knownKey(uid), JSON.stringify(known))
+  } catch {
+    // Storage unavailable — vanished matches just won't be offered for review.
+  }
 }

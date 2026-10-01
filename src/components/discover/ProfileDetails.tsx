@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { displayAge, type DiscoverProfile } from '../../services/discover'
 import type { Mode } from '../../store/modeStore'
 import CompatibilityBlock from './CompatibilityBlock'
+import TierBadge from '../TierBadge'
 import {
   goDeeperRows,
   lifeDetails,
@@ -64,6 +65,9 @@ export default function ProfileDetails({
           <span className="rounded-full bg-white/10 px-3 py-1 text-sm">
             {mode === 'play' ? '🔴 Play' : '🔵 Spark'}
           </span>
+        </div>
+        <div className="mt-2 empty:hidden">
+          <TierBadge tier={(profile as Record<string, unknown>).zyloveScoreTier} />
         </div>
         {profile.locationLabel && <p className="mt-1 text-sm text-white/40">{profile.locationLabel}</p>}
         <CompatibilityBlock

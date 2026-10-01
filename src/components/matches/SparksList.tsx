@@ -1,5 +1,6 @@
 import type { SparkEntry } from '../../services/sparks'
 import { displayAge } from '../../services/discover'
+import { UserTierBadge } from '../TierBadge'
 import { relativeTime } from '../../services/matches'
 
 interface SparksListProps {
@@ -51,11 +52,14 @@ export default function SparksList({ sparks, matchedUids, onSelect }: SparksList
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline justify-between gap-2">
-                  <span className="truncate font-medium text-white/90">
+                  <span className="flex min-w-0 items-center gap-2 truncate font-medium text-white/90">
                     {revealed ? (
                       <>
-                        {s.profile.displayName ?? 'Someone'}
-                        {age !== null && <span className="font-normal text-white/50">, {age}</span>}
+                        <span className="truncate">
+                          {s.profile.displayName ?? 'Someone'}
+                          {age !== null && <span className="font-normal text-white/50">, {age}</span>}
+                        </span>
+                        <UserTierBadge uid={s.likerUid} />
                       </>
                     ) : s.isWeeklySpark ? (
                       <span className="text-[#F59E0B]">✦ Weekly Spark</span>

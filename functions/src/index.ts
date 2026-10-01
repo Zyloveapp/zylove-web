@@ -1,17 +1,20 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
+import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
 import { initializeApp } from 'firebase-admin/app'
-import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
+import { FieldValue, Timestamp, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 import { buildBioPrompt, parseBioRequest } from './bioPrompt'
+import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import {
-  REVIEW_CATEGORIES,
-  computeNewScore,
-  computeScoreDelta,
-  scoreToTier,
-  type ReviewCategory,
-  type ZyloveScoreTier,
-} from './shared/zyloveScore'
+  FLAG_CATEGORY_IDS,
+  MAX_NEGATIVE_DELTA,
+  MAX_POSITIVE_DELTA,
+  MODERATION_RULES,
+  POINTS_PER_NEGATIVE,
+  POINTS_PER_POSITIVE,
+  REVIEW_TONE,
+} from './shared/reviewCategories'
 import { PLAY_PROMPTS, SPARK_PROMPTS, UNIVERSAL_PROMPTS } from './shared/profile'
 
 initializeApp()
@@ -336,13 +339,28 @@ export const setVisibility = onCall(
   },
 )
 
-// ─── submitReview ────────────────────────────────────────────────────────────
+// ─── submitReview / processMatchEnd ──────────────────────────────────────────
+//
+// Three tiers of review category (shared/reviewCategories.ts):
+//   positive — applied when the review is submitted
+//   neutral  — stored, no score impact
+//   negative — held on the review doc and applied only once the match ends
+//              (blocked, unmatched or deleted), so the reviewed person can't
+//              tie a score drop to an ongoing conversation.
+// Review docs carry no revieweeUid, so the reviewee read rule never matches:
+// reviews, including pending negatives, stay server-only. Moderation runs at
+// submit time regardless of deferral.
 
-const REVIEW_CATEGORY_META = new Map(REVIEW_CATEGORIES.map((c) => [c.id, c]))
-// Mobile's definition of a completed conversation (zyloveScore.ts header).
-const MIN_MESSAGES_TO_REVIEW = 5
 const DEFAULT_ZYLOVE_SCORE = 70
+// Each applied review is one sample in a rolling average over the last
+// SCORE_WINDOW samples. A sample maps the review's delta (−10…+8) onto 0–100
+// around the default: +8 → 100, 0 → 70, −10 → 32.5. Mobile's 50 + delta×5
+// mapping topped out at 90 with the +8 cap, which made Elite (95) unreachable.
+const SAMPLE_PER_POINT = 3.75
+const SCORE_WINDOW = 20
 const SCORE_HISTORY_LENGTH = 10
+const DAY_MS = 24 * 60 * 60 * 1000
+const BOT_PREFIXES = ['zbot-', 'seed-']
 
 interface ScoreHistoryPoint {
   delta: number
@@ -351,26 +369,127 @@ interface ScoreHistoryPoint {
   timestamp: number
 }
 
-function parseCategories(data: unknown): ReviewCategory[] {
-  const raw = typeof data === 'object' && data !== null ? (data as Record<string, unknown>).categories : undefined
-  if (!Array.isArray(raw) || raw.length === 0) throw new HttpsError('invalid-argument', 'Pick at least one category')
-  const categories = [...new Set(raw)]
-  if (!categories.every((c): c is ReviewCategory => typeof c === 'string' && REVIEW_CATEGORY_META.has(c as ReviewCategory))) {
-    throw new HttpsError('invalid-argument', 'Unknown review category')
-  }
-  return categories
+interface ScoreState {
+  score: number
+  samples: number
+  history: ScoreHistoryPoint[]
 }
 
 function num(v: unknown, fallback: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback
 }
 
-// One anonymous post-conversation review per reviewer per match. Updates the
-// reviewed user's Zylove Score with mobile's zyloveScore.ts math and flags them
-// for moderation once any category crosses its triggersModerationAt count.
-// Review docs are written without revieweeUid, so the reviewee read rule never
-// matches and reviews stay server-only (a match has one partner, so a readable
-// review would name its author).
+function strings(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+}
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n))
+}
+
+function readScoreState(data: DocumentData): ScoreState {
+  return {
+    score: num(data.score, DEFAULT_ZYLOVE_SCORE),
+    // Docs written before scoreSamples existed had one sample per review.
+    samples: num(data.scoreSamples, num(data.reviewCount, 0)),
+    history: Array.isArray(data.history) ? data.history : [],
+  }
+}
+
+function addSample(state: ScoreState, delta: number, reason: string): ScoreState {
+  const weight = Math.min(state.samples, SCORE_WINDOW)
+  const sample = clamp(DEFAULT_ZYLOVE_SCORE + delta * SAMPLE_PER_POINT, 0, 100)
+  const score = Math.round(clamp((state.score * weight + sample) / (weight + 1), 0, 100))
+  return {
+    score,
+    samples: state.samples + 1,
+    history: [...state.history, { delta, score, reason, timestamp: Date.now() }].slice(-SCORE_HISTORY_LENGTH),
+  }
+}
+
+const positiveDelta = (n: number) => Math.min(n * POINTS_PER_POSITIVE, MAX_POSITIVE_DELTA)
+const negativeDelta = (n: number) => Math.max(n * POINTS_PER_NEGATIVE, MAX_NEGATIVE_DELTA)
+
+function matchEnded(match: DocumentData): boolean {
+  return match.isBlocked === true || (match.unmatchedAt !== undefined && match.unmatchedAt !== null)
+}
+
+function topCategories(counts: Record<string, number>): string[] {
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([id]) => id)
+}
+
+function parseCategories(data: unknown): string[] {
+  const raw = typeof data === 'object' && data !== null ? (data as Record<string, unknown>).categories : undefined
+  if (!Array.isArray(raw) || raw.length === 0) throw new HttpsError('invalid-argument', 'Pick at least one category')
+  const categories = [...new Set(raw)]
+  if (!categories.every((c): c is string => typeof c === 'string' && REVIEW_TONE.has(c))) {
+    throw new HttpsError('invalid-argument', 'Unknown review category')
+  }
+  return categories
+}
+
+// Like requireMatchPair, but also accepts matches mobile's unmatch has
+// deleted. Their messages survive the delete, and messages can only be
+// written by participants while the match exists, so the caller's message
+// count check (≥ 1) proves the match was real.
+async function requireReviewablePair(matchId: string, callerId: string, otherUid: string): Promise<{ ended: boolean }> {
+  if (otherUid === callerId) throw new HttpsError('invalid-argument', 'reviewedUid must be your match')
+  const snap = await getFirestore().collection('matches').doc(matchId).get()
+  const data = snap.data()
+  if (data) {
+    const users: unknown = data.users ?? data.participants
+    if (!Array.isArray(users) || !users.includes(callerId) || !users.includes(otherUid)) {
+      throw new HttpsError('permission-denied', 'Not a participant in this match')
+    }
+    return { ended: matchEnded(data) }
+  }
+  if (matchId !== [callerId, otherUid].sort().join('_')) {
+    throw new HttpsError('permission-denied', 'Not a participant in this match')
+  }
+  return { ended: true }
+}
+
+// Queues the reviewed user for the safety team once a category crosses its
+// threshold. One reviewQueue doc per user and category (admin-only; the same
+// collection submitUnmatch writes), never a field on the public users doc.
+async function checkModeration(reviewedUid: string, reviewerUid: string, matchId: string, categories: string[]): Promise<void> {
+  const rules = MODERATION_RULES.filter((r) => categories.includes(r.category))
+  if (rules.length === 0) return
+  const db = getFirestore()
+  const reviews = await db.collection('reviews').where('reviewedUid', '==', reviewedUid).get()
+  const now = Date.now()
+  for (const rule of rules) {
+    const count = reviews.docs.filter((d) => {
+      const r = d.data()
+      if (!strings(r.categories).includes(rule.category)) return false
+      if (rule.windowDays === null) return true
+      const at = r.createdAt instanceof Timestamp ? r.createdAt.toMillis() : now
+      return now - at <= rule.windowDays * DAY_MS
+    }).length
+    if (count < rule.threshold) continue
+    await db.collection('reviewQueue').doc(`review_${reviewedUid}_${rule.category}`).set(
+      {
+        reportedUid: reviewedUid,
+        reporterUid: reviewerUid,
+        reason: `review_${rule.category}`,
+        matchId,
+        priority: rule.urgent ? 'urgent' : 'normal',
+        flaggedForReview: true,
+        urgentReview: rule.urgent,
+        count,
+        source: 'review',
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    )
+    logger.warn('submitReview: moderation threshold reached', { category: rule.category, count, urgent: rule.urgent })
+  }
+}
+
+// One anonymous review per reviewer per match.
 export const submitReview = onCall(
   { timeoutSeconds: 30, memory: '128MiB', invoker: 'public' },
   async (request): Promise<{ success: true; newScore: number; newTier: ZyloveScoreTier }> => {
@@ -379,71 +498,151 @@ export const submitReview = onCall(
     const matchId = requireString(request.data, 'matchId')
     const reviewedUid = requireString(request.data, 'reviewedUid')
     const categories = parseCategories(request.data)
-    await requireMatchPair(matchId, callerId, reviewedUid)
+    if (BOT_PREFIXES.some((p) => reviewedUid.startsWith(p))) throw new HttpsError('invalid-argument', 'Bots cannot be reviewed')
+    const { ended } = await requireReviewablePair(matchId, callerId, reviewedUid)
 
     const db = getFirestore()
     const messageCount = (await db.collection(`matches/${matchId}/messages`).count().get()).data().count
-    if (messageCount < MIN_MESSAGES_TO_REVIEW) {
-      throw new HttpsError('failed-precondition', 'Have a conversation before leaving a review')
-    }
+    if (messageCount < 1) throw new HttpsError('failed-precondition', 'Have a conversation before leaving a review')
+
+    const positive = categories.filter((c) => REVIEW_TONE.get(c) === 'positive')
+    const neutral = categories.filter((c) => REVIEW_TONE.get(c) === 'neutral')
+    const negative = categories.filter((c) => REVIEW_TONE.get(c) === 'negative')
+    const applyNegativeNow = negative.length > 0 && ended
+    // A review whose only score impact is still pending stays invisible
+    // (not even counted) until the match ends.
+    const countedNow = negative.length === 0 || ended || positive.length > 0
 
     const reviewRef = db.collection('reviews').doc(`${matchId}_${callerId}`)
     const userRef = db.collection('users').doc(reviewedUid)
     const scoreRef = userRef.collection('zyloveScore').doc('current')
-    const delta = computeScoreDelta(categories)
 
     const result = await db.runTransaction(async (tx) => {
       const [existing, scoreSnap, userSnap] = await Promise.all([tx.get(reviewRef), tx.get(scoreRef), tx.get(userRef)])
-      if (existing.exists) throw new HttpsError('already-exists', 'You already reviewed this conversation')
+      if (existing.exists) throw new HttpsError('already-exists', 'You already reviewed this connection')
       if (!userSnap.exists) throw new HttpsError('not-found', 'That profile no longer exists')
 
       const current = scoreSnap.data() ?? {}
-      const reviewCount = num(current.reviewCount, 0)
-      const newScore = computeNewScore(num(current.score, DEFAULT_ZYLOVE_SCORE), delta, reviewCount)
-      const newCount = reviewCount + 1
-      const newTier = scoreToTier(newScore, newCount)
-
-      const counts: Record<string, number> = { ...(current.categoryCounts ?? {}) }
-      for (const c of categories) counts[c] = num(counts[c], 0) + 1
-      const sentiments = categories.map((c) => REVIEW_CATEGORY_META.get(c)?.sentiment)
-      const flagged = categories.some((c) => {
-        const at = REVIEW_CATEGORY_META.get(c)?.triggersModerationAt ?? 0
-        return at > 0 && counts[c] >= at
-      })
-      const history: ScoreHistoryPoint[] = Array.isArray(current.history) ? current.history : []
+      let state = readScoreState(current)
+      if (positive.length > 0) state = addSample(state, positiveDelta(positive.length), 'Positive review')
+      if (applyNegativeNow) state = addSample(state, negativeDelta(negative.length), 'Review after a connection ended')
+      const reviewCount = num(current.reviewCount, 0) + (countedNow ? 1 : 0)
+      const tier = scoreToTier(state.score, reviewCount)
+      const positiveCounts: Record<string, number> = { ...(current.positiveCategoryCounts ?? {}) }
+      for (const c of positive) positiveCounts[c] = num(positiveCounts[c], 0) + 1
 
       tx.create(reviewRef, {
         reviewerUid: callerId,
         reviewedUid,
         matchId,
         categories,
-        flaggedForReview: sentiments.includes('flag'),
+        positiveCategories: positive,
+        neutralCategories: neutral,
+        negativeCategories: negative,
+        negativePending: negative.length > 0 && !ended,
+        counted: countedNow,
         createdAt: FieldValue.serverTimestamp(),
+        ...(applyNegativeNow ? { negativeAppliedAt: FieldValue.serverTimestamp() } : {}),
       })
-      tx.set(scoreRef, {
-        uid: reviewedUid,
-        score: newScore,
-        tier: newTier,
-        reviewCount: FieldValue.increment(1),
-        positiveCount: FieldValue.increment(sentiments.includes('positive') ? 1 : 0),
-        negativeCount: FieldValue.increment(sentiments.includes('negative') ? 1 : 0),
-        flagCount: FieldValue.increment(sentiments.includes('flag') ? 1 : 0),
-        categoryCounts: counts,
-        // Mobile's score screen reads these unguarded (.length on undefined crashes it).
-        topPositiveCategories: [],
-        pendingDisputeCount: 0,
-        unlockedPerks: [],
-        history: [...history, { delta, score: newScore, reason: 'New review received', timestamp: Date.now() }].slice(
-          -SCORE_HISTORY_LENGTH,
-        ),
-        lastUpdated: FieldValue.serverTimestamp(),
-      }, { merge: true })
-      tx.update(userRef, { zyloveScoreTier: newTier, ...(flagged ? { flaggedForReview: true } : {}) })
-      return { newScore, newTier, flagged }
+      tx.set(
+        scoreRef,
+        {
+          uid: reviewedUid,
+          score: state.score,
+          tier,
+          scoreSamples: state.samples,
+          history: state.history,
+          reviewCount,
+          positiveCount: FieldValue.increment(positive.length > 0 ? 1 : 0),
+          negativeCount: FieldValue.increment(applyNegativeNow ? 1 : 0),
+          flagCount: FieldValue.increment(applyNegativeNow && negative.some((c) => FLAG_CATEGORY_IDS.includes(c)) ? 1 : 0),
+          positiveCategoryCounts: positiveCounts,
+          topPositiveCategories: topCategories(positiveCounts),
+          // Mobile's score screen reads these unguarded (.length on undefined crashes it).
+          pendingDisputeCount: num(current.pendingDisputeCount, 0),
+          unlockedPerks: Array.isArray(current.unlockedPerks) ? current.unlockedPerks : [],
+          lastUpdated: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      )
+      tx.update(userRef, { zyloveScoreTier: tier })
+      return { newScore: state.score, newTier: tier }
     })
 
-    logger.info('submitReview', { matchId, delta, tier: result.newTier, flagged: result.flagged })
-    return { success: true, newScore: result.newScore, newTier: result.newTier }
+    // After the commit so the count includes this review. A failure here must
+    // not fail a saved review, but it is a safety gap, so log it loudly.
+    await checkModeration(reviewedUid, callerId, matchId, categories).catch((err: unknown) =>
+      logger.error('submitReview: moderation check failed', {
+        matchId,
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    )
+
+    logger.info('submitReview', { matchId, positive: positive.length, neutral: neutral.length, negative: negative.length, ended })
+    return { success: true, ...result }
+  },
+)
+
+// Applies one review's held negatives. Idempotent: the transaction re-checks
+// negativePending, so retries and repeat triggers apply it once.
+async function applyPendingNegative(reviewRef: DocumentReference): Promise<void> {
+  const db = getFirestore()
+  await db.runTransaction(async (tx) => {
+    const review = (await tx.get(reviewRef)).data()
+    if (!review || review.negativePending !== true || typeof review.reviewedUid !== 'string') return
+    const userRef = db.collection('users').doc(review.reviewedUid)
+    const scoreRef = userRef.collection('zyloveScore').doc('current')
+    const [scoreSnap, userSnap] = await Promise.all([tx.get(scoreRef), tx.get(userRef)])
+
+    tx.update(reviewRef, { negativePending: false, negativeAppliedAt: FieldValue.serverTimestamp(), counted: true })
+    if (!userSnap.exists) return // Deleted account: just clear the pending state.
+
+    const negatives = strings(review.negativeCategories)
+    const current = scoreSnap.data() ?? {}
+    const state = addSample(readScoreState(current), negativeDelta(negatives.length), 'Review after a connection ended')
+    const reviewCount = num(current.reviewCount, 0) + (review.counted === true ? 0 : 1)
+    const tier = scoreToTier(state.score, reviewCount)
+    tx.set(
+      scoreRef,
+      {
+        uid: review.reviewedUid,
+        score: state.score,
+        tier,
+        scoreSamples: state.samples,
+        history: state.history,
+        reviewCount,
+        negativeCount: FieldValue.increment(1),
+        flagCount: FieldValue.increment(negatives.some((c) => FLAG_CATEGORY_IDS.includes(c)) ? 1 : 0),
+        topPositiveCategories: Array.isArray(current.topPositiveCategories) ? current.topPositiveCategories : [],
+        pendingDisputeCount: num(current.pendingDisputeCount, 0),
+        unlockedPerks: Array.isArray(current.unlockedPerks) ? current.unlockedPerks : [],
+        lastUpdated: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    )
+    tx.update(userRef, { zyloveScoreTier: tier })
+  })
+}
+
+// Applies held negative reviews when a match ends: blocked (isBlocked),
+// unmatched (unmatchedAt), or deleted — mobile's submitUnmatch deletes the
+// match doc outright. Fires on every match write, so it returns early unless
+// this write is the one that ended the match.
+export const processMatchEnd = onDocumentWritten(
+  { document: 'matches/{matchId}', timeoutSeconds: 60, memory: '256MiB' },
+  async (event) => {
+    const before = event.data?.before.data()
+    const after = event.data?.after.data()
+    if (!before) return
+    // Deletion always counts; applyPendingNegative skips anything already applied.
+    const endedNow = after === undefined || (matchEnded(after) && !matchEnded(before))
+    if (!endedNow) return
+
+    const { matchId } = event.params
+    const reviews = await getFirestore().collection('reviews').where('matchId', '==', matchId).get()
+    const pending = reviews.docs.filter((d) => d.data().negativePending === true)
+    for (const d of pending) await applyPendingNegative(d.ref)
+    if (pending.length > 0) logger.info('processMatchEnd: applied held negative reviews', { matchId, count: pending.length })
   },
 )
 

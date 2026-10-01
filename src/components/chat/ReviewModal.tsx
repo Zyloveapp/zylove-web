@@ -1,13 +1,7 @@
 import { useEffect, useState } from 'react'
 import { FirebaseError } from 'firebase/app'
-import { submitReview } from '../../services/zyloveScore'
-import {
-  FLAG_CATEGORIES,
-  NEGATIVE_CATEGORIES,
-  POSITIVE_CATEGORIES,
-  type ReviewCategory,
-  type ReviewCategoryMeta,
-} from '../../types/zyloveScore'
+import { markReviewed, submitReview } from '../../services/zyloveScore'
+import { REVIEW_CATEGORY_DEFS, type ReviewCategoryDef, type ReviewTone } from '../../types/reviewCategories'
 
 interface ReviewModalProps {
   matchId: string
@@ -16,11 +10,31 @@ interface ReviewModalProps {
   onClose: () => void
 }
 
-const TO_FLAG = [...NEGATIVE_CATEGORIES, ...FLAG_CATEGORIES]
+const PILL_TINT: Record<ReviewTone, { on: string; off: string }> = {
+  positive: {
+    on: 'border-emerald-400 bg-emerald-500/20 text-emerald-200',
+    off: 'border-emerald-500/30 bg-emerald-500/5 text-white/70',
+  },
+  neutral: {
+    on: 'border-white/50 bg-white/15 text-white',
+    off: 'border-white/15 bg-white/5 text-white/60',
+  },
+  negative: {
+    on: 'border-amber-400 bg-red-500/20 text-amber-200',
+    off: 'border-amber-500/30 bg-red-500/5 text-white/70',
+  },
+}
 
-// Anonymous post-conversation review feeding the reviewed person's Zylove Score.
+const SECTIONS: { tone: ReviewTone; title: string; note?: string }[] = [
+  { tone: 'positive', title: 'What went well?' },
+  { tone: 'neutral', title: 'Anything to note?' },
+  { tone: 'negative', title: 'Flag something?', note: 'Negative feedback is processed privately after your connection ends.' },
+]
+
+// Anonymous review of a connection, feeding the reviewed person's Zylove
+// Score. Only offered once a match has ended or gone cold, never mid-chat.
 export default function ReviewModal({ matchId, partnerUid, name, onClose }: ReviewModalProps) {
-  const [selected, setSelected] = useState<ReviewCategory[]>([])
+  const [selected, setSelected] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -33,7 +47,7 @@ export default function ReviewModal({ matchId, partnerUid, name, onClose }: Revi
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  function toggle(id: ReviewCategory) {
+  function toggle(id: string) {
     setSelected((s) => (s.includes(id) ? s.filter((c) => c !== id) : [...s, id]))
   }
 
@@ -43,37 +57,29 @@ export default function ReviewModal({ matchId, partnerUid, name, onClose }: Revi
     setError(null)
     try {
       await submitReview(matchId, partnerUid, selected)
+      markReviewed(matchId)
       setDone(true)
     } catch (err) {
-      if (err instanceof FirebaseError && err.code === 'functions/already-exists') setDone(true)
-      else setError("Couldn't send your review. Try again.")
+      if (err instanceof FirebaseError && err.code === 'functions/already-exists') {
+        markReviewed(matchId)
+        setDone(true)
+      } else {
+        setError("Couldn't send your review. Try again.")
+      }
     } finally {
       setSubmitting(false)
     }
   }
 
-  function pill(c: ReviewCategoryMeta) {
+  function pill(c: ReviewCategoryDef) {
     const on = selected.includes(c.id)
-    const tint =
-      c.sentiment === 'positive'
-        ? on
-          ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
-          : 'border-emerald-500/30 bg-emerald-500/5 text-white/70'
-        : c.sentiment === 'flag'
-          ? on
-            ? 'border-red-400 bg-red-500/20 text-red-200'
-            : 'border-red-500/30 bg-red-500/5 text-white/70'
-          : on
-            ? 'border-amber-400 bg-amber-500/20 text-amber-200'
-            : 'border-amber-500/30 bg-amber-500/5 text-white/70'
     return (
       <button
         key={c.id}
         type="button"
         onClick={() => toggle(c.id)}
         aria-pressed={on}
-        title={c.description}
-        className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${tint}`}
+        className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${PILL_TINT[c.tone][on ? 'on' : 'off']}`}
       >
         <span aria-hidden>{c.emoji}</span> {c.label}
       </button>
@@ -91,7 +97,7 @@ export default function ReviewModal({ matchId, partnerUid, name, onClose }: Revi
         {done ? (
           <div className="py-6 text-center">
             <p id="review-title" className="text-lg font-semibold">
-              ✦ Thank you. Your feedback helps Zylove stay real.
+              ✦ Thank you. Your honesty helps Zylove stay real.
             </p>
             <button
               type="button"
@@ -105,17 +111,21 @@ export default function ReviewModal({ matchId, partnerUid, name, onClose }: Revi
         ) : (
           <>
             <h2 id="review-title" className="text-xl font-bold">
-              How was your conversation with {name}?
+              How was your time with {name}?
             </h2>
             <p className="mt-1 text-sm text-white/60">
-              Your review is anonymous and helps keep Zylove safe and genuine.
+              Your review is anonymous and helps keep Zylove real. It's processed after your connection ends.
             </p>
 
-            <h3 className="mt-6 text-sm font-semibold text-white/80">What went well?</h3>
-            <div className="mt-2 flex flex-wrap gap-2">{POSITIVE_CATEGORIES.map(pill)}</div>
-
-            <h3 className="mt-6 text-sm font-semibold text-white/80">Anything to flag?</h3>
-            <div className="mt-2 flex flex-wrap gap-2">{TO_FLAG.map(pill)}</div>
+            {SECTIONS.map((section) => (
+              <section key={section.tone} className="mt-6">
+                <h3 className="text-sm font-semibold text-white/80">{section.title}</h3>
+                {section.note && <p className="mt-0.5 text-xs text-white/40">{section.note}</p>}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {REVIEW_CATEGORY_DEFS.filter((c) => c.tone === section.tone).map(pill)}
+                </div>
+              </section>
+            ))}
 
             {error && <p className="mt-4 text-center text-sm text-red-400">{error}</p>}
             <button

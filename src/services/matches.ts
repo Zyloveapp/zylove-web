@@ -22,6 +22,8 @@ export interface MatchEntry {
   matchedAt: number // ms
   lastSenderId: string | null
   mode: Mode
+  // Blocked or unmatched; mobile's unmatch deletes the doc instead.
+  ended: boolean
 }
 
 // Firestore Timestamp, epoch ms, or missing → epoch ms.
@@ -56,6 +58,7 @@ export function toEntry(matchId: string, data: DocumentData, uid: string): Match
     matchedAt: toMillis(data.matchedAt) || toMillis(data.createdAt),
     lastSenderId: str(data.lastSenderId),
     mode: data.mode === 'play' ? 'play' : 'spark',
+    ended: data.isBlocked === true || (data.unmatchedAt !== undefined && data.unmatchedAt !== null),
   }
 }
 
@@ -112,4 +115,17 @@ export function relativeTime(ms: number): string {
   if (diff < 2 * day) return 'yesterday'
   if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`
   return new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+// Every match the user is in, across both modes.
+export function subscribeAllMatches(
+  uid: string,
+  onChange: (matches: MatchEntry[]) => void,
+  onError: (err: Error) => void,
+): Unsubscribe {
+  return onSnapshot(
+    query(collection(db, 'matches'), where('users', 'array-contains', uid)),
+    (snap) => onChange(snap.docs.map((d) => toEntry(d.id, d.data(), uid)).filter((e): e is MatchEntry => e !== null)),
+    onError,
+  )
 }

@@ -2,6 +2,7 @@ import { BrowserRouter, Outlet, Routes, Route } from 'react-router-dom'
 import AuthGuard from './components/AuthGuard'
 import PauseGuard from './components/PauseGuard'
 import Nav from './components/Nav'
+import ReviewPrompter from './components/ReviewPrompter'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
@@ -21,6 +22,7 @@ function AppLayout() {
       <div className="pb-16 lg:pb-0">
         <Outlet />
       </div>
+      <ReviewPrompter />
     </div>
   )
 }

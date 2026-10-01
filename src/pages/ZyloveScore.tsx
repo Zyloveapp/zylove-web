@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { DEFAULT_SCORE, subscribeScore, type ScoreDetail } from '../services/zyloveScore'
-import { REVIEW_CATEGORIES, SPARK_PERKS, TIER_META, getUnlockedPerks, type ZyloveScoreTier } from '../types/zyloveScore'
+import { SPARK_PERKS, TIER_META, getUnlockedPerks, type ZyloveScoreTier } from '../types/zyloveScore'
+import { REVIEW_CATEGORY_DEFS } from '../types/reviewCategories'
 
 // Web palette for the ring and tier label.
 const TIER_COLOR: Record<ZyloveScoreTier, string> = {
@@ -97,7 +98,7 @@ export default function ZyloveScore() {
   const next = Object.values(TIER_META).find((t) => t.minScore > s.score) ?? null
   const unlocked = getUnlockedPerks(s.score)
   const qualities = s.topPositiveCategories
-    .map((id) => REVIEW_CATEGORIES.find((c) => c.id === id))
+    .map((id) => REVIEW_CATEGORY_DEFS.find((c) => c.id === id))
     .filter((c) => c !== undefined)
 
   return (

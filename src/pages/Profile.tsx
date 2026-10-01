@@ -5,6 +5,7 @@ import { displayAge } from '../services/discover'
 import { loadOwnProfile, profileCompleteness, type OwnProfile } from '../services/profile'
 import { cmToFeetInches } from '../types/profile'
 import VisibilityControl from '../components/profile/VisibilityControl'
+import TierBadge, { badgeTier, type BadgeTier } from '../components/TierBadge'
 import {
   bodyTypeLabel,
   dealbreakerLabel,
@@ -54,12 +55,19 @@ function TagSection({ title, items }: { title: string; items: string[] }) {
   )
 }
 
-function PhotoHero({ photos, name }: { photos: string[]; name: string }) {
+// Earned-badge glow around the photo.
+const GLOW: Record<BadgeTier, string> = {
+  trusted: 'ring-2 ring-[#1B4FD8]/60 ring-offset-2 ring-offset-gray-950',
+  elite: 'ring-2 ring-amber-400/60 ring-offset-2 ring-offset-gray-950',
+}
+
+function PhotoHero({ photos, name, glow }: { photos: string[]; name: string; glow: BadgeTier | null }) {
+  const ring = glow ? GLOW[glow] : ''
   const [index, setIndex] = useState(0)
   const count = photos.length
   if (count === 0) {
     return (
-      <div className="flex aspect-[3/4] w-full items-center justify-center rounded-2xl bg-[#1B4FD8]/20">
+      <div className={`flex aspect-[3/4] w-full items-center justify-center rounded-2xl bg-[#1B4FD8]/20 ${ring}`}>
         <span className="text-7xl font-bold text-[#7C9BFF]">{name.charAt(0).toUpperCase() || '?'}</span>
       </div>
     )
@@ -67,7 +75,7 @@ function PhotoHero({ photos, name }: { photos: string[]; name: string }) {
   const shown = Math.min(index, count - 1)
   return (
     <div>
-      <div className="relative aspect-[3/4] w-full overflow-hidden rounded-2xl bg-white/5">
+      <div className={`relative aspect-[3/4] w-full overflow-hidden rounded-2xl bg-white/5 ${ring}`}>
         <img src={photos[shown]} alt={`${name}, photo ${shown + 1}`} className="h-full w-full object-cover" />
         {count > 1 && (
           <>
@@ -169,6 +177,7 @@ export default function Profile() {
   const age = displayAge(p)
   const gender = profileGenderLabel(p)
   const isFounder = (p as Record<string, unknown>).isFounder === true
+  const tier = (p as Record<string, unknown>).zyloveScoreTier
   const bodyType = p.bodyType && p.bodyType !== 'prefer_not_to_say' ? bodyTypeLabel(p.bodyType) : null
   const weekend = list(p.weekendVibes).length > 0 ? list(p.weekendVibes) : list([p.weekendVibe])
   const kids = kidsDetail(p)
@@ -181,7 +190,7 @@ export default function Profile() {
   return (
     <div className={page}>
       <div className="mx-auto max-w-xl space-y-8 px-4 pt-6 pb-8">
-        <PhotoHero photos={list(p.photoURLs)} name={name} />
+        <PhotoHero photos={list(p.photoURLs)} name={name} glow={badgeTier(tier)} />
 
         <header>
           <div className="flex flex-wrap items-baseline gap-x-2">
@@ -192,6 +201,11 @@ export default function Profile() {
             {gender && <span className="text-white/60">· {gender}</span>}
             {p.pronouns && <span className="text-sm text-white/40">{p.pronouns}</span>}
           </div>
+          {badgeTier(tier) && (
+            <div className="mt-2 [&>span]:px-3 [&>span]:py-1 [&>span]:text-sm">
+              <TierBadge tier={tier} />
+            </div>
+          )}
           {isFounder && (
             <span className="mt-2 inline-block rounded-full border border-[#1B4FD8]/40 bg-[#1B4FD8]/15 px-3 py-1 text-xs font-semibold text-[#B4C6FF]">
               ✦ Austin Founding Circle

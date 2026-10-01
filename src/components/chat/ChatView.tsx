@@ -5,10 +5,11 @@ import { getPrivateKey, keysReady, subscribePublicKey } from '../../services/key
 import { markMatchRead, type MatchEntry } from '../../services/matches'
 import { markVibeCheckFired, shouldTriggerVibeCheck } from '../../services/vibeCheck'
 import {
-  REVIEW_MIN_MESSAGES,
-  conversationEnded,
-  markReviewPromptShown,
-  reviewPromptShown,
+  coldReviewShown,
+  conversationCold,
+  isBotUid,
+  markColdReviewShown,
+  reviewed,
 } from '../../services/zyloveScore'
 import ConversationNudge from './ConversationNudge'
 import FirstChatModal from './FirstChatModal'
@@ -53,8 +54,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   // Fires at most once per open, like mobile's session gate.
   const vibeCheckFired = useRef(false)
   const vibeCheckTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  // 'back' = opened by the back button; closing it then leaves the chat.
-  const [review, setReview] = useState<'open' | 'back' | null>(null)
+  const [showReview, setShowReview] = useState(false)
   const reviewChecked = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -148,35 +148,18 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
 
   useEffect(() => () => clearTimeout(vibeCheckTimer.current), [])
 
-  // Review prompt: once per match, after a long conversation (never for bots).
-  // Shown when leaving via back, or on opening a chat that has gone quiet.
-  const reviewEligible =
-    conversation.length >= REVIEW_MIN_MESSAGES && !partnerUid.startsWith('zbot-') && !reviewPromptShown(matchId)
-
+  // Review prompt, "gone cold" trigger: once per match, on opening a chat
+  // that's been quiet 30+ days after 10+ messages. Never while a conversation
+  // is active; ended matches are handled app-wide by ReviewPrompter.
   useEffect(() => {
     if (reviewChecked.current || messages === null || showFirstChat) return
     reviewChecked.current = true
     // Never stack on a vibe check fired by this open.
-    if (!reviewEligible || vibeCheckFired.current) return
-    if (!conversationEnded(conversation[conversation.length - 1]?.sentAt ?? null)) return
-    markReviewPromptShown(matchId)
-    setReview('open')
-  }, [messages, showFirstChat, reviewEligible, conversation, matchId])
-
-  function handleBack() {
-    if (reviewEligible && review === null && !showVibeCheck) {
-      markReviewPromptShown(matchId)
-      setReview('back')
-      return
-    }
-    onBack?.()
-  }
-
-  function closeReview() {
-    const leaving = review === 'back'
-    setReview(null)
-    if (leaving) onBack?.()
-  }
+    if (vibeCheckFired.current || isBotUid(partnerUid) || reviewed(matchId) || coldReviewShown(matchId)) return
+    if (!conversationCold(conversation[conversation.length - 1]?.sentAt ?? null, conversation.length)) return
+    markColdReviewShown(matchId)
+    setShowReview(true)
+  }, [messages, showFirstChat, conversation, partnerUid, matchId])
 
   const trimmed = text.trim()
   const ownBubble = match.mode === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
@@ -216,7 +199,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     <div className="fixed inset-0 z-50 flex h-[100dvh] flex-col overscroll-none bg-gray-950 text-white lg:static lg:z-auto lg:h-full">
       <header className="flex shrink-0 items-center gap-3 border-b border-white/10 px-4 py-3 lg:px-6">
         {onBack && (
-          <button type="button" onClick={handleBack} className="text-xl text-white/60 hover:text-white lg:hidden" aria-label="Back">
+          <button type="button" onClick={onBack} className="text-xl text-white/60 hover:text-white lg:hidden" aria-label="Back">
             ←
           </button>
         )}
@@ -279,7 +262,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           matchId={matchId}
           partnerUid={partnerUid}
           messages={conversation}
-          suppressed={showFirstChat || showVibeCheck || review !== null}
+          suppressed={showFirstChat || showVibeCheck || showReview}
           onPick={setText}
         />
         {sendError && <p className="mb-2 text-center text-sm text-red-400">{sendError}</p>}
@@ -320,8 +303,8 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
         />
       )}
 
-      {review !== null && (
-        <ReviewModal matchId={matchId} partnerUid={partnerUid} name={match.name} onClose={closeReview} />
+      {showReview && (
+        <ReviewModal matchId={matchId} partnerUid={partnerUid} name={match.name} onClose={() => setShowReview(false)} />
       )}
     </div>
   )
