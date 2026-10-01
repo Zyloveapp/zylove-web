@@ -140,13 +140,52 @@ export interface OnLikeResponse {
 // Category scores are 0–100. Spark: coreFit, valuesIntentions, physicalPrefs,
 // loveLanguages, lifestyle, personality. Play: nonNegotiables,
 // physicalCompatibility, energyVibe, intentionsLimits.
+// Tier 1 facet scoring (Spark only — onTap returns the pair's tier1Spark).
+export interface ArchetypeMatch {
+  id: string
+  label: string
+  copy: string
+  confidence: number // 0–1; the server only emits matches at ≥ 0.7
+}
+
+export interface Tier1Result {
+  archetype: ArchetypeMatch | null
+  combinedScore: number | null // can exceed 100 from bonus stacking
+  asymmetryGap: number | null // |A→B − B→A| in score points
+  dataConfidence: number | null
+}
+
 export interface CompatibilityResult {
   pairId: string
   sparkScore?: number
   playScore?: number
   breakdown?: { spark?: Record<string, number>; play?: Record<string, number> }
   triggeredDealbreakers?: string[]
-  tier1?: unknown
+  tier1?: Tier1Result | null
+}
+
+function num(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+function parseArchetype(v: unknown): ArchetypeMatch | null {
+  if (typeof v !== 'object' || v === null) return null
+  const a = v as Record<string, unknown>
+  if (typeof a.id !== 'string' || typeof a.label !== 'string') return null
+  return { id: a.id, label: a.label, copy: typeof a.copy === 'string' ? a.copy : '', confidence: num(a.confidence) ?? 0 }
+}
+
+// tier1 is server-computed and fail-open (null when scoring it failed), so
+// it's validated field by field rather than trusted as typed.
+function parseTier1(v: unknown): Tier1Result | null {
+  if (typeof v !== 'object' || v === null) return null
+  const t = v as Record<string, unknown>
+  return {
+    archetype: parseArchetype(t.archetype),
+    combinedScore: num(t.combinedScore),
+    asymmetryGap: num(t.asymmetryGap),
+    dataConfidence: num(t.dataConfidence),
+  }
 }
 
 // In-flight/completed onTap calls for this session, so the background
@@ -157,9 +196,10 @@ const compatibilityRequests = new Map<string, Promise<CompatibilityResult>>()
 export function fetchCompatibility(targetUid: string): Promise<CompatibilityResult> {
   let request = compatibilityRequests.get(targetUid)
   if (!request) {
-    request = httpsCallable<{ tappedUserId: string }, CompatibilityResult>(functions, 'onTap')({
-      tappedUserId: targetUid,
-    }).then(({ data }) => data)
+    request = httpsCallable<{ tappedUserId: string }, Omit<CompatibilityResult, 'tier1'> & { tier1?: unknown }>(
+      functions,
+      'onTap',
+    )({ tappedUserId: targetUid }).then(({ data }) => ({ ...data, tier1: parseTier1(data.tier1) }))
     // Forget failures so the next call retries.
     request.catch(() => compatibilityRequests.delete(targetUid))
     compatibilityRequests.set(targetUid, request)

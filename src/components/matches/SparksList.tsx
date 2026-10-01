@@ -33,7 +33,10 @@ export default function SparksList({ sparks, matchedUids, onSelect }: SparksList
         const revealed = matched || s.isBot
         const photo = s.profile.photoURLs?.[0]
         const age = displayAge(s.profile)
-        const subtitle = matched ? "You're matched" : 'Tap to see their profile'
+        const reportReady = 'Your compatibility report is ready ✦'
+        // Unrevealed, non-weekly cards already use that line as their title.
+        const titleIsReport = !revealed && !s.isWeeklySpark
+        const subtitle = matched ? "You're matched" : titleIsReport ? null : reportReady
         return (
           <li key={s.likerUid}>
             <button
@@ -57,13 +60,13 @@ export default function SparksList({ sparks, matchedUids, onSelect }: SparksList
                     ) : s.isWeeklySpark ? (
                       <span className="text-[#F59E0B]">✦ Weekly Spark</span>
                     ) : (
-                      'Your compatibility report is ready ✦'
+                      reportReady
                     )}
                   </span>
                   {s.likedAt > 0 && <span className="shrink-0 text-xs text-white/35">{relativeTime(s.likedAt)}</span>}
                 </span>
                 {revealed && s.isWeeklySpark && <span className="block text-xs text-[#F59E0B]">✦ Weekly Spark</span>}
-                <span className="block truncate text-sm text-white/40">{subtitle}</span>
+                {subtitle && <span className="block truncate text-sm text-white/40">{subtitle}</span>}
                 {s.expiresAt !== null && <span className="block text-xs text-amber-400">{expiresIn(s.expiresAt)}</span>}
               </span>
               {s.compatibilityScore !== null && (

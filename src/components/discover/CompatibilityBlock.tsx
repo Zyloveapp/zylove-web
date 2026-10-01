@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchCompatibility, type CompatibilityResult, type DiscoverProfile } from '../../services/discover'
+import { DEALBREAKER_LABELS, type Dealbreaker } from '../../types/profile'
 import type { Mode } from '../../store/modeStore'
 import { discoverTheme } from './theme'
 
@@ -36,6 +37,42 @@ function insightFor(value: number): string {
   if (value >= 80) return 'High compatibility'
   if (value >= 70) return 'Good match'
   return 'Moderate'
+}
+
+// Category-specific wording for "Why you match"; anything not listed falls
+// back to the generic level words.
+function categoryInsight(key: string, value: number, asymmetryGap: number | null): string {
+  switch (key) {
+    case 'valuesIntentions':
+      return `${insightFor(value)} · You both value connection`
+    case 'coreFit':
+      if (asymmetryGap !== null && asymmetryGap < 10) return 'Well balanced'
+      if (asymmetryGap !== null && asymmetryGap <= 20) return 'Complementary'
+      return insightFor(value)
+    case 'loveLanguages':
+      return value > 70 ? 'You give what they need' : 'Different styles'
+    default:
+      return insightFor(value)
+  }
+}
+
+// Mobile's score scale (green / cobalt / amber / red).
+function scoreColor(score: number): string {
+  if (score >= 80) return 'text-green-400'
+  if (score >= 60) return 'text-[#1B4FD8]'
+  if (score >= 40) return 'text-amber-400'
+  return 'text-red-400'
+}
+
+function scoreQualifier(score: number): string | null {
+  if (score >= 80) return 'Strong match'
+  if (score >= 60) return 'Good potential'
+  if (score >= 40) return 'Worth exploring'
+  return null
+}
+
+function dealbreakerLabel(id: string): string {
+  return id in DEALBREAKER_LABELS ? DEALBREAKER_LABELS[id as Dealbreaker] : id.replace(/_/g, ' ')
 }
 
 // Categories scored from data the viewed profile may not have filled in.
@@ -161,13 +198,35 @@ function RevealedScore({
     .filter(hasValue)
     .filter((c) => c.value > INSIGHT_THRESHOLD)
   const dealbreakers = result.triggeredDealbreakers ?? []
+  // tier1 is computed from Spark data only, so it never shows in Play mode.
+  const tier1 = mode === 'spark' ? (result.tier1 ?? null) : null
+  const archetype = tier1?.archetype && tier1.archetype.confidence > 0.4 ? tier1.archetype : null
+  const deepFit =
+    tier1 && tier1.combinedScore !== null && (tier1.dataConfidence ?? 0) > 0
+      ? Math.min(100, Math.round(tier1.combinedScore))
+      : null
+  const rounded = Math.round(score)
+  const qualifier = scoreQualifier(rounded)
 
   return (
     <div
       className={`mt-4 transition-all duration-500 ${visible ? 'translate-y-0 opacity-100 blur-0' : 'translate-y-1 opacity-0 blur-sm'}`}
     >
-      <p className={`text-5xl font-bold ${theme.scoreText}`}>{Math.round(score)}%</p>
-      <p className="mt-1 text-xs uppercase tracking-widest text-white/30">Zylove Score</p>
+      {archetype && (
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/5 p-4">
+          <p className="text-sm font-semibold text-[#1B4FD8]">✦ {archetype.label}</p>
+          {archetype.copy && <p className="mt-1 text-sm text-white/60">{archetype.copy}</p>}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <p className={`text-5xl font-bold ${scoreColor(rounded)}`}>{rounded}%</p>
+        {deepFit !== null && (
+          <span className="rounded-full bg-[#1B4FD8]/20 px-3 py-1 text-xs text-[#1B4FD8]">✦ Deep Fit {deepFit}%</span>
+        )}
+      </div>
+      <p className="mt-1 text-xs uppercase tracking-widest text-white/30">{mode === 'play' ? 'Play Odds' : 'Spark Odds'}</p>
+      {qualifier && <p className="mt-0.5 text-xs text-white/50">{qualifier}</p>}
 
       {bars.length > 0 && (
         <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
@@ -193,7 +252,7 @@ function RevealedScore({
               <li key={c.key} className="text-sm">
                 <span className="text-white/55">{c.label}</span>
                 <span className="mx-2 text-white/20">·</span>
-                <span className="text-white/80">{insightFor(c.value)}</span>
+                <span className="text-white/80">{categoryInsight(c.key, c.value, tier1?.asymmetryGap ?? null)}</span>
               </li>
             ))}
           </ul>
@@ -202,8 +261,9 @@ function RevealedScore({
 
       {dealbreakers.length > 0 && (
         <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3">
-          <p className="text-sm text-amber-400">⚠ Some dealbreakers flagged</p>
-          <p className="mt-1 text-xs text-amber-400/60">Consider reviewing their profile carefully</p>
+          <p className="text-sm text-amber-400">
+            You flagged a dealbreaker — {dealbreakerLabel(dealbreakers[0])} — this is your call to make.
+          </p>
         </div>
       )}
     </div>
