@@ -4,8 +4,8 @@ import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import SparkleIcon from './icons/SparkleIcon'
 
-// Heights reserved by the bars: desktop top bar h-14, mobile bottom bar h-16.
-// Pages use h-[calc(100dvh-4rem)] lg:h-[calc(100dvh-3.5rem)] to fit between them.
+// Heights reserved by the bars: Header h-12 on top, this bar h-16 at the
+// bottom. Pages use h-[calc(100dvh-7rem)] to fit between them.
 
 function CompassIcon() {
   return (
@@ -43,45 +43,23 @@ const LINKS: { to: string; label: string; icon: ReactNode }[] = [
   { to: '/profile', label: 'Profile', icon: <PersonIcon /> },
 ]
 
+// Bottom tab bar on every screen size; the top of the page belongs to Header.
 export default function Nav() {
   const user = useAuthStore((s) => s.user)
   const mode = useModeStore((s) => s.mode)
   if (!user) return null
+  const activeColor = mode === 'play' ? 'text-[#E03131]' : 'text-[#1B4FD8]'
 
   return (
-    <>
-      {/* Desktop: top bar */}
-      <header className="sticky top-0 z-40 hidden h-14 border-b border-white/10 bg-gray-950 lg:block">
-        <div className="relative flex h-full items-center justify-between px-6">
-          <span className="font-semibold text-white">✦ Zylove</span>
-          <nav className="absolute left-1/2 flex -translate-x-1/2 gap-8">
-            {LINKS.map((l) => (
-              <NavLink
-                key={l.to}
-                to={l.to}
-                className={({ isActive }) =>
-                  `text-sm font-medium transition-colors ${isActive ? 'text-white' : 'text-white/40 hover:text-white/70'}`
-                }
-              >
-                {l.label}
-              </NavLink>
-            ))}
-          </nav>
-          <span className="rounded-full bg-white/10 px-3 py-1 text-sm text-white">
-            {mode === 'play' ? '🔴 Play' : '🔵 Spark'}
-          </span>
-        </div>
-      </header>
-
-      {/* Mobile: bottom bar */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 flex h-16 border-t border-white/10 bg-gray-950 lg:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-40 h-16 border-t border-white/10 bg-gray-950">
+      <div className="mx-auto flex h-full max-w-xl">
         {LINKS.map((l) => (
           <NavLink
             key={l.to}
             to={l.to}
             className={({ isActive }) =>
-              `flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${
-                isActive ? 'text-[#1B4FD8]' : 'text-white/40'
+              `flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors ${
+                isActive ? activeColor : 'text-white/40 hover:text-white/70'
               }`
             }
           >
@@ -89,7 +67,7 @@ export default function Nav() {
             {l.label}
           </NavLink>
         ))}
-      </nav>
-    </>
+      </div>
+    </nav>
   )
 }

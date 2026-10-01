@@ -196,7 +196,7 @@ export default function EditProfile() {
     }
   }
 
-  const page = 'min-h-[calc(100dvh-4rem)] bg-gray-950 text-white lg:min-h-[calc(100dvh-3.5rem)]'
+  const page = 'min-h-[calc(100dvh-7rem)] bg-gray-950 text-white'
 
   if (loadError) {
     return (
@@ -402,7 +402,7 @@ export default function EditProfile() {
       </div>
 
       {/* Sits above the mobile bottom nav (h-16); flush on desktop. */}
-      <div className="sticky bottom-16 border-t border-white/10 bg-gray-950 px-4 py-3 lg:bottom-0">
+      <div className="sticky bottom-16 border-t border-white/10 bg-gray-950 px-4 py-3">
         <div className="mx-auto max-w-xl">
           {saveState === 'saved' && (
             <p className="mb-2 text-center text-sm text-emerald-400">Saved ✦ — Your Spark profile has been updated.</p>

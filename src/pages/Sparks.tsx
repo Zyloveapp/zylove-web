@@ -54,7 +54,7 @@ export default function Sparks() {
   const loaded = state?.key === key ? state : null
 
   return (
-    <div className="flex h-[calc(100dvh-4rem)] lg:h-[calc(100dvh-3.5rem)] bg-gray-950 text-white">
+    <div className="flex h-[calc(100dvh-7rem)] bg-gray-950 text-white">
       <aside className="flex w-full shrink-0 flex-col border-white/10 lg:w-80 lg:border-r">
         <h1 className="px-4 py-5 text-xl font-bold text-white">Sparks ✦</h1>
         <div className="flex-1 overflow-y-auto">

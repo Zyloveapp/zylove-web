@@ -167,7 +167,7 @@ export default function Profile() {
     }
   }, [uid])
 
-  const page = 'min-h-[calc(100dvh-4rem)] bg-gray-950 text-white lg:min-h-[calc(100dvh-3.5rem)]'
+  const page = 'min-h-[calc(100dvh-7rem)] bg-gray-950 text-white'
 
   if (loaded?.uid !== uid) {
     return (
@@ -335,7 +335,7 @@ export default function Profile() {
       </div>
 
       {/* Sits above the mobile bottom nav (h-16); flush on desktop. */}
-      <div className="sticky bottom-16 border-t border-white/10 bg-gray-950 px-4 py-3 lg:bottom-0">
+      <div className="sticky bottom-16 border-t border-white/10 bg-gray-950 px-4 py-3">
         <div className="mx-auto grid max-w-xl grid-cols-3 gap-2 text-sm leading-tight">
           <Link
             to="/profile/edit"

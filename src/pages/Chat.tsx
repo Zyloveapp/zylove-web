@@ -25,7 +25,7 @@ export default function Chat() {
     )
   }, [uid, matchId])
 
-  const container = 'h-[calc(100dvh-4rem)] lg:h-[calc(100dvh-3.5rem)] bg-gray-950'
+  const container = 'h-[calc(100dvh-7rem)] bg-gray-950'
 
   if (loaded?.matchId !== matchId) {
     return (

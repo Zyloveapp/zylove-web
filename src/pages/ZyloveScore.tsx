@@ -81,7 +81,7 @@ export default function ZyloveScore() {
     )
   }, [uid])
 
-  const page = 'min-h-[calc(100dvh-4rem)] bg-gray-950 text-white lg:min-h-[calc(100dvh-3.5rem)]'
+  const page = 'min-h-[calc(100dvh-7rem)] bg-gray-950 text-white'
 
   if (loaded?.uid !== uid) {
     return (

@@ -104,7 +104,7 @@ export default function Discover() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[calc(100dvh-4rem)] lg:min-h-[calc(100dvh-3.5rem)] items-center justify-center bg-gray-950">
+      <div className="flex min-h-[calc(100dvh-7rem)] items-center justify-center bg-gray-950">
         <Spinner />
       </div>
     )
@@ -112,7 +112,7 @@ export default function Discover() {
 
   if (queue.error) {
     return (
-      <div className="flex min-h-[calc(100dvh-4rem)] lg:min-h-[calc(100dvh-3.5rem)] flex-col items-center justify-center gap-3 bg-gray-950 text-white">
+      <div className="flex min-h-[calc(100dvh-7rem)] flex-col items-center justify-center gap-3 bg-gray-950 text-white">
         <p className="text-white/70">Couldn't load profiles</p>
         <button
           type="button"
@@ -130,7 +130,7 @@ export default function Discover() {
 
   if (!current) {
     return (
-      <div className="flex min-h-[calc(100dvh-4rem)] lg:min-h-[calc(100dvh-3.5rem)] flex-col items-center justify-center bg-gray-950 px-6 text-center text-white">
+      <div className="flex min-h-[calc(100dvh-7rem)] flex-col items-center justify-center bg-gray-950 px-6 text-center text-white">
         <span className="mb-6 text-6xl text-[#1B4FD8]">✦</span>
         <h1 className="text-2xl font-semibold">You've seen everyone for now</h1>
         <p className="mt-3 text-white/50">New profiles appear as people join. Check back soon.</p>
@@ -142,8 +142,8 @@ export default function Discover() {
   const actions = <DiscoverActions mode={mode} busy={busy} error={actionError} onAction={handleAction} />
 
   return (
-    <div className="min-h-[calc(100dvh-4rem)] lg:min-h-[calc(100dvh-3.5rem)] bg-gray-950 text-white lg:flex">
-      <aside className="flex flex-col p-6 lg:sticky lg:top-14 lg:h-[calc(100dvh-3.5rem)] lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:py-10">
+    <div className="min-h-[calc(100dvh-7rem)] bg-gray-950 text-white lg:flex">
+      <aside className="flex flex-col p-6 lg:sticky lg:top-12 lg:h-[calc(100dvh-7rem)] lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:py-10">
         <PhotoGallery key={current.uid} photos={current.photoURLs ?? []} name={name} />
         <div className="mt-8 hidden lg:block">{actions}</div>
       </aside>

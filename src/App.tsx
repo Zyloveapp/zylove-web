@@ -1,6 +1,7 @@
 import { BrowserRouter, Outlet, Routes, Route } from 'react-router-dom'
 import AuthGuard from './components/AuthGuard'
 import PauseGuard from './components/PauseGuard'
+import Header from './components/Header'
 import Nav from './components/Nav'
 import ReviewPrompter from './components/ReviewPrompter'
 import Home from './pages/Home'
@@ -13,14 +14,16 @@ import Profile from './pages/Profile'
 import EditProfile from './pages/EditProfile'
 import GoDeeper from './pages/GoDeeper'
 import ZyloveScore from './pages/ZyloveScore'
+import Settings from './pages/Settings'
 import Chat from './pages/Chat'
 
 // Protected pages share the nav. Leaves room for the mobile bottom bar.
 function AppLayout() {
   return (
     <div className="min-h-screen bg-gray-950">
+      <Header />
       <Nav />
-      <div className="pb-16 lg:pb-0">
+      <div className="pb-16">
         <Outlet />
       </div>
       <ReviewPrompter />
@@ -45,6 +48,7 @@ export default function App() {
               <Route path="/profile/edit" element={<EditProfile />} />
               <Route path="/profile/go-deeper" element={<GoDeeper />} />
               <Route path="/zylove-score" element={<ZyloveScore />} />
+              <Route path="/settings" element={<Settings />} />
               <Route path="/chat/:matchId" element={<Chat />} />
             </Route>
           </Route>

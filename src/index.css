@@ -59,6 +59,26 @@ body {
   animation: zy-shimmer 3s linear infinite;
 }
 
+/* Wrong PIN. */
+@keyframes zy-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-10px); }
+  40%, 80% { transform: translateX(10px); }
+}
+.zy-shake { animation: zy-shake 400ms ease-in-out; }
+
+/* Header: visibility sheet drop-down, and the Play pill's soft red pulse. */
+@keyframes zy-drop {
+  from { transform: translateY(-8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.zy-drop { animation: zy-drop 160ms ease-out both; }
+@keyframes zy-play-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(224, 49, 49, 0); }
+  50% { box-shadow: 0 0 10px 2px rgba(224, 49, 49, 0.35); }
+}
+.zy-play-pulse { animation: zy-play-pulse 2.4s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
   .zy-slide-from-left,
   .zy-slide-from-right,
@@ -66,7 +86,10 @@ body {
   .zy-pulse,
   .zy-glow,
   .zy-float,
-  .zy-shimmer {
+  .zy-shimmer,
+  .zy-shake,
+  .zy-drop,
+  .zy-play-pulse {
     animation: none;
   }
   .zy-glow { box-shadow: 0 0 0 4px #1B4FD8; }
