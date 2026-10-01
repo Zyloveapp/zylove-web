@@ -32,7 +32,6 @@ export default function SparkProfileView({ uid, spark, matched, onClose, onMatch
 
   const profile = loaded?.likerUid === spark.likerUid ? loaded.profile : spark.profile
   const photo = profile.photoURLs?.[0]
-  const revealed = matched || spark.isBot
 
   async function handleMatch() {
     if (busy) return
@@ -67,27 +66,16 @@ export default function SparkProfileView({ uid, spark, matched, onClose, onMatch
           ← Back
         </button>
         <span className={`text-sm ${spark.isWeeklySpark ? 'text-[#F59E0B]' : 'text-white/40'}`}>
-          {spark.isWeeklySpark ? '✦ Weekly Spark' : 'Someone likes you ✦'}
+          {spark.isWeeklySpark ? '✦ Weekly Spark' : 'Your compatibility report is ready ✦'}
         </span>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-6 py-8">
           <div className="relative mb-8 aspect-[4/5] w-full max-w-sm overflow-hidden rounded-2xl bg-gradient-to-br from-[#1B4FD8]/60 to-white/10">
-            {photo && (
-              <img
-                src={photo}
-                alt=""
-                className={`h-full w-full object-cover ${revealed ? '' : 'scale-110 blur-2xl'}`}
-              />
-            )}
-            {!revealed && (
-              <span className="absolute inset-0 flex items-center justify-center text-sm text-white/70">
-                Photos unlock when you match
-              </span>
-            )}
+            {photo && <img src={photo} alt="" className="h-full w-full object-cover" />}
           </div>
-          <ProfileDetails profile={profile} mode={spark.mode} />
+          <ProfileDetails profile={profile} mode={spark.mode} autoRevealScore />
         </div>
       </div>
 
@@ -101,7 +89,7 @@ export default function SparkProfileView({ uid, spark, matched, onClose, onMatch
               disabled={busy}
               className="w-full rounded-xl bg-[#1B4FD8] px-5 py-3 font-semibold text-white transition-opacity disabled:opacity-50"
             >
-              ✦ It's a match
+              ✦ It's a Spark
             </button>
             <button
               type="button"

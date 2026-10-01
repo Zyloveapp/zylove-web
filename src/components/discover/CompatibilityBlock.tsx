@@ -58,13 +58,27 @@ const revealedScores = new Map<string, CompatibilityResult>()
 
 type Status = 'hidden' | 'loading' | 'revealed' | 'error'
 
-export default function CompatibilityBlock({ profile, mode }: { profile: DiscoverProfile; mode: Mode }) {
+export default function CompatibilityBlock({
+  profile,
+  mode,
+  autoReveal = false,
+}: {
+  profile: DiscoverProfile
+  mode: Mode
+  // Sparks: the score was already earned, so it loads and shows without a click.
+  autoReveal?: boolean
+}) {
   const targetUid = profile.uid
   const cached = revealedScores.get(targetUid)
-  const [status, setStatus] = useState<Status>(cached ? 'revealed' : 'hidden')
+  const [status, setStatus] = useState<Status>(cached ? 'revealed' : autoReveal ? 'loading' : 'hidden')
   const [result, setResult] = useState<CompatibilityResult | null>(cached ?? null)
 
-  // onTap runs only here, on an explicit click — never on mount.
+  useEffect(() => {
+    if (autoReveal && !revealedScores.has(targetUid)) void reveal()
+    // reveal only reads targetUid, so this runs once per profile.
+  }, [autoReveal, targetUid])
+
+  // In Discover the score stays hidden until the user clicks to reveal it.
   async function reveal() {
     setStatus('loading')
     try {
@@ -102,7 +116,11 @@ export default function CompatibilityBlock({ profile, mode }: { profile: Discove
         </div>
       </div>
       <p className="mt-2 max-w-xs text-center text-xs text-white/30">
-        {status === 'error' ? "Couldn't load your score." : 'See how compatible you really are'}
+        {status === 'error'
+          ? "Couldn't load your score."
+          : status === 'loading' && autoReveal
+            ? 'Loading your compatibility…'
+            : 'See how compatible you really are'}
       </p>
     </div>
   )

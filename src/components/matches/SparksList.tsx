@@ -29,7 +29,7 @@ export default function SparksList({ sparks, matchedUids, onSelect }: SparksList
     <ul>
       {sparks.map((s) => {
         const matched = matchedUids.has(s.likerUid)
-        // Matched people and bots (house profiles) are shown unblurred.
+        // Name and age show for matched people and bots; photos are always clear.
         const revealed = matched || s.isBot
         const photo = s.profile.photoURLs?.[0]
         const age = displayAge(s.profile)
@@ -43,11 +43,7 @@ export default function SparksList({ sparks, matchedUids, onSelect }: SparksList
             >
               <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-[#1B4FD8]/60 to-white/10">
                 {photo && (
-                  <img
-                    src={photo}
-                    alt=""
-                    className={`h-full w-full object-cover ${revealed ? '' : 'scale-125 blur-md'}`}
-                  />
+                  <img src={photo} alt="" className="h-full w-full object-cover" />
                 )}
               </span>
               <span className="min-w-0 flex-1">
@@ -61,7 +57,7 @@ export default function SparksList({ sparks, matchedUids, onSelect }: SparksList
                     ) : s.isWeeklySpark ? (
                       <span className="text-[#F59E0B]">✦ Weekly Spark</span>
                     ) : (
-                      'Someone likes you ✦'
+                      'Your compatibility report is ready ✦'
                     )}
                   </span>
                   {s.likedAt > 0 && <span className="shrink-0 text-xs text-white/35">{relativeTime(s.likedAt)}</span>}

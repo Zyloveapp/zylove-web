@@ -33,7 +33,15 @@ function Pills({ items, icon }: { items: string[]; icon?: string }) {
   )
 }
 
-export default function ProfileDetails({ profile, mode }: { profile: DiscoverProfile; mode: Mode }) {
+export default function ProfileDetails({
+  profile,
+  mode,
+  autoRevealScore = false,
+}: {
+  profile: DiscoverProfile
+  mode: Mode
+  autoRevealScore?: boolean
+}) {
   const age = displayAge(profile)
   const bio = profile.bio?.trim()
   const prompts = (profile.promptAnswers ?? []).filter((p) => p.answer?.trim())
@@ -58,7 +66,7 @@ export default function ProfileDetails({ profile, mode }: { profile: DiscoverPro
           </span>
         </div>
         {profile.locationLabel && <p className="mt-1 text-sm text-white/40">{profile.locationLabel}</p>}
-        <CompatibilityBlock key={profile.uid} profile={profile} mode={mode} />
+        <CompatibilityBlock key={profile.uid} profile={profile} mode={mode} autoReveal={autoRevealScore} />
       </header>
 
       {bio && (
