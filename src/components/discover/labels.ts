@@ -16,6 +16,7 @@ import {
   RELATIONSHIP_STATUS_LABELS,
   RELATIONSHIP_VALUE_LABELS,
   RELIGION_LABELS,
+  SEEKING_TRAIT_LABELS,
   SPARK_PROMPTS as LEGACY_SPARK_PROMPTS,
   STRESS_RESPONSE_LABELS,
   TOGETHERNESS_STYLE_LABELS,
@@ -49,6 +50,7 @@ export const loveLanguageLabel = (k: string) => labelOf(LOVE_LANGUAGE_LABELS, k)
 
 export const openToLabel = (k: string) => labelOf(OPEN_TO_LABELS, k)
 export const dealbreakerLabel = (k: string) => labelOf(DEALBREAKER_LABELS, k)
+export const seekingTraitLabel = (k: string) => labelOf(SEEKING_TRAIT_LABELS, k)
 export const genderLabel = (k: string) => labelOf(GENDER_LABELS, k)
 // genderIdentity is a string from Spark onboarding, an array from Play.
 export function profileGenderLabel(p: DiscoverProfile): string | null {

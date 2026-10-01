@@ -1,15 +1,16 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { displayAge } from '../services/discover'
 import { loadOwnProfile, profileCompleteness, type OwnProfile } from '../services/profile'
 import { cmToFeetInches } from '../types/profile'
 import VisibilityControl from '../components/profile/VisibilityControl'
+import HowIOperate from '../components/profile/HowIOperate'
+import { goDeeperAnswers } from '../components/profile/goDeeper'
 import TierBadge, { badgeTier, type BadgeTier } from '../components/TierBadge'
 import {
   bodyTypeLabel,
   dealbreakerLabel,
-  goDeeperRows,
   habitLabel,
   kidsDetail,
   lifestyleLabel,
@@ -19,6 +20,7 @@ import {
   profileGenderLabel,
   promptQuestion,
   relationshipStatusLabel,
+  seekingTraitLabel,
   valueLabel,
   weekendLabel,
 } from '../components/discover/labels'
@@ -140,6 +142,14 @@ type Loaded = { uid: string; data: OwnProfile | null }
 export default function Profile() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const [loaded, setLoaded] = useState<Loaded | null>(null)
+  // e.g. "✦ Profile refreshed." after Reimagine my profile. Read once, then
+  // cleared from history so a reload doesn't show it again.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [flash] = useState<unknown>(() => (location.state as { flash?: unknown } | null)?.flash)
+  useEffect(() => {
+    if (flash) navigate(location.pathname, { replace: true, state: null })
+  }, [flash, navigate, location.pathname])
 
   useEffect(() => {
     if (!uid) return
@@ -183,13 +193,17 @@ export default function Profile() {
   const kids = kidsDetail(p)
   const status =
     p.relationshipStatus && p.relationshipStatus !== 'prefer_not_to_say' ? relationshipStatusLabel(p.relationshipStatus) : null
-  const deeper = goDeeperRows(p)
   const loveGive = list(p.loveLangGive).map(loveLanguageLabel)
   const loveReceive = list(p.loveLangReceive).map(loveLanguageLabel)
 
   return (
     <div className={page}>
       <div className="mx-auto max-w-xl space-y-8 px-4 pt-6 pb-8">
+        {typeof flash === 'string' && (
+          <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center text-sm text-emerald-300">
+            {flash}
+          </p>
+        )}
         <PhotoHero photos={list(p.photoURLs)} name={name} glow={badgeTier(tier)} />
 
         <header>
@@ -225,6 +239,8 @@ export default function Profile() {
           </section>
         )}
 
+        <HowIOperate answers={goDeeperAnswers(p)} />
+
         {list(p.openTo).length > 0 && <Pills items={list(p.openTo).map(openToLabel)} tone="cobalt" />}
 
         <TagSection title="Personality" items={list(p.personalityTraits).map(personalityLabel)} />
@@ -253,10 +269,25 @@ export default function Profile() {
           </section>
         )}
 
-        {own.dealbreakers.length > 0 && (
+        {(own.seekingTraits.length > 0 || own.dealbreakers.length > 0) && (
           <section>
             <SectionHeading>What I'm looking for</SectionHeading>
-            <Pills items={own.dealbreakers.map((d) => `🚫 ${dealbreakerLabel(d)}`)} tone="red" />
+            {own.seekingTraits.length > 0 && (
+              <>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/40">Looking for</p>
+                <Pills items={own.seekingTraits.map(seekingTraitLabel)} tone="cobalt" />
+              </>
+            )}
+            {own.dealbreakers.length > 0 && (
+              <>
+                <p
+                  className={`mb-2 text-xs font-semibold uppercase tracking-widest text-white/40 ${own.seekingTraits.length > 0 ? 'mt-4' : ''}`}
+                >
+                  Deal breakers
+                </p>
+                <Pills items={own.dealbreakers.map((d) => `🚫 ${dealbreakerLabel(d)}`)} tone="red" />
+              </>
+            )}
             <p className="mt-2 text-xs text-white/30">Only you can see this.</p>
           </section>
         )}
@@ -287,21 +318,6 @@ export default function Profile() {
                 <p className="mt-2 text-lg text-white">{q.answer}</p>
               </div>
             ))}
-          </section>
-        )}
-
-        {deeper.length > 0 && (
-          <section>
-            <SectionHeading>How they operate</SectionHeading>
-            <ul className="flex flex-col gap-y-2 text-sm">
-              {deeper.map((r) => (
-                <li key={r.label}>
-                  <span className="text-white/40">{r.label}</span>
-                  <span className="mx-2 text-white/20">·</span>
-                  <span className="text-white">{r.value}</span>
-                </li>
-              ))}
-            </ul>
           </section>
         )}
 

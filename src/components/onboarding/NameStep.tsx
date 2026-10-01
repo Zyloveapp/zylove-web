@@ -4,6 +4,8 @@ import { StepHeader, StyledSelect } from './ui'
 interface NameStepProps {
   displayName: string
   birthdayRaw: string
+  // Profile refresh after identity lock: shown, not editable.
+  birthdayLocked?: boolean
   onChange: (patch: { displayName?: string; birthdayRaw?: string }) => void
 }
 
@@ -33,14 +35,14 @@ function splitBirthday(raw: string): [string, string, string] {
   return [m.length === 2 ? m : '', d.length === 2 ? d : '', y.length === 4 ? y : '']
 }
 
-export default function NameStep({ displayName, birthdayRaw, onChange }: NameStepProps) {
+export default function NameStep({ displayName, birthdayRaw, birthdayLocked = false, onChange }: NameStepProps) {
   const [month, day, year] = splitBirthday(birthdayRaw)
   const setPart = (patch: { month?: string; day?: string; year?: string }) =>
     onChange({ birthdayRaw: `${patch.month ?? month}/${patch.day ?? day}/${patch.year ?? year}` })
 
   const complete = birthdayRaw.length === 10
   const parsed = complete ? parseBirthday(birthdayRaw) : null
-  const error = !complete
+  const error = birthdayLocked || !complete
     ? null
     : !parsed
       ? 'Please enter a valid date.'
@@ -62,7 +64,13 @@ export default function NameStep({ displayName, birthdayRaw, onChange }: NameSte
           className={inputClass}
         />
       </label>
-      <div className="mt-5 space-y-1">
+      {birthdayLocked && (
+        <div className="mt-5 space-y-1">
+          <span className="block text-sm font-medium text-gray-800">🔒 Birthday</span>
+          <p className="text-sm text-gray-500">Locked after account setup.</p>
+        </div>
+      )}
+      <div className={`mt-5 space-y-1 ${birthdayLocked ? 'hidden' : ''}`}>
         <span className="block text-sm font-medium text-gray-800">Birthday</span>
         <div className="flex gap-2">
           <StyledSelect

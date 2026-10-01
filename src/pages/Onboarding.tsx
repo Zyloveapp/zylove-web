@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { FirebaseError } from 'firebase/app'
 import { useAuthStore } from '../store/authStore'
 import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
-import { recordLegalAcceptance, saveSparkOnboarding } from '../services/onboarding'
+import { loadRefreshDraft, recordLegalAcceptance, saveSparkOnboarding } from '../services/onboarding'
 import { generateSparkBio } from '../services/bio'
 import TermsStep from '../components/onboarding/TermsStep'
 import NameStep from '../components/onboarding/NameStep'
@@ -41,6 +41,7 @@ import {
   answeredPromptCount,
   heightToInches,
   parseBirthday,
+  releasePhotoPreview,
   type OnboardingDraft,
 } from '../components/onboarding/types'
 
@@ -77,13 +78,18 @@ const STEPS = [
 
 type StepId = (typeof STEPS)[number]['id']
 
-const STEP_INDEX = Object.fromEntries(STEPS.map((s, i) => [s.id, i])) as Record<StepId, number>
+// A refresh skips terms (already accepted) and, once identity is locked,
+// gender (it can't change).
+function stepsFor(refresh: boolean, identityLocked: boolean) {
+  return STEPS.filter((s) => !(refresh && s.id === 'terms') && !(identityLocked && s.id === 'gender'))
+}
 
-function isStepValid(id: StepId, d: OnboardingDraft, bioGenerating: boolean): boolean {
+function isStepValid(id: StepId, d: OnboardingDraft, bioGenerating: boolean, identityLocked: boolean): boolean {
   switch (id) {
     case 'terms':
       return d.termsAccepted
     case 'name': {
+      if (identityLocked) return d.displayName.trim().length > 0
       const b = parseBirthday(d.birthdayRaw)
       return d.displayName.trim().length > 0 && b !== null && b.age >= MIN_AGE
     }
@@ -149,6 +155,10 @@ export default function Onboarding() {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const authLoading = useAuthStore((s) => s.loading)
+  const [searchParams] = useSearchParams()
+  // "Reimagine my profile": same flow, pre-filled from the saved profile.
+  const refresh = searchParams.get('refresh') === 'true'
+  const [refreshLoad, setRefreshLoad] = useState<{ uid: string; locked: boolean } | 'error' | null>(null)
 
   const [stepIndex, setStepIndex] = useState(0)
   const [draft, setDraft] = useState<OnboardingDraft>(INITIAL_DRAFT)
@@ -164,11 +174,28 @@ export default function Onboarding() {
   useEffect(() => {
     photosRef.current = draft.photos
   }, [draft.photos])
-  useEffect(() => () => photosRef.current.forEach((p) => URL.revokeObjectURL(p.previewUrl)), [])
+  useEffect(() => () => photosRef.current.forEach(releasePhotoPreview), [])
 
   useEffect(() => {
     window.scrollTo(0, 0)
   }, [stepIndex])
+
+  const userId = user?.uid
+  useEffect(() => {
+    if (!refresh || !userId) return
+    let cancelled = false
+    loadRefreshDraft(userId)
+      .then((loaded) => {
+        if (cancelled) return
+        if (!loaded) return setRefreshLoad('error')
+        setDraft(loaded.draft)
+        setRefreshLoad({ uid: userId, locked: loaded.identityLocked })
+      })
+      .catch(() => !cancelled && setRefreshLoad('error'))
+    return () => {
+      cancelled = true
+    }
+  }, [refresh, userId])
 
   if (authLoading) {
     return (
@@ -181,7 +208,28 @@ export default function Onboarding() {
   if (!user) return <Navigate to="/login" replace />
   const uid = user.uid
 
-  const step = STEPS[stepIndex]
+  if (refresh && refreshLoad === 'error') {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-4 text-center">
+        <p className="text-gray-700">We couldn't load your profile to refresh it.</p>
+        <button type="button" onClick={() => navigate('/profile/edit')} className="text-sm text-gray-500 underline">
+          Back to Edit Profile
+        </button>
+      </div>
+    )
+  }
+  // Wait for the pre-fill so nothing is edited (or saved) over an empty draft.
+  if (refresh && (refreshLoad === null || refreshLoad === 'error' || refreshLoad.uid !== uid)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-gray-800" />
+      </div>
+    )
+  }
+
+  const identityLocked = refresh && typeof refreshLoad === 'object' && refreshLoad !== null && refreshLoad.locked
+  const steps = stepsFor(refresh, identityLocked)
+  const step = steps[stepIndex]
   const update = (patch: Partial<OnboardingDraft>) => setDraft((d) => ({ ...d, ...patch }))
 
   function startBio() {
@@ -197,11 +245,11 @@ export default function Onboarding() {
 
   function goTo(id: StepId) {
     if (id === 'bio' && !draft.bio.trim() && !bioGenerating) startBio()
-    setStepIndex(STEP_INDEX[id])
+    setStepIndex(steps.findIndex((s) => s.id === id))
   }
 
   function next() {
-    const following = STEPS[stepIndex + 1]
+    const following = steps[stepIndex + 1]
     if (following) goTo(following.id)
   }
 
@@ -223,7 +271,8 @@ export default function Onboarding() {
     setSaveError(null)
     try {
       await saveSparkOnboarding(uid, draft)
-      navigate('/discover', { replace: true })
+      if (refresh) navigate('/profile', { replace: true, state: { flash: '✦ Profile refreshed.' } })
+      else navigate('/discover', { replace: true })
     } catch (err) {
       setSaveError(saveErrorMessage(err))
       setSaving(false)
@@ -236,7 +285,14 @@ export default function Onboarding() {
       case 'terms':
         return <TermsStep accepted={draft.termsAccepted} onAccept={acceptTerms} />
       case 'name':
-        return <NameStep displayName={draft.displayName} birthdayRaw={draft.birthdayRaw} onChange={update} />
+        return (
+          <NameStep
+            displayName={draft.displayName}
+            birthdayRaw={draft.birthdayRaw}
+            birthdayLocked={identityLocked}
+            onChange={update}
+          />
+        )
       case 'photos':
         return <PhotosStep photos={draft.photos} onChange={(photos) => update({ photos })} />
       case 'gender':
@@ -337,20 +393,25 @@ export default function Onboarding() {
   // Steps that render their own primary action instead of the bottom Next.
   const ownsPrimary =
     (step.id === 'terms' && !draft.termsAccepted) || step.id === 'goDeeper' || step.id === 'review'
-  const canAdvance = isStepValid(step.id, draft, bioGenerating)
+  const canAdvance = isStepValid(step.id, draft, bioGenerating, identityLocked)
 
   return (
     <div className="min-h-screen bg-white">
       <div className="mx-auto w-full max-w-md px-4 pb-28 pt-6">
+        {refresh && (
+          <p className="mb-5 rounded-lg bg-gray-100 px-4 py-3 text-sm text-gray-700">
+            Refreshing your profile — your existing answers are pre-filled. Update anything that's changed.
+          </p>
+        )}
         <div className="mb-6">
           <div className="h-1.5 overflow-hidden rounded-full bg-gray-200">
             <div
               className="h-full rounded-full bg-gray-900 transition-all"
-              style={{ width: `${((stepIndex + 1) / STEPS.length) * 100}%` }}
+              style={{ width: `${((stepIndex + 1) / steps.length) * 100}%` }}
             />
           </div>
           <p className="mt-2 text-xs font-medium uppercase tracking-wide text-gray-500">
-            Step {stepIndex + 1} of {STEPS.length} · {step.title}
+            Step {stepIndex + 1} of {steps.length} · {step.title}
           </p>
         </div>
 

@@ -22,12 +22,17 @@ import {
 import type { PromptAnswer, SparkProfile } from '../types/dualProfile'
 import { computeSparkCompleteness } from '../types/scorecard'
 import {
+  INITIAL_DRAFT,
+  PROMPT_COUNT,
   parseBirthday,
   type ConflictStyle,
+  type HeightFtIn,
   type OnboardingDraft,
+  type PhotoDraft,
   type StressResponse,
   type TogethernessStyle,
 } from '../components/onboarding/types'
+import { loadOwnProfile } from './profile'
 
 // ─── Legal acceptance ────────────────────────────────────────────────────────
 
@@ -59,7 +64,7 @@ interface GoDeeperFields {
 // mobile onboarding finish(): onboardingComplete gates AuthGuard/mobile
 // routing, and a changed profileUpdatedAt triggers onProfileWrite rescoring.
 interface OnboardingMetaFields {
-  sparkVisibility: 'active' | 'hidden'
+  sparkVisibility: 'active' | 'hidden' | 'paused'
   onboardingComplete: true
   profileUpdatedAt: FieldValue
   mode: 'spark' | 'play'
@@ -115,7 +120,11 @@ type SparkProfileDoc = Partial<SparkProfile> & { sparkPromptAnswers: Record<stri
 
 // ─── Photos ──────────────────────────────────────────────────────────────────
 
-async function uploadPhotos(uid: string, files: File[]): Promise<{ refs: StorageReference[]; urls: string[] }> {
+// Uploads the new photos and returns every URL in draft order. Photos already
+// uploaded (profile refresh) keep their URL; only new uploads get refs, so a
+// failed save never deletes a photo the profile already uses.
+async function uploadPhotos(uid: string, photos: PhotoDraft[]): Promise<{ refs: StorageReference[]; urls: string[] }> {
+  const files = photos.map((p) => p.file).filter((f): f is File => f !== null)
   const stamp = Date.now()
   const refs = files.map((file, i) => {
     const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : 'jpg'
@@ -131,7 +140,9 @@ async function uploadPhotos(uid: string, files: File[]): Promise<{ refs: Storage
     throw failed.reason
   }
 
-  const urls = await Promise.all(refs.map((r) => getDownloadURL(r)))
+  const uploaded = await Promise.all(refs.map((r) => getDownloadURL(r)))
+  let next = 0
+  const urls = photos.map((p) => (p.file ? uploaded[next++] : p.previewUrl))
   return { refs, urls }
 }
 
@@ -149,8 +160,15 @@ function required<T>(value: T | null, field: string): T {
 // Uploads photos, then writes the root profile, Spark profile and private
 // seeking prefs in a single batch so the user never ends up half-onboarded.
 export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Promise<void> {
+  const rootRef = doc(db, 'users', uid)
+  const existing = await getDoc(rootRef)
+  // Once identity is locked the rules reject any change to birthday,
+  // genderIdentity or matchableAs, so a re-save leaves them untouched.
+  const identityLocked = existing.data()?.identityLockedAt != null
+  const existingAge: unknown = existing.data()?.age
   const birthday = parseBirthday(d.birthdayRaw)
-  if (!birthday) throw new Error('Onboarding incomplete: birthday')
+  const age = birthday?.age ?? (identityLocked && typeof existingAge === 'number' ? existingAge : null)
+  if (age === null) throw new Error('Onboarding incomplete: birthday')
   const genderIdentity = required(d.genderIdentity, 'genderIdentity')
   const relationshipStatus = required(d.relationshipStatus, 'relationshipStatus')
   const intent = required(d.intent, 'intent')
@@ -162,12 +180,10 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
   const heightCm = feetInchesToCm(d.height.feet, d.height.inches)
   const bio = d.bio.trim()
 
-  const { refs, urls: photoURLs } = await uploadPhotos(uid, d.photos.map((p) => p.file))
+  const { refs, urls: photoURLs } = await uploadPhotos(uid, d.photos)
 
   try {
     const now = Date.now()
-    const rootRef = doc(db, 'users', uid)
-    const existing = await getDoc(rootRef)
 
     // Private key goes to IndexedDB now; the public key rides in the batch below.
     await keysReady(uid)
@@ -177,9 +193,9 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
     const coreFields = {
       uid,
       displayName: d.displayName.trim(),
-      age: birthday.age,
-      birthday: birthday.iso,
-      genderIdentity,
+      age,
+      ...(!identityLocked && birthday && { birthday: birthday.iso }),
+      ...(!identityLocked && { genderIdentity }),
       attractedTo: d.attractedTo,
       relationshipStatus,
       openTo: d.openTo,
@@ -219,11 +235,18 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
     // Only off-map identities declare matchableAs. Never deleted on re-save:
     // it's identity-locked by the rules once identityLockedAt is set.
     const matchable =
-      OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) && d.matchableAs.length > 0
+      !identityLocked && OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) && d.matchableAs.length > 0
         ? { matchableAs: d.matchableAs }
         : {}
+    // A re-save (profile refresh) keeps a hidden/paused choice the user made.
+    const prevVisibility: unknown = existing.data()?.sparkVisibility
     const meta: OnboardingMetaFields = {
-      sparkVisibility: photoURLs.length > 0 ? 'active' : 'hidden',
+      sparkVisibility:
+        photoURLs.length === 0
+          ? 'hidden'
+          : prevVisibility === 'hidden' || prevVisibility === 'paused'
+            ? prevVisibility
+            : 'active',
       onboardingComplete: true,
       profileUpdatedAt: serverTimestamp(),
       mode: intent === 'play' ? 'play' : 'spark',
@@ -252,8 +275,11 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
         { merge: true },
       )
     } else {
+      if (!birthday) throw new Error('Onboarding incomplete: birthday')
       const profile: RootProfileDoc = {
         ...coreFields,
+        birthday: birthday.iso,
+        genderIdentity,
         ...optional,
         ...matchable,
         bio,
@@ -275,7 +301,7 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
     const spark: SparkProfileDoc = {
       uid,
       displayName: coreFields.displayName,
-      age: birthday.age,
+      age,
       ...(optional.pronouns && { pronouns: optional.pronouns }),
       genderIdentity,
       attractedTo: d.attractedTo,
@@ -334,4 +360,102 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
   // Server-side tier elevation for women (rules block client writes to
   // subscriptionTier). Fire-and-forget: never blocks or fails the save.
   httpsCallable(functions, 'claimWomenElite')({}).catch(() => {})
+}
+
+// ─── Profile refresh ─────────────────────────────────────────────────────────
+
+function str<T extends string>(v: unknown): T | null {
+  return typeof v === 'string' && v !== '' ? (v as T) : null
+}
+
+function arr<T extends string>(v: unknown): T[] {
+  return Array.isArray(v) ? v.filter((x): x is T => typeof x === 'string' && x !== '') : []
+}
+
+function num(v: unknown, fallback: number): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback
+}
+
+function cmToHeight(cm: unknown, fallback: HeightFtIn): HeightFtIn {
+  if (typeof cm !== 'number' || cm <= 0) return fallback
+  const total = Math.round(cm / 2.54)
+  return { feet: Math.floor(total / 12), inches: total % 12 }
+}
+
+// Stored as ISO YYYY-MM-DD; the draft uses MM/DD/YYYY.
+function isoToBirthdayRaw(v: unknown): string {
+  const m = typeof v === 'string' ? /^(\d{4})-(\d{2})-(\d{2})/.exec(v) : null
+  return m ? `${m[2]}/${m[3]}/${m[1]}` : ''
+}
+
+export interface RefreshDraft {
+  draft: OnboardingDraft
+  // Birthday and gender can't change once locked (see saveSparkOnboarding).
+  identityLocked: boolean
+}
+
+// Rebuilds an onboarding draft from the saved profile for "Reimagine my
+// profile". Terms count as accepted; photos are kept as their stored URLs.
+export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null> {
+  const [own, seekingSnap] = await Promise.all([
+    loadOwnProfile(uid),
+    getDoc(doc(db, `users/${uid}/seekingPreferences/prefs`)).catch(() => null),
+  ])
+  if (!own) return null
+  const p = own.profile as Record<string, unknown>
+  const s = seekingSnap?.data() ?? {}
+  const prompts = own.prompts.slice(0, PROMPT_COUNT)
+  const rawGender: unknown = Array.isArray(p.genderIdentity) ? p.genderIdentity[0] : p.genderIdentity
+  const weekend = arr<OnboardingDraft['weekendVibes'][number]>(p.weekendVibes)
+  const minCm: unknown = s.seekingHeightMinCm
+  const maxCm: unknown = s.seekingHeightMaxCm
+
+  const draft: OnboardingDraft = {
+    ...INITIAL_DRAFT,
+    termsAccepted: true,
+    displayName: str(p.displayName) ?? '',
+    birthdayRaw: isoToBirthdayRaw(p.birthday),
+    photos: arr(p.photoURLs).map((url) => ({ id: crypto.randomUUID(), file: null, previewUrl: url })),
+    genderIdentity: str(rawGender),
+    genderSelfDescribe: str(p.genderSelfDescribe) ?? '',
+    matchableAs: arr(p.matchableAs),
+    pronouns: str(p.pronouns) ?? '',
+    attractedTo: arr(p.attractedTo),
+    relationshipStatus: str(p.relationshipStatus),
+    openTo: arr(p.openTo),
+    bodyType: str(p.bodyType),
+    height: cmToHeight(p.heightCm, INITIAL_DRAFT.height),
+    lifestyleTags: arr(p.lifestyleTags),
+    habitTags: arr(p.habitTags),
+    drinkingHabit: str(p.drinkingHabit),
+    personalityTraits: arr(p.personalityTraits),
+    relationshipValues: arr(p.relationshipValues),
+    // Older profiles stored a single weekendVibe.
+    weekendVibes: weekend.length > 0 ? weekend : arr([p.weekendVibe]),
+    loveLangGive: arr(p.loveLangGive),
+    loveLangReceive: arr(p.loveLangReceive),
+    religion: str(p.religion),
+    politicalView: str(p.politicalView),
+    parentalCurrent: str(p.parentalCurrent),
+    parentalIntent: str(p.parentalIntent),
+    seekingHeightNoPreference: s.seekingHeightNoPreference !== false,
+    seekingHeightMin: cmToHeight(minCm, INITIAL_DRAFT.seekingHeightMin),
+    seekingHeightMax: cmToHeight(maxCm, INITIAL_DRAFT.seekingHeightMax),
+    seekingBodyTypes: arr(s.seekingBodyTypes),
+    seekingTraits: arr(s.seekingTraits),
+    // Root dealbreakers (mobile) plus the private prefs (web).
+    dealbreakers: arr(own.dealbreakers),
+    intent: str(p.intent),
+    radiusMiles: num(p.radiusMiles, INITIAL_DRAFT.radiusMiles),
+    ageMin: num(p.ageMin, INITIAL_DRAFT.ageMin),
+    ageMax: num(p.ageMax, INITIAL_DRAFT.ageMax),
+    selectedPromptIds: prompts.map((q) => q.promptId),
+    promptAnswers: Object.fromEntries(prompts.map((q) => [q.promptId, q.answer])),
+    conflictStyle: str(p.conflictStyle),
+    togethernessStyle: str(p.togethernessStyle),
+    stressResponse: str(p.stressResponse),
+    bio: own.bio,
+    bioGeneratedAt: typeof p.bioGeneratedAt === 'number' ? p.bioGeneratedAt : null,
+  }
+  return { draft, identityLocked: p.identityLockedAt != null }
 }

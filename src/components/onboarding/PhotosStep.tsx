@@ -1,5 +1,5 @@
 import { useRef, useState, type ChangeEvent } from 'react'
-import { MAX_PHOTO_BYTES, MAX_PHOTOS, type PhotoDraft } from './types'
+import { MAX_PHOTO_BYTES, MAX_PHOTOS, releasePhotoPreview, type PhotoDraft } from './types'
 
 interface PhotosStepProps {
   photos: PhotoDraft[]
@@ -40,7 +40,7 @@ export default function PhotosStep({ photos, onChange }: PhotosStepProps) {
 
   function remove(id: string) {
     const photo = photos.find((p) => p.id === id)
-    if (photo) URL.revokeObjectURL(photo.previewUrl)
+    if (photo) releasePhotoPreview(photo)
     onChange(photos.filter((p) => p.id !== id))
   }
 

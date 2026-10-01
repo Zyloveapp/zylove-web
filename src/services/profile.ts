@@ -18,6 +18,8 @@ export interface OwnProfile {
   prompts: PromptAnswer[]
   // Root dealbreakers (mobile) plus the private seeking prefs (web onboarding).
   dealbreakers: string[]
+  // Traits they want in a partner; same two sources as dealbreakers.
+  seekingTraits: string[]
 }
 
 function strings(v: unknown): string[] {
@@ -60,6 +62,7 @@ export async function loadOwnProfile(uid: string): Promise<OwnProfile | null> {
     bio,
     prompts: prompts.length > 0 ? prompts : promptList(profile.promptAnswers),
     dealbreakers: [...new Set([...strings(profile.dealbreakers), ...strings(seeking?.data()?.dealbreakers)])],
+    seekingTraits: [...new Set([...strings(profile.seekingTraits), ...strings(seeking?.data()?.seekingTraits)])],
   }
 }
 
@@ -118,6 +121,17 @@ export async function saveSparkEdits(uid: string, e: SparkEdits): Promise<void> 
     { merge: true },
   )
   await batch.commit()
+}
+
+export interface GoDeeperEdits {
+  conflictStyle: string
+  togethernessStyle: string
+  stressResponse: string
+}
+
+// A changed profileUpdatedAt triggers onProfileWrite rescoring.
+export async function saveGoDeeper(uid: string, a: GoDeeperEdits): Promise<void> {
+  await updateDoc(doc(db, 'users', uid), { ...a, profileUpdatedAt: serverTimestamp() })
 }
 
 // ─── Photos ──────────────────────────────────────────────────────────────────

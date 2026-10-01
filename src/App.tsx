@@ -11,6 +11,7 @@ import Matches from './pages/Matches'
 import Sparks from './pages/Sparks'
 import Profile from './pages/Profile'
 import EditProfile from './pages/EditProfile'
+import GoDeeper from './pages/GoDeeper'
 import ZyloveScore from './pages/ZyloveScore'
 import Chat from './pages/Chat'
 
@@ -42,6 +43,7 @@ export default function App() {
               <Route path="/sparks" element={<Sparks />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/profile/edit" element={<EditProfile />} />
+              <Route path="/profile/go-deeper" element={<GoDeeper />} />
               <Route path="/zylove-score" element={<ZyloveScore />} />
               <Route path="/chat/:matchId" element={<Chat />} />
             </Route>

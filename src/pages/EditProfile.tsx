@@ -16,6 +16,7 @@ import {
 import type { DiscoverProfile } from '../services/discover'
 import { SPARK_PROMPT_BANK, type PromptAnswer } from '../types/dualProfile'
 import { profileGenderLabel, promptQuestion } from '../components/discover/labels'
+import { goDeeperAnswerRows, goDeeperAnswers, goDeeperComplete } from '../components/profile/goDeeper'
 
 const inputClass =
   'w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-white placeholder:text-white/30 focus:border-white/30 focus:outline-none'
@@ -216,6 +217,7 @@ export default function EditProfile() {
   }
 
   const gender = profileGenderLabel(profile)
+  const deeper = goDeeperAnswers(profile)
 
   return (
     <div className={page}>
@@ -357,6 +359,46 @@ export default function EditProfile() {
             </button>
           )}
         </Section>
+
+        <Section emoji="✦" title="How I operate" sub="Conflict, togetherness and stress — sharpens your compatibility">
+          {goDeeperComplete(deeper) ? (
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <dl className="space-y-3">
+                  {goDeeperAnswerRows(deeper).map((r) => (
+                    <div key={r.label}>
+                      <dt className="text-xs text-white/40">{r.label}</dt>
+                      <dd className="mt-0.5 text-white">{r.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <Link to="/profile/go-deeper" className="shrink-0 text-sm text-[#7C9BFF] hover:text-white">
+                  Edit
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <Link
+              to="/profile/go-deeper"
+              className="block rounded-xl border border-[#1B4FD8]/40 bg-[#1B4FD8]/10 px-4 py-3 text-sm font-semibold text-[#B4C6FF] hover:bg-[#1B4FD8]/20"
+            >
+              Answer these questions to sharpen your matches →
+            </Link>
+          )}
+        </Section>
+
+        <div>
+          <button
+            type="button"
+            onClick={() => navigate('/onboarding?refresh=true')}
+            className="w-full rounded-xl border border-white/15 py-3 font-semibold text-white/70 transition-colors hover:bg-white/5 hover:text-white"
+          >
+            ↺ Reimagine my profile
+          </button>
+          <p className="mt-2 text-center text-xs text-white/40">
+            Go through a guided refresh — your answers will be pre-filled.
+          </p>
+        </div>
       </div>
 
       {/* Sits above the mobile bottom nav (h-16); flush on desktop. */}

@@ -49,10 +49,16 @@ export const STRESS_RESPONSE_LABELS: Record<StressResponse, string> = {
 
 // ─── Draft ───────────────────────────────────────────────────────────────────
 
+// file is null for a photo that's already uploaded (profile refresh); its
+// previewUrl is then the stored download URL rather than an object URL.
 export interface PhotoDraft {
   id: string
-  file: File
+  file: File | null
   previewUrl: string
+}
+
+export function releasePhotoPreview(p: PhotoDraft): void {
+  if (p.file) URL.revokeObjectURL(p.previewUrl)
 }
 
 export interface HeightFtIn {
