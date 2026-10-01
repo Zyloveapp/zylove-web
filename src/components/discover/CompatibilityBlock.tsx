@@ -3,6 +3,7 @@ import {
   displayScore,
   fetchCompatibility,
   fetchMyProfile,
+  recordReveal,
   type CompatibilityResult,
   type DiscoverProfile,
 } from '../../services/discover'
@@ -127,10 +128,14 @@ export default function CompatibilityBlock({
   }, [autoReveal, targetUid])
 
   // In Discover the score stays hidden until the user clicks to reveal it.
+  // Runs for the "Reveal your score" button and for every view that opens
+  // revealed (Spark profile, Top Pick, /profile/:uid); both count as seeing
+  // the score for "Curious".
   async function reveal() {
     setStatus('loading')
     try {
       const data = await fetchCompatibility(targetUid)
+      if (uid) recordReveal(uid, targetUid)
       revealedScores.set(targetUid, data)
       setResult(data)
       setStatus('revealed')

@@ -1056,9 +1056,16 @@ function isWoman(genderIdentity: unknown): boolean {
   return v === 'woman' || v === 'cis woman' || v === 'trans_woman'
 }
 
-// "Curious" — people who opened your compatibility score first: the pair
-// doc's initiatedBy is the other person (onTap or an inline onLike created
-// it). Excludes anyone you've liked or linked with, and anyone who liked you
+// When the other person in a pair (not `uid`) revealed the score.
+function revealedAt(pair: DocumentData, uid: string): number {
+  const otherUid = pair.userA === uid ? pair.userB : pair.userA
+  return toMillis(pair[`${otherUid}_revealedAt`]) || toMillis(pair.createdAt)
+}
+
+// "Curious" — people who actually looked at your compatibility score: the
+// pair doc carries {theirUid}_revealed, written by the web client when they
+// tap "Reveal your score" or open a view that shows the full report (the
+// background prefetch doesn't count). Excludes anyone you've liked or linked with, and anyone who liked you
 // (they're in Sparks, where an unmatched liker's name stays hidden — showing
 // them here would unmask them). Women and Elite get the list; everyone else
 // gets only the count, enforced here so the list can't be fetched directly.
@@ -1081,12 +1088,12 @@ export const getCuriousVisitors = onCall(
       .filter(({ pair }) => {
         const iAmA = pair.userA === uid
         const otherUid = iAmA ? pair.userB : pair.userA
-        if (typeof otherUid !== 'string' || pair.initiatedBy !== otherUid) return false
+        if (typeof otherUid !== 'string' || pair[`${otherUid}_revealed`] !== true) return false
         if (pair.matched === true) return false
         // Neither side has liked: I haven't, and they haven't (Sparks covers that).
         return pair.userALiked !== true && pair.userBLiked !== true
       })
-      .sort((a, b) => toMillis(b.pair.createdAt) - toMillis(a.pair.createdAt))
+      .sort((a, b) => revealedAt(b.pair, uid) - revealedAt(a.pair, uid))
 
     const visitors: CuriousVisitor[] = []
     for (const { id, pair } of candidates) {
@@ -1109,7 +1116,7 @@ export const getCuriousVisitors = onCall(
         sparkScore: typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
         playScore: typeof pair.playScore === 'number' ? pair.playScore : null,
         tier1Spark: pair.tier1Spark ?? null,
-        at: toMillis(pair.createdAt),
+        at: revealedAt(pair, uid),
       })
     }
 

@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, limit, query, setDoc, where } from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs, limit, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from './firebase'
@@ -239,6 +239,17 @@ export function fetchCompatibility(targetUid: string): Promise<CompatibilityResu
     compatibilityRequests.set(targetUid, request)
   }
   return request
+}
+
+// Marks that the viewer actually saw the score (the reveal button, or a full
+// report that opens revealed), as opposed to the background prefetch. Feeds
+// the other person's "Curious" tab. Only the viewer's own two fields are
+// touched; failures are ignored — it's a signal, not part of the reveal.
+export function recordReveal(uid: string, targetUid: string): void {
+  updateDoc(doc(db, 'pairs', [uid, targetUid].sort().join('_')), {
+    [`${uid}_revealed`]: true,
+    [`${uid}_revealedAt`]: serverTimestamp(),
+  }).catch(() => {})
 }
 
 // onLike requires the pairs/{a_b} doc that onTap creates, so it's created in
