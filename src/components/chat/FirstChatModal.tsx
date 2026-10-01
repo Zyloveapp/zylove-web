@@ -4,8 +4,8 @@ import { markFirstChatSeen } from './firstChatSeen'
 const FEATURES: { icon: string; title: string; body: string }[] = [
   {
     icon: '🔒',
-    title: 'Privacy first',
-    body: 'What’s said here stays here. Zylove staff cannot read your conversations.',
+    title: 'End-to-end encrypted',
+    body: 'Your messages are encrypted. Zylove cannot read your conversations.',
   },
   {
     icon: '✦',
@@ -70,13 +70,11 @@ export default function FirstChatModal({ matchId, name, onClose }: FirstChatModa
           ))}
         </ul>
 
-        <p className="mt-5 text-center text-xs text-white/40">Message encryption coming soon.</p>
-
         <button
           type="button"
           onClick={dismiss}
           autoFocus
-          className="mt-4 w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold text-white transition-opacity hover:opacity-90"
+          className="mt-6 w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold text-white transition-opacity hover:opacity-90"
         >
           Start the conversation
         </button>
