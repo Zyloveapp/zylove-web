@@ -2,22 +2,25 @@ import type { MatchEntry } from '../../services/matches'
 import type { Mode } from '../../store/modeStore'
 
 interface IgnitedRowProps {
-  title: string
+  // No heading when null (Spark: new links just lead the list).
+  title: string | null
   matches: MatchEntry[]
   mode: Mode
   activeId: string | null
   onSelect: (m: MatchEntry) => void
 }
 
-// New links nobody has written to yet ("The spark is lit" / "Entangled").
+// New links nobody has written to yet (labelled "Entangled" in Play).
 export default function IgnitedRow({ title, matches, mode, activeId, onSelect }: IgnitedRowProps) {
   const ring = mode === 'play' ? 'ring-[#E03131]' : 'ring-[#1B4FD8]'
   return (
     <section className="pb-2">
-      <h2 className="px-4 text-sm font-semibold text-white/70">
-        {title} <span className="text-white/40">· {matches.length}</span>
-      </h2>
-      <ul className="flex gap-4 overflow-x-auto px-4 pt-3 pb-2 [scrollbar-width:none]">
+      {title && (
+        <h2 className="px-4 text-sm font-semibold text-white/70">
+          {title} <span className="text-white/40">· {matches.length}</span>
+        </h2>
+      )}
+      <ul className={`flex gap-4 overflow-x-auto px-4 pb-2 [scrollbar-width:none] ${title ? 'pt-3' : 'pt-1'}`}>
         {matches.map((m) => (
           <li key={m.matchId} className="shrink-0">
             <button

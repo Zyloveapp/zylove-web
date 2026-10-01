@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { SparkEntry } from '../../services/sparks'
+import type { SentSpark, SparkEntry } from '../../services/sparks'
 import { displayAge, type DiscoverProfile, type TopPick } from '../../services/discover'
 import { UserTierBadge } from '../TierBadge'
 import { relativeTime } from '../../services/matches'
@@ -173,6 +173,40 @@ export function TopPicksList({ picks, mode, onSelect }: { picks: TopPick[]; mode
             <IntentPill intent={p.profile.intent} />
           </span>
         </Card>
+      ))}
+    </ul>
+  )
+}
+
+// Outgoing likes still waiting on the other person. No "Tap for full
+// breakdown" target yet, so these cards aren't buttons.
+export function SentList({ sent, mode }: { sent: SentSpark[]; mode: Mode }) {
+  if (sent.length === 0) {
+    return <p className="px-6 py-16 text-center text-sm text-white/50">No pending sparks. Keep exploring ✦</p>
+  }
+  return (
+    <ul className="space-y-3">
+      {sent.map((s) => (
+        <li key={s.uid} className="flex items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+          <span className="relative h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gradient-to-br from-[#1B4FD8]/60 to-white/10">
+            {s.photoURL && <img src={s.photoURL} alt="" className="h-full w-full object-cover" />}
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col gap-1">
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-lg font-semibold text-white">
+                {s.name}
+                {s.age !== null && <span className="font-normal text-white/50">, {s.age}</span>}
+              </span>
+              <UserTierBadge uid={s.uid} />
+            </span>
+            <span className="flex items-center gap-2 text-sm text-white/45">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white/40" aria-hidden />
+              Waiting...
+            </span>
+            {s.likedAt > 0 && <span className="text-xs text-white/30">Sent {relativeTime(s.likedAt)}</span>}
+          </span>
+          {s.score && <ScorePill score={s.score.value} mode={mode} />}
+        </li>
       ))}
     </ul>
   )

@@ -101,7 +101,7 @@ export default function Links() {
           <div className="flex-1 overflow-y-auto">
             {ignited.length > 0 && (
               <IgnitedRow
-                title={isPlay ? '🔴 Entangled' : '✦ The spark is lit'}
+                title={isPlay ? '🔴 Entangled' : null}
                 matches={ignited}
                 mode={mode}
                 activeId={activeId}

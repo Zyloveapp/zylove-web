@@ -11,7 +11,7 @@ import {
 } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
-import { likeProfile, type DiscoverProfile } from './discover'
+import { displayScore, likeProfile, parseTier1, type DiscoverProfile, type DisplayScore } from './discover'
 import type { Mode } from '../store/modeStore'
 
 // users/{uid}/likeQueue/{likerUid} — people who liked this user. Written by
@@ -137,4 +137,48 @@ export async function likeBackSpark(uid: string, spark: SparkEntry, profile: Dis
     'likeBack',
   )({ likerUid: spark.likerUid, mode: spark.mode })
   return data.matchId
+}
+
+// ─── Sent ────────────────────────────────────────────────────────────────────
+
+export interface SentSpark {
+  uid: string
+  name: string
+  age: number | null
+  photoURL: string | null
+  score: DisplayScore | null
+  likedAt: number
+}
+
+interface SentSparkRaw {
+  uid: string
+  displayName: string
+  age: number | null
+  photoURL: string | null
+  sparkScore: number | null
+  playScore: number | null
+  tier1Spark: unknown
+  likedAt: number
+}
+
+// Your likes that haven't become links yet, for this mode. Pairs can't be
+// queried from the client, so the getSentSparks callable gathers them.
+export async function fetchSentSparks(mode: Mode): Promise<SentSpark[]> {
+  const { data } = await httpsCallable<{ mode: Mode }, { sent: SentSparkRaw[] }>(functions, 'getSentSparks')({ mode })
+  return data.sent.map((s) => ({
+    uid: s.uid,
+    name: s.displayName,
+    age: s.age,
+    photoURL: s.photoURL,
+    score: displayScore(
+      {
+        pairId: '',
+        sparkScore: s.sparkScore ?? undefined,
+        playScore: s.playScore ?? undefined,
+        tier1: parseTier1(s.tier1Spark),
+      },
+      mode,
+    ),
+    likedAt: s.likedAt,
+  }))
 }

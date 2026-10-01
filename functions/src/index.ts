@@ -956,3 +956,76 @@ Keep the whole response under 200 words. Be specific to their actual profile, no
     }
   },
 )
+
+// ─── getSentSparks ───────────────────────────────────────────────────────────
+
+interface SentSpark {
+  uid: string
+  displayName: string
+  age: number | null
+  photoURL: string | null
+  sparkScore: number | null
+  playScore: number | null
+  tier1Spark: unknown
+  likedAt: number
+}
+
+const SENT_LIMIT = 100
+
+function toMillis(v: unknown): number {
+  if (typeof v === 'number') return v
+  return v instanceof Timestamp ? v.toMillis() : 0
+}
+
+// The caller's outgoing likes that haven't become links, for the Sparks
+// "Sent" tab. A like lives only as pairs/{a_b}.userXLiked, and the client
+// rules can't list pairs (they key on the doc id), so this runs server-side.
+// The mode comes from the like-queue entry the like wrote; whether the other
+// person passed is never revealed — pending is pending.
+export const getSentSparks = onCall(
+  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
+  async (request): Promise<{ sent: SentSpark[] }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    const uid = request.auth.uid
+    const mode = (request.data as Record<string, unknown> | null)?.mode === 'play' ? 'play' : 'spark'
+    const db = getFirestore()
+    const pairs = db.collection('pairs')
+
+    const [asA, asB] = await Promise.all([
+      pairs.where('userA', '==', uid).where('userALiked', '==', true).where('matched', '==', false).limit(SENT_LIMIT).get(),
+      pairs.where('userB', '==', uid).where('userBLiked', '==', true).where('matched', '==', false).limit(SENT_LIMIT).get(),
+    ])
+
+    const sent = await Promise.all(
+      [...asA.docs, ...asB.docs].map(async (pairSnap): Promise<SentSpark | null> => {
+        const pair = pairSnap.data()
+        const otherUid: unknown = pair.userA === uid ? pair.userB : pair.userA
+        if (typeof otherUid !== 'string') return null
+        const [matchSnap, userSnap, queueSnap] = await Promise.all([
+          db.collection('matches').doc(pairSnap.id).get(),
+          db.collection('users').doc(otherUid).get(),
+          db.doc(`users/${otherUid}/likeQueue/${uid}`).get(),
+        ])
+        // likeBack creates matches without flipping pairs.matched.
+        if (matchSnap.exists) return null
+        const user = userSnap.data()
+        if (!user || user.isSuspended === true) return null
+        const queue = queueSnap.data()
+        if (queue && (queue.mode === 'play' ? 'play' : 'spark') !== mode) return null
+        const photos: unknown = user.photoURLs
+        return {
+          uid: otherUid,
+          displayName: typeof user.displayName === 'string' && user.displayName ? user.displayName : 'Someone',
+          age: typeof user.age === 'number' && user.age > 0 ? user.age : null,
+          photoURL: Array.isArray(photos) && typeof photos[0] === 'string' ? photos[0] : null,
+          sparkScore: typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
+          playScore: typeof pair.playScore === 'number' ? pair.playScore : null,
+          tier1Spark: pair.tier1Spark ?? null,
+          likedAt: toMillis(queue?.likedAt) || toMillis(pair.createdAt),
+        }
+      }),
+    )
+
+    return { sent: sent.filter((s): s is SentSpark => s !== null).sort((a, b) => b.likedAt - a.likedAt) }
+  },
+)

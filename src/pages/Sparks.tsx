@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
-import SparksList, { TopPicksList } from '../components/matches/SparksList'
+import SparksList, { SentList, TopPicksList } from '../components/matches/SparksList'
 import SparkProfileView from '../components/matches/SparkProfileView'
 import TopPickView from '../components/matches/TopPickView'
 import MatchOverlay, { type NewMatch } from '../components/discover/MatchOverlay'
 import { subscribeMatches, type MatchEntry } from '../services/matches'
-import { subscribeSparkQueue, type SparkEntry } from '../services/sparks'
+import { fetchSentSparks, subscribeSparkQueue, type SentSpark, type SparkEntry } from '../services/sparks'
 import { fetchTopPicks, type TopPick } from '../services/discover'
 
-type Tab = 'sparks' | 'viewed' | 'picks'
+type Tab = 'sparks' | 'viewed' | 'picks' | 'sent'
 
 interface QueueState {
   key: string
@@ -32,6 +32,7 @@ export default function Sparks() {
   // Matches are only needed to know which likers are already matched.
   const [matches, setMatches] = useState<{ key: string; list: MatchEntry[] } | null>(null)
   const [picks, setPicks] = useState<{ key: string; list: TopPick[] | null; error: boolean } | null>(null)
+  const [sent, setSent] = useState<{ key: string; list: SentSpark[] | null; error: boolean } | null>(null)
   const [selected, setSelected] = useState<SparkEntry | null>(null)
   const [selectedPick, setSelectedPick] = useState<TopPick | null>(null)
   const [newMatch, setNewMatch] = useState<NewMatch | null>(null)
@@ -70,6 +71,19 @@ export default function Sparks() {
     }
   }, [tab, picksLoaded, uid, mode, key])
 
+  // Sent comes from a callable; fetched each time the tab is opened so new
+  // likes from Explore show up.
+  useEffect(() => {
+    if (tab !== 'sent' || !uid) return
+    let cancelled = false
+    fetchSentSparks(mode)
+      .then((list) => !cancelled && setSent({ key, list, error: false }))
+      .catch(() => !cancelled && setSent({ key, list: [], error: true }))
+    return () => {
+      cancelled = true
+    }
+  }, [tab, uid, mode, key])
+
   const matchedUids = useMemo(
     () => new Set(matches?.key === key ? matches.list.map((m) => m.partnerUid) : []),
     [matches, key],
@@ -78,11 +92,13 @@ export default function Sparks() {
   const loaded = queue?.key === key ? queue : null
   const pickList = picks?.key === key ? picks.list : null
   const liveCount = loaded?.live.length ?? 0
+  const sentList = sent?.key === key ? sent.list : null
 
   const TABS: { id: Tab; label: string }[] = [
     { id: 'sparks', label: `${isPlay ? '🔥 Flames' : '✦ Sparks'} ${liveCount}` },
     { id: 'viewed', label: `◎ Viewed · ${loaded?.viewed.length ?? 0}` },
     { id: 'picks', label: `✦ Top Picks${pickList ? ` ${pickList.length}` : ''}` },
+    { id: 'sent', label: `→ Sent${sentList ? ` ${sentList.length}` : ''}` },
   ]
   const activeTab = isPlay ? 'border-[#E03131] text-white' : 'border-[#1B4FD8] text-white'
 
@@ -116,7 +132,15 @@ export default function Sparks() {
         </div>
 
         <div className="pb-6">
-          {tab === 'picks' ? (
+          {tab === 'sent' ? (
+            sentList === null ? (
+              <Spinner />
+            ) : sent?.error ? (
+              <p className="py-10 text-center text-sm text-white/50">Couldn't load your sent {isPlay ? 'flames' : 'sparks'}.</p>
+            ) : (
+              <SentList sent={sentList} mode={mode} />
+            )
+          ) : tab === 'picks' ? (
             pickList === null ? (
               <Spinner />
             ) : picks?.error ? (

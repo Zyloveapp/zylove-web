@@ -195,7 +195,7 @@ function parseArchetype(v: unknown): ArchetypeMatch | null {
 
 // tier1 is server-computed and fail-open (null when scoring it failed), so
 // it's validated field by field rather than trusted as typed.
-function parseTier1(v: unknown): Tier1Result | null {
+export function parseTier1(v: unknown): Tier1Result | null {
   if (typeof v !== 'object' || v === null) return null
   const t = v as Record<string, unknown>
   return {
