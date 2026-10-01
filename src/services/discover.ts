@@ -302,6 +302,8 @@ export function actionErrorMessage(err: unknown): string {
 // Deep Fit (tier1) inflates thin profiles — empty data reads as a perfect
 // facet match — so it only becomes the headline score once both people have
 // filled in most of the seven tag lists it's built from (5 of 7 ≈ 0.71).
+// Above 100 is the uncapped physical bonus stacking, not a real fit, so
+// those fall back to the base score too.
 const DEEP_FIT_MIN_CONFIDENCE = 0.6
 
 export interface DisplayScore {
@@ -313,7 +315,7 @@ export interface DisplayScore {
 // (Spark only), otherwise the base score. Always capped at 100.
 export function displayScore(result: CompatibilityResult, mode: Mode): DisplayScore | null {
   const t = mode === 'spark' ? result.tier1 : null
-  if (t && t.combinedScore !== null && (t.dataConfidence ?? 0) >= DEEP_FIT_MIN_CONFIDENCE) {
+  if (t && t.combinedScore !== null && t.combinedScore <= 100 && (t.dataConfidence ?? 0) >= DEEP_FIT_MIN_CONFIDENCE) {
     return { value: clampScore(t.combinedScore), deep: true }
   }
   const base = mode === 'play' ? result.playScore : result.sparkScore

@@ -7,7 +7,7 @@ import TopPickView from '../components/matches/TopPickView'
 import MatchOverlay, { type NewMatch } from '../components/discover/MatchOverlay'
 import { subscribeMatches, type MatchEntry } from '../services/matches'
 import { fetchSentSparks, subscribeSparkQueue, type SentSpark, type SparkEntry } from '../services/sparks'
-import { fetchTopPicks, type TopPick } from '../services/discover'
+import { displayScore, fetchCompatibility, fetchTopPicks, type TopPick } from '../services/discover'
 
 type Tab = 'sparks' | 'viewed' | 'picks' | 'sent'
 
@@ -34,6 +34,8 @@ export default function Sparks() {
   const [picks, setPicks] = useState<{ key: string; list: TopPick[] | null; error: boolean } | null>(null)
   const [sent, setSent] = useState<{ key: string; list: SentSpark[] | null; error: boolean } | null>(null)
   const [selected, setSelected] = useState<SparkEntry | null>(null)
+  // Calculated scores for sparks opened this session, keyed by likerUid.
+  const [scores, setScores] = useState<{ key: string; map: Map<string, number> }>({ key, map: new Map() })
   const [selectedPick, setSelectedPick] = useState<TopPick | null>(null)
   const [newMatch, setNewMatch] = useState<NewMatch | null>(null)
 
@@ -102,8 +104,21 @@ export default function Sparks() {
   ]
   const activeTab = isPlay ? 'border-[#E03131] text-white' : 'border-[#1B4FD8] text-white'
 
+  // Opening a spark loads its real pair score (onTap, shared with the
+  // profile's compatibility block) and swaps it into the card.
   function openSpark(spark: SparkEntry) {
     setSelected(spark)
+    fetchCompatibility(spark.likerUid)
+      .then((result) => {
+        const score = displayScore(result, mode)
+        if (!score) return
+        setScores((prev) => {
+          const map = new Map(prev.key === key ? prev.map : [])
+          map.set(spark.likerUid, score.value)
+          return { key, map }
+        })
+      })
+      .catch(() => {})
   }
 
   return (
@@ -159,6 +174,7 @@ export default function Sparks() {
               matchedUids={matchedUids}
               onSelect={openSpark}
               variant={tab === 'viewed' ? 'viewed' : 'live'}
+              scores={scores.key === key ? scores.map : undefined}
             />
           )}
         </div>

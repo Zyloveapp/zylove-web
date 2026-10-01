@@ -271,7 +271,9 @@ function RevealedScore({
       )}
 
       <p className={`text-5xl font-bold ${scoreColor(rounded)}`}>{rounded}%</p>
-      <p className="mt-1 text-xs uppercase tracking-widest text-white/30">{mode === 'play' ? 'Play Odds' : 'Spark Odds'}</p>
+      <p className="mt-1 text-xs uppercase tracking-widest text-white/30">
+        {score.deep ? 'Compatibility' : mode === 'play' ? 'Play Odds' : 'Spark Odds'}
+      </p>
       {qualifier && <p className="mt-0.5 text-xs text-white/50">{qualifier}</p>}
       <p className="mt-1 text-xs text-white/35">{score.deep ? '✦ Deep compatibility score' : 'Compatibility estimate'}</p>
 

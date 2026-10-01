@@ -3,7 +3,6 @@ import type { SentSpark, SparkEntry } from '../../services/sparks'
 import { displayAge, type DiscoverProfile, type TopPick } from '../../services/discover'
 import { UserTierBadge } from '../TierBadge'
 import { relativeTime } from '../../services/matches'
-import { INTENT_LABELS, type DatingIntent } from '../../types/profile'
 import type { Mode } from '../../store/modeStore'
 
 function expiresIn(expiresAt: number): string {
@@ -12,12 +11,18 @@ function expiresIn(expiresAt: number): string {
   return hours >= 1 ? `Expires in ${hours}h` : `Expires in ${Math.max(1, Math.floor(ms / 60_000))}m`
 }
 
+const INTENT_PILL: Record<string, string> = {
+  spark: 'Here for something real',
+  play: 'Here for a good time',
+  open: 'Open to connection',
+}
+
 function IntentPill({ intent }: { intent: unknown }) {
-  const meta = typeof intent === 'string' && intent in INTENT_LABELS ? INTENT_LABELS[intent as DatingIntent] : null
-  if (!meta) return null
+  const label = typeof intent === 'string' ? INTENT_PILL[intent] : undefined
+  if (!label) return null
   return (
     <span className="inline-block rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-[11px] text-white/70">
-      {meta.emoji} {meta.label}
+      {label}
     </span>
   )
 }
@@ -86,9 +91,12 @@ interface SparksListProps {
   onSelect: (spark: SparkEntry) => void
   // 'viewed': entries the user passed on.
   variant?: 'live' | 'viewed'
+  // Real scores (likerUid → %) for cards whose profile has been opened; they
+  // replace the like's snapshot score, which is random for bots.
+  scores?: Map<string, number>
 }
 
-export default function SparksList({ sparks, mode, matchedUids, onSelect, variant = 'live' }: SparksListProps) {
+export default function SparksList({ sparks, mode, matchedUids, onSelect, variant = 'live', scores }: SparksListProps) {
   if (sparks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
@@ -116,7 +124,10 @@ export default function SparksList({ sparks, mode, matchedUids, onSelect, varian
             photo={s.profile.photoURLs?.[0]}
             onSelect={() => onSelect(s)}
             dim={variant === 'viewed'}
-            score={s.compatibilityScore !== null ? <ScorePill score={s.compatibilityScore} mode={mode} /> : null}
+            score={(() => {
+              const value = scores?.get(s.likerUid) ?? s.compatibilityScore
+              return value !== null ? <ScorePill score={value} mode={mode} /> : null
+            })()}
           >
             {s.isWeeklySpark && <span className="block text-xs font-semibold text-[#F59E0B]">✦ Weekly Spark</span>}
             {revealed ? (
