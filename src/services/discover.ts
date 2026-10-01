@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs, limit, query, setDoc, where } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from './firebase'
@@ -149,12 +149,29 @@ export interface CompatibilityResult {
   tier1?: unknown
 }
 
+// In-flight/completed onTap calls for this session, so the background
+// prefetch, the score reveal and likeProfile share a single request.
+const compatibilityRequests = new Map<string, Promise<CompatibilityResult>>()
+
 // Computes (or returns the cached) pairs/{a_b} score for the viewer + target.
-export async function fetchCompatibility(targetUid: string): Promise<CompatibilityResult> {
-  const { data } = await httpsCallable<{ tappedUserId: string }, CompatibilityResult>(functions, 'onTap')({
-    tappedUserId: targetUid,
-  })
-  return data
+export function fetchCompatibility(targetUid: string): Promise<CompatibilityResult> {
+  let request = compatibilityRequests.get(targetUid)
+  if (!request) {
+    request = httpsCallable<{ tappedUserId: string }, CompatibilityResult>(functions, 'onTap')({
+      tappedUserId: targetUid,
+    }).then(({ data }) => data)
+    // Forget failures so the next call retries.
+    request.catch(() => compatibilityRequests.delete(targetUid))
+    compatibilityRequests.set(targetUid, request)
+  }
+  return request
+}
+
+// onLike requires the pairs/{a_b} doc that onTap creates, so it's created in
+// the background as each profile is shown. Fire-and-forget; the score stays
+// hidden until the user reveals it.
+export function prefetchCompatibility(targetUid: string): void {
+  fetchCompatibility(targetUid).catch(() => {})
 }
 
 // Safety net for profiles saved without trust/safety defaults (e.g. the
@@ -173,12 +190,43 @@ export async function passProfile(uid: string, mode: Mode, targetUid: string): P
   markSwiped(uid, mode, targetUid)
 }
 
-export async function likeProfile(uid: string, mode: Mode, targetUid: string): Promise<OnLikeResponse> {
+// Same snapshot shape the mobile app and botEngine write; the match lists on
+// both apps read name/photo/age from here.
+function participantSnapshot(p: DiscoverProfile): { displayName: string; age: number | null; photoURL: string | null } {
+  return {
+    displayName: p.displayName || 'Someone',
+    age: displayAge(p),
+    photoURL: p.photoURLs?.[0] ?? null,
+  }
+}
+
+// onLike creates matches/{id} without participantSnapshots, so the liker's
+// client fills them in on a new match.
+async function writeParticipantSnapshots(matchId: string, uid: string, target: DiscoverProfile): Promise<void> {
+  const meSnap = await getDoc(doc(db, 'users', uid))
+  if (!meSnap.exists()) return
+  const me = { ...(meSnap.data() as DiscoverProfile), uid }
+  await setDoc(
+    doc(db, 'matches', matchId),
+    { participantSnapshots: { [uid]: participantSnapshot(me), [target.uid]: participantSnapshot(target) } },
+    { merge: true },
+  )
+}
+
+export async function likeProfile(uid: string, mode: Mode, target: DiscoverProfile): Promise<OnLikeResponse> {
+  // Make sure the pair doc exists (usually already done by the prefetch).
+  await fetchCompatibility(target.uid).catch(() => {})
   const { data } = await httpsCallable<OnLikeRequest, OnLikeResponse>(functions, 'onLike')({
-    likedUserId: targetUid,
+    likedUserId: target.uid,
     mode,
   })
-  markSwiped(uid, mode, targetUid)
+  markSwiped(uid, mode, target.uid)
+  if (data.matched && data.matchId) {
+    // The match already exists; a failed snapshot write only degrades the list row.
+    await writeParticipantSnapshots(data.matchId, uid, target).catch((err: unknown) =>
+      console.warn('Failed to write participantSnapshots', err),
+    )
+  }
   return data
 }
 

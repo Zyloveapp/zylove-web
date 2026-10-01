@@ -12,6 +12,7 @@ import {
   fetchCandidates,
   likeProfile,
   passProfile,
+  prefetchCompatibility,
   type DiscoverProfile,
 } from '../services/discover'
 
@@ -58,6 +59,12 @@ export default function Discover() {
 
   const loading = queue?.key !== key
   const current = loading ? undefined : queue.profiles[0]
+  const currentUid = current?.uid
+
+  // Creates the pair doc onLike needs while the user reads the profile.
+  useEffect(() => {
+    if (currentUid) prefetchCompatibility(currentUid)
+  }, [currentUid])
 
   // Drops the current profile, or moves it to the back of the queue ("Maybe").
   function advance(requeue: boolean) {
@@ -78,7 +85,7 @@ export default function Discover() {
     setBusy(true)
     try {
       if (action === 'interested') {
-        const result = await likeProfile(uid, mode, current.uid)
+        const result = await likeProfile(uid, mode, current)
         if (result.matched) setMatchName(current.displayName ?? 'someone')
       } else {
         await passProfile(uid, mode, current.uid)
