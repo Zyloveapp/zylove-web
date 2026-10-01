@@ -9,12 +9,23 @@ interface SparkProfileViewProps {
   spark: SparkEntry
   matched: boolean
   onClose: () => void
-  onMatched: (matchId: string, name: string) => void
+  // Fired on tap, before likeBack returns, so the overlay can show instantly.
+  onMatchStart: (name: string) => void
+  onMatched: (matchId: string) => void
+  onMatchFailed: () => void
 }
 
 type Loaded = { likerUid: string; profile: DiscoverProfile }
 
-export default function SparkProfileView({ uid, spark, matched, onClose, onMatched }: SparkProfileViewProps) {
+export default function SparkProfileView({
+  uid,
+  spark,
+  matched,
+  onClose,
+  onMatchStart,
+  onMatched,
+  onMatchFailed,
+}: SparkProfileViewProps) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -40,10 +51,12 @@ export default function SparkProfileView({ uid, spark, matched, onClose, onMatch
     if (busy) return
     setBusy(true)
     setError(null)
+    onMatchStart(profile.displayName ?? 'someone')
     try {
       const matchId = await likeBackSpark(uid, spark, profile)
-      onMatched(matchId, profile.displayName ?? 'someone')
+      onMatched(matchId)
     } catch (err) {
+      onMatchFailed()
       setError(actionErrorMessage(err))
       setBusy(false)
     }

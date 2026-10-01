@@ -7,3 +7,41 @@ html,
 body {
   @apply bg-gray-950;
 }
+
+/* Match overlay ("Sparks are flying") */
+@keyframes zy-slide-from-left {
+  from { transform: translateX(-140px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes zy-slide-from-right {
+  from { transform: translateX(140px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+/* Sparkles radiate from the centre once the photos meet (400ms). */
+@keyframes zy-burst {
+  0% { transform: rotate(var(--zy-angle)) translateY(0) scale(0); opacity: 1; }
+  50% { transform: rotate(var(--zy-angle)) translateY(-56px) scale(1); opacity: 1; }
+  100% { transform: rotate(var(--zy-angle)) translateY(-84px) scale(0); opacity: 0; }
+}
+@keyframes zy-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+}
+@keyframes zy-timer {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+.zy-slide-from-left { animation: zy-slide-from-left 400ms ease-out both; }
+.zy-slide-from-right { animation: zy-slide-from-right 400ms ease-out both; }
+.zy-burst { opacity: 0; animation: zy-burst 900ms ease-out 400ms both; }
+.zy-pulse { animation: zy-pulse 1.4s ease-in-out 400ms infinite; }
+.zy-timer { transform-origin: left; animation-name: zy-timer; animation-timing-function: linear; animation-fill-mode: forwards; }
+
+@media (prefers-reduced-motion: reduce) {
+  .zy-slide-from-left,
+  .zy-slide-from-right,
+  .zy-burst,
+  .zy-pulse {
+    animation: none;
+  }
+}

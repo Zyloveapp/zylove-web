@@ -81,15 +81,17 @@ export default function Sparks() {
           spark={selected}
           matched={matchedUids.has(selected.likerUid)}
           onClose={() => setSelected(null)}
-          onMatched={(matchId, name) =>
+          onMatchStart={(name) =>
             setNewMatch({
-              matchId,
+              matchId: null,
               theirUid: selected.likerUid,
               theirName: name,
               theirPhoto: selected.profile.photoURLs?.[0] ?? null,
               mode: selected.mode,
             })
           }
+          onMatched={(matchId) => setNewMatch((m) => (m ? { ...m, matchId } : m))}
+          onMatchFailed={() => setNewMatch(null)}
         />
       )}
 
