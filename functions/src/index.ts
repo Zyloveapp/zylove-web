@@ -166,11 +166,19 @@ export const likeBack = onCall(
 
     const matchId = [callerId, likerUid].sort().join('_')
     const matchRef = db.collection('matches').doc(matchId)
+    // onBotMessage only replies on matches flagged isBot (zbot- isn't in its
+    // legacy seed- prefix check).
+    const isBot = likerUid.startsWith('zbot-')
 
     // Transaction so two taps (or both people at once) create one match.
     const created = await db.runTransaction(async (tx) => {
       const existing = await tx.get(matchRef)
-      if (existing.exists) return false
+      if (existing.exists) {
+        // onLike (triggered by the client's like just before this call) may
+        // have created the match first, without the bot flag.
+        if (isBot && existing.data()?.isBot !== true) tx.update(matchRef, { isBot: true, botUid: likerUid })
+        return false
+      }
       const [callerSnap, likerSnap] = await Promise.all([
         tx.get(db.collection('users').doc(callerId)),
         tx.get(db.collection('users').doc(likerUid)),
@@ -184,6 +192,7 @@ export const likeBack = onCall(
         lastMessagePreview: null,
         hasUnread: false,
         isBlocked: false,
+        ...(isBot ? { isBot: true, botUid: likerUid } : {}),
         participantSnapshots: {
           [callerId]: participantSnapshot(callerSnap.data()),
           [likerUid]: participantSnapshot(likerSnap.data()),
@@ -420,6 +429,10 @@ export const submitReview = onCall(
         negativeCount: FieldValue.increment(sentiments.includes('negative') ? 1 : 0),
         flagCount: FieldValue.increment(sentiments.includes('flag') ? 1 : 0),
         categoryCounts: counts,
+        // Mobile's score screen reads these unguarded (.length on undefined crashes it).
+        topPositiveCategories: [],
+        pendingDisputeCount: 0,
+        unlockedPerks: [],
         history: [...history, { delta, score: newScore, reason: 'New review received', timestamp: Date.now() }].slice(
           -SCORE_HISTORY_LENGTH,
         ),

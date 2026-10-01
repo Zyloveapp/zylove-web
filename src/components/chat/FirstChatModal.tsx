@@ -1,33 +1,47 @@
 import { useEffect } from 'react'
 import { markFirstChatSeen } from './firstChatSeen'
 
+// Mobile's Spark FirstMessageSafetyCard copy, minus the screenshot-blocking
+// item (mobile-only).
 const FEATURES: { icon: string; title: string; body: string }[] = [
+  {
+    icon: '✓',
+    title: 'Verified profiles',
+    body: "Every person here passed phone verification. You're talking to a real human.",
+  },
   {
     icon: '🔒',
     title: 'End-to-end encrypted',
-    body: 'Your messages are encrypted. Zylove cannot read your conversations.',
+    body: 'Your messages are encrypted on your device. Only you two can read them. Not even us.',
+  },
+  {
+    icon: '📸',
+    title: 'Photo sharing requires consent',
+    body: "Neither of you can send photos until you both agree to it. You're always in control of that.",
   },
   {
     icon: '✦',
-    title: 'Intentional connections',
-    body: 'You both chose this. Take your time, be yourself.',
+    title: 'Vibe Checks keep it real',
+    body: "As the conversation flows, you'll get a private check-in — just for you. Rate the vibe, unlock conversation sparks, and when you're both feeling it, you'll know.",
   },
   {
-    icon: '🚩',
-    title: 'Report & block',
-    body: 'Something feel off? Use the report button anytime. We take it seriously.',
+    icon: '🚨',
+    title: 'Block or report anytime',
+    body: 'Tap ••• at any point. Reports go to a real person. Serious safety issues are escalated immediately.',
   },
 ]
 
+const SAFETY_NOTE =
+  "When you're ready to meet in person: public place first, tell a friend where you're going, trust your gut."
+
 interface FirstChatModalProps {
   matchId: string
-  name: string
   onClose: () => void
 }
 
-// Shown once per match on web (mobile's equivalent is FirstMessageSafetyCard).
+// Shown once per match (mobile's equivalent is FirstMessageSafetyCard).
 // Bottom sheet on mobile, centered card on desktop.
-export default function FirstChatModal({ matchId, name, onClose }: FirstChatModalProps) {
+export default function FirstChatModal({ matchId, onClose }: FirstChatModalProps) {
   function dismiss() {
     markFirstChatSeen(matchId)
     onClose()
@@ -50,15 +64,20 @@ export default function FirstChatModal({ matchId, name, onClose }: FirstChatModa
       aria-modal="true"
       aria-labelledby="first-chat-title"
     >
-      <div className="w-full rounded-t-2xl bg-gray-900 px-6 pt-6 text-white pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] lg:max-w-sm lg:rounded-2xl lg:pb-6">
-        <h2 id="first-chat-title" className="text-xl font-bold">
-          ✦ You matched with {name}
+      <div className="max-h-[90dvh] w-full overflow-y-auto rounded-t-2xl bg-gray-900 px-6 pt-6 text-white pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] lg:max-w-md lg:rounded-2xl lg:pb-6">
+        <span className="inline-block rounded-full bg-[#1B4FD8]/15 px-3 py-1 text-xs font-semibold text-[#7C9BFF]">
+          🔵 Zylove · Spark
+        </span>
+        <h2 id="first-chat-title" className="mt-3 text-xl font-bold">
+          You've got a connection. Here's what's got your back.
         </h2>
-        <p className="mt-1 text-sm text-white/60">Here’s how Zylove keeps this space safe and real.</p>
+        <p className="mt-1 text-sm text-white/60">
+          Zylove was built so you can focus on the person, not the safety math.
+        </p>
 
-        <ul className="mt-5 space-y-4">
+        <ul className="mt-5 divide-y divide-white/10">
           {FEATURES.map((f) => (
-            <li key={f.title} className="flex gap-3">
+            <li key={f.title} className="flex gap-3 py-3 first:pt-0">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#1B4FD8]/15 text-[#7C9BFF]">
                 {f.icon}
               </span>
@@ -70,14 +89,21 @@ export default function FirstChatModal({ matchId, name, onClose }: FirstChatModa
           ))}
         </ul>
 
+        <p className="mt-4 rounded-xl border border-[#1B4FD8]/25 bg-[#1B4FD8]/10 px-4 py-3 text-sm leading-snug text-[#B4C6FF]">
+          💡 {SAFETY_NOTE}
+        </p>
+
         <button
           type="button"
           onClick={dismiss}
           autoFocus
           className="mt-6 w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold text-white transition-opacity hover:opacity-90"
         >
-          Start the conversation
+          Got it — let's talk
         </button>
+        <p className="mt-3 text-center text-xs text-white/40">
+          This message appears once. Tap ••• in the chat header to access safety features anytime.
+        </p>
       </div>
     </div>
   )

@@ -14,7 +14,7 @@ import ConversationNudge from './ConversationNudge'
 import FirstChatModal from './FirstChatModal'
 import ReviewModal from './ReviewModal'
 import VibeCheckModal from './VibeCheckModal'
-import { firstChatSeen } from './firstChatSeen'
+import { firstChatSeen, firstChatSeenRemotely } from './firstChatSeen'
 
 function messageTime(ms: number | null): string {
   if (ms === null) return 'Sending…'
@@ -75,6 +75,18 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
       () => setLoaded({ matchId, messages: [], error: true }),
     )
   }, [matchId, uid])
+
+  // Hide the first-chat modal if it was already dismissed on mobile.
+  useEffect(() => {
+    if (firstChatSeen(matchId)) return
+    let cancelled = false
+    firstChatSeenRemotely(matchId).then((seen) => {
+      if (seen && !cancelled) setShowFirstChat(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [matchId])
 
   useEffect(
     () =>
@@ -295,7 +307,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
       </div>
 
       {showFirstChat && (
-        <FirstChatModal matchId={matchId} name={match.name} onClose={() => setShowFirstChat(false)} />
+        <FirstChatModal matchId={matchId} onClose={() => setShowFirstChat(false)} />
       )}
 
       {showVibeCheck && (
