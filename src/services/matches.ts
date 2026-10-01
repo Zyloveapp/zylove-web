@@ -129,3 +129,16 @@ export function subscribeAllMatches(
     onError,
   )
 }
+
+// Whether the conversation has started. The match doc's lastMessage* fields
+// stand in for the messages subcollection, which would cost a read per match.
+export function hasMessages(m: MatchEntry): boolean {
+  return m.lastMessageAt > 0 || m.lastMessagePreview !== null
+}
+
+const NEW_MATCH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+
+// Matched in the last 7 days and nobody has written yet.
+export function isNewMatch(m: MatchEntry, now: number): boolean {
+  return !m.ended && !hasMessages(m) && m.matchedAt > now - NEW_MATCH_WINDOW_MS
+}
