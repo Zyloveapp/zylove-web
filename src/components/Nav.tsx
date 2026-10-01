@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 
@@ -43,20 +43,17 @@ function PersonIcon() {
   )
 }
 
-// Sparks is a tab of the Matches page, so active state also checks ?tab.
-const LINKS: { to: string; label: string; icon: ReactNode; isActive: (path: string, tab: string | null) => boolean }[] = [
-  { to: '/discover', label: 'Discover', icon: <CompassIcon />, isActive: (p) => p.startsWith('/discover') },
-  { to: '/matches', label: 'Matches', icon: <HeartIcon />, isActive: (p, tab) => p.startsWith('/matches') && tab !== 'sparks' },
-  { to: '/matches?tab=sparks', label: 'Sparks', icon: <SparkleIcon />, isActive: (p, tab) => p.startsWith('/matches') && tab === 'sparks' },
-  { to: '/profile', label: 'Profile', icon: <PersonIcon />, isActive: (p) => p.startsWith('/profile') },
+const LINKS: { to: string; label: string; icon: ReactNode }[] = [
+  { to: '/discover', label: 'Discover', icon: <CompassIcon /> },
+  { to: '/matches', label: 'Matches', icon: <HeartIcon /> },
+  { to: '/sparks', label: 'Sparks', icon: <SparkleIcon /> },
+  { to: '/profile', label: 'Profile', icon: <PersonIcon /> },
 ]
 
 export default function Nav() {
   const user = useAuthStore((s) => s.user)
   const mode = useModeStore((s) => s.mode)
-  const { pathname, search } = useLocation()
   if (!user) return null
-  const tab = new URLSearchParams(search).get('tab')
 
   return (
     <>
@@ -65,19 +62,17 @@ export default function Nav() {
         <div className="relative flex h-full items-center justify-between px-6">
           <span className="font-semibold text-white">✦ Zylove</span>
           <nav className="absolute left-1/2 flex -translate-x-1/2 gap-8">
-            {LINKS.map((l) => {
-              const active = l.isActive(pathname, tab)
-              return (
-                <Link
-                  key={l.to}
-                  to={l.to}
-                  aria-current={active ? 'page' : undefined}
-                  className={`text-sm font-medium transition-colors ${active ? 'text-white' : 'text-white/40 hover:text-white/70'}`}
-                >
-                  {l.label}
-                </Link>
-              )
-            })}
+            {LINKS.map((l) => (
+              <NavLink
+                key={l.to}
+                to={l.to}
+                className={({ isActive }) =>
+                  `text-sm font-medium transition-colors ${isActive ? 'text-white' : 'text-white/40 hover:text-white/70'}`
+                }
+              >
+                {l.label}
+              </NavLink>
+            ))}
           </nav>
           <span className="rounded-full bg-white/10 px-3 py-1 text-sm text-white">
             {mode === 'play' ? '🔴 Play' : '🔵 Spark'}
@@ -87,22 +82,20 @@ export default function Nav() {
 
       {/* Mobile: bottom bar */}
       <nav className="fixed inset-x-0 bottom-0 z-40 flex h-16 border-t border-white/10 bg-gray-950 lg:hidden">
-        {LINKS.map((l) => {
-          const active = l.isActive(pathname, tab)
-          return (
-            <Link
-              key={l.to}
-              to={l.to}
-              aria-current={active ? 'page' : undefined}
-              className={`flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${
-                active ? 'text-[#1B4FD8]' : 'text-white/40'
-              }`}
-            >
-              {l.icon}
-              {l.label}
-            </Link>
-          )
-        })}
+        {LINKS.map((l) => (
+          <NavLink
+            key={l.to}
+            to={l.to}
+            className={({ isActive }) =>
+              `flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${
+                isActive ? 'text-[#1B4FD8]' : 'text-white/40'
+              }`
+            }
+          >
+            {l.icon}
+            {l.label}
+          </NavLink>
+        ))}
       </nav>
     </>
   )
