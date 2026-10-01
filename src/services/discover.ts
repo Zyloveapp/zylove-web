@@ -250,7 +250,7 @@ export async function passProfile(uid: string, mode: Mode, targetUid: string): P
 
 // Same snapshot shape the mobile app and botEngine write; the match lists on
 // both apps read name/photo/age from here.
-export function participantSnapshot(p: DiscoverProfile): { displayName: string; age: number | null; photoURL: string | null } {
+function participantSnapshot(p: DiscoverProfile): { displayName: string; age: number | null; photoURL: string | null } {
   return {
     displayName: p.displayName || 'Someone',
     age: displayAge(p),

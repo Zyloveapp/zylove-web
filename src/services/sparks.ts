@@ -1,19 +1,17 @@
 import {
   collection,
-  deleteDoc,
   doc,
   getDoc,
   onSnapshot,
   orderBy,
   query,
-  serverTimestamp,
-  setDoc,
   updateDoc,
   type DocumentData,
   type Unsubscribe,
 } from 'firebase/firestore'
-import { db } from './firebase'
-import { likeProfile, participantSnapshot, type DiscoverProfile } from './discover'
+import { httpsCallable } from 'firebase/functions'
+import { db, functions } from './firebase'
+import { likeProfile, type DiscoverProfile } from './discover'
 import type { Mode } from '../store/modeStore'
 
 // users/{uid}/likeQueue/{likerUid} — people who liked this user. Written by
@@ -96,39 +94,16 @@ export async function loadSparkProfile(spark: SparkEntry): Promise<DiscoverProfi
   return { ...spark.profile, ...(snap.data() as DiscoverProfile), uid: spark.likerUid }
 }
 
-// Liking back someone in your queue is mutual by definition. onLike only
-// knows about likes recorded in pairs/{a_b}, which mobile and bot likes never
-// write — so when it doesn't report a match, the match is created here the
-// way the mobile app does it, and both queue entries are consumed.
+// Liking back someone in your queue is mutual by definition, but onLike only
+// knows about likes recorded in pairs/{a_b} (mobile and bot likes never write
+// there). onLike still runs to keep pairs in sync; the likeBack callable then
+// creates the match if onLike didn't and consumes both queue entries — writes
+// the client's Firestore rules don't allow.
 export async function likeBackSpark(uid: string, spark: SparkEntry, profile: DiscoverProfile): Promise<string> {
-  const result = await likeProfile(uid, spark.mode, profile)
-  const matchId = result.matched && result.matchId ? result.matchId : [uid, spark.likerUid].sort().join('_')
-
-  if (!result.matched) {
-    const matchRef = doc(db, 'matches', matchId)
-    const existing = await getDoc(matchRef)
-    if (!existing.exists()) {
-      const meSnap = await getDoc(doc(db, 'users', uid))
-      const me: DiscoverProfile = { ...(meSnap.data() as DiscoverProfile | undefined), uid }
-      await setDoc(matchRef, {
-        matchId,
-        users: [uid, spark.likerUid].sort(),
-        participantSnapshots: {
-          [uid]: participantSnapshot(me),
-          [spark.likerUid]: participantSnapshot(profile),
-        },
-        mode: spark.mode,
-        matchedAt: serverTimestamp(),
-        lastMessagePreview: null,
-        hasUnread: false,
-        isBlocked: false,
-      })
-    }
-  }
-
-  await Promise.allSettled([
-    deleteDoc(doc(db, `users/${uid}/likeQueue/${spark.likerUid}`)),
-    deleteDoc(doc(db, `users/${spark.likerUid}/likeQueue/${uid}`)),
-  ])
-  return matchId
+  await likeProfile(uid, spark.mode, profile)
+  const { data } = await httpsCallable<{ likerUid: string; mode: Mode }, { matched: true; matchId: string }>(
+    functions,
+    'likeBack',
+  )({ likerUid: spark.likerUid, mode: spark.mode })
+  return data.matchId
 }
