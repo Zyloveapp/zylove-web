@@ -1,20 +1,12 @@
 import type { ReactNode } from 'react'
 import type { DiscoverProfile } from '../../services/discover'
 import { lifestyleLabel, loveLanguageLabel, personalityLabel, valueLabel } from './labels'
+import { compareProfiles, joinNames } from './compare'
 
 // Side-by-side Spark insights from both profiles (mirrors mobile's
 // MatchScorecard): Things in Common, Worth a Conversation, Love Languages.
 
 const MAX_DIFFERENCES = 2
-
-function list(v: unknown): string[] {
-  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
-}
-
-function joinNames(names: string[]): string {
-  if (names.length <= 1) return names.join('')
-  return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`
-}
 
 function Section({ icon, title, iconClass, children }: { icon: string; title: string; iconClass: string; children: ReactNode }) {
   return (
@@ -58,13 +50,8 @@ function LoveLangCell({ title, items, matched }: { title: string; items: string[
 }
 
 export default function ProfileComparison({ me, them }: { me: DiscoverProfile; them: DiscoverProfile }) {
-  const sharedValues = list(me.relationshipValues).filter((v) => list(them.relationshipValues).includes(v))
-  const sharedTraits = list(me.personalityTraits).filter((t) => list(them.personalityTraits).includes(t))
-  const myLife = list(me.lifestyleTags)
-  const theirLife = list(them.lifestyleTags)
-  const sharedLife = myLife.filter((t) => theirLife.includes(t))
-  const onlyMine = myLife.filter((t) => !theirLife.includes(t))
-  const onlyTheirs = theirLife.filter((t) => !myLife.includes(t))
+  const facts = compareProfiles(me, them)
+  const { sharedValues, sharedTraits, sharedLife, onlyMine, onlyTheirs, myGive, myNeed, theirGive, theirNeed } = facts
 
   const commons: { label: string; detail: string }[] = []
   if (sharedValues.length > 0) {
@@ -94,13 +81,9 @@ export default function ProfileComparison({ me, them }: { me: DiscoverProfile; t
     }
   }
 
-  const myGive = list(me.loveLangGive)
-  const myNeed = list(me.loveLangReceive)
-  const theirGive = list(them.loveLangGive)
-  const theirNeed = list(them.loveLangReceive)
   // Your give meets their need; their give meets your need.
-  const iGiveTheyNeed = new Set(myGive.filter((l) => theirNeed.includes(l)))
-  const theyGiveINeed = new Set(theirGive.filter((l) => myNeed.includes(l)))
+  const iGiveTheyNeed = new Set(facts.iGiveTheyNeed)
+  const theyGiveINeed = new Set(facts.theyGiveINeed)
   const hasLoveLangs = myGive.length + myNeed.length + theirGive.length + theirNeed.length > 0
 
   return (

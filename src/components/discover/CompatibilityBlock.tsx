@@ -9,6 +9,7 @@ import {
 import BreakTheIce from './BreakTheIce'
 import { useAuthStore } from '../../store/authStore'
 import ProfileComparison from './ProfileComparison'
+import { compareProfiles, whyThisWorks, type ProfileFacts } from './compare'
 import { DEALBREAKER_LABELS, type Dealbreaker } from '../../types/profile'
 import type { Mode } from '../../store/modeStore'
 import { discoverTheme } from './theme'
@@ -29,7 +30,7 @@ const CATEGORIES: Record<Mode, { key: string; label: string }[]> = {
   ],
 }
 
-// Every category, in scoring-weight order — used for "Why you match".
+// Every category, in scoring-weight order — used for "Why this works".
 const ALL_CATEGORIES: Record<Mode, { key: string; label: string }[]> = {
   spark: [
     ...CATEGORIES.spark,
@@ -40,30 +41,6 @@ const ALL_CATEGORIES: Record<Mode, { key: string; label: string }[]> = {
 }
 
 const INSIGHT_THRESHOLD = 60
-
-function insightFor(value: number): string {
-  if (value >= 90) return 'Strong alignment'
-  if (value >= 80) return 'High compatibility'
-  if (value >= 70) return 'Good match'
-  return 'Moderate'
-}
-
-// Category-specific wording for "Why you match"; anything not listed falls
-// back to the generic level words.
-function categoryInsight(key: string, value: number, asymmetryGap: number | null): string {
-  switch (key) {
-    case 'valuesIntentions':
-      return `${insightFor(value)} · You both value connection`
-    case 'coreFit':
-      if (asymmetryGap !== null && asymmetryGap < 10) return 'Well balanced'
-      if (asymmetryGap !== null && asymmetryGap <= 20) return 'Complementary'
-      return insightFor(value)
-    case 'loveLanguages':
-      return value > 70 ? 'You give what they need' : 'Different styles'
-    default:
-      return insightFor(value)
-  }
-}
 
 // Mobile's score scale (green / cobalt / amber / red).
 function scoreColor(score: number): string {
@@ -117,7 +94,7 @@ export default function CompatibilityBlock({
   match?: { matchId: string }
   // Sparks: the score was already earned, so it loads and shows without a click.
   autoReveal?: boolean
-  // Why you match, Things in common, Worth a conversation and the love
+  // Why this works, Things in common, Worth a conversation and the love
   // languages grid. Discover only teases (score, archetype, bars); the full
   // report is the reward in Sparks.
   fullReport?: boolean
@@ -163,8 +140,8 @@ export default function CompatibilityBlock({
   }
 
   if (status === 'revealed' && result) {
-    const comparison =
-      showComparison && me?.uid === uid ? <ProfileComparison me={me.profile} them={profile} /> : null
+    const myProfile = showComparison && me?.uid === uid ? me.profile : null
+    const comparison = myProfile ? <ProfileComparison me={myProfile} them={profile} /> : null
     return (
       <RevealedScore
         result={result}
@@ -173,6 +150,7 @@ export default function CompatibilityBlock({
         hidden={emptyCategories(profile)}
         fullReport={fullReport}
         comparison={comparison}
+        facts={myProfile ? compareProfiles(myProfile, profile) : null}
         breakTheIce={match ? <BreakTheIce matchId={match.matchId} otherUid={targetUid} /> : null}
       />
     )
@@ -216,6 +194,7 @@ function RevealedScore({
   hidden,
   fullReport,
   comparison,
+  facts,
   breakTheIce,
 }: {
   result: CompatibilityResult
@@ -224,6 +203,9 @@ function RevealedScore({
   hidden: Set<string>
   fullReport: boolean
   comparison: ReactNode
+  // Both profiles compared, for data-driven "Why this works" lines (null
+  // until the viewer's profile loads, and in Play).
+  facts: ProfileFacts | null
   breakTheIce: ReactNode
 }) {
   const theme = discoverTheme(mode)
@@ -295,13 +277,13 @@ function RevealedScore({
 
       {insights.length > 0 && (
         <div className="mt-6">
-          <p className="text-[11px] uppercase tracking-widest text-white font-semibold mb-4">Why you match</p>
+          <p className="text-[11px] uppercase tracking-widest text-white font-semibold mb-4">Why this works</p>
           <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {insights.map((c) => (
               <li key={c.key} className="text-sm">
                 <span className="text-white/55">{c.label}</span>
                 <span className="mx-2 text-white/20">·</span>
-                <span className="text-white/80">{categoryInsight(c.key, c.value, tier1?.asymmetryGap ?? null)}</span>
+                <span className="text-white/80">{whyThisWorks(c.key, c.value, tier1?.asymmetryGap ?? null, facts)}</span>
               </li>
             ))}
           </ul>
