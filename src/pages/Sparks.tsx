@@ -2,13 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
-import SparksList, { CuriousList, SentList, TopPicksList } from '../components/matches/SparksList'
+import SparksList, { CuriousList, SentList } from '../components/matches/SparksList'
 import SparkProfileView from '../components/matches/SparkProfileView'
-import TopPickView from '../components/matches/TopPickView'
 import MatchOverlay, { type NewMatch } from '../components/discover/MatchOverlay'
 import { subscribeMatches, type MatchEntry } from '../services/matches'
 import { CURIOUS_MAX, fetchCurious, fetchSentSparks, subscribeSparkQueue, type CuriousResult, type SentSpark, type SparkEntry } from '../services/sparks'
-import { displayScore, fetchCompatibility, fetchTopPicks, type TopPick } from '../services/discover'
+import { displayScore, fetchCompatibility } from '../services/discover'
 
 type Tab = 'sparks' | 'curious' | 'picks' | 'sent'
 
@@ -20,7 +19,11 @@ interface QueueState {
 }
 
 // Sparks (Spark) / Flames (Play): people who liked you, who's curious about
-// you, Top Picks from Explore, and likes you've sent.
+// you, your best-matched Sparks (Top Picks), and likes you've sent.
+
+// Top Picks only appears once there's enough to filter.
+const TOP_PICKS_MIN_SPARKS = 4
+const TOP_PICKS_COUNT = 3
 export default function Sparks() {
   // AuthGuard guarantees a signed-in user on this route.
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
@@ -32,14 +35,12 @@ export default function Sparks() {
   const [queue, setQueue] = useState<QueueState | null>(null)
   // Matches are only needed to know which likers are already matched.
   const [matches, setMatches] = useState<{ key: string; list: MatchEntry[] } | null>(null)
-  const [picks, setPicks] = useState<{ key: string; list: TopPick[] | null; error: boolean } | null>(null)
   const [curious, setCurious] = useState<{ key: string; result: CuriousResult | null; error: boolean } | null>(null)
   const navigate = useNavigate()
   const [sent, setSent] = useState<{ key: string; list: SentSpark[] | null; error: boolean } | null>(null)
   const [selected, setSelected] = useState<SparkEntry | null>(null)
   // Calculated scores for sparks opened this session, keyed by likerUid.
   const [scores, setScores] = useState<{ key: string; map: Map<string, number> }>({ key, map: new Map() })
-  const [selectedPick, setSelectedPick] = useState<TopPick | null>(null)
   const [newMatch, setNewMatch] = useState<NewMatch | null>(null)
 
   useEffect(() => {
@@ -62,19 +63,6 @@ export default function Sparks() {
     )
   }, [uid, mode, key])
 
-  // Top Picks read one pair doc per Explore candidate, so they load the first
-  // time the tab opens (per mode), not with the page.
-  const picksLoaded = picks?.key === key
-  useEffect(() => {
-    if (tab !== 'picks' || picksLoaded || !uid) return
-    let cancelled = false
-    fetchTopPicks(uid, mode)
-      .then((list) => !cancelled && setPicks({ key, list, error: false }))
-      .catch(() => !cancelled && setPicks({ key, list: [], error: true }))
-    return () => {
-      cancelled = true
-    }
-  }, [tab, picksLoaded, uid, mode, key])
 
   // Curious comes from a callable; refreshed each time the tab opens.
   useEffect(() => {
@@ -107,8 +95,22 @@ export default function Sparks() {
   )
 
   const loaded = queue?.key === key ? queue : null
-  const pickList = picks?.key === key ? picks.list : null
   const liveCount = loaded?.live.length ?? 0
+  const syncedScores = scores.key === key ? scores.map : undefined
+  // Best-matched incoming Sparks: the real score once a card has been opened,
+  // otherwise the score saved with the like. Unscored likes are left out.
+  const topPicks = useMemo(() => {
+    const live = loaded?.live ?? []
+    if (live.length < TOP_PICKS_MIN_SPARKS) return null
+    return live
+      .map((s) => ({ s, score: syncedScores?.get(s.likerUid) ?? s.compatibilityScore }))
+      .filter((x): x is { s: SparkEntry; score: number } => x.score !== null)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, TOP_PICKS_COUNT)
+      .map((x) => x.s)
+  }, [loaded, syncedScores])
+  // The tab disappears when the queue drops below the minimum.
+  const shownTab: Tab = tab === 'picks' && !topPicks ? 'sparks' : tab
   const sentList = sent?.key === key ? sent.list : null
   const curiousState = curious?.key === key ? curious : null
   const curiousCount = curiousState?.result
@@ -120,7 +122,7 @@ export default function Sparks() {
   const TABS: { id: Tab; label: string }[] = [
     { id: 'sparks', label: `${isPlay ? '🔥 Flames' : '✦ Sparks'} ${liveCount}` },
     { id: 'curious', label: `✦ Curious${curiousCount ? ` ${curiousCount}` : ''}` },
-    { id: 'picks', label: `✦ Top Picks${pickList ? ` ${pickList.length}` : ''}` },
+    ...(topPicks ? [{ id: 'picks' as const, label: `✦ Top Picks ${topPicks.length}` }] : []),
     { id: 'sent', label: `→ Sent${sentList ? ` ${sentList.length}` : ''}` },
   ]
   const activeTab = isPlay ? 'border-[#E03131] text-white' : 'border-[#1B4FD8] text-white'
@@ -156,10 +158,10 @@ export default function Sparks() {
               key={t.id}
               type="button"
               role="tab"
-              aria-selected={tab === t.id}
+              aria-selected={shownTab === t.id}
               onClick={() => setTab(t.id)}
               className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-                tab === t.id ? activeTab : 'border-transparent text-white/45 hover:text-white/70'
+                shownTab === t.id ? activeTab : 'border-transparent text-white/45 hover:text-white/70'
               }`}
             >
               {t.label}
@@ -168,7 +170,7 @@ export default function Sparks() {
         </div>
 
         <div className="pb-6">
-          {tab === 'curious' ? (
+          {shownTab === 'curious' ? (
             !curiousState ? (
               <Spinner />
             ) : curiousState.error || !curiousState.result ? (
@@ -176,7 +178,7 @@ export default function Sparks() {
             ) : (
               <CuriousList result={curiousState.result} mode={mode} onSelect={(id) => navigate(`/profile/${id}`)} />
             )
-          ) : tab === 'sent' ? (
+          ) : shownTab === 'sent' ? (
             sentList === null ? (
               <Spinner />
             ) : sent?.error ? (
@@ -184,13 +186,18 @@ export default function Sparks() {
             ) : (
               <SentList sent={sentList} mode={mode} />
             )
-          ) : tab === 'picks' ? (
-            pickList === null ? (
-              <Spinner />
-            ) : picks?.error ? (
-              <p className="py-10 text-center text-sm text-white/50">Couldn't load Top Picks.</p>
+          ) : shownTab === 'picks' && topPicks ? (
+            topPicks.length === 0 ? (
+              <p className="py-16 text-center text-sm text-white/50">Scores load as you explore. Check back soon.</p>
             ) : (
-              <TopPicksList picks={pickList} mode={mode} onSelect={setSelectedPick} />
+              <SparksList
+                sparks={topPicks}
+                mode={mode}
+                matchedUids={matchedUids}
+                onSelect={openSpark}
+                scores={syncedScores}
+                topPicks
+              />
             )
           ) : !loaded ? (
             <Spinner />
@@ -202,7 +209,7 @@ export default function Sparks() {
               mode={mode}
               matchedUids={matchedUids}
               onSelect={openSpark}
-              scores={scores.key === key ? scores.map : undefined}
+              scores={syncedScores}
             />
           )}
         </div>
@@ -226,30 +233,6 @@ export default function Sparks() {
           }
           onMatched={(matchId) => setNewMatch((m) => (m ? { ...m, matchId } : m))}
           onMatchFailed={() => setNewMatch(null)}
-        />
-      )}
-
-      {selectedPick && (
-        <TopPickView
-          key={selectedPick.profile.uid}
-          uid={uid}
-          pick={selectedPick}
-          mode={mode}
-          onClose={() => setSelectedPick(null)}
-          onDone={({ matchId }) => {
-            const p = selectedPick.profile
-            setSelectedPick(null)
-            setPicks((prev) => (prev?.list ? { ...prev, list: prev.list.filter((x) => x.profile.uid !== p.uid) } : prev))
-            if (matchId) {
-              setNewMatch({
-                matchId,
-                theirUid: p.uid,
-                theirName: p.displayName ?? 'Someone',
-                theirPhoto: p.photoURLs?.[0] ?? null,
-                mode,
-              })
-            }
-          }}
         />
       )}
 

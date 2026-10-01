@@ -352,38 +352,3 @@ export function displayScore(result: CompatibilityResult, mode: Mode): DisplaySc
 function clampScore(n: number): number {
   return Math.max(0, Math.min(100, Math.round(n)))
 }
-
-// ─── Top Picks ───────────────────────────────────────────────────────────────
-
-export interface TopPick {
-  profile: DiscoverProfile
-  score: DisplayScore
-}
-
-// The three best-scoring unswiped Explore profiles, ranked only by pair scores
-// that already exist (pairs/{a_b}, written when a profile was opened or
-// prefetched). Never calls onTap, so ranking creates no new pair docs.
-export async function fetchTopPicks(uid: string, mode: Mode): Promise<TopPick[]> {
-  const candidates = await fetchCandidates(uid, mode)
-  const scored = await Promise.all(
-    candidates.map(async (profile): Promise<TopPick | null> => {
-      const snap = await getDoc(doc(db, 'pairs', [uid, profile.uid].sort().join('_'))).catch(() => null)
-      const data = snap?.data()
-      if (!data) return null
-      const score = displayScore(
-        {
-          pairId: snap!.id,
-          sparkScore: num(data.sparkScore) ?? undefined,
-          playScore: num(data.playScore) ?? undefined,
-          tier1: parseTier1(data.tier1Spark),
-        },
-        mode,
-      )
-      return score ? { profile, score } : null
-    }),
-  )
-  return scored
-    .filter((p): p is TopPick => p !== null)
-    .sort((a, b) => b.score.value - a.score.value)
-    .slice(0, 3)
-}

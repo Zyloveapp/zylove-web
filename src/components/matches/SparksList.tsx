@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { CURIOUS_MAX, type CuriousResult, type SentSpark, type SparkEntry } from '../../services/sparks'
-import { displayAge, type DiscoverProfile, type TopPick } from '../../services/discover'
+import { displayAge, type DiscoverProfile } from '../../services/discover'
 import { UserTierBadge } from '../TierBadge'
 import { relativeTime } from '../../services/matches'
 import type { Mode } from '../../store/modeStore'
@@ -88,9 +88,11 @@ interface SparksListProps {
   // Real scores (likerUid → %) for cards whose profile has been opened; they
   // replace the like's snapshot score, which is random for bots.
   scores?: Map<string, number>
+  // Top Picks tab: adds the gold "✦ Top Pick" label to every card.
+  topPicks?: boolean
 }
 
-export default function SparksList({ sparks, mode, matchedUids, onSelect, scores }: SparksListProps) {
+export default function SparksList({ sparks, mode, matchedUids, onSelect, scores, topPicks = false }: SparksListProps) {
   if (sparks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
@@ -116,6 +118,7 @@ export default function SparksList({ sparks, mode, matchedUids, onSelect, scores
               return value !== null ? <ScorePill score={value} mode={mode} /> : null
             })()}
           >
+            {topPicks && <span className="block text-xs font-semibold text-[#F59E0B]">✦ Top Pick</span>}
             {s.isWeeklySpark && <span className="block text-xs font-semibold text-[#F59E0B]">✦ Weekly Spark</span>}
             {revealed ? (
               <NameLine profile={s.profile} uid={s.likerUid} />
@@ -136,39 +139,6 @@ export default function SparksList({ sparks, mode, matchedUids, onSelect, scores
           </Card>
         )
       })}
-    </ul>
-  )
-}
-
-export function TopPicksList({ picks, mode, onSelect }: { picks: TopPick[]; mode: Mode; onSelect: (pick: TopPick) => void }) {
-  if (picks.length === 0) {
-    return (
-      <div className="px-6 py-16 text-center">
-        <p className="text-sm text-white/50">
-          Top Picks come from profiles you've opened in Explore. Keep exploring and your best matches will land here.
-        </p>
-      </div>
-    )
-  }
-  return (
-    <ul className="space-y-3">
-      {picks.map((p) => (
-        <Card
-          key={p.profile.uid}
-          photo={p.profile.photoURLs?.[0]}
-          onSelect={() => onSelect(p)}
-          score={<ScorePill score={p.score.value} mode={mode} />}
-        >
-          <span className="block text-xs font-semibold text-[#F59E0B]">✦ Top Pick</span>
-          <NameLine profile={p.profile} uid={p.profile.uid} />
-          {p.profile.locationLabel && (
-            <span className="mt-0.5 block truncate text-sm text-white/50">📍 {p.profile.locationLabel}</span>
-          )}
-          <span className="mt-2 block">
-            <IntentPill intent={p.profile.intent} />
-          </span>
-        </Card>
-      ))}
     </ul>
   )
 }
