@@ -295,3 +295,29 @@ export async function fetchProfileReview(): Promise<ProfileReview> {
   const { data } = await httpsCallable<void, ProfileReview>(functions, 'reviewProfile', { timeout: 60_000 })()
   return data
 }
+
+// ─── Play profile (users/{uid}/playProfile/data) ─────────────────────────────
+
+export interface PlayProfileData {
+  photoURLs: string[]
+  playBio: string
+  spiceLevel: string | null
+  playInterestTags: string[]
+  playNonNegotiables: string[]
+  promptAnswers: PromptAnswer[]
+}
+
+// Someone's Play profile, or null if they don't have one (or it can't be read).
+export async function loadPlayProfile(uid: string): Promise<PlayProfileData | null> {
+  const snap = await getDoc(doc(db, `users/${uid}/playProfile/data`)).catch(() => null)
+  const d = snap?.data()
+  if (!d) return null
+  return {
+    photoURLs: strings(d.photoURLs),
+    playBio: typeof d.playBio === 'string' ? d.playBio.trim() : '',
+    spiceLevel: str(d.spiceLevel),
+    playInterestTags: strings(d.playInterestTags),
+    playNonNegotiables: strings(d.playNonNegotiables),
+    promptAnswers: promptList(d.promptAnswers),
+  }
+}

@@ -2,15 +2,16 @@ import { useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
-import { loadOwnProfile, type OwnProfile } from '../services/profile'
+import { loadOwnProfile, loadPlayProfile, type OwnProfile, type PlayProfileData } from '../services/profile'
 import { subscribeAllMatches, type MatchEntry } from '../services/matches'
 import { actionErrorMessage } from '../services/discover'
 import { passFromProfile, sparkFromProfile } from '../services/sparks'
 import ProfileSections from '../components/profile/ProfileSections'
+import PlayProfileSections from '../components/profile/PlayProfileSections'
 import CompatibilityBlock from '../components/discover/CompatibilityBlock'
 import MatchOverlay, { type NewMatch } from '../components/discover/MatchOverlay'
 
-type Loaded = { uid: string; data: OwnProfile | null }
+type Loaded = { uid: string; data: OwnProfile | null; play: PlayProfileData | null }
 
 // Someone else's profile: the same layout as your own, minus the owner-only
 // parts (edit, completeness, dealbreakers, Zylove Score). Linked people get a
@@ -36,11 +37,11 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
   useEffect(() => {
     if (!targetUid || targetUid === uid) return
     let cancelled = false
-    loadOwnProfile(targetUid)
-      .catch(() => null)
-      .then((data) => {
-        if (!cancelled) setLoaded({ uid: targetUid, data })
-      })
+    // Play data is loaded up front too: which one shows depends on the mode,
+    // which isn't known until the links list arrives.
+    Promise.all([loadOwnProfile(targetUid).catch(() => null), loadPlayProfile(targetUid)]).then(([data, play]) => {
+      if (!cancelled) setLoaded({ uid: targetUid, data, play })
+    })
     return () => {
       cancelled = true
     }
@@ -75,9 +76,23 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
   }
 
   const { profile, bio, prompts, dynamicPrompt } = current.data
+  const play = current.play
   const link = matches.find((m) => m.partnerUid === targetUid && !m.ended) ?? null
   const viewMode = link?.mode ?? mode
   const accent = viewMode === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
+
+  const report = (
+    <section>
+      <CompatibilityBlock
+        key={targetUid}
+        profile={profile}
+        mode={viewMode}
+        autoReveal
+        fullReport
+        match={link ? { matchId: link.matchId } : undefined}
+      />
+    </section>
+  )
 
   function goBack() {
     if (window.history.length > 1) navigate(-1)
@@ -119,25 +134,28 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
         <button type="button" onClick={goBack} className="text-sm text-white/60 hover:text-white">
           ← Back
         </button>
-        <ProfileSections
-          profile={profile}
-          bio={bio}
-          prompts={prompts}
-          dynamicPrompt={dynamicPrompt}
-          nameFallback="Someone"
-          afterHeader={
-            <section>
-              <CompatibilityBlock
-                key={targetUid}
-                profile={profile}
-                mode={viewMode}
-                autoReveal
-                fullReport
-                match={link ? { matchId: link.matchId } : undefined}
-              />
-            </section>
-          }
-        />
+        {viewMode === 'play' && play ? (
+          <PlayProfileSections profile={profile} play={play} afterHeader={report} />
+        ) : (
+          <ProfileSections
+            profile={profile}
+            bio={bio}
+            prompts={prompts}
+            dynamicPrompt={dynamicPrompt}
+            nameFallback="Someone"
+            afterHeader={
+              <>
+                {/* In Play without a Play profile, say what's being shown. */}
+                {viewMode === 'play' && (
+                  <p className="-mt-4 text-xs text-white/40">
+                    <span className="rounded-full border border-[#1B4FD8]/40 bg-[#1B4FD8]/10 px-2 py-0.5 text-[#9DB4FF]">Spark profile</span>
+                  </p>
+                )}
+                {report}
+              </>
+            }
+          />
+        )}
       </div>
 
       {/* Sits above the mobile bottom nav (h-16). */}

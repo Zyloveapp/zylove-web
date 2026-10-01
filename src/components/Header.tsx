@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
+import { doc, getDoc } from 'firebase/firestore'
+import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import { setVisibility, subscribeVisibility, type Visibility, type VisibilityState } from '../services/visibility'
@@ -75,6 +78,53 @@ function VisibilitySheet({ current, onPick, onClose }: { current: Visibility; on
   )
 }
 
+// Shown instead of the PIN when the user has no Play profile yet. Portaled
+// to <body> so it sits above the header and nav.
+function PlaySetupSheet({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/60 backdrop-blur-sm lg:items-center lg:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="play-setup-title"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="w-full rounded-t-2xl bg-gray-900 px-6 pt-6 text-white pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] lg:max-w-sm lg:rounded-2xl lg:pb-6">
+        <p className="text-3xl" aria-hidden>
+          🔴
+        </p>
+        <h2 id="play-setup-title" className="mt-3 text-xl font-bold">
+          Set up your Play profile
+        </h2>
+        <p className="mt-2 text-sm text-white/60">
+          Play is a separate experience with its own profile. Set it up to get started.
+        </p>
+        {/* Play onboarding isn't on web yet, so this just closes for now. */}
+        <button
+          type="button"
+          onClick={onClose}
+          autoFocus
+          className="mt-6 w-full rounded-xl bg-[#E03131] py-3 font-semibold text-white transition-opacity hover:opacity-90"
+        >
+          Get started
+        </button>
+        <button type="button" onClick={onClose} className="mt-2 w-full py-2 text-sm text-white/50 hover:text-white">
+          Cancel
+        </button>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 // Persistent top bar on every protected page: wordmark, mode pill, visibility
 // and settings. Going into Play asks for the Play PIN; back to Spark is instant.
 export default function Header() {
@@ -84,6 +134,8 @@ export default function Header() {
   const [visibility, setVisibilityState] = useState<VisibilityState | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [pinFlow, setPinFlow] = useState(false)
+  const [playSetup, setPlaySetup] = useState(false)
+  const [checkingPlay, setCheckingPlay] = useState(false)
 
   useEffect(() => {
     if (!uid) return
@@ -94,9 +146,18 @@ export default function Header() {
   const current = visibility?.[mode] ?? null
   const dot = VISIBILITY.find((o) => o.value === current)
 
-  function togglePill() {
-    if (isPlay) setMode('spark')
-    else setPinFlow(true)
+  // Into Play: needs a Play profile, then the PIN. Back to Spark is instant.
+  async function togglePill() {
+    if (isPlay) return setMode('spark')
+    if (checkingPlay) return
+    setCheckingPlay(true)
+    // A failed read shouldn't lock anyone out of Play: fall through to the PIN.
+    const hasPlay = await getDoc(doc(db, `users/${uid}/playProfile/data`))
+      .then((snap) => snap.exists())
+      .catch(() => true)
+    setCheckingPlay(false)
+    if (hasPlay) setPinFlow(true)
+    else setPlaySetup(true)
   }
 
   function pick(v: Visibility) {
@@ -118,6 +179,7 @@ export default function Header() {
         <button
           type="button"
           onClick={togglePill}
+          disabled={checkingPlay}
           aria-label={isPlay ? 'Play mode — switch to Spark' : 'Spark mode — switch to Play'}
           className={`justify-self-center rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
             isPlay
@@ -152,6 +214,8 @@ export default function Header() {
 
         {sheetOpen && current && <VisibilitySheet current={current} onPick={pick} onClose={() => setSheetOpen(false)} />}
       </div>
+
+      {playSetup && <PlaySetupSheet onClose={() => setPlaySetup(false)} />}
 
       {pinFlow && (
         <PlayPinFlow

@@ -131,7 +131,23 @@ export async function fetchCandidates(uid: string, mode: Mode): Promise<Discover
     })
 
   // Everyone left has photos, so "photos first" is already satisfied.
-  return shuffle(candidates)
+  return shuffle(mode === 'play' ? await withPlayProfiles(candidates) : candidates)
+}
+
+// Play Explore only shows people with a Play profile. 'play' intent implies
+// one; 'open' users may have only Spark, so their playProfile/data docs are
+// checked in parallel. An unreadable doc counts as missing.
+async function withPlayProfiles(candidates: DiscoverProfile[]): Promise<DiscoverProfile[]> {
+  const hasPlay = await Promise.all(
+    candidates.map((p) =>
+      p.intent === 'open'
+        ? getDoc(doc(db, `users/${p.uid}/playProfile/data`))
+            .then((snap) => snap.exists())
+            .catch(() => false)
+        : Promise.resolve(true),
+    ),
+  )
+  return candidates.filter((_, i) => hasPlay[i])
 }
 
 // ─── Actions (deployed Callables) ────────────────────────────────────────────

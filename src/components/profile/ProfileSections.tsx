@@ -58,7 +58,7 @@ const GLOW: Record<BadgeTier, string> = {
   elite: 'ring-2 ring-amber-400/60 ring-offset-2 ring-offset-gray-950',
 }
 
-function PhotoHero({ photos, name, glow }: { photos: string[]; name: string; glow: BadgeTier | null }) {
+export function PhotoHero({ photos, name, glow }: { photos: string[]; name: string; glow: BadgeTier | null }) {
   const ring = glow ? GLOW[glow] : ''
   const [index, setIndex] = useState(0)
   const count = photos.length
@@ -109,6 +109,44 @@ function PhotoHero({ photos, name, glow }: { photos: string[]; name: string; glo
   )
 }
 
+// Name, age, gender, pronouns, badges and basics — shared by the Spark and
+// Play profile layouts.
+export function ProfileHeader({ profile: p, nameFallback }: { profile: DiscoverProfile; nameFallback: string }) {
+  const name = p.displayName ?? ''
+  const age = displayAge(p)
+  const gender = profileGenderLabel(p)
+  const isFounder = (p as Record<string, unknown>).isFounder === true
+  const tier = (p as Record<string, unknown>).zyloveScoreTier
+  const bodyType = p.bodyType && p.bodyType !== 'prefer_not_to_say' ? bodyTypeLabel(p.bodyType) : null
+  return (
+    <header>
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <h1 className="text-3xl font-bold">
+          {name || nameFallback}
+          {age !== null && <span className="font-normal text-white/70">, {age}</span>}
+        </h1>
+        {gender && <span className="text-white/60">· {gender}</span>}
+        {p.pronouns && <span className="text-sm text-white/40">{p.pronouns}</span>}
+      </div>
+      {badgeTier(tier) && (
+        <div className="mt-2 [&>span]:px-3 [&>span]:py-1 [&>span]:text-sm">
+          <TierBadge tier={tier} />
+        </div>
+      )}
+      {isFounder && (
+        <span className="mt-2 inline-block rounded-full border border-[#1B4FD8]/40 bg-[#1B4FD8]/15 px-3 py-1 text-xs font-semibold text-[#B4C6FF]">
+          ✦ Austin Founding Circle
+        </span>
+      )}
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-white/60">
+        {p.locationLabel && <span>📍 {p.locationLabel}</span>}
+        {typeof p.heightCm === 'number' && p.heightCm > 0 && <span>📏 {cmToFeetInches(p.heightCm)}</span>}
+        {bodyType && <span>{bodyType}</span>}
+      </div>
+    </header>
+  )
+}
+
 function list(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x !== '') : []
 }
@@ -139,12 +177,7 @@ export default function ProfileSections({
   lookingFor,
   promptsExtra,
 }: ProfileSectionsProps) {
-  const name = p.displayName ?? ''
-  const age = displayAge(p)
-  const gender = profileGenderLabel(p)
-  const isFounder = (p as Record<string, unknown>).isFounder === true
   const tier = (p as Record<string, unknown>).zyloveScoreTier
-  const bodyType = p.bodyType && p.bodyType !== 'prefer_not_to_say' ? bodyTypeLabel(p.bodyType) : null
   const weekend = list(p.weekendVibes).length > 0 ? list(p.weekendVibes) : list([p.weekendVibe])
   const kids = kidsDetail(p)
   const status =
@@ -154,33 +187,9 @@ export default function ProfileSections({
 
   return (
     <>
-      <PhotoHero photos={list(p.photoURLs)} name={name} glow={badgeTier(tier)} />
+      <PhotoHero photos={list(p.photoURLs)} name={p.displayName ?? ''} glow={badgeTier(tier)} />
 
-      <header>
-        <div className="flex flex-wrap items-baseline gap-x-2">
-          <h1 className="text-3xl font-bold">
-            {name || nameFallback}
-            {age !== null && <span className="font-normal text-white/70">, {age}</span>}
-          </h1>
-          {gender && <span className="text-white/60">· {gender}</span>}
-          {p.pronouns && <span className="text-sm text-white/40">{p.pronouns}</span>}
-        </div>
-        {badgeTier(tier) && (
-          <div className="mt-2 [&>span]:px-3 [&>span]:py-1 [&>span]:text-sm">
-            <TierBadge tier={tier} />
-          </div>
-        )}
-        {isFounder && (
-          <span className="mt-2 inline-block rounded-full border border-[#1B4FD8]/40 bg-[#1B4FD8]/15 px-3 py-1 text-xs font-semibold text-[#B4C6FF]">
-            ✦ Austin Founding Circle
-          </span>
-        )}
-        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-white/60">
-          {p.locationLabel && <span>📍 {p.locationLabel}</span>}
-          {typeof p.heightCm === 'number' && p.heightCm > 0 && <span>📏 {cmToFeetInches(p.heightCm)}</span>}
-          {bodyType && <span>{bodyType}</span>}
-        </div>
-      </header>
+      <ProfileHeader profile={p} nameFallback={nameFallback} />
 
       {afterHeader}
 

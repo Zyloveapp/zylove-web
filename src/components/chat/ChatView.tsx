@@ -14,7 +14,6 @@ import {
 } from '../../services/zyloveScore'
 import ConversationNudge from './ConversationNudge'
 import FirstChatModal from './FirstChatModal'
-import MatchProfileView from './MatchProfileView'
 import ReviewModal from './ReviewModal'
 import VibeCheckModal from './VibeCheckModal'
 import { firstChatSeen, firstChatSeenRemotely } from './firstChatSeen'
@@ -57,8 +56,6 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const vibeCheckFired = useRef(false)
   const vibeCheckTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [showReview, setShowReview] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [showProfile, setShowProfile] = useState(false)
   const navigate = useNavigate()
   const reviewChecked = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -208,60 +205,25 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
             ←
           </button>
         )}
-        {match.photoURL ? (
-          <img src={match.photoURL} alt="" className="h-12 w-12 rounded-full object-cover" />
-        ) : (
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 font-semibold text-white/70">
-            {match.name.charAt(0).toUpperCase()}
-          </span>
-        )}
-        <h2 className="min-w-0 flex-1 truncate font-semibold">
-          {match.name}
-          {match.age !== null && <span className="font-normal text-white/50">, {match.age}</span>}
-        </h2>
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setMenuOpen((o) => !o)}
-            aria-label="More"
-            aria-expanded={menuOpen}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-lg text-white/60 hover:bg-white/10 hover:text-white"
-          >
-            •••
-          </button>
-          {menuOpen && (
-            <>
-              <button
-                type="button"
-                aria-label="Close menu"
-                onClick={() => setMenuOpen(false)}
-                className="fixed inset-0 z-10 cursor-default"
-              />
-              <div className="absolute right-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-xl border border-white/10 bg-gray-900 shadow-2xl">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false)
-                    setShowProfile(true)
-                  }}
-                  className="w-full px-4 py-3 text-left text-sm text-white hover:bg-white/5"
-                >
-                  ✦ View compatibility
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false)
-                    navigate(`/profile/${partnerUid}`)
-                  }}
-                  className="w-full border-t border-white/5 px-4 py-3 text-left text-sm text-white hover:bg-white/5"
-                >
-                  View profile →
-                </button>
-              </div>
-            </>
+        {/* Name and avatar open their profile. The ••• menu returns with Report/Block. */}
+        <button
+          type="button"
+          onClick={() => navigate(`/profile/${partnerUid}`)}
+          aria-label={`View ${match.name}'s profile`}
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left transition-opacity hover:opacity-80"
+        >
+          {match.photoURL ? (
+            <img src={match.photoURL} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />
+          ) : (
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/10 font-semibold text-white/70">
+              {match.name.charAt(0).toUpperCase()}
+            </span>
           )}
-        </div>
+          <span className="min-w-0 truncate font-semibold">
+            {match.name}
+            {match.age !== null && <span className="font-normal text-white/50">, {match.age}</span>}
+          </span>
+        </button>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 lg:px-6">
@@ -351,7 +313,6 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
         />
       )}
 
-      {showProfile && <MatchProfileView match={match} onClose={() => setShowProfile(false)} />}
 
       {showReview && (
         <ReviewModal matchId={matchId} partnerUid={partnerUid} name={match.name} onClose={() => setShowReview(false)} />
