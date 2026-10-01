@@ -212,3 +212,59 @@ export async function passFromProfile(uid: string, mode: Mode, targetUid: string
   const queued = await getDoc(doc(db, `users/${uid}/likeQueue/${targetUid}`)).catch(() => null)
   if (queued?.exists()) await dismissSpark(uid, targetUid).catch(() => {})
 }
+
+// ─── Curious ─────────────────────────────────────────────────────────────────
+
+export interface CuriousVisitor {
+  uid: string
+  profile: DiscoverProfile // name, age, photo, place, intent — enough for a card
+  score: DisplayScore | null
+}
+
+export interface CuriousResult {
+  // Locked for free and Spark+ men: count only, no names or photos.
+  locked: boolean
+  count: number // capped at CURIOUS_MAX
+  visitors: CuriousVisitor[]
+}
+
+export const CURIOUS_MAX = 20
+
+interface CuriousRaw {
+  uid: string
+  displayName: string
+  age: number | null
+  photoURL: string | null
+  locationLabel: string | null
+  intent: string | null
+  sparkScore: number | null
+  playScore: number | null
+  tier1Spark: unknown
+}
+
+// People who opened your compatibility score first (getCuriousVisitors).
+export async function fetchCurious(mode: Mode): Promise<CuriousResult> {
+  const { data } = await httpsCallable<void, { locked: boolean; count: number; visitors: CuriousRaw[] }>(
+    functions,
+    'getCuriousVisitors',
+  )()
+  return {
+    locked: data.locked,
+    count: data.count,
+    visitors: data.visitors.map((v) => ({
+      uid: v.uid,
+      profile: {
+        uid: v.uid,
+        displayName: v.displayName,
+        age: v.age ?? undefined,
+        photoURLs: v.photoURL ? [v.photoURL] : [],
+        locationLabel: v.locationLabel ?? undefined,
+        intent: (v.intent ?? undefined) as DiscoverProfile['intent'],
+      },
+      score: displayScore(
+        { pairId: '', sparkScore: v.sparkScore ?? undefined, playScore: v.playScore ?? undefined, tier1: parseTier1(v.tier1Spark) },
+        mode,
+      ),
+    })),
+  }
+}

@@ -1029,3 +1029,92 @@ export const getSentSparks = onCall(
     return { sent: sent.filter((s): s is SentSpark => s !== null).sort((a, b) => b.likedAt - a.likedAt) }
   },
 )
+
+// ─── getCuriousVisitors ──────────────────────────────────────────────────────
+
+interface CuriousVisitor {
+  uid: string
+  displayName: string
+  age: number | null
+  photoURL: string | null
+  locationLabel: string | null
+  intent: string | null
+  sparkScore: number | null
+  playScore: number | null
+  tier1Spark: unknown
+  at: number
+}
+
+const CURIOUS_LIMIT = 20
+
+// Mirrors isWomanIdentity in the web app's subscription.ts. genderIdentity is
+// a string from Spark onboarding, an array from Play.
+function isWoman(genderIdentity: unknown): boolean {
+  const g = Array.isArray(genderIdentity) ? genderIdentity[0] : genderIdentity
+  if (typeof g !== 'string') return false
+  const v = g.toLowerCase().trim()
+  return v === 'woman' || v === 'cis woman' || v === 'trans_woman'
+}
+
+// "Curious" — people who opened your compatibility score first: the pair
+// doc's initiatedBy is the other person (onTap or an inline onLike created
+// it). Excludes anyone you've liked or linked with, and anyone who liked you
+// (they're in Sparks, where an unmatched liker's name stays hidden — showing
+// them here would unmask them). Women and Elite get the list; everyone else
+// gets only the count, enforced here so the list can't be fetched directly.
+export const getCuriousVisitors = onCall(
+  { timeoutSeconds: 30, memory: '128MiB', invoker: 'public' },
+  async (request): Promise<{ locked: boolean; count: number; visitors: CuriousVisitor[] }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    const uid = request.auth.uid
+    const db = getFirestore()
+
+    const [me, asA, asB] = await Promise.all([
+      db.collection('users').doc(uid).get(),
+      db.collection('pairs').where('userA', '==', uid).get(),
+      db.collection('pairs').where('userB', '==', uid).get(),
+    ])
+    const unlocked = isWoman(me.data()?.genderIdentity) || me.data()?.subscriptionTier === 'elite'
+
+    const candidates = [...asA.docs, ...asB.docs]
+      .map((d) => ({ id: d.id, pair: d.data() }))
+      .filter(({ pair }) => {
+        const iAmA = pair.userA === uid
+        const otherUid = iAmA ? pair.userB : pair.userA
+        if (typeof otherUid !== 'string' || pair.initiatedBy !== otherUid) return false
+        if (pair.matched === true) return false
+        // Neither side has liked: I haven't, and they haven't (Sparks covers that).
+        return pair.userALiked !== true && pair.userBLiked !== true
+      })
+      .sort((a, b) => toMillis(b.pair.createdAt) - toMillis(a.pair.createdAt))
+
+    const visitors: CuriousVisitor[] = []
+    for (const { id, pair } of candidates) {
+      if (visitors.length >= CURIOUS_LIMIT) break
+      const otherUid: string = pair.userA === uid ? pair.userB : pair.userA
+      const [matchSnap, userSnap] = await Promise.all([
+        db.collection('matches').doc(id).get(),
+        db.collection('users').doc(otherUid).get(),
+      ])
+      const user = userSnap.data()
+      if (matchSnap.exists || !user || user.isSuspended === true) continue
+      const photos: unknown = user.photoURLs
+      visitors.push({
+        uid: otherUid,
+        displayName: typeof user.displayName === 'string' && user.displayName ? user.displayName : 'Someone',
+        age: typeof user.age === 'number' && user.age > 0 ? user.age : null,
+        photoURL: Array.isArray(photos) && typeof photos[0] === 'string' ? photos[0] : null,
+        locationLabel: typeof user.locationLabel === 'string' && user.locationLabel ? user.locationLabel : null,
+        intent: typeof user.intent === 'string' ? user.intent : null,
+        sparkScore: typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
+        playScore: typeof pair.playScore === 'number' ? pair.playScore : null,
+        tier1Spark: pair.tier1Spark ?? null,
+        at: toMillis(pair.createdAt),
+      })
+    }
+
+    return unlocked
+      ? { locked: false, count: visitors.length, visitors }
+      : { locked: true, count: visitors.length, visitors: [] }
+  },
+)

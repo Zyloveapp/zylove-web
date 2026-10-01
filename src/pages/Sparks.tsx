@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
-import SparksList, { SentList, TopPicksList } from '../components/matches/SparksList'
+import SparksList, { CuriousList, SentList, TopPicksList } from '../components/matches/SparksList'
 import SparkProfileView from '../components/matches/SparkProfileView'
 import TopPickView from '../components/matches/TopPickView'
 import MatchOverlay, { type NewMatch } from '../components/discover/MatchOverlay'
 import { subscribeMatches, type MatchEntry } from '../services/matches'
-import { fetchSentSparks, subscribeSparkQueue, type SentSpark, type SparkEntry } from '../services/sparks'
+import { CURIOUS_MAX, fetchCurious, fetchSentSparks, subscribeSparkQueue, type CuriousResult, type SentSpark, type SparkEntry } from '../services/sparks'
 import { displayScore, fetchCompatibility, fetchTopPicks, type TopPick } from '../services/discover'
 
-type Tab = 'sparks' | 'viewed' | 'picks' | 'sent'
+type Tab = 'sparks' | 'curious' | 'picks' | 'sent'
 
 interface QueueState {
   key: string
@@ -18,8 +19,8 @@ interface QueueState {
   error: boolean
 }
 
-// Sparks (Spark) / Flames (Play): people who liked you, the ones you passed
-// on, and Top Picks from Explore.
+// Sparks (Spark) / Flames (Play): people who liked you, who's curious about
+// you, Top Picks from Explore, and likes you've sent.
 export default function Sparks() {
   // AuthGuard guarantees a signed-in user on this route.
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
@@ -32,6 +33,8 @@ export default function Sparks() {
   // Matches are only needed to know which likers are already matched.
   const [matches, setMatches] = useState<{ key: string; list: MatchEntry[] } | null>(null)
   const [picks, setPicks] = useState<{ key: string; list: TopPick[] | null; error: boolean } | null>(null)
+  const [curious, setCurious] = useState<{ key: string; result: CuriousResult | null; error: boolean } | null>(null)
+  const navigate = useNavigate()
   const [sent, setSent] = useState<{ key: string; list: SentSpark[] | null; error: boolean } | null>(null)
   const [selected, setSelected] = useState<SparkEntry | null>(null)
   // Calculated scores for sparks opened this session, keyed by likerUid.
@@ -73,6 +76,18 @@ export default function Sparks() {
     }
   }, [tab, picksLoaded, uid, mode, key])
 
+  // Curious comes from a callable; refreshed each time the tab opens.
+  useEffect(() => {
+    if (tab !== 'curious' || !uid) return
+    let cancelled = false
+    fetchCurious(mode)
+      .then((result) => !cancelled && setCurious({ key, result, error: false }))
+      .catch(() => !cancelled && setCurious({ key, result: null, error: true }))
+    return () => {
+      cancelled = true
+    }
+  }, [tab, uid, mode, key])
+
   // Sent comes from a callable; fetched each time the tab is opened so new
   // likes from Explore show up.
   useEffect(() => {
@@ -95,10 +110,16 @@ export default function Sparks() {
   const pickList = picks?.key === key ? picks.list : null
   const liveCount = loaded?.live.length ?? 0
   const sentList = sent?.key === key ? sent.list : null
+  const curiousState = curious?.key === key ? curious : null
+  const curiousCount = curiousState?.result
+    ? curiousState.result.count >= CURIOUS_MAX
+      ? `${CURIOUS_MAX}+`
+      : String(curiousState.result.count)
+    : ''
 
   const TABS: { id: Tab; label: string }[] = [
     { id: 'sparks', label: `${isPlay ? '🔥 Flames' : '✦ Sparks'} ${liveCount}` },
-    { id: 'viewed', label: `◎ Viewed · ${loaded?.viewed.length ?? 0}` },
+    { id: 'curious', label: `✦ Curious${curiousCount ? ` ${curiousCount}` : ''}` },
     { id: 'picks', label: `✦ Top Picks${pickList ? ` ${pickList.length}` : ''}` },
     { id: 'sent', label: `→ Sent${sentList ? ` ${sentList.length}` : ''}` },
   ]
@@ -147,7 +168,15 @@ export default function Sparks() {
         </div>
 
         <div className="pb-6">
-          {tab === 'sent' ? (
+          {tab === 'curious' ? (
+            !curiousState ? (
+              <Spinner />
+            ) : curiousState.error || !curiousState.result ? (
+              <p className="py-10 text-center text-sm text-white/50">Couldn't load who's curious.</p>
+            ) : (
+              <CuriousList result={curiousState.result} mode={mode} onSelect={(id) => navigate(`/profile/${id}`)} />
+            )
+          ) : tab === 'sent' ? (
             sentList === null ? (
               <Spinner />
             ) : sent?.error ? (
@@ -169,11 +198,10 @@ export default function Sparks() {
             <p className="py-10 text-center text-sm text-white/50">Couldn't load your {isPlay ? 'flames' : 'sparks'}.</p>
           ) : (
             <SparksList
-              sparks={tab === 'viewed' ? loaded.viewed : loaded.live}
+              sparks={loaded.live}
               mode={mode}
               matchedUids={matchedUids}
               onSelect={openSpark}
-              variant={tab === 'viewed' ? 'viewed' : 'live'}
               scores={scores.key === key ? scores.map : undefined}
             />
           )}
