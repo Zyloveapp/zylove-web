@@ -1,5 +1,6 @@
 import { BrowserRouter, Outlet, Routes, Route } from 'react-router-dom'
 import AuthGuard from './components/AuthGuard'
+import PauseGuard from './components/PauseGuard'
 import Nav from './components/Nav'
 import Home from './pages/Home'
 import Login from './pages/Login'
@@ -30,12 +31,14 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/onboarding" element={<Onboarding />} />
         <Route element={<AuthGuard />}>
-          <Route element={<AppLayout />}>
-            <Route path="/discover" element={<Discover />} />
-            <Route path="/matches" element={<Matches />} />
-            <Route path="/sparks" element={<Sparks />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/chat/:matchId" element={<Chat />} />
+          <Route element={<PauseGuard />}>
+            <Route element={<AppLayout />}>
+              <Route path="/discover" element={<Discover />} />
+              <Route path="/matches" element={<Matches />} />
+              <Route path="/sparks" element={<Sparks />} />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/chat/:matchId" element={<Chat />} />
+            </Route>
           </Route>
         </Route>
       </Routes>

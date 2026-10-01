@@ -3,7 +3,17 @@ import { ENCRYPTION_KEY_MISSING, MAX_MESSAGE_LENGTH, markMessagesRead, sendMessa
 import { decryptMessage } from '../../services/encryption'
 import { getPrivateKey, keysReady, subscribePublicKey } from '../../services/keys'
 import { markMatchRead, type MatchEntry } from '../../services/matches'
+import { markVibeCheckFired, shouldTriggerVibeCheck } from '../../services/vibeCheck'
+import {
+  REVIEW_MIN_MESSAGES,
+  conversationEnded,
+  markReviewPromptShown,
+  reviewPromptShown,
+} from '../../services/zyloveScore'
+import ConversationNudge from './ConversationNudge'
 import FirstChatModal from './FirstChatModal'
+import ReviewModal from './ReviewModal'
+import VibeCheckModal from './VibeCheckModal'
 import { firstChatSeen } from './firstChatSeen'
 
 function messageTime(ms: number | null): string {
@@ -28,6 +38,7 @@ type Loaded = { matchId: string; messages: ChatMessage[]; error: boolean }
 type PartnerKey = { partnerUid: string; key: string; error: boolean }
 
 const UNDECRYPTABLE = 'Unable to decrypt message'
+const VIBE_CHECK_DELAY_MS = 1500
 
 export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const { matchId, partnerUid } = match
@@ -38,6 +49,13 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const [showFirstChat, setShowFirstChat] = useState(() => !firstChatSeen(matchId))
   const [partnerKeyState, setPartnerKeyState] = useState<PartnerKey | null>(null)
   const [myKeyState, setMyKeyState] = useState<{ uid: string; key: string | null } | null>(null)
+  const [showVibeCheck, setShowVibeCheck] = useState(false)
+  // Fires at most once per open, like mobile's session gate.
+  const vibeCheckFired = useRef(false)
+  const vibeCheckTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  // 'back' = opened by the back button; closing it then leaves the chat.
+  const [review, setReview] = useState<'open' | 'back' | null>(null)
+  const reviewChecked = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -99,6 +117,55 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     bottomRef.current?.scrollIntoView({ block: 'end' })
   }, [messages?.length])
 
+  // Conversation messages only — system notes and photos don't count toward
+  // vibe-check milestones (mobile counts text messages).
+  const conversation = useMemo(
+    () => (messages ?? []).filter((m) => m.nonce !== 'system' && m.messageType === 'text'),
+    [messages],
+  )
+
+  useEffect(() => {
+    if (vibeCheckFired.current || showFirstChat) return
+    const senders = conversation.map((m) => m.senderId)
+    if (!shouldTriggerVibeCheck(senders, uid, matchId)) return
+    vibeCheckFired.current = true
+    markVibeCheckFired(matchId, senders.length)
+    // Kept in a ref so a message arriving during the delay doesn't cancel it.
+    vibeCheckTimer.current = setTimeout(() => setShowVibeCheck(true), VIBE_CHECK_DELAY_MS)
+  }, [conversation, showFirstChat, uid, matchId])
+
+  useEffect(() => () => clearTimeout(vibeCheckTimer.current), [])
+
+  // Review prompt: once per match, after a long conversation (never for bots).
+  // Shown when leaving via back, or on opening a chat that has gone quiet.
+  const reviewEligible =
+    conversation.length >= REVIEW_MIN_MESSAGES && !partnerUid.startsWith('zbot-') && !reviewPromptShown(matchId)
+
+  useEffect(() => {
+    if (reviewChecked.current || messages === null || showFirstChat) return
+    reviewChecked.current = true
+    // Never stack on a vibe check fired by this open.
+    if (!reviewEligible || vibeCheckFired.current) return
+    if (!conversationEnded(conversation[conversation.length - 1]?.sentAt ?? null)) return
+    markReviewPromptShown(matchId)
+    setReview('open')
+  }, [messages, showFirstChat, reviewEligible, conversation, matchId])
+
+  function handleBack() {
+    if (reviewEligible && review === null && !showVibeCheck) {
+      markReviewPromptShown(matchId)
+      setReview('back')
+      return
+    }
+    onBack?.()
+  }
+
+  function closeReview() {
+    const leaving = review === 'back'
+    setReview(null)
+    if (leaving) onBack?.()
+  }
+
   const trimmed = text.trim()
   const ownBubble = match.mode === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
   // Never fall back to plaintext just because the partner's key failed to load.
@@ -137,7 +204,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     <div className="fixed inset-0 z-50 flex h-[100dvh] flex-col overscroll-none bg-gray-950 text-white lg:static lg:z-auto lg:h-full">
       <header className="flex shrink-0 items-center gap-3 border-b border-white/10 px-4 py-3 lg:px-6">
         {onBack && (
-          <button type="button" onClick={onBack} className="text-xl text-white/60 hover:text-white lg:hidden" aria-label="Back">
+          <button type="button" onClick={handleBack} className="text-xl text-white/60 hover:text-white lg:hidden" aria-label="Back">
             ←
           </button>
         )}
@@ -196,6 +263,13 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
       </div>
 
       <div className="shrink-0 border-t border-white/10 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] lg:px-6">
+        <ConversationNudge
+          matchId={matchId}
+          partnerUid={partnerUid}
+          messages={conversation}
+          suppressed={showFirstChat || showVibeCheck || review !== null}
+          onPick={setText}
+        />
         {sendError && <p className="mb-2 text-center text-sm text-red-400">{sendError}</p>}
         {partnerKey?.error && (
           <p className="mb-2 text-center text-sm text-red-400">Couldn't load encryption keys. Reopen the chat to retry.</p>
@@ -222,6 +296,20 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
 
       {showFirstChat && (
         <FirstChatModal matchId={matchId} name={match.name} onClose={() => setShowFirstChat(false)} />
+      )}
+
+      {showVibeCheck && (
+        <VibeCheckModal
+          matchId={matchId}
+          partnerUid={partnerUid}
+          name={match.name}
+          onClose={() => setShowVibeCheck(false)}
+          onUseOpener={setText}
+        />
+      )}
+
+      {review !== null && (
+        <ReviewModal matchId={matchId} partnerUid={partnerUid} name={match.name} onClose={closeReview} />
       )}
     </div>
   )
