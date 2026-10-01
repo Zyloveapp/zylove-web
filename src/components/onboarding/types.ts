@@ -161,6 +161,8 @@ export const INITIAL_DRAFT: OnboardingDraft = {
 export const MIN_AGE = 18
 export const MAX_RANGE_AGE = 80
 export const MAX_PHOTOS = 6
+// Profile refresh: existing profiles can hold up to Edit Profile's limit.
+export const MAX_REFRESH_PHOTOS = 9
 export const MAX_PHOTO_BYTES = 10 * 1024 * 1024 // matches storage.rules
 export const PROMPT_COUNT = 3
 export const MIN_PROMPT_ANSWERS = 2

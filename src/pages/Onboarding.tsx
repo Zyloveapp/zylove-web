@@ -4,6 +4,7 @@ import { FirebaseError } from 'firebase/app'
 import { useAuthStore } from '../store/authStore'
 import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
 import { loadRefreshDraft, recordLegalAcceptance, saveSparkOnboarding } from '../services/onboarding'
+import type { PromptAnswer } from '../types/dualProfile'
 import { generateSparkBio } from '../services/bio'
 import TermsStep from '../components/onboarding/TermsStep'
 import NameStep from '../components/onboarding/NameStep'
@@ -33,6 +34,7 @@ import {
   CONFLICT_STYLE_LABELS,
   INITIAL_DRAFT,
   MAX_PHOTOS,
+  MAX_REFRESH_PHOTOS,
   MIN_AGE,
   MIN_PROMPT_ANSWERS,
   PROMPT_COUNT,
@@ -84,7 +86,13 @@ function stepsFor(refresh: boolean, identityLocked: boolean) {
   return STEPS.filter((s) => !(refresh && s.id === 'terms') && !(identityLocked && s.id === 'gender'))
 }
 
-function isStepValid(id: StepId, d: OnboardingDraft, bioGenerating: boolean, identityLocked: boolean): boolean {
+function isStepValid(
+  id: StepId,
+  d: OnboardingDraft,
+  bioGenerating: boolean,
+  identityLocked: boolean,
+  maxPhotos: number,
+): boolean {
   switch (id) {
     case 'terms':
       return d.termsAccepted
@@ -94,7 +102,7 @@ function isStepValid(id: StepId, d: OnboardingDraft, bioGenerating: boolean, ide
       return d.displayName.trim().length > 0 && b !== null && b.age >= MIN_AGE
     }
     case 'photos':
-      return d.photos.length >= 1 && d.photos.length <= MAX_PHOTOS
+      return d.photos.length >= 1 && d.photos.length <= maxPhotos
     case 'gender':
       return (
         d.genderIdentity !== null &&
@@ -158,7 +166,9 @@ export default function Onboarding() {
   const [searchParams] = useSearchParams()
   // "Reimagine my profile": same flow, pre-filled from the saved profile.
   const refresh = searchParams.get('refresh') === 'true'
-  const [refreshLoad, setRefreshLoad] = useState<{ uid: string; locked: boolean } | 'error' | null>(null)
+  const [refreshLoad, setRefreshLoad] = useState<
+    { uid: string; locked: boolean; extraPrompts: PromptAnswer[] } | 'error' | null
+  >(null)
 
   const [stepIndex, setStepIndex] = useState(0)
   const [draft, setDraft] = useState<OnboardingDraft>(INITIAL_DRAFT)
@@ -189,7 +199,7 @@ export default function Onboarding() {
         if (cancelled) return
         if (!loaded) return setRefreshLoad('error')
         setDraft(loaded.draft)
-        setRefreshLoad({ uid: userId, locked: loaded.identityLocked })
+        setRefreshLoad({ uid: userId, locked: loaded.identityLocked, extraPrompts: loaded.extraPrompts })
       })
       .catch(() => !cancelled && setRefreshLoad('error'))
     return () => {
@@ -227,7 +237,9 @@ export default function Onboarding() {
     )
   }
 
-  const identityLocked = refresh && typeof refreshLoad === 'object' && refreshLoad !== null && refreshLoad.locked
+  const refreshInfo = refresh && typeof refreshLoad === 'object' ? refreshLoad : null
+  const identityLocked = refreshInfo?.locked ?? false
+  const maxPhotos = refresh ? MAX_REFRESH_PHOTOS : MAX_PHOTOS
   const steps = stepsFor(refresh, identityLocked)
   const step = steps[stepIndex]
   const update = (patch: Partial<OnboardingDraft>) => setDraft((d) => ({ ...d, ...patch }))
@@ -270,7 +282,7 @@ export default function Onboarding() {
     setSaving(true)
     setSaveError(null)
     try {
-      await saveSparkOnboarding(uid, draft)
+      await saveSparkOnboarding(uid, draft, { extraPrompts: refreshInfo?.extraPrompts })
       if (refresh) navigate('/profile', { replace: true, state: { flash: '✦ Profile refreshed.' } })
       else navigate('/discover', { replace: true })
     } catch (err) {
@@ -294,7 +306,7 @@ export default function Onboarding() {
           />
         )
       case 'photos':
-        return <PhotosStep photos={draft.photos} onChange={(photos) => update({ photos })} />
+        return <PhotosStep photos={draft.photos} onChange={(photos) => update({ photos })} maxPhotos={maxPhotos} />
       case 'gender':
         return <GenderStep {...props} />
       case 'attractedTo':
@@ -393,7 +405,7 @@ export default function Onboarding() {
   // Steps that render their own primary action instead of the bottom Next.
   const ownsPrimary =
     (step.id === 'terms' && !draft.termsAccepted) || step.id === 'goDeeper' || step.id === 'review'
-  const canAdvance = isStepValid(step.id, draft, bioGenerating, identityLocked)
+  const canAdvance = isStepValid(step.id, draft, bioGenerating, identityLocked, maxPhotos)
 
   return (
     <div className="min-h-screen bg-white">

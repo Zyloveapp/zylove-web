@@ -4,11 +4,12 @@ import { MAX_PHOTO_BYTES, MAX_PHOTOS, releasePhotoPreview, type PhotoDraft } fro
 interface PhotosStepProps {
   photos: PhotoDraft[]
   onChange: (photos: PhotoDraft[]) => void
+  maxPhotos?: number
 }
 
 // Photos stay local (object-URL previews) until the final step uploads them,
 // so abandoning onboarding never leaves orphaned files in Storage.
-export default function PhotosStep({ photos, onChange }: PhotosStepProps) {
+export default function PhotosStep({ photos, onChange, maxPhotos = MAX_PHOTOS }: PhotosStepProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -17,7 +18,7 @@ export default function PhotosStep({ photos, onChange }: PhotosStepProps) {
     e.target.value = '' // allow re-selecting the same file
     setError(null)
 
-    const room = MAX_PHOTOS - photos.length
+    const room = maxPhotos - photos.length
     const accepted: PhotoDraft[] = []
     const problems: string[] = []
 
@@ -27,7 +28,7 @@ export default function PhotosStep({ photos, onChange }: PhotosStepProps) {
       } else if (file.size > MAX_PHOTO_BYTES) {
         problems.push(`${file.name} is over 10 MB.`)
       } else if (accepted.length >= room) {
-        problems.push(`Only ${MAX_PHOTOS} photos allowed.`)
+        problems.push(`Only ${maxPhotos} photos allowed.`)
         break
       } else {
         accepted.push({ id: crypto.randomUUID(), file, previewUrl: URL.createObjectURL(file) })
@@ -54,7 +55,7 @@ export default function PhotosStep({ photos, onChange }: PhotosStepProps) {
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold">Add your photos</h1>
       <p className="text-gray-600">
-        Add 1–{MAX_PHOTOS} photos. The first one is your main photo — tap another to make it first.
+        Add 1–{maxPhotos} photos. The first one is your main photo — tap another to make it first.
       </p>
 
       <div className="grid grid-cols-3 gap-2">
@@ -78,7 +79,7 @@ export default function PhotosStep({ photos, onChange }: PhotosStepProps) {
             </button>
           </div>
         ))}
-        {photos.length < MAX_PHOTOS && (
+        {photos.length < maxPhotos && (
           <button
             type="button"
             onClick={() => inputRef.current?.click()}

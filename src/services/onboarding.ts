@@ -159,7 +159,13 @@ function required<T>(value: T | null, field: string): T {
 
 // Uploads photos, then writes the root profile, Spark profile and private
 // seeking prefs in a single batch so the user never ends up half-onboarded.
-export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Promise<void> {
+// extraPrompts: saved prompts beyond the PROMPT_COUNT a refresh shows. They're
+// kept as-is unless the draft now uses the same prompt.
+export async function saveSparkOnboarding(
+  uid: string,
+  d: OnboardingDraft,
+  { extraPrompts = [] }: { extraPrompts?: PromptAnswer[] } = {},
+): Promise<void> {
   const rootRef = doc(db, 'users', uid)
   const existing = await getDoc(rootRef)
   // Once identity is locked the rules reject any change to birthday,
@@ -173,9 +179,10 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
   const relationshipStatus = required(d.relationshipStatus, 'relationshipStatus')
   const intent = required(d.intent, 'intent')
 
-  const promptAnswers: PromptAnswer[] = d.selectedPromptIds
-    .map((promptId) => ({ promptId, answer: (d.promptAnswers[promptId] ?? '').trim() }))
-    .filter((p) => p.answer)
+  const promptAnswers: PromptAnswer[] = [
+    ...d.selectedPromptIds.map((promptId) => ({ promptId, answer: (d.promptAnswers[promptId] ?? '').trim() })),
+    ...extraPrompts.filter((p) => !d.selectedPromptIds.includes(p.promptId)),
+  ].filter((p) => p.answer)
   const sparkPromptAnswers = Object.fromEntries(promptAnswers.map((p) => [p.promptId, p.answer]))
   const heightCm = feetInchesToCm(d.height.feet, d.height.inches)
   const bio = d.bio.trim()
@@ -322,7 +329,11 @@ export async function saveSparkOnboarding(uid: string, d: OnboardingDraft): Prom
       completeness: computeSparkCompleteness({ ...coreFields, ...optional, bio }),
       lastUpdated: now,
     }
-    batch.set(doc(db, `users/${uid}/sparkProfile/data`), spark, { merge: true })
+    const sparkRef = doc(db, `users/${uid}/sparkProfile/data`)
+    batch.set(sparkRef, spark, { merge: true })
+    // set+merge merges map keys, so a prompt swapped out would linger in
+    // sparkPromptAnswers (which loadOwnProfile prefers). Replace the map whole.
+    batch.update(sparkRef, { sparkPromptAnswers })
 
     const seeking: SeekingPreferencesDoc = {
       uid,
@@ -390,6 +401,8 @@ function isoToBirthdayRaw(v: unknown): string {
 
 export interface RefreshDraft {
   draft: OnboardingDraft
+  // Prompts beyond the PROMPT_COUNT the flow shows; pass back to the save.
+  extraPrompts: PromptAnswer[]
   // Birthday and gender can't change once locked (see saveSparkOnboarding).
   identityLocked: boolean
 }
@@ -457,5 +470,5 @@ export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null
     bio: own.bio,
     bioGeneratedAt: typeof p.bioGeneratedAt === 'number' ? p.bioGeneratedAt : null,
   }
-  return { draft, identityLocked: p.identityLockedAt != null }
+  return { draft, extraPrompts: own.prompts.slice(PROMPT_COUNT), identityLocked: p.identityLockedAt != null }
 }
