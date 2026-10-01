@@ -1,5 +1,12 @@
-import { useEffect, useState } from 'react'
-import { fetchCompatibility, type CompatibilityResult, type DiscoverProfile } from '../../services/discover'
+import { useEffect, useState, type ReactNode } from 'react'
+import {
+  fetchCompatibility,
+  fetchMyProfile,
+  type CompatibilityResult,
+  type DiscoverProfile,
+} from '../../services/discover'
+import { useAuthStore } from '../../store/authStore'
+import ProfileComparison from './ProfileComparison'
 import { DEALBREAKER_LABELS, type Dealbreaker } from '../../types/profile'
 import type { Mode } from '../../store/modeStore'
 import { discoverTheme } from './theme'
@@ -109,6 +116,23 @@ export default function CompatibilityBlock({
   const cached = revealedScores.get(targetUid)
   const [status, setStatus] = useState<Status>(cached ? 'revealed' : autoReveal ? 'loading' : 'hidden')
   const [result, setResult] = useState<CompatibilityResult | null>(cached ?? null)
+  const uid = useAuthStore((s) => s.user?.uid) ?? ''
+  const [me, setMe] = useState<{ uid: string; profile: DiscoverProfile } | null>(null)
+
+  // The side-by-side sections compare Spark data, so they're Spark-only.
+  const showComparison = status === 'revealed' && mode === 'spark' && uid !== ''
+  useEffect(() => {
+    if (!showComparison) return
+    let cancelled = false
+    fetchMyProfile(uid)
+      .then((profile) => {
+        if (!cancelled && profile) setMe({ uid, profile })
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [showComparison, uid])
 
   useEffect(() => {
     if (autoReveal && !revealedScores.has(targetUid)) void reveal()
@@ -129,7 +153,17 @@ export default function CompatibilityBlock({
   }
 
   if (status === 'revealed' && result) {
-    return <RevealedScore result={result} mode={mode} animate={!cached} hidden={emptyCategories(profile)} />
+    const comparison =
+      showComparison && me?.uid === uid ? <ProfileComparison me={me.profile} them={profile} /> : null
+    return (
+      <RevealedScore
+        result={result}
+        mode={mode}
+        animate={!cached}
+        hidden={emptyCategories(profile)}
+        comparison={comparison}
+      />
+    )
   }
 
   return (
@@ -168,11 +202,13 @@ function RevealedScore({
   mode,
   animate,
   hidden,
+  comparison,
 }: {
   result: CompatibilityResult
   mode: Mode
   animate: boolean
   hidden: Set<string>
+  comparison: ReactNode
 }) {
   const theme = discoverTheme(mode)
   // Start hidden only when freshly revealed, then fade/slide in on the next frame.
@@ -258,6 +294,8 @@ function RevealedScore({
           </ul>
         </div>
       )}
+
+      {comparison}
 
       {dealbreakers.length > 0 && (
         <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3">

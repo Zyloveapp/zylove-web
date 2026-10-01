@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
+import SparkleIcon from './icons/SparkleIcon'
 
 // Heights reserved by the bars: desktop top bar h-14, mobile bottom bar h-16.
 // Pages use h-[calc(100dvh-4rem)] lg:h-[calc(100dvh-3.5rem)] to fit between them.
@@ -22,14 +23,6 @@ function HeartIcon() {
         d="M12 20s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 10c0 5.65-7 10-7 10Z"
         strokeLinejoin="round"
       />
-    </svg>
-  )
-}
-
-function SparkleIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-6 w-6" aria-hidden>
-      <path d="M12 3c.6 4.6 3.4 7.4 9 9-5.6 1.6-8.4 4.4-9 9-.6-4.6-3.4-7.4-9-9 5.6-1.6 8.4-4.4 9-9Z" strokeLinejoin="round" />
     </svg>
   )
 }

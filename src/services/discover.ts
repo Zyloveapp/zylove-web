@@ -44,6 +44,24 @@ export function markSwiped(uid: string, mode: Mode, targetUid: string): void {
   }
 }
 
+// ─── Viewer profile ──────────────────────────────────────────────────────────
+
+const myProfileRequests = new Map<string, Promise<DiscoverProfile | null>>()
+
+// The signed-in user's own profile, for side-by-side comparisons. Cached for
+// the session so each compatibility block doesn't refetch it.
+export function fetchMyProfile(uid: string): Promise<DiscoverProfile | null> {
+  let request = myProfileRequests.get(uid)
+  if (!request) {
+    request = getDoc(doc(db, 'users', uid)).then((snap) =>
+      snap.exists() ? { ...(snap.data() as DiscoverProfile), uid } : null,
+    )
+    request.catch(() => myProfileRequests.delete(uid))
+    myProfileRequests.set(uid, request)
+  }
+  return request
+}
+
 // ─── Filtering ───────────────────────────────────────────────────────────────
 
 function asList(v: string[] | string | undefined): string[] {

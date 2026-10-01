@@ -1,0 +1,136 @@
+import type { ReactNode } from 'react'
+import type { DiscoverProfile } from '../../services/discover'
+import { lifestyleLabel, loveLanguageLabel, personalityLabel, valueLabel } from './labels'
+
+// Side-by-side Spark insights from both profiles (mirrors mobile's
+// MatchScorecard): Things in Common, Worth a Conversation, Love Languages.
+
+const MAX_DIFFERENCES = 2
+
+function list(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+}
+
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names.join('')
+  return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`
+}
+
+function Section({ icon, title, iconClass, children }: { icon: string; title: string; iconClass: string; children: ReactNode }) {
+  return (
+    <div className="mt-6">
+      <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-white">
+        <span className={`mr-1.5 ${iconClass}`}>{icon}</span>
+        {title}
+      </p>
+      {children}
+    </div>
+  )
+}
+
+function Row({ label, detail, accent }: { label: string; detail: string; accent: string }) {
+  return (
+    <div className={`mb-2 border-l-2 pl-3 ${accent}`}>
+      <p className="text-sm font-medium text-white/80">{label}</p>
+      <p className="text-sm text-white/55">{detail}</p>
+    </div>
+  )
+}
+
+function LoveLangCell({ title, items, matched }: { title: string; items: string[]; matched: Set<string> }) {
+  return (
+    <div>
+      <p className="mb-1.5 text-xs text-white/40">{title}</p>
+      {items.length === 0 ? (
+        <p className="text-sm text-white/25">—</p>
+      ) : (
+        <ul className="space-y-1">
+          {items.map((l) => (
+            <li key={l} className={`text-sm ${matched.has(l) ? 'text-white' : 'text-white/55'}`}>
+              {loveLanguageLabel(l)}
+              {matched.has(l) && <span className="ml-1.5 font-semibold text-[#1B4FD8]">✓</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+export default function ProfileComparison({ me, them }: { me: DiscoverProfile; them: DiscoverProfile }) {
+  const sharedValues = list(me.relationshipValues).filter((v) => list(them.relationshipValues).includes(v))
+  const sharedTraits = list(me.personalityTraits).filter((t) => list(them.personalityTraits).includes(t))
+  const myLife = list(me.lifestyleTags)
+  const theirLife = list(them.lifestyleTags)
+  const sharedLife = myLife.filter((t) => theirLife.includes(t))
+  const onlyMine = myLife.filter((t) => !theirLife.includes(t))
+  const onlyTheirs = theirLife.filter((t) => !myLife.includes(t))
+
+  const commons: { label: string; detail: string }[] = []
+  if (sharedValues.length > 0) {
+    commons.push({ label: 'Shared values', detail: `You both prioritize ${joinNames(sharedValues.map(valueLabel))}.` })
+  }
+  if (sharedTraits.length > 0) {
+    commons.push({ label: 'Personality match', detail: `You're both ${joinNames(sharedTraits.map(personalityLabel))}.` })
+  }
+  if (sharedLife.length > 0) {
+    commons.push({ label: 'Lifestyle in common', detail: sharedLife.map(lifestyleLabel).join(' · ') })
+  }
+
+  // Pair one of yours with one of theirs where both sides differ (as mobile
+  // does); otherwise list the side that has tags the other doesn't.
+  const differences: { label: string; detail: string }[] = []
+  const pairs = Math.min(onlyMine.length, onlyTheirs.length, MAX_DIFFERENCES)
+  for (let i = 0; i < pairs; i++) {
+    differences.push({
+      label: 'Different lifestyles',
+      detail: `You: ${lifestyleLabel(onlyMine[i])} · They: ${lifestyleLabel(onlyTheirs[i])}`,
+    })
+  }
+  if (pairs === 0) {
+    for (const t of onlyMine.slice(0, MAX_DIFFERENCES)) differences.push({ label: 'Just you', detail: lifestyleLabel(t) })
+    for (const t of onlyTheirs.slice(0, MAX_DIFFERENCES - differences.length)) {
+      differences.push({ label: 'Just them', detail: lifestyleLabel(t) })
+    }
+  }
+
+  const myGive = list(me.loveLangGive)
+  const myNeed = list(me.loveLangReceive)
+  const theirGive = list(them.loveLangGive)
+  const theirNeed = list(them.loveLangReceive)
+  // Your give meets their need; their give meets your need.
+  const iGiveTheyNeed = new Set(myGive.filter((l) => theirNeed.includes(l)))
+  const theyGiveINeed = new Set(theirGive.filter((l) => myNeed.includes(l)))
+  const hasLoveLangs = myGive.length + myNeed.length + theirGive.length + theirNeed.length > 0
+
+  return (
+    <>
+      {commons.length > 0 && (
+        <Section icon="✦" title="Things in common" iconClass="text-green-400">
+          {commons.map((c) => (
+            <Row key={c.label} label={c.label} detail={c.detail} accent="border-green-400/60" />
+          ))}
+        </Section>
+      )}
+
+      {differences.length > 0 && (
+        <Section icon="◎" title="Worth a conversation" iconClass="text-amber-400">
+          {differences.map((d, i) => (
+            <Row key={i} label={d.label} detail={d.detail} accent="border-amber-400/60" />
+          ))}
+        </Section>
+      )}
+
+      {hasLoveLangs && (
+        <Section icon="♡" title="Love languages" iconClass="text-[#1B4FD8]">
+          <div className="grid max-w-md grid-cols-2 gap-x-6 gap-y-4 rounded-xl border border-white/[0.08] bg-white/5 p-4">
+            <LoveLangCell title="You give" items={myGive} matched={iGiveTheyNeed} />
+            <LoveLangCell title="You receive" items={myNeed} matched={theyGiveINeed} />
+            <LoveLangCell title="They give" items={theirGive} matched={theyGiveINeed} />
+            <LoveLangCell title="They need" items={theirNeed} matched={iGiveTheyNeed} />
+          </div>
+        </Section>
+      )}
+    </>
+  )
+}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import ProfileDetails from '../discover/ProfileDetails'
+import SparkleIcon from '../icons/SparkleIcon'
 import { actionErrorMessage, type DiscoverProfile } from '../../services/discover'
 import { dismissSpark, likeBackSpark, loadSparkProfile, type SparkEntry } from '../../services/sparks'
 
@@ -87,9 +88,10 @@ export default function SparkProfileView({ uid, spark, matched, onClose, onMatch
               type="button"
               onClick={handleMatch}
               disabled={busy}
-              className="w-full rounded-xl bg-[#1B4FD8] px-5 py-3 font-semibold text-white transition-opacity disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1B4FD8] px-5 py-3 font-semibold text-white transition-opacity disabled:opacity-50"
             >
-              ✦ It's a Spark
+              <SparkleIcon className="h-5 w-5" />
+              It's a Spark
             </button>
             <button
               type="button"
