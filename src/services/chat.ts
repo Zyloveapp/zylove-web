@@ -11,7 +11,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from './firebase'
-import { encryptMessage } from './encryption'
+import { encryptMessage, isRealPublicKey } from './encryption'
 import { getPrivateKey, keysReady } from './keys'
 
 // Message format shared with the mobile app. `ciphertext` holds a base64
@@ -76,8 +76,12 @@ export function subscribeMessages(
   )
 }
 
-// Encrypts to the recipient's public key. Falls back to plaintext (nonce
-// 'stub') when either side has no real key — bots and mobile-only users.
+export const ENCRYPTION_KEY_MISSING = 'encryption_key_missing'
+
+// Encrypts to the recipient's public key. Plaintext (nonce 'stub') is only
+// allowed when the recipient has no real key — bots and legacy mobile users.
+// If the recipient has a real key but we can't encrypt (own private key
+// missing or unreadable), the send is refused rather than leaking plaintext.
 export async function sendMessage(
   matchId: string,
   uid: string,
@@ -86,9 +90,12 @@ export async function sendMessage(
 ): Promise<void> {
   await keysReady(uid)
   const privateKey = await getPrivateKey(uid)
-  const { ciphertext, nonce } = privateKey
-    ? encryptMessage(text, recipientPublicKey, privateKey)
-    : { ciphertext: text, nonce: 'stub' }
+  const recipientHasKey = isRealPublicKey(recipientPublicKey)
+  if (recipientHasKey && !privateKey) throw new Error(ENCRYPTION_KEY_MISSING)
+  const { ciphertext, nonce } =
+    recipientHasKey && privateKey ? encryptMessage(text, recipientPublicKey, privateKey) : { ciphertext: text, nonce: 'stub' }
+  // encryptMessage falls back to 'stub' if the stored private key is corrupt.
+  if (recipientHasKey && nonce === 'stub') throw new Error(ENCRYPTION_KEY_MISSING)
   await addDoc(collection(db, `matches/${matchId}/messages`), {
     ciphertext,
     nonce,

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { MAX_MESSAGE_LENGTH, markMessagesRead, sendMessage, subscribeMessages, type ChatMessage } from '../../services/chat'
+import { ENCRYPTION_KEY_MISSING, MAX_MESSAGE_LENGTH, markMessagesRead, sendMessage, subscribeMessages, type ChatMessage } from '../../services/chat'
 import { decryptMessage } from '../../services/encryption'
 import { getPrivateKey, keysReady, subscribePublicKey } from '../../services/keys'
 import { markMatchRead, type MatchEntry } from '../../services/matches'
@@ -112,8 +112,12 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     try {
       await sendMessage(matchId, uid, trimmed, partnerKey.key)
       setText('')
-    } catch {
-      setSendError("Couldn't send. Try again.")
+    } catch (err) {
+      setSendError(
+        err instanceof Error && err.message === ENCRYPTION_KEY_MISSING
+          ? 'Unable to send — your encryption key is missing. Try signing out and back in.'
+          : "Couldn't send. Try again.",
+      )
     } finally {
       setSending(false)
     }
