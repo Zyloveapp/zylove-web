@@ -1,3 +1,9 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Keep the page dark behind everything so iOS keyboard/overscroll never shows white. */
+html,
+body {
+  @apply bg-gray-950;
+}

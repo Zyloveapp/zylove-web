@@ -3,26 +3,8 @@ import { MAX_MESSAGE_LENGTH, markMessagesRead, sendMessage, subscribeMessages, t
 import { decryptMessage } from '../../services/encryption'
 import { getPrivateKey, keysReady, subscribePublicKey } from '../../services/keys'
 import { markMatchRead, type MatchEntry } from '../../services/matches'
-
-function introKey(matchId: string): string {
-  return `zylove_chat_intro_dismissed_${matchId}`
-}
-
-function introDismissed(matchId: string): boolean {
-  try {
-    return localStorage.getItem(introKey(matchId)) === '1'
-  } catch {
-    return false
-  }
-}
-
-function dismissIntro(matchId: string): void {
-  try {
-    localStorage.setItem(introKey(matchId), '1')
-  } catch {
-    // Storage unavailable — the banner hides anyway once a message exists.
-  }
-}
+import FirstChatModal from './FirstChatModal'
+import { firstChatSeen } from './firstChatSeen'
 
 function messageTime(ms: number | null): string {
   if (ms === null) return 'Sending…'
@@ -53,7 +35,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
-  const [introHidden, setIntroHidden] = useState(() => introDismissed(matchId))
+  const [showFirstChat, setShowFirstChat] = useState(() => !firstChatSeen(matchId))
   const [partnerKeyState, setPartnerKeyState] = useState<PartnerKey | null>(null)
   const [myKeyState, setMyKeyState] = useState<{ uid: string; key: string | null } | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -119,7 +101,6 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
 
   const trimmed = text.trim()
   const ownBubble = match.mode === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
-  const showIntro = messages !== null && messages.length === 0 && !introHidden
   // Never fall back to plaintext just because the partner's key failed to load.
   const canSend = partnerKey !== null && !partnerKey.error
 
@@ -131,8 +112,6 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     try {
       await sendMessage(matchId, uid, trimmed, partnerKey.key)
       setText('')
-      dismissIntro(matchId)
-      setIntroHidden(true)
     } catch {
       setSendError("Couldn't send. Try again.")
     } finally {
@@ -148,7 +127,10 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   }
 
   return (
-    <div className="flex h-full flex-col bg-gray-950 text-white">
+    // Mobile: full-screen over the bottom nav, sized to the dynamic viewport so
+    // the keyboard shrinks the message list instead of exposing the page below.
+    // Desktop: fills its pane.
+    <div className="fixed inset-0 z-50 flex h-[100dvh] flex-col overscroll-none bg-gray-950 text-white lg:static lg:z-auto lg:h-full">
       <header className="flex shrink-0 items-center gap-3 border-b border-white/10 px-4 py-3 lg:px-6">
         {onBack && (
           <button type="button" onClick={onBack} className="text-xl text-white/60 hover:text-white lg:hidden" aria-label="Back">
@@ -168,7 +150,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
         </h2>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 lg:px-6">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 lg:px-6">
         <div className="flex min-h-full flex-col justify-end gap-3">
           {messages === null ? (
             <div className="flex justify-center py-10">
@@ -209,12 +191,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-white/10 px-4 py-3 lg:px-6">
-        {showIntro && (
-          <p className="mb-3 rounded-lg bg-white/5 px-4 py-2.5 text-center text-sm text-white/50">
-            This is the start of your conversation with {match.name}. Be respectful.
-          </p>
-        )}
+      <div className="shrink-0 border-t border-white/10 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] lg:px-6">
         {sendError && <p className="mb-2 text-center text-sm text-red-400">{sendError}</p>}
         {partnerKey?.error && (
           <p className="mb-2 text-center text-sm text-red-400">Couldn't load encryption keys. Reopen the chat to retry.</p>
@@ -238,6 +215,10 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           </button>
         </form>
       </div>
+
+      {showFirstChat && (
+        <FirstChatModal matchId={matchId} name={match.name} onClose={() => setShowFirstChat(false)} />
+      )}
     </div>
   )
 }
