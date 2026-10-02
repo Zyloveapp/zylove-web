@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
@@ -22,6 +22,7 @@ import {
   tagsIn,
   type PlayDraft,
   type PlayTagCategory,
+  loadPlayDraft,
 } from '../services/playOnboarding'
 
 const RED = '#E03131'
@@ -159,6 +160,13 @@ export default function PlayOnboarding() {
   // AuthGuard guarantees a signed-in user on this route.
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
 
+  // ?edit=true (Me → "Edit Play profile"): prefill from the saved Play
+  // profile and start at photos. Without a saved profile it's a normal setup.
+  const [searchParams] = useSearchParams()
+  const wantsEdit = searchParams.get('edit') === 'true'
+  const [edit, setEdit] = useState<'loading' | 'ready' | 'none'>(wantsEdit ? 'loading' : 'none')
+  const editing = edit === 'ready'
+
   const [stepIndex, setStepIndex] = useState(0)
   const [draft, setDraft] = useState<PlayDraft>(() => {
     const promptIds = selectPlayPrompts(uid).map((p) => p.id)
@@ -179,6 +187,24 @@ export default function PlayOnboarding() {
   })
 
   const update = (patch: Partial<PlayDraft>) => setDraft((d) => ({ ...d, ...patch }))
+
+  useEffect(() => {
+    if (!wantsEdit || !uid) return
+    let cancelled = false
+    loadPlayDraft(uid, selectPlayPrompts(uid).map((p) => p.id))
+      .catch(() => null)
+      .then((saved) => {
+        if (cancelled) return
+        if (!saved) return setEdit('none')
+        setDraft(saved)
+        setBioEditing(saved.bio.trim() !== '')
+        setStepIndex(STEPS.indexOf('photos'))
+        setEdit('ready')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [wantsEdit, uid])
 
   useEffect(() => {
     if (!uid) return
@@ -250,6 +276,11 @@ export default function PlayOnboarding() {
     setSaving(true)
     setSaveError(null)
     try {
+      if (editing) {
+        await savePlayOnboarding(uid, draft, { keepIntent: true })
+        navigate('/profile', { replace: true, state: { flash: '✦ Play profile updated.' } })
+        return
+      }
       await savePlayOnboarding(uid, draft)
       // Not straight into Play: Header sees the param and runs the normal
       // entry (PIN setup, then the "Play time." transition).
@@ -527,12 +558,26 @@ export default function PlayOnboarding() {
     }
   }
 
-  const isFirst = stepIndex === 0
+  // Editing skips the welcome step, so photos is where "Cancel" lives.
+  const isFirst = stepIndex === (editing ? STEPS.indexOf('photos') : 0)
   const isLast = step === 'review'
+
+  if (edit === 'loading') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-950">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-[#E03131]" />
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
       <div className="mx-auto w-full max-w-md px-4 pb-32 pt-6">
+        {editing && (
+          <p className="mb-5 rounded-xl border border-[#E03131]/30 bg-[#E03131]/10 px-4 py-3 text-center text-sm text-red-200">
+            Updating your Play profile — your answers are pre-filled.
+          </p>
+        )}
         <div className="mb-8">
           <div className="h-1 overflow-hidden rounded-full bg-white/10">
             <div
@@ -566,7 +611,7 @@ export default function PlayOnboarding() {
           </button>
           {isLast ? (
             <button type="button" onClick={enterPlay} disabled={saving} className={primaryButton}>
-              {saving ? 'Saving…' : 'Enter Play ✦'}
+              {saving ? 'Saving…' : editing ? 'Save changes ✦' : 'Enter Play ✦'}
             </button>
           ) : (
             <button

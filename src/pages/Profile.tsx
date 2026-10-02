@@ -102,6 +102,11 @@ export default function Profile() {
     return (
       <div className={page}>
         <div className="mx-auto max-w-xl space-y-8 px-4 pt-6 pb-8">
+          {typeof flash === 'string' && (
+            <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center text-sm text-emerald-300">
+              {flash}
+            </p>
+          )}
           <h1 className="text-sm font-semibold uppercase tracking-widest text-red-400">🔴 Play Profile</h1>
           {playData ? (
             <PlayProfileSections profile={own.profile} play={playData} />
@@ -123,17 +128,13 @@ export default function Profile() {
         {/* Sits above the mobile bottom nav (h-16). */}
         <div className="sticky bottom-16 border-t border-[#E03131]/20 bg-gray-950 px-4 py-3">
           <div className="mx-auto grid max-w-xl grid-cols-2 gap-2 text-sm leading-tight">
-            {/* No Play profile editor yet; Play onboarding starts blank, so it
-                isn't offered as an edit path. */}
-            <button
-              type="button"
-              disabled
-              title="Play profile editing is coming soon"
-              className="flex flex-col items-center justify-center rounded-xl border border-[#E03131]/50 px-2 py-2.5 text-center font-semibold text-white/60"
+            {/* Play onboarding in edit mode: prefilled, starts at photos. */}
+            <Link
+              to="/play-onboarding?edit=true"
+              className="flex items-center justify-center rounded-xl border border-[#E03131] px-2 py-3 text-center font-semibold text-white transition-colors hover:bg-[#E03131]/15"
             >
               ✏ Edit Play profile
-              <span className="text-[10px] font-normal text-white/40">Coming soon</span>
-            </button>
+            </Link>
             <Link
               to="/zylove-score"
               className="flex items-center justify-center rounded-xl border border-white/20 px-2 py-3 text-center font-semibold text-white/80 transition-colors hover:bg-white/10"

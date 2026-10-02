@@ -90,7 +90,9 @@ async function uploadPlayPhotos(uid: string, photos: PhotoDraft[]): Promise<{ re
 // Writes the Play profile and marks the user as having both profiles, in one
 // batch. Prompt answers go out in both shapes: the playPromptAnswers map, and
 // the promptAnswers array that mobile and the web profile view read.
-export async function savePlayOnboarding(uid: string, d: PlayDraft): Promise<void> {
+// Editing (keepIntent) leaves the root intent alone: a Play-only mobile user
+// must not be switched to 'open' just by updating their Play profile.
+export async function savePlayOnboarding(uid: string, d: PlayDraft, { keepIntent = false } = {}): Promise<void> {
   const prompts = answeredPrompts(d)
   const bio = d.bio.trim()
   const { refs, urls: photoURLs } = await uploadPlayPhotos(uid, d.photos)
@@ -122,7 +124,7 @@ export async function savePlayOnboarding(uid: string, d: PlayDraft): Promise<voi
     // Mirrors mobile's Play onboarding: mobile Discover and profile cards read
     // these Play fields from the root doc, not the playProfile subcollection.
     batch.update(doc(db, 'users', uid), {
-      intent: 'open',
+      ...(!keepIntent && { intent: 'open' }),
       spiceLevel: d.spiceLevel,
       playInterestTags: d.tags,
       playNonNegotiables: d.nonNegotiables,
@@ -134,5 +136,45 @@ export async function savePlayOnboarding(uid: string, d: PlayDraft): Promise<voi
   } catch (err) {
     await Promise.allSettled(refs.map((r) => deleteObject(r)))
     throw err
+  }
+}
+
+// ─── Edit ────────────────────────────────────────────────────────────────────
+
+const PROMPT_SLOTS = 3
+
+// The saved Play profile as an onboarding draft, or null if there isn't one.
+// Photos come back as already-uploaded entries (file: null); prompt slots are
+// the saved answers, topped up with the suggested prompts.
+export async function loadPlayDraft(uid: string, suggested: string[]): Promise<PlayDraft | null> {
+  const snap = await getDoc(doc(db, `users/${uid}/playProfile/data`))
+  const d = snap.data()
+  if (!d) return null
+  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x !== '') : [])
+
+  const answers: Record<string, string> = {}
+  if (Array.isArray(d.promptAnswers)) {
+    for (const a of d.promptAnswers) {
+      if (typeof a?.promptId === 'string' && typeof a?.answer === 'string' && a.answer.trim()) answers[a.promptId] = a.answer
+    }
+  } else if (typeof d.playPromptAnswers === 'object' && d.playPromptAnswers !== null) {
+    for (const [id, answer] of Object.entries(d.playPromptAnswers)) {
+      if (typeof answer === 'string' && answer.trim()) answers[id] = answer
+    }
+  }
+  const promptIds = Object.keys(answers).slice(0, PROMPT_SLOTS)
+  for (const id of suggested) {
+    if (promptIds.length >= PROMPT_SLOTS) break
+    if (!promptIds.includes(id)) promptIds.push(id)
+  }
+
+  return {
+    photos: strings(d.photoURLs).map((url) => ({ id: url, file: null, previewUrl: url })),
+    bio: typeof d.playBio === 'string' ? d.playBio : '',
+    spiceLevel: typeof d.spiceLevel === 'string' ? (d.spiceLevel as SpiceLevel) : null,
+    tags: strings(d.playInterestTags) as PlayInterestTag[],
+    nonNegotiables: strings(d.playNonNegotiables) as PlayNonNegotiable[],
+    promptIds,
+    answers,
   }
 }
