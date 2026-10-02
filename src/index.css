@@ -79,118 +79,202 @@ body {
 }
 .zy-play-pulse { animation: zy-play-pulse 2.4s ease-in-out infinite; }
 
-/* ─── Mode transitions ─────────────────────────────────────────────────────
-   Spark → Play "the tear": a red crack rips the screen open (0–500ms), the
-   flame and headline emerge (400–700), subline (600–800), hold, seal 1500–1800.
-   Play → Spark "the drain": two red pulses (0–300), red drains down while
-   cobalt bleeds in from the edges (300–700), ✦ crystallizes (600–900),
-   subline (800–1000), hold, settle 1600–1900. Particles and dots take their
-   direction from --dx/--dy, set inline. */
-@keyframes crack-appear {
-  0% { transform: scaleX(0); opacity: 0; }
-  40% { transform: scaleX(1); opacity: 1; filter: brightness(1.8); }
-  100% { transform: scaleX(1); opacity: 1; filter: brightness(1); }
+/* ─── Mode transitions (4s) ────────────────────────────────────────────────
+   Spark → Play "the tear":
+     0–600 dim + shockwave + red veins · 600–900 crack flickers · 900–1400
+     panels tear apart, 16 particles · 1300–1900 🔥 + "Play time." · 1700
+     subline · 2000–3200 hold (edge pulse, slow spin, shimmer) · 3200–3800
+     implode (crack flashes) · onComplete 4000.
+   Play → Spark "the drain":
+     0–900 two heartbeat pulses + shake · 800–1600 red drains, cobalt bleeds
+     in from the edges (purple overlap ~1100) · 1400–2200 12 dots orbit then
+     converge, flash, ✦ · 2200 "Back to real." · 2400 subline · 2500–3400
+     hold · 3400–3900 settle · onComplete 4000.
+   Transforms that would collide (emerge + slow spin, fade + float) live on
+   nested elements. Direction/size/timing per particle come in inline. */
+
+@keyframes mt-appear { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mt-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes mt-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes mt-sub {
+  0% { opacity: 0; transform: translateY(8px); }
+  28% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 1; transform: translateY(-4px); }
 }
-@keyframes tear-left {
+@keyframes mt-shimmer {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+/* Edge glow: tinted lighter than the background so it shows on solid colour. */
+@keyframes mt-edges-red {
+  0%, 100% { box-shadow: inset 0 0 0 2px rgba(255, 140, 140, 0), inset 0 0 60px rgba(255, 140, 140, 0); }
+  50% { box-shadow: inset 0 0 0 3px rgba(255, 140, 140, 0.6), inset 0 0 90px rgba(255, 140, 140, 0.35); }
+}
+@keyframes mt-edges-cobalt {
+  0%, 100% { box-shadow: inset 0 0 0 2px rgba(140, 170, 255, 0), inset 0 0 60px rgba(140, 170, 255, 0); }
+  50% { box-shadow: inset 0 0 0 3px rgba(140, 170, 255, 0.6), inset 0 0 90px rgba(140, 170, 255, 0.35); }
+}
+
+/* The tear */
+@keyframes mt-panel-shade {
+  0% { opacity: 0; }
+  66.7% { opacity: 0.3; }
+  100% { opacity: 1; }
+}
+@keyframes mt-shockwave {
+  from { transform: scale(0); opacity: 0.6; }
+  to { transform: scale(1); opacity: 0; }
+}
+@keyframes mt-vein {
+  0% { transform: scaleY(0); opacity: 1; filter: brightness(1); }
+  27% { transform: scaleY(1); opacity: 1; }
+  45% { opacity: 0.7; filter: brightness(1); }
+  59% { opacity: 1; filter: brightness(2); }
+  73% { opacity: 1; filter: brightness(1.6); }
+  100% { transform: scaleY(1); opacity: 0; filter: brightness(1); }
+}
+@keyframes mt-crack-flicker {
+  0% { opacity: 0; transform: scaleY(0.2); }
+  20% { opacity: 1; transform: scaleY(1); }
+  40% { opacity: 0.3; }
+  60% { opacity: 1; }
+  80% { opacity: 0.3; }
+  100% { opacity: 1; transform: scaleY(1); }
+}
+@keyframes mt-flash { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+@keyframes mt-tear-left {
   from { transform: translateX(0) rotate(0deg); }
-  to { transform: translateX(-100%) rotate(-1deg); }
+  to { transform: translateX(-105%) rotate(-2deg); }
 }
-@keyframes tear-right {
+@keyframes mt-tear-right {
   from { transform: translateX(0) rotate(0deg); }
-  to { transform: translateX(100%) rotate(1deg); }
+  to { transform: translateX(105%) rotate(2deg); }
 }
-@keyframes particle-scatter {
-  from { transform: translate(0, 0) scale(1); opacity: 1; }
-  to { transform: translate(var(--dx), var(--dy)) scale(0.4); opacity: 0; }
+@keyframes mt-particle {
+  0% { transform: translate(0, 0) scale(1); opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(0.3); opacity: 0; }
 }
-@keyframes spin-emerge {
+@keyframes mt-emerge {
   0% { transform: rotate(-360deg) scale(0); opacity: 0; }
-  70% { transform: rotate(0deg) scale(1.2); opacity: 1; }
+  70% { transform: rotate(0deg) scale(1.3); opacity: 1; }
   100% { transform: rotate(0deg) scale(1); opacity: 1; }
 }
-@keyframes slam-in {
-  0% { transform: scale(0.3) translateY(30px); opacity: 0; }
-  70% { transform: scale(1.05) translateY(0); opacity: 1; }
+@keyframes mt-slam {
+  0% { transform: scale(0.2) translateY(40px); opacity: 0; }
+  65% { transform: scale(1.08) translateY(0); opacity: 1; }
   100% { transform: scale(1) translateY(0); opacity: 1; }
 }
-@keyframes slide-up-fade {
-  from { transform: translateY(16px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+@keyframes mt-implode {
+  from { transform: scale(1); opacity: 1; }
+  to { transform: scale(0.92); opacity: 0; }
 }
-/* Edge glow during the hold. White-tinted: a same-colour outline would vanish
-   against the solid red or cobalt background. */
-@keyframes edge-pulse {
-  0%, 100% { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0), inset 0 0 40px rgba(255, 255, 255, 0); }
-  50% { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35), inset 0 0 60px rgba(255, 255, 255, 0.18); }
+
+.mt-tear-panel { opacity: 0; animation: mt-panel-shade 900ms linear both; }
+.mt-tear-panel-left { animation: mt-panel-shade 900ms linear both, mt-tear-left 500ms cubic-bezier(0.25, 0.46, 0.45, 0.94) 900ms both; }
+.mt-tear-panel-right { animation: mt-panel-shade 900ms linear both, mt-tear-right 500ms cubic-bezier(0.25, 0.46, 0.45, 0.94) 900ms both; }
+.mt-red-base { opacity: 0; animation: mt-appear 1ms linear 880ms both; }
+.mt-shockwave { animation: mt-shockwave 400ms ease-out both; }
+.mt-vein { transform: scaleY(0); animation: mt-vein 1100ms ease-out 100ms both; }
+.mt-crack { opacity: 0; animation: mt-crack-flicker 300ms linear 600ms both, mt-fade-out 120ms linear 900ms forwards; }
+.mt-crack-flash { opacity: 0; animation: mt-flash 100ms linear 3200ms both; }
+.mt-particle { opacity: 0; animation-name: mt-particle; animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); animation-fill-mode: both; }
+.mt-tear-emoji { animation: mt-emerge 600ms cubic-bezier(0.34, 1.56, 0.64, 1) 1300ms both; }
+.mt-tear-emoji-spin { animation: mt-spin 3s linear 1900ms infinite; }
+.mt-tear-headline { text-shadow: 0 0 40px rgba(224, 49, 49, 0.8); animation: mt-slam 500ms cubic-bezier(0.34, 1.56, 0.64, 1) 1300ms both; }
+.mt-tear-sub { animation: mt-sub 1400ms ease-out 1700ms both; }
+.mt-tear-shimmer {
+  background: linear-gradient(110deg, transparent 35%, rgba(255, 190, 190, 0.85) 50%, transparent 65%) no-repeat;
+  background-size: 200% 100%;
+  background-position: 150% 0;
+  animation: mt-shimmer 2s ease-in-out 2000ms both;
 }
-@keyframes pulse-red {
-  0%, 50%, 100% { opacity: 0; }
-  25%, 75% { opacity: 0.6; }
+.mt-tear-edges { animation: mt-edges-red 1000ms ease-in-out 2000ms 2 both; }
+.mt-implode { animation: mt-implode 600ms ease-in both; }
+
+/* The drain */
+@keyframes mt-heartbeat {
+  0%, 38.9%, 61.1%, 100% { opacity: 0; }
+  19.4%, 80.5% { opacity: 0.7; }
 }
-@keyframes drain-down {
+@keyframes mt-heartbeat-shake {
+  0%, 15%, 26%, 75%, 86%, 100% { transform: translateX(0); }
+  18%, 78% { transform: translateX(3px); }
+  22%, 82% { transform: translateX(-3px); }
+}
+@keyframes mt-drain-down {
   from { clip-path: inset(0 0 0 0); }
   to { clip-path: inset(100% 0 0 0); }
 }
-@keyframes cobalt-bleed-top { from { height: 0; } to { height: 50.5%; } }
-@keyframes cobalt-bleed-bottom { from { height: 0; } to { height: 50.5%; } }
-@keyframes cobalt-bleed-left { from { width: 0; } to { width: 50.5%; } }
-@keyframes cobalt-bleed-right { from { width: 0; } to { width: 50.5%; } }
-@keyframes converge {
+@keyframes mt-bleed-y { from { height: 0; } to { height: 50.5%; } }
+@keyframes mt-bleed-x { from { width: 0; } to { width: 50.5%; } }
+/* Leading edge of each bar: thick as it enters, thin as it spreads. */
+@keyframes mt-edge-y { 0% { height: 0; } 15% { height: 20px; } 100% { height: 2px; } }
+@keyframes mt-edge-x { 0% { width: 0; } 15% { width: 20px; } 100% { width: 2px; } }
+@keyframes mt-trail-row {
+  0% { opacity: 0; }
+  10%, 85% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes mt-trail-dot { from { opacity: 0.2; } to { opacity: 1; } }
+@keyframes mt-purple { 0%, 100% { opacity: 0; } 50% { opacity: 0.4; } }
+@keyframes mt-orbit { from { transform: rotate(0deg); } to { transform: rotate(180deg); } }
+@keyframes mt-pull {
   0% { transform: translate(var(--dx), var(--dy)) scale(1); opacity: 0; }
-  30% { opacity: 1; }
+  12% { opacity: 1; }
+  50% { transform: translate(var(--dx), var(--dy)) scale(1); opacity: 1; }
   100% { transform: translate(0, 0) scale(0.3); opacity: 0; }
 }
-@keyframes crystallize {
+@keyframes mt-white-flash { 0% { opacity: 0; } 30% { opacity: 0.85; } 100% { opacity: 0; } }
+@keyframes mt-crystal {
   0% { transform: scale(0); opacity: 0; }
-  70% { transform: scale(1.1); opacity: 1; }
+  60% { transform: scale(1.4); opacity: 1; }
   100% { transform: scale(1); opacity: 1; }
 }
-/* "Back to real." lands with weight: settles down from slightly large. */
-@keyframes weight-in {
-  from { transform: scale(1.12) translateY(-8px); opacity: 0; }
+@keyframes mt-weight {
+  from { transform: scale(1.08) translateY(-10px); opacity: 0; }
   to { transform: scale(1) translateY(0); opacity: 1; }
 }
-@keyframes implode-out {
-  from { transform: scale(1); opacity: 1; }
-  to { transform: scale(0.95); opacity: 0; }
+@keyframes mt-rise {
+  0% { transform: translateY(0); opacity: 0; }
+  15% { opacity: 0.9; }
+  100% { transform: translateY(-40vh); opacity: 0; }
 }
-@keyframes settle-out {
+@keyframes mt-settle {
   from { transform: scale(1); opacity: 1; }
   to { transform: scale(0.98); opacity: 0; }
 }
-@keyframes crossfade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes crossfade-out { from { opacity: 1; } to { opacity: 0; } }
 
-/* The tear */
-.zy-crack { animation: crack-appear 200ms ease-out both; }
-.zy-crack-gone { animation: crossfade-out 120ms linear 260ms both; }
-.zy-tear-left { animation: tear-left 300ms cubic-bezier(0.7, 0, 0.84, 0) 200ms both; }
-.zy-tear-right { animation: tear-right 300ms cubic-bezier(0.7, 0, 0.84, 0) 200ms both; }
-.zy-particle { opacity: 0; animation: particle-scatter 550ms cubic-bezier(0.16, 1, 0.3, 1) 220ms both; }
-.zy-tear-emoji { animation: spin-emerge 300ms cubic-bezier(0.34, 1.56, 0.64, 1) 400ms both; }
-.zy-tear-headline { animation: slam-in 300ms cubic-bezier(0.34, 1.56, 0.64, 1) 400ms both; }
-.zy-tear-sub { animation: slide-up-fade 200ms ease-out 600ms both; }
-.zy-tear-edges { animation: edge-pulse 700ms ease-in-out 800ms both; }
-.zy-seal { animation: implode-out 300ms ease-in both; }
+.mt-shake { animation: mt-heartbeat-shake 900ms linear both; }
+.mt-heartbeat { opacity: 0; animation: mt-heartbeat 900ms ease-in-out both; }
+.mt-drain-base { opacity: 0; animation: mt-appear 1ms linear 800ms both; }
+.mt-drain-red { opacity: 0; animation: mt-appear 1ms linear 800ms both, mt-drain-down 800ms ease-in 800ms both; }
+.mt-bleed-y { height: 0; animation: mt-bleed-y 800ms cubic-bezier(0.22, 1, 0.36, 1) 800ms both; }
+.mt-bleed-x { width: 0; animation: mt-bleed-x 800ms cubic-bezier(0.22, 1, 0.36, 1) 800ms both; }
+.mt-edge-y { height: 0; animation: mt-edge-y 800ms cubic-bezier(0.22, 1, 0.36, 1) 800ms both; }
+.mt-edge-x { width: 0; animation: mt-edge-x 800ms cubic-bezier(0.22, 1, 0.36, 1) 800ms both; }
+.mt-trail-row { opacity: 0; animation: mt-trail-row 800ms linear 800ms both; }
+.mt-trail-dot { animation: mt-trail-dot 240ms ease-in-out infinite alternate; }
+.mt-purple { opacity: 0; animation: mt-purple 200ms ease-in-out 1100ms both; }
+.mt-orbit { animation: mt-orbit 400ms ease-in-out 1400ms both; }
+.mt-pull { opacity: 0; animation: mt-pull 800ms ease-in-out 1400ms both; }
+.mt-white-flash { opacity: 0; animation: mt-white-flash 350ms ease-out 2200ms both; }
+.mt-crystal { text-shadow: 0 0 40px rgba(27, 79, 216, 0.9); animation: mt-crystal 500ms cubic-bezier(0.34, 1.56, 0.64, 1) 2200ms both; }
+.mt-crystal-spin { animation: mt-spin 4s linear 2700ms infinite; }
+.mt-drain-headline { animation: mt-weight 500ms cubic-bezier(0.22, 1, 0.36, 1) 2200ms both; }
+.mt-drain-sub { animation: mt-sub 1400ms ease-out 2400ms both; }
+.mt-drain-shimmer {
+  background: linear-gradient(110deg, transparent 35%, rgba(170, 195, 255, 0.85) 50%, transparent 65%) no-repeat;
+  background-size: 200% 100%;
+  background-position: 150% 0;
+  animation: mt-shimmer 2s ease-in-out 2600ms both;
+}
+.mt-drain-edges { animation: mt-edges-cobalt 1000ms ease-in-out 2500ms 2 both; }
+.mt-rise { opacity: 0; animation-name: mt-rise; animation-timing-function: ease-out; animation-fill-mode: both; }
+.mt-settle { animation: mt-settle 500ms ease-out both; }
 
-/* The drain */
-.zy-pulse-red { opacity: 0; animation: pulse-red 300ms linear both; }
-.zy-drain-base { opacity: 0; animation: crossfade-in 1ms linear 300ms both; }
-.zy-drain-red { opacity: 0; animation: crossfade-in 1ms linear 300ms both, drain-down 400ms ease-in 300ms both; }
-.zy-bleed-top { animation: cobalt-bleed-top 400ms cubic-bezier(0.22, 1, 0.36, 1) 300ms both; }
-.zy-bleed-bottom { animation: cobalt-bleed-bottom 400ms cubic-bezier(0.22, 1, 0.36, 1) 300ms both; }
-.zy-bleed-left { animation: cobalt-bleed-left 400ms cubic-bezier(0.22, 1, 0.36, 1) 300ms both; }
-.zy-bleed-right { animation: cobalt-bleed-right 400ms cubic-bezier(0.22, 1, 0.36, 1) 300ms both; }
-.zy-converge { opacity: 0; animation: converge 250ms ease-in 600ms both; }
-.zy-crystal { animation: crystallize 200ms cubic-bezier(0.34, 1.56, 0.64, 1) 750ms both; }
-.zy-drain-headline { animation: weight-in 300ms cubic-bezier(0.22, 1, 0.36, 1) 600ms both; }
-.zy-drain-sub { animation: slide-up-fade 200ms ease-out 800ms both; }
-.zy-drain-edges { animation: edge-pulse 600ms ease-in-out 1000ms both; }
-.zy-settle { animation: settle-out 300ms ease-out both; }
-
-/* Reduced motion: one plain crossfade in and out. */
-.zy-crossfade-in { animation: crossfade-in 600ms ease-out both; }
-.zy-crossfade-out { animation: crossfade-out 400ms ease-in both; }
+/* Reduced motion: solid colour, text fades in, holds, fades out (1.5s). */
+.mt-reduced-in { animation: mt-appear 400ms ease-out both; }
+.mt-reduced-out { animation: mt-fade-out 400ms ease-in both; }
 
 @media (prefers-reduced-motion: reduce) {
   .zy-slide-from-left,
