@@ -79,6 +79,45 @@ body {
 }
 .zy-play-pulse { animation: zy-play-pulse 2.4s ease-in-out infinite; }
 
+/* Mode transition ("Play time." / "Back to real."). The burst's end scale
+   comes from --burst-scale (viewport diagonal ÷ circle size), set inline. */
+@keyframes burst-expand {
+  from { transform: scale(0.05); border-radius: 50%; }
+  to { transform: scale(var(--burst-scale, 60)); border-radius: 0%; }
+}
+@keyframes spin-scale {
+  from { transform: rotate(-180deg) scale(0); opacity: 0; }
+  to { transform: rotate(0deg) scale(1); opacity: 1; }
+}
+@keyframes slam-in {
+  from { transform: scale(0.3) translateY(30px); opacity: 0; }
+  to { transform: scale(1) translateY(0); opacity: 1; }
+}
+@keyframes slide-up-fade {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes implode-out {
+  from { transform: scale(1); opacity: 1; }
+  to { transform: scale(0.95); opacity: 0; }
+}
+@keyframes fade-in-plain {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes fade-out-plain {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+.zy-burst-expand { animation: burst-expand 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+/* The overshoot easing carries the emoji past 1 (to ~1.2) before it settles. */
+.zy-spin-scale { animation: spin-scale 300ms cubic-bezier(0.34, 1.56, 0.64, 1) 150ms both; }
+.zy-slam-in { animation: slam-in 350ms cubic-bezier(0.34, 1.56, 0.64, 1) 150ms both; }
+.zy-slide-up-fade { animation: slide-up-fade 200ms ease-out 350ms both; }
+.zy-implode-out { animation: implode-out 350ms ease-in both; }
+.zy-fade-in-plain { animation: fade-in-plain 500ms ease-out both; }
+.zy-fade-out-plain { animation: fade-out-plain 350ms ease-in both; }
+
 @media (prefers-reduced-motion: reduce) {
   .zy-slide-from-left,
   .zy-slide-from-right,

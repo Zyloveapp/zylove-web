@@ -7,6 +7,7 @@ import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import { setVisibility, subscribeVisibility, type Visibility, type VisibilityState } from '../services/visibility'
 import PlayPinFlow from './PlayPinFlow'
+import ModeTransition from './ModeTransition'
 
 const VISIBILITY: { value: Visibility; label: string; pill: string; description: string; dot: string; tone: string }[] = [
   {
@@ -126,7 +127,8 @@ function PlaySetupSheet({ onClose }: { onClose: () => void }) {
 }
 
 // Persistent top bar on every protected page: wordmark, mode pill, visibility
-// and settings. Going into Play asks for the Play PIN; back to Spark is instant.
+// and settings. Going into Play asks for the Play PIN; either way the
+// "Play time." / "Back to real." transition plays before the mode changes.
 export default function Header() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const mode = useModeStore((s) => s.mode)
@@ -136,6 +138,8 @@ export default function Header() {
   const [pinFlow, setPinFlow] = useState(false)
   const [playSetup, setPlaySetup] = useState(false)
   const [checkingPlay, setCheckingPlay] = useState(false)
+  // The mode being switched to while its transition plays.
+  const [transition, setTransition] = useState<'spark' | 'play' | null>(null)
 
   useEffect(() => {
     if (!uid) return
@@ -146,9 +150,10 @@ export default function Header() {
   const current = visibility?.[mode] ?? null
   const dot = VISIBILITY.find((o) => o.value === current)
 
-  // Into Play: needs a Play profile, then the PIN. Back to Spark is instant.
+  // Into Play: needs a Play profile, then the PIN. Back to Spark needs neither.
   async function togglePill() {
-    if (isPlay) return setMode('spark')
+    if (transition) return
+    if (isPlay) return setTransition('spark')
     if (checkingPlay) return
     setCheckingPlay(true)
     // A failed read shouldn't lock anyone out of Play: fall through to the PIN.
@@ -179,7 +184,7 @@ export default function Header() {
         <button
           type="button"
           onClick={togglePill}
-          disabled={checkingPlay}
+          disabled={checkingPlay || transition !== null}
           aria-label={isPlay ? 'Play mode — switch to Spark' : 'Spark mode — switch to Play'}
           className={`justify-self-center rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
             isPlay
@@ -217,13 +222,23 @@ export default function Header() {
 
       {playSetup && <PlaySetupSheet onClose={() => setPlaySetup(false)} />}
 
+      {transition && (
+        <ModeTransition
+          toMode={transition}
+          onComplete={() => {
+            setMode(transition)
+            setTransition(null)
+          }}
+        />
+      )}
+
       {pinFlow && (
         <PlayPinFlow
           uid={uid}
           purpose="unlock"
           onDone={() => {
             setPinFlow(false)
-            setMode('play')
+            setTransition('play')
           }}
           onCancel={() => setPinFlow(false)}
         />
