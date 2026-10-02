@@ -4,8 +4,12 @@ import PauseGuard from './components/PauseGuard'
 import Header from './components/Header'
 import Nav from './components/Nav'
 import ReviewPrompter from './components/ReviewPrompter'
-import Home from './pages/Home'
 import Login from './pages/Login'
+import Terms from './pages/public/Terms'
+import Privacy from './pages/public/Privacy'
+import Community from './pages/public/Community'
+import Join from './pages/public/Join'
+import Contact from './pages/public/Contact'
 import Onboarding from './pages/Onboarding'
 import PlayOnboarding from './pages/PlayOnboarding'
 import Discover from './pages/Discover'
@@ -37,8 +41,14 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Home />} />
+        {/* Public: landing (signed-in users are sent to /discover) and static pages. */}
+        <Route path="/" element={<Login />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/join" element={<Join />} />
+        <Route path="/terms" element={<Terms />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/community" element={<Community />} />
+        <Route path="/contact" element={<Contact />} />
         <Route path="/onboarding" element={<Onboarding />} />
         <Route element={<AuthGuard />}>
           {/* Full-screen flow: no header or nav. */}

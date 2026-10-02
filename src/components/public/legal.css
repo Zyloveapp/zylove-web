@@ -1,0 +1,52 @@
+/* Legal pages (terms, privacy, community) — the copied zylove-website markup,
+   restyled for the dark web app. Only classes those pages use are styled. */
+.zy-legal { color: rgba(255, 255, 255, 0.75); line-height: 1.7; font-size: 15px; }
+.zy-legal h1 { color: #fff; font-size: 2rem; font-weight: 800; line-height: 1.2; margin: 0 0 0.5rem; }
+.zy-legal h2 { color: #fff; font-size: 1.25rem; font-weight: 700; margin: 2.25rem 0 0.75rem; scroll-margin-top: 4.5rem; }
+.zy-legal h3 { color: #fff; font-size: 1rem; font-weight: 600; margin: 1.5rem 0 0.5rem; }
+.zy-legal p { margin: 0 0 1rem; }
+.zy-legal ul { list-style: disc; padding-left: 1.25rem; margin: 0 0 1rem; }
+.zy-legal li { margin: 0.25rem 0; }
+.zy-legal strong { color: #fff; font-weight: 600; }
+.zy-legal a { color: #7c9bff; text-decoration: underline; text-underline-offset: 2px; }
+.zy-legal a:hover { color: #fff; }
+.zy-legal section { scroll-margin-top: 4.5rem; }
+
+.zy-legal .meta,
+.zy-legal .hero-meta { color: rgba(255, 255, 255, 0.4); font-size: 0.85rem; margin-bottom: 1.5rem; }
+.zy-legal .hero { margin-bottom: 2rem; }
+.zy-legal .hero-tag { color: #7c9bff; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 0.5rem; }
+.zy-legal .hero-sub { color: rgba(255, 255, 255, 0.6); font-size: 1.05rem; }
+.zy-legal .section-num { color: #7c9bff; margin-right: 0.4rem; }
+
+.zy-legal .intro,
+.zy-legal .intro-box,
+.zy-legal .callout,
+.zy-legal .enforcement-box,
+.zy-legal .report-box { border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.04); border-radius: 1rem; padding: 1rem 1.25rem; margin: 1.25rem 0; }
+.zy-legal .callout-blue,
+.zy-legal .report-box { border-color: rgba(27, 79, 216, 0.4); background: rgba(27, 79, 216, 0.1); }
+.zy-legal .callout-green { border-color: rgba(74, 222, 128, 0.3); background: rgba(74, 222, 128, 0.08); }
+.zy-legal .play-box { border: 1px solid rgba(224, 49, 49, 0.35); background: rgba(224, 49, 49, 0.08); border-radius: 1rem; padding: 1rem 1.25rem; margin: 1.25rem 0; }
+.zy-legal .intro > :last-child,
+.zy-legal .intro-box > :last-child,
+.zy-legal .callout > :last-child,
+.zy-legal .play-box > :last-child,
+.zy-legal .enforcement-box > :last-child,
+.zy-legal .report-box > :last-child { margin-bottom: 0; }
+
+.zy-legal .badge { display: inline-block; border-radius: 9999px; padding: 0.1rem 0.6rem; font-size: 0.75rem; font-weight: 600; }
+.zy-legal .badge-blue { background: rgba(27, 79, 216, 0.2); color: #b4c6ff; }
+.zy-legal .badge-green { background: rgba(74, 222, 128, 0.15); color: #86efac; }
+
+.zy-legal .data-table { width: 100%; border-collapse: collapse; margin: 1rem 0 1.5rem; font-size: 0.875rem; display: block; overflow-x: auto; }
+.zy-legal .data-table th,
+.zy-legal .data-table td { border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding: 0.6rem 0.75rem; text-align: left; vertical-align: top; }
+.zy-legal .data-table th { color: #fff; font-weight: 600; }
+
+/* Community guidelines: numbered rules */
+.zy-legal .rule { display: flex; gap: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.08); padding: 1.5rem 0; }
+.zy-legal .rule-number { flex-shrink: 0; color: #1b4fd8; font-size: 1.5rem; font-weight: 800; line-height: 1.2; min-width: 2rem; }
+.zy-legal .rule-body { min-width: 0; }
+.zy-legal .rule-body h2 { margin-top: 0; }
+.zy-legal .prohibited { border-left: 2px solid rgba(224, 49, 49, 0.6); padding-left: 1rem; margin-top: 0.75rem; }
