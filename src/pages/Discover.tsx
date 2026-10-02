@@ -25,6 +25,11 @@ function Spinner() {
   return <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
 }
 
+// Play Explore shows Play photos (falling back to the main ones).
+function photosOf(p: DiscoverProfile): string[] {
+  return p.playProfile?.photoURLs.length ? p.playProfile.photoURLs : (p.photoURLs ?? [])
+}
+
 export default function Discover() {
   // AuthGuard guarantees a signed-in user on this route.
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
@@ -87,7 +92,7 @@ export default function Discover() {
             matchId: result.matchId ?? [uid, current.uid].sort().join('_'),
             theirUid: current.uid,
             theirName: current.displayName ?? 'Someone',
-            theirPhoto: current.photoURLs?.[0] ?? null,
+            theirPhoto: photosOf(current)[0] ?? null,
             mode,
           })
         }
@@ -144,7 +149,7 @@ export default function Discover() {
   return (
     <div className="min-h-[calc(100dvh-7rem)] bg-gray-950 text-white lg:flex">
       <aside className="flex flex-col p-6 lg:sticky lg:top-12 lg:h-[calc(100dvh-7rem)] lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:py-10">
-        <PhotoGallery key={current.uid} photos={current.photoURLs ?? []} name={name} />
+        <PhotoGallery key={current.uid} photos={photosOf(current)} name={name} />
         <div className="mt-8 hidden lg:block">{actions}</div>
       </aside>
 

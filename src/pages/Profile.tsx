@@ -2,13 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
-import {
-  loadOwnProfile,
-  loadPlayProfile,
-  profileCompleteness,
-  type OwnProfile,
-  type PlayProfileData,
-} from '../services/profile'
+import { loadOwnProfile, profileCompleteness, type OwnProfile } from '../services/profile'
+import { loadPlayProfile, type PlayProfileData } from '../services/playProfile'
 import PlayProfileSections from '../components/profile/PlayProfileSections'
 import VisibilityControl from '../components/profile/VisibilityControl'
 import JustForYouCard from '../components/profile/JustForYouCard'

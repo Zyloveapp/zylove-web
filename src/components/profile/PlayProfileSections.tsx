@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { DiscoverProfile } from '../../services/discover'
-import type { PlayProfileData } from '../../services/profile'
+import type { PlayProfileData } from '../../services/playProfile'
 import {
   PLAY_NON_NEGOTIABLE_LABELS,
   PLAY_TAG_CATEGORY_LABELS,
@@ -39,17 +39,9 @@ function groupedInterests(tags: string[]): { title: string; items: string[] }[] 
 
 // The Play face of a profile: Play photos, bio, spice level, interests,
 // non-negotiables and Play prompts. Identity basics come from the root doc.
-export default function PlayProfileSections({
-  profile,
-  play,
-  afterHeader,
-}: {
-  profile: DiscoverProfile
-  play: PlayProfileData
-  afterHeader?: ReactNode
-}) {
-  const photos = play.photoURLs.length > 0 ? play.photoURLs : list(profile.photoURLs)
-  const bio = play.playBio || profile.bio?.trim() || ''
+// Bio, spice level, grouped interests, non-negotiables and Play prompts —
+// the Play body shared by the Play profile pages and Play Explore.
+export function PlayDetailsBody({ bio, play }: { bio: string; play: PlayProfileData }) {
   const spice = play.spiceLevel && has(SPICE_META, play.spiceLevel) ? SPICE_META[play.spiceLevel as SpiceLevel] : null
   const nonNegotiables = play.playNonNegotiables.map((k) =>
     has(PLAY_NON_NEGOTIABLE_LABELS, k) ? PLAY_NON_NEGOTIABLE_LABELS[k as PlayNonNegotiable] : k.replace(/_/g, ' '),
@@ -58,15 +50,6 @@ export default function PlayProfileSections({
 
   return (
     <>
-      <PhotoHero
-        photos={photos}
-        name={profile.displayName ?? ''}
-        glow={badgeTier((profile as Record<string, unknown>).zyloveScoreTier)}
-      />
-      <ProfileHeader profile={profile} nameFallback="Someone" />
-
-      {afterHeader}
-
       {bio && (
         <section>
           <SectionHeading>About</SectionHeading>
@@ -115,6 +98,32 @@ export default function PlayProfileSections({
           ))}
         </section>
       )}
+    </>
+  )
+}
+
+export default function PlayProfileSections({
+  profile,
+  play,
+  afterHeader,
+}: {
+  profile: DiscoverProfile
+  play: PlayProfileData
+  afterHeader?: ReactNode
+}) {
+  const photos = play.photoURLs.length > 0 ? play.photoURLs : list(profile.photoURLs)
+  const bio = play.playBio || profile.bio?.trim() || ''
+
+  return (
+    <>
+      <PhotoHero
+        photos={photos}
+        name={profile.displayName ?? ''}
+        glow={badgeTier((profile as Record<string, unknown>).zyloveScoreTier)}
+      />
+      <ProfileHeader profile={profile} nameFallback="Someone" />
+      {afterHeader}
+      <PlayDetailsBody bio={bio} play={play} />
     </>
   )
 }

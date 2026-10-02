@@ -5,6 +5,7 @@ import { db, functions } from './firebase'
 import { genderToAttractedToCategory } from '../utils/genderUtils'
 import type { DatingProfile } from '../types/profile'
 import type { Mode } from '../store/modeStore'
+import { parsePlayProfile, type PlayProfileData } from './playProfile'
 
 const CANDIDATE_LIMIT = 50
 
@@ -15,6 +16,8 @@ export type DiscoverProfile = Partial<Omit<DatingProfile, 'attractedTo'>> & {
   attractedTo?: string[] | string
   sparkVisibility?: string
   playVisibility?: string
+  // Play Explore only: the candidate's playProfile/data, used for display.
+  playProfile?: PlayProfileData
 }
 
 // ─── Swiped list (per user + mode, this browser only) ───────────────────────
@@ -134,20 +137,22 @@ export async function fetchCandidates(uid: string, mode: Mode): Promise<Discover
   return shuffle(mode === 'play' ? await withPlayProfiles(candidates) : candidates)
 }
 
-// Play Explore only shows people with a Play profile. 'play' intent implies
-// one; 'open' users may have only Spark, so their playProfile/data docs are
-// checked in parallel. An unreadable doc counts as missing.
+// Play Explore only shows people with a Play profile, and shows them with it:
+// everyone left after the filters gets their playProfile/data read in
+// parallel (bot or not, whatever their intent). No Play profile, or an
+// unreadable one, means they're left out — never Spark data in Play.
 async function withPlayProfiles(candidates: DiscoverProfile[]): Promise<DiscoverProfile[]> {
-  const hasPlay = await Promise.all(
+  const play = await Promise.all(
     candidates.map((p) =>
-      p.intent === 'open'
-        ? getDoc(doc(db, `users/${p.uid}/playProfile/data`))
-            .then((snap) => snap.exists())
-            .catch(() => false)
-        : Promise.resolve(true),
+      getDoc(doc(db, `users/${p.uid}/playProfile/data`))
+        .then((snap) => (snap.exists() ? parsePlayProfile(snap.data()) : null))
+        .catch(() => null),
     ),
   )
-  return candidates.filter((_, i) => hasPlay[i])
+  return candidates.flatMap((p, i) => {
+    const playProfile = play[i]
+    return playProfile ? [{ ...p, playProfile }] : []
+  })
 }
 
 // ─── Actions (deployed Callables) ────────────────────────────────────────────
