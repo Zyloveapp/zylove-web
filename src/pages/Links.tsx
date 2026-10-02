@@ -65,7 +65,7 @@ export default function Links() {
     .sort((a, b) => b.matchedAt - a.matchedAt)
   const conversations = matches.filter(hasMessages)
   const isPlay = mode === 'play'
-  const title = isPlay ? '✦ Chats ✦' : '✦ Links ✦'
+  const title = isPlay ? '🔥 Chats 🔥' : '✦ Links ✦'
   const accent = isPlay ? 'text-[#E03131]' : 'text-[#1B4FD8]'
 
   // ChatView marks the conversation read when it opens.
@@ -104,7 +104,7 @@ export default function Links() {
           <div className="flex-1 overflow-y-auto">
             {ignited.length > 0 && (
               <IgnitedRow
-                title={isPlay ? '🔴 Entangled' : null}
+                title={isPlay ? '🔥 Entanglements' : null}
                 matches={ignited}
                 mode={mode}
                 activeId={activeId}

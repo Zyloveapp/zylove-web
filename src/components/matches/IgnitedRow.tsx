@@ -10,17 +10,19 @@ interface IgnitedRowProps {
   onSelect: (m: MatchEntry) => void
 }
 
-// New links nobody has written to yet (labelled "Entangled" in Play).
+// New links nobody has written to yet. Only Play gives the row a heading
+// ("🔥 Entanglements"), styled red with a count pill.
 export default function IgnitedRow({ title, matches, mode, activeId, onSelect }: IgnitedRowProps) {
   const ring = mode === 'play' ? 'ring-[#E03131]' : 'ring-[#1B4FD8]'
   return (
     <section className="pb-2">
       {title && (
-        <h2 className="px-4 text-sm font-semibold text-white/70">
-          {title} <span className="text-white/40">· {matches.length}</span>
+        <h2 className="mx-4 mb-3 flex items-center gap-2 border-b border-[#E03131]/20 pb-2 text-lg font-semibold text-red-400">
+          {title}
+          <span className="rounded-full bg-[#E03131]/20 px-2 py-0.5 text-sm text-red-400">{matches.length}</span>
         </h2>
       )}
-      <ul className={`flex gap-4 overflow-x-auto px-4 pb-2 [scrollbar-width:none] ${title ? 'pt-3' : 'pt-1'}`}>
+      <ul className={`flex gap-4 overflow-x-auto px-4 pb-2 [scrollbar-width:none] ${title ? '' : 'pt-1'}`}>
         {matches.map((m) => (
           <li key={m.matchId} className="shrink-0">
             <button
