@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import PhotoGallery from '../components/discover/PhotoGallery'
@@ -41,6 +41,8 @@ export default function Discover() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [newMatch, setNewMatch] = useState<NewMatch | null>(null)
   const [reload, setReload] = useState(0)
+  // Desktop photo column scrolls on its own; everything else scrolls the page.
+  const asideRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     if (!uid) return
@@ -68,7 +70,11 @@ export default function Discover() {
   }, [currentUid])
 
   // Drops the current profile, or moves it to the back of the queue ("Maybe").
+  // The next profile starts at the top: the page (mobile, and the details
+  // column on desktop) and the desktop photo column.
   function advance(requeue: boolean) {
+    window.scrollTo({ top: 0 })
+    asideRef.current?.scrollTo({ top: 0 })
     setQueue((q) => {
       if (!q || q.profiles.length === 0) return q
       const [head, ...rest] = q.profiles
@@ -148,7 +154,7 @@ export default function Discover() {
 
   return (
     <div className="min-h-[calc(100dvh-7rem)] bg-gray-950 text-white lg:flex">
-      <aside className="flex flex-col p-6 lg:sticky lg:top-12 lg:h-[calc(100dvh-7rem)] lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:py-10">
+      <aside ref={asideRef} className="flex flex-col p-6 lg:sticky lg:top-12 lg:h-[calc(100dvh-7rem)] lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:py-10">
         <PhotoGallery key={current.uid} photos={photosOf(current)} name={name} />
         <div className="mt-8 hidden lg:block">{actions}</div>
       </aside>
