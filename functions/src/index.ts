@@ -1191,3 +1191,6 @@ export const getCuriousVisitors = onCall(
       : { locked: true, count: visitors.length, visitors: [] }
   },
 )
+
+// Bot chats: "typing…" while a bot reply is on its way (see botTyping.ts).
+export { botTypingStart, botTypingStop } from './botTyping'
