@@ -4,6 +4,7 @@ import ProfileDetails from '../discover/ProfileDetails'
 import SparkleIcon from '../icons/SparkleIcon'
 import { actionErrorMessage, type DiscoverProfile } from '../../services/discover'
 import { dismissSpark, likeBackSpark, loadSparkProfile, type SparkEntry } from '../../services/sparks'
+import { loadPlayProfile, parsePlayProfile } from '../../services/playProfile'
 
 interface SparkProfileViewProps {
   uid: string
@@ -33,20 +34,29 @@ export default function SparkProfileView({
   const [linked, setLinked] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // A Flame (Play like) shows the liker's Play profile: their live
+  // playProfile/data, or failing that the Play fields saved with the like.
+  // Spark likes show the full root profile as before.
   useEffect(() => {
     let cancelled = false
-    loadSparkProfile(spark)
-      .catch(() => spark.profile)
-      .then((profile) => {
-        if (!cancelled) setLoaded({ likerUid: spark.likerUid, profile })
-      })
+    const isFlame = spark.mode === 'play'
+    Promise.all([
+      loadSparkProfile(spark).catch(() => spark.profile),
+      isFlame ? loadPlayProfile(spark.likerUid) : Promise.resolve(null),
+    ]).then(([profile, play]) => {
+      if (cancelled) return
+      const snapshot = spark.profile as Record<string, unknown>
+      const fallback = snapshot.playBio || snapshot.spiceLevel ? parsePlayProfile(snapshot) : null
+      const playProfile = isFlame ? (play ?? fallback ?? undefined) : undefined
+      setLoaded({ likerUid: spark.likerUid, profile: { ...profile, playProfile } })
+    })
     return () => {
       cancelled = true
     }
   }, [spark])
 
   const profile = loaded?.likerUid === spark.likerUid ? loaded.profile : spark.profile
-  const photo = profile.photoURLs?.[0]
+  const photo = (profile.playProfile?.photoURLs.length ? profile.playProfile.photoURLs : profile.photoURLs)?.[0]
   // Name from the like snapshot; only bots and matched people are named.
   const headerName = ((spark.isBot || matched) && spark.profile.displayName?.trim()) || 'Someone'
 

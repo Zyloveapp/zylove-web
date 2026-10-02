@@ -1,8 +1,8 @@
 import { doc, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore'
-import { deleteObject, getDownloadURL, ref, uploadBytes, type StorageReference } from 'firebase/storage'
 import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
-import { db, functions, storage } from './firebase'
+import { db, functions } from './firebase'
+import { uploadModeratedPhotos } from './moderatedPhotos'
 import {
   PLAY_TAG_LABELS,
   type PlayInterestTag,
@@ -67,76 +67,59 @@ export async function generatePlayBio(
 
 // ─── Save ────────────────────────────────────────────────────────────────────
 
-// photos/{uid}/play/... is the path storage.rules allows for Play photos (the
-// mobile app's path); users/{uid}/photos/ only allows one level, no subfolder.
-async function uploadPlayPhotos(uid: string, photos: PhotoDraft[]): Promise<{ refs: StorageReference[]; urls: string[] }> {
-  const files = photos.map((p) => p.file).filter((f): f is File => f !== null)
-  const stamp = Date.now()
-  const refs = files.map((file, i) => {
-    const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : 'jpg'
-    return ref(storage, `photos/${uid}/play/${stamp}-${i}.${ext}`)
-  })
-  const results = await Promise.allSettled(files.map((file, i) => uploadBytes(refs[i], file, { contentType: file.type })))
-  const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
-  if (failed) {
-    await Promise.allSettled(refs.filter((_, i) => results[i].status === 'fulfilled').map((r) => deleteObject(r)))
-    throw failed.reason
-  }
-  const uploaded = await Promise.all(refs.map((r) => getDownloadURL(r)))
-  let next = 0
-  return { refs, urls: photos.map((p) => (p.file ? uploaded[next++] : p.previewUrl)) }
-}
 
 // Writes the Play profile and marks the user as having both profiles, in one
-// batch. Prompt answers go out in both shapes: the playPromptAnswers map, and
+// batch, then sends new photos through moderation (onPhotoUpload publishes them
+// to playProfile/data, which must exist first). Resolves with notices for
+// photos that didn't publish — empty when they all passed. Prompt answers go out in both shapes: the playPromptAnswers map, and
 // the promptAnswers array that mobile and the web profile view read.
 // Editing (keepIntent) leaves the root intent alone: a Play-only mobile user
 // must not be switched to 'open' just by updating their Play profile.
-export async function savePlayOnboarding(uid: string, d: PlayDraft, { keepIntent = false } = {}): Promise<void> {
+export async function savePlayOnboarding(uid: string, d: PlayDraft, { keepIntent = false } = {}): Promise<string[]> {
   const prompts = answeredPrompts(d)
   const bio = d.bio.trim()
-  const { refs, urls: photoURLs } = await uploadPlayPhotos(uid, d.photos)
+  // Only already-published photos (editing) are written here.
+  const photoURLs = d.photos.filter((p) => p.file === null).map((p) => p.previewUrl)
+  const newPhotos = d.photos.map((p) => p.file).filter((f): f is File => f !== null)
 
-  try {
-    const playRef = doc(db, `users/${uid}/playProfile/data`)
-    const existing = await getDoc(playRef)
-    const now = Date.now()
-    const batch = writeBatch(db)
-    batch.set(
-      playRef,
-      {
-        uid,
-        photoURLs,
-        playBio: bio,
-        spiceLevel: d.spiceLevel,
-        playInterestTags: d.tags,
-        playNonNegotiables: d.nonNegotiables,
-        playPromptAnswers: Object.fromEntries(prompts.map((p) => [p.promptId, p.answer])),
-        promptAnswers: prompts,
-        playOnboardingComplete: true,
-        aiPhotoScanningConsent: true,
-        isActive: photoURLs.length > 0,
-        lastUpdated: now,
-        ...(!existing.exists() && { createdAt: now, radiusMiles: 25, ageMin: 21, ageMax: 45 }),
-      },
-      { merge: true },
-    )
-    // Mirrors mobile's Play onboarding: mobile Discover and profile cards read
-    // these Play fields from the root doc, not the playProfile subcollection.
-    batch.update(doc(db, 'users', uid), {
-      ...(!keepIntent && { intent: 'open' }),
+  const playRef = doc(db, `users/${uid}/playProfile/data`)
+  const existing = await getDoc(playRef)
+  const now = Date.now()
+  const batch = writeBatch(db)
+  batch.set(
+    playRef,
+    {
+      uid,
+      photoURLs,
+      playBio: bio,
       spiceLevel: d.spiceLevel,
       playInterestTags: d.tags,
       playNonNegotiables: d.nonNegotiables,
-      playBio: bio,
-      playPromptAnswers: prompts,
-      profileUpdatedAt: serverTimestamp(),
-    })
-    await batch.commit()
-  } catch (err) {
-    await Promise.allSettled(refs.map((r) => deleteObject(r)))
-    throw err
-  }
+      playPromptAnswers: Object.fromEntries(prompts.map((p) => [p.promptId, p.answer])),
+      promptAnswers: prompts,
+      playOnboardingComplete: true,
+      aiPhotoScanningConsent: true,
+      isActive: d.photos.length > 0,
+      lastUpdated: now,
+      ...(!existing.exists() && { createdAt: now, radiusMiles: 25, ageMin: 21, ageMax: 45 }),
+    },
+    { merge: true },
+  )
+  // Mirrors mobile's Play onboarding: mobile Discover and profile cards read
+  // these Play fields from the root doc, not the playProfile subcollection.
+  batch.update(doc(db, 'users', uid), {
+    ...(!keepIntent && { intent: 'open' }),
+    spiceLevel: d.spiceLevel,
+    playInterestTags: d.tags,
+    playNonNegotiables: d.nonNegotiables,
+    playBio: bio,
+    playPromptAnswers: prompts,
+    profileUpdatedAt: serverTimestamp(),
+  })
+  await batch.commit()
+
+  const { notices } = await uploadModeratedPhotos(uid, 'play', newPhotos)
+  return notices
 }
 
 // ─── Edit ────────────────────────────────────────────────────────────────────

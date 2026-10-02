@@ -1,5 +1,5 @@
-import { arrayRemove, arrayUnion, deleteField, doc, getDoc, serverTimestamp, updateDoc, writeBatch } from 'firebase/firestore'
-import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage'
+import { arrayRemove, deleteField, doc, getDoc, serverTimestamp, updateDoc, writeBatch } from 'firebase/firestore'
+import { deleteObject, ref } from 'firebase/storage'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions, storage } from './firebase'
 import { displayAge, type DiscoverProfile } from './discover'
@@ -139,7 +139,8 @@ export async function saveGoDeeper(uid: string, a: GoDeeperEdits): Promise<void>
 }
 
 // ─── Photos ──────────────────────────────────────────────────────────────────
-// Same Storage path and direct photoURLs write as web onboarding.
+// Uploads go through moderation (moderatedPhotos.ts); only onPhotoUpload
+// publishes photo URLs. Removal is a direct arrayRemove.
 
 export function photoError(file: File): string | null {
   if (!file.type.startsWith('image/')) return 'Choose an image file.'
@@ -147,26 +148,29 @@ export function photoError(file: File): string | null {
   return null
 }
 
-export async function uploadProfilePhoto(uid: string, file: File): Promise<string> {
-  const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : 'jpg'
-  const photoRef = ref(storage, `users/${uid}/photos/${Date.now()}.${ext}`)
-  await uploadBytes(photoRef, file, { contentType: file.type })
-  const url = await getDownloadURL(photoRef)
-  try {
-    await updateDoc(doc(db, 'users', uid), { photoURLs: arrayUnion(url), profileUpdatedAt: serverTimestamp() })
-  } catch (err) {
-    await deleteObject(photoRef).catch(() => {})
-    throw err
-  }
-  return url
-}
 
 // arrayRemove, never a rewrite of the whole list, so photos added elsewhere
 // (mobile, moderation) are never dropped.
 export async function removeProfilePhoto(uid: string, url: string): Promise<void> {
   await updateDoc(doc(db, 'users', uid), { photoURLs: arrayRemove(url), profileUpdatedAt: serverTimestamp() })
   // Best effort: the file may live under a path this client can't delete.
-  await deleteObject(ref(storage, url)).catch(() => {})
+  const path = storagePathOf(url)
+  if (path) await deleteObject(ref(storage, path)).catch(() => {})
+}
+
+// Storage path from either URL shape a photo can have: a Firebase download URL
+// (…/o/{encoded path}) or the signed URL onPhotoUpload publishes
+// (storage.googleapis.com/{bucket}/{path}).
+function storagePathOf(url: string): string | null {
+  try {
+    const u = new URL(url)
+    const firebase = /\/o\/(.+)$/.exec(u.pathname)
+    if (firebase) return decodeURIComponent(firebase[1])
+    if (u.hostname === 'storage.googleapis.com') return decodeURIComponent(u.pathname.split('/').slice(2).join('/'))
+  } catch {
+    // Not a URL we can map to a path.
+  }
+  return null
 }
 
 // ─── Bio ─────────────────────────────────────────────────────────────────────

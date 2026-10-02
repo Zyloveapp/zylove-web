@@ -282,8 +282,11 @@ export default function Onboarding() {
     setSaving(true)
     setSaveError(null)
     try {
-      await saveSparkOnboarding(uid, draft, { extraPrompts: refreshInfo?.extraPrompts })
-      if (refresh) navigate('/profile', { replace: true, state: { flash: '✦ Profile refreshed.' } })
+      const photoNotices = await saveSparkOnboarding(uid, draft, { extraPrompts: refreshInfo?.extraPrompts })
+      // A photo still under review (or slow) goes on the profile page, where
+      // the notice shows; Discover needs a published photo anyway.
+      if (photoNotices.length > 0) navigate('/profile', { replace: true, state: { flash: photoNotices.join(' ') } })
+      else if (refresh) navigate('/profile', { replace: true, state: { flash: '✦ Profile refreshed.' } })
       else navigate('/discover', { replace: true })
     } catch (err) {
       setSaveError(saveErrorMessage(err))

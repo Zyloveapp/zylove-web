@@ -7,9 +7,9 @@ import {
   writeBatch,
   type FieldValue,
 } from 'firebase/firestore'
-import { deleteObject, getDownloadURL, ref, uploadBytes, type StorageReference } from 'firebase/storage'
 import { httpsCallable } from 'firebase/functions'
-import { db, functions, storage } from './firebase'
+import { db, functions } from './firebase'
+import { uploadModeratedPhotos } from './moderatedPhotos'
 import { keysReady, resolveKeypair } from './keys'
 import {
   OFF_MAP_GENDER_IDENTITIES,
@@ -28,7 +28,6 @@ import {
   type ConflictStyle,
   type HeightFtIn,
   type OnboardingDraft,
-  type PhotoDraft,
   type StressResponse,
   type TogethernessStyle,
 } from '../components/onboarding/types'
@@ -119,36 +118,9 @@ export interface SeekingPreferencesDoc {
 type SparkProfileDoc = Partial<SparkProfile> & { sparkPromptAnswers: Record<string, string> }
 
 // ─── Photos ──────────────────────────────────────────────────────────────────
-
-// Uploads the new photos and returns every URL in draft order. Photos already
-// uploaded (profile refresh) keep their URL; only new uploads get refs, so a
-// failed save never deletes a photo the profile already uses.
-async function uploadPhotos(uid: string, photos: PhotoDraft[]): Promise<{ refs: StorageReference[]; urls: string[] }> {
-  const files = photos.map((p) => p.file).filter((f): f is File => f !== null)
-  const stamp = Date.now()
-  const refs = files.map((file, i) => {
-    const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : 'jpg'
-    return ref(storage, `users/${uid}/photos/${stamp}-${i}.${ext}`)
-  })
-
-  const results = await Promise.allSettled(
-    files.map((file, i) => uploadBytes(refs[i], file, { contentType: file.type })),
-  )
-  const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
-  if (failed) {
-    await deletePhotos(refs.filter((_, i) => results[i].status === 'fulfilled'))
-    throw failed.reason
-  }
-
-  const uploaded = await Promise.all(refs.map((r) => getDownloadURL(r)))
-  let next = 0
-  const urls = photos.map((p) => (p.file ? uploaded[next++] : p.previewUrl))
-  return { refs, urls }
-}
-
-async function deletePhotos(refs: StorageReference[]): Promise<void> {
-  await Promise.allSettled(refs.map((r) => deleteObject(r)))
-}
+// New photos are uploaded after the profile is saved, through moderation
+// (moderatedPhotos.ts): onPhotoUpload can only update an existing doc, and
+// only it publishes photo URLs.
 
 // ─── Save ────────────────────────────────────────────────────────────────────
 
@@ -157,15 +129,17 @@ function required<T>(value: T | null, field: string): T {
   return value
 }
 
-// Uploads photos, then writes the root profile, Spark profile and private
-// seeking prefs in a single batch so the user never ends up half-onboarded.
+// Writes the root profile, Spark profile and private seeking prefs in a single
+// batch so the user never ends up half-onboarded, then sends new photos
+// through moderation. Resolves with notices for photos that didn't publish
+// (under review, slow, failed) — empty when they all passed.
 // extraPrompts: saved prompts beyond the PROMPT_COUNT a refresh shows. They're
 // kept as-is unless the draft now uses the same prompt.
 export async function saveSparkOnboarding(
   uid: string,
   d: OnboardingDraft,
   { extraPrompts = [] }: { extraPrompts?: PromptAnswer[] } = {},
-): Promise<void> {
+): Promise<string[]> {
   const rootRef = doc(db, 'users', uid)
   const existing = await getDoc(rootRef)
   // Once identity is locked the rules reject any change to birthday,
@@ -187,176 +161,174 @@ export async function saveSparkOnboarding(
   const heightCm = feetInchesToCm(d.height.feet, d.height.inches)
   const bio = d.bio.trim()
 
-  const { refs, urls: photoURLs } = await uploadPhotos(uid, d.photos)
+  // Only already-published photos (profile refresh) are written here; new
+  // ones go through moderation after the commit.
+  const photoURLs = d.photos.filter((p) => p.file === null).map((p) => p.previewUrl)
+  const newPhotos = d.photos.map((p) => p.file).filter((f): f is File => f !== null)
+  const hasPhotos = d.photos.length > 0
 
-  try {
-    const now = Date.now()
+  const now = Date.now()
 
-    // Private key goes to IndexedDB now; the public key rides in the batch below.
-    await keysReady(uid)
-    const existingKey: unknown = existing.data()?.publicKey
-    const keys = await resolveKeypair(uid, typeof existingKey === 'string' ? existingKey : undefined)
+  // Private key goes to IndexedDB now; the public key rides in the batch below.
+  await keysReady(uid)
+  const existingKey: unknown = existing.data()?.publicKey
+  const keys = await resolveKeypair(uid, typeof existingKey === 'string' ? existingKey : undefined)
 
-    const coreFields = {
-      uid,
-      displayName: d.displayName.trim(),
-      age,
-      ...(!identityLocked && birthday && { birthday: birthday.iso }),
-      ...(!identityLocked && { genderIdentity }),
-      attractedTo: d.attractedTo,
-      relationshipStatus,
-      openTo: d.openTo,
-      heightCm,
-      lifestyleTags: d.lifestyleTags,
-      habitTags: d.habitTags,
-      personalityTraits: d.personalityTraits,
-      relationshipValues: d.relationshipValues,
-      weekendVibes: d.weekendVibes,
-      loveLangGive: d.loveLangGive,
-      loveLangReceive: d.loveLangReceive,
-      promptAnswers,
-      photoURLs,
-      intent,
-      radiusMiles: d.radiusMiles,
-      ageMin: d.ageMin,
-      ageMax: d.ageMax,
-      lastActive: now,
-    } satisfies Partial<RootProfileDoc>
+  const coreFields = {
+    uid,
+    displayName: d.displayName.trim(),
+    age,
+    ...(!identityLocked && birthday && { birthday: birthday.iso }),
+    ...(!identityLocked && { genderIdentity }),
+    attractedTo: d.attractedTo,
+    relationshipStatus,
+    openTo: d.openTo,
+    heightCm,
+    lifestyleTags: d.lifestyleTags,
+    habitTags: d.habitTags,
+    personalityTraits: d.personalityTraits,
+    relationshipValues: d.relationshipValues,
+    weekendVibes: d.weekendVibes,
+    loveLangGive: d.loveLangGive,
+    loveLangReceive: d.loveLangReceive,
+    promptAnswers,
+    photoURLs,
+    intent,
+    radiusMiles: d.radiusMiles,
+    ageMin: d.ageMin,
+    ageMax: d.ageMax,
+    lastActive: now,
+  } satisfies Partial<RootProfileDoc>
 
-    const optional: Partial<OptionalRootFields> = {
-      ...(genderIdentity === 'self_describe' && d.genderSelfDescribe.trim() && {
-        genderSelfDescribe: d.genderSelfDescribe.trim(),
-      }),
-      ...(d.pronouns.trim() && { pronouns: d.pronouns.trim() }),
-      ...(d.bodyType && { bodyType: d.bodyType }),
-      ...(d.drinkingHabit && { drinkingHabit: d.drinkingHabit }),
-      ...(d.religion && { religion: d.religion }),
-      ...(d.politicalView && { politicalView: d.politicalView }),
-      ...(d.parentalCurrent && { parentalCurrent: d.parentalCurrent }),
-      ...(d.parentalIntent && { parentalIntent: d.parentalIntent }),
-      ...(bio && d.bioGeneratedAt !== null && { bioGeneratedAt: d.bioGeneratedAt }),
-      ...(d.conflictStyle && { conflictStyle: d.conflictStyle }),
-      ...(d.togethernessStyle && { togethernessStyle: d.togethernessStyle }),
-      ...(d.stressResponse && { stressResponse: d.stressResponse }),
-    }
-    // Only off-map identities declare matchableAs. Never deleted on re-save:
-    // it's identity-locked by the rules once identityLockedAt is set.
-    const matchable =
-      !identityLocked && OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) && d.matchableAs.length > 0
-        ? { matchableAs: d.matchableAs }
-        : {}
-    // A re-save (profile refresh) keeps a hidden/paused choice the user made.
-    const prevVisibility: unknown = existing.data()?.sparkVisibility
-    const meta: OnboardingMetaFields = {
-      sparkVisibility:
-        photoURLs.length === 0
-          ? 'hidden'
-          : prevVisibility === 'hidden' || prevVisibility === 'paused'
-            ? prevVisibility
-            : 'active',
-      onboardingComplete: true,
-      profileUpdatedAt: serverTimestamp(),
-      mode: intent === 'play' ? 'play' : 'spark',
-      aiPhotoScanningConsent: true,
-    }
-
-    const batch = writeBatch(db)
-
-    if (existing.exists()) {
-      // Merge so fields owned elsewhere (location, keys, trust fields) survive.
-      // Optional answers the user cleared this time are removed.
-      const deletions: Partial<Record<OptionalRootField, FieldValue>> = Object.fromEntries(
-        OPTIONAL_ROOT_FIELDS.filter((k) => optional[k] === undefined).map((k) => [k, deleteField()]),
-      )
-      batch.set(
-        rootRef,
-        {
-          ...coreFields,
-          ...(bio && { bio }),
-          ...optional,
-          ...matchable,
-          ...deletions,
-          ...(keys.changed && { publicKey: keys.publicKey }),
-          ...meta,
-        },
-        { merge: true },
-      )
-    } else {
-      if (!birthday) throw new Error('Onboarding incomplete: birthday')
-      const profile: RootProfileDoc = {
-        ...coreFields,
-        birthday: birthday.iso,
-        genderIdentity,
-        ...optional,
-        ...matchable,
-        bio,
-        openToCrossover: false,
-        // Seeking data lives in the private seekingPreferences doc, not here.
-        seekingBodyTypes: [],
-        seekingTraits: [],
-        dealbreakers: [],
-        geohash: '',
-        locationLabel: '',
-        phoneVerified: false,
-        publicKey: keys.publicKey,
-        createdAt: now,
-        ...meta,
-      }
-      batch.set(rootRef, profile)
-    }
-
-    const spark: SparkProfileDoc = {
-      uid,
-      displayName: coreFields.displayName,
-      age,
-      ...(optional.pronouns && { pronouns: optional.pronouns }),
-      genderIdentity,
-      attractedTo: d.attractedTo,
-      photoURLs,
-      ...(bio && { bio }),
-      promptAnswers,
-      sparkPromptAnswers,
-      lifestyleTags: d.lifestyleTags,
-      personalityTags: d.personalityTraits,
-      topValues: d.relationshipValues,
-      intent: 'spark',
-      height: heightCm,
-      ...(d.bodyType && { bodyType: d.bodyType }),
-      radiusMiles: d.radiusMiles,
-      ageMin: d.ageMin,
-      ageMax: d.ageMax,
-      isActive: photoURLs.length > 0,
-      completeness: computeSparkCompleteness({ ...coreFields, ...optional, bio }),
-      lastUpdated: now,
-    }
-    const sparkRef = doc(db, `users/${uid}/sparkProfile/data`)
-    batch.set(sparkRef, spark, { merge: true })
-    // set+merge merges map keys, so a prompt swapped out would linger in
-    // sparkPromptAnswers (which loadOwnProfile prefers). Replace the map whole.
-    batch.update(sparkRef, { sparkPromptAnswers })
-
-    const seeking: SeekingPreferencesDoc = {
-      uid,
-      seekingBodyTypes: d.seekingBodyTypes,
-      seekingTraits: d.seekingTraits,
-      dealbreakers: d.dealbreakers,
-      seekingHeightNoPreference: d.seekingHeightNoPreference,
-      ...(!d.seekingHeightNoPreference && {
-        seekingHeightMinCm: feetInchesToCm(d.seekingHeightMin.feet, d.seekingHeightMin.inches),
-        seekingHeightMaxCm: feetInchesToCm(d.seekingHeightMax.feet, d.seekingHeightMax.inches),
-      }),
-      _lastUpdated: now,
-    }
-    batch.set(doc(db, `users/${uid}/seekingPreferences/prefs`), seeking)
-
-    await batch.commit()
-  } catch (err) {
-    await deletePhotos(refs)
-    throw err
+  const optional: Partial<OptionalRootFields> = {
+    ...(genderIdentity === 'self_describe' && d.genderSelfDescribe.trim() && {
+      genderSelfDescribe: d.genderSelfDescribe.trim(),
+    }),
+    ...(d.pronouns.trim() && { pronouns: d.pronouns.trim() }),
+    ...(d.bodyType && { bodyType: d.bodyType }),
+    ...(d.drinkingHabit && { drinkingHabit: d.drinkingHabit }),
+    ...(d.religion && { religion: d.religion }),
+    ...(d.politicalView && { politicalView: d.politicalView }),
+    ...(d.parentalCurrent && { parentalCurrent: d.parentalCurrent }),
+    ...(d.parentalIntent && { parentalIntent: d.parentalIntent }),
+    ...(bio && d.bioGeneratedAt !== null && { bioGeneratedAt: d.bioGeneratedAt }),
+    ...(d.conflictStyle && { conflictStyle: d.conflictStyle }),
+    ...(d.togethernessStyle && { togethernessStyle: d.togethernessStyle }),
+    ...(d.stressResponse && { stressResponse: d.stressResponse }),
+  }
+  // Only off-map identities declare matchableAs. Never deleted on re-save:
+  // it's identity-locked by the rules once identityLockedAt is set.
+  const matchable =
+    !identityLocked && OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) && d.matchableAs.length > 0
+      ? { matchableAs: d.matchableAs }
+      : {}
+  // A re-save (profile refresh) keeps a hidden/paused choice the user made.
+  const prevVisibility: unknown = existing.data()?.sparkVisibility
+  const meta: OnboardingMetaFields = {
+    sparkVisibility:
+      !hasPhotos
+        ? 'hidden'
+        : prevVisibility === 'hidden' || prevVisibility === 'paused'
+          ? prevVisibility
+          : 'active',
+    onboardingComplete: true,
+    profileUpdatedAt: serverTimestamp(),
+    mode: intent === 'play' ? 'play' : 'spark',
+    aiPhotoScanningConsent: true,
   }
 
-  // Everything below runs after a successful commit, outside the photo
-  // cleanup above — a failure here must never delete a saved profile's photos.
+  const batch = writeBatch(db)
+
+  if (existing.exists()) {
+    // Merge so fields owned elsewhere (location, keys, trust fields) survive.
+    // Optional answers the user cleared this time are removed.
+    const deletions: Partial<Record<OptionalRootField, FieldValue>> = Object.fromEntries(
+      OPTIONAL_ROOT_FIELDS.filter((k) => optional[k] === undefined).map((k) => [k, deleteField()]),
+    )
+    batch.set(
+      rootRef,
+      {
+        ...coreFields,
+        ...(bio && { bio }),
+        ...optional,
+        ...matchable,
+        ...deletions,
+        ...(keys.changed && { publicKey: keys.publicKey }),
+        ...meta,
+      },
+      { merge: true },
+    )
+  } else {
+    if (!birthday) throw new Error('Onboarding incomplete: birthday')
+    const profile: RootProfileDoc = {
+      ...coreFields,
+      birthday: birthday.iso,
+      genderIdentity,
+      ...optional,
+      ...matchable,
+      bio,
+      openToCrossover: false,
+      // Seeking data lives in the private seekingPreferences doc, not here.
+      seekingBodyTypes: [],
+      seekingTraits: [],
+      dealbreakers: [],
+      geohash: '',
+      locationLabel: '',
+      phoneVerified: false,
+      publicKey: keys.publicKey,
+      createdAt: now,
+      ...meta,
+    }
+    batch.set(rootRef, profile)
+  }
+
+  const spark: SparkProfileDoc = {
+    uid,
+    displayName: coreFields.displayName,
+    age,
+    ...(optional.pronouns && { pronouns: optional.pronouns }),
+    genderIdentity,
+    attractedTo: d.attractedTo,
+    photoURLs,
+    ...(bio && { bio }),
+    promptAnswers,
+    sparkPromptAnswers,
+    lifestyleTags: d.lifestyleTags,
+    personalityTags: d.personalityTraits,
+    topValues: d.relationshipValues,
+    intent: 'spark',
+    height: heightCm,
+    ...(d.bodyType && { bodyType: d.bodyType }),
+    radiusMiles: d.radiusMiles,
+    ageMin: d.ageMin,
+    ageMax: d.ageMax,
+    isActive: hasPhotos,
+    completeness: computeSparkCompleteness({ ...coreFields, ...optional, bio }),
+    lastUpdated: now,
+  }
+  const sparkRef = doc(db, `users/${uid}/sparkProfile/data`)
+  batch.set(sparkRef, spark, { merge: true })
+  // set+merge merges map keys, so a prompt swapped out would linger in
+  // sparkPromptAnswers (which loadOwnProfile prefers). Replace the map whole.
+  batch.update(sparkRef, { sparkPromptAnswers })
+
+  const seeking: SeekingPreferencesDoc = {
+    uid,
+    seekingBodyTypes: d.seekingBodyTypes,
+    seekingTraits: d.seekingTraits,
+    dealbreakers: d.dealbreakers,
+    seekingHeightNoPreference: d.seekingHeightNoPreference,
+    ...(!d.seekingHeightNoPreference && {
+      seekingHeightMinCm: feetInchesToCm(d.seekingHeightMin.feet, d.seekingHeightMin.inches),
+      seekingHeightMaxCm: feetInchesToCm(d.seekingHeightMax.feet, d.seekingHeightMax.inches),
+    }),
+    _lastUpdated: now,
+  }
+  batch.set(doc(db, `users/${uid}/seekingPreferences/prefs`), seeking)
+
+  await batch.commit()
+
+  // Everything below runs after a successful commit.
 
   // Server sets the trust/safety fields clients can't write (isSuspended etc.).
   // Awaited so the profile is discoverable before the user reaches Discover.
@@ -371,6 +343,11 @@ export async function saveSparkOnboarding(
   // Server-side tier elevation for women (rules block client writes to
   // subscriptionTier). Fire-and-forget: never blocks or fails the save.
   httpsCallable(functions, 'claimWomenElite')({}).catch(() => {})
+
+  // Discover also requires a published photo, so the profile only shows up
+  // once moderation passes one.
+  const { notices } = await uploadModeratedPhotos(uid, 'spark', newPhotos)
+  return notices
 }
 
 // ─── Profile refresh ─────────────────────────────────────────────────────────

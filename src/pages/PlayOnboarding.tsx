@@ -180,6 +180,8 @@ export default function PlayOnboarding() {
   const [saveError, setSaveError] = useState<string | null>(null)
   // The prompt slot whose question is being replaced from the picker.
   const [pickerSlot, setPickerSlot] = useState<number | null>(null)
+  // Set after a successful first save when some photos didn't publish yet.
+  const [photoNotices, setPhotoNotices] = useState<string[] | null>(null)
   // Gender and attraction for the bio prompt come from the shared root profile.
   const [identity, setIdentity] = useState<{ genderIdentity: unknown; attractedTo: unknown }>({
     genderIdentity: null,
@@ -272,20 +274,31 @@ export default function PlayOnboarding() {
     update({ promptIds: ids })
   }
 
+  // Not straight into Play: Header sees the param and runs the normal entry
+  // (PIN setup, then the "Play time." transition).
+  function continueToPlay() {
+    setMode('spark')
+    navigate('/discover?play_setup_complete=true', { replace: true })
+  }
+
   async function enterPlay() {
     setSaving(true)
     setSaveError(null)
     try {
       if (editing) {
-        await savePlayOnboarding(uid, draft, { keepIntent: true })
-        navigate('/profile', { replace: true, state: { flash: '✦ Play profile updated.' } })
+        const notices = await savePlayOnboarding(uid, draft, { keepIntent: true })
+        const flash = notices.length > 0 ? notices.join(' ') : '✦ Play profile updated.'
+        navigate('/profile', { replace: true, state: { flash } })
         return
       }
-      await savePlayOnboarding(uid, draft)
-      // Not straight into Play: Header sees the param and runs the normal
-      // entry (PIN setup, then the "Play time." transition).
-      setMode('spark')
-      navigate('/discover?play_setup_complete=true', { replace: true })
+      const notices = await savePlayOnboarding(uid, draft)
+      // Saved; a photo still under review is explained before moving on.
+      if (notices.length > 0) {
+        setPhotoNotices(notices)
+        setSaving(false)
+        return
+      }
+      continueToPlay()
     } catch {
       setSaveError("Couldn't save your Play profile. Check your connection and try again.")
       setSaving(false)
@@ -597,6 +610,14 @@ export default function PlayOnboarding() {
         </div>
 
         <main>{renderStep()}</main>
+        {isLast && photoNotices && (
+          <div className="mt-6 space-y-1 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            <p className="font-semibold">Your Play profile is saved.</p>
+            {photoNotices.map((n) => (
+              <p key={n}>{n}</p>
+            ))}
+          </div>
+        )}
       </div>
 
       <nav className="fixed inset-x-0 bottom-0 border-t border-white/10 bg-gray-950/95 pb-[env(safe-area-inset-bottom,0px)] backdrop-blur">
@@ -604,12 +625,16 @@ export default function PlayOnboarding() {
           <button
             type="button"
             onClick={() => (isFirst ? navigate(-1) : setStepIndex((i) => i - 1))}
-            disabled={saving}
+            disabled={saving || photoNotices !== null}
             className="rounded-xl border border-white/15 px-5 py-3 font-medium text-white/70 hover:bg-white/5 disabled:opacity-40"
           >
             {isFirst ? 'Cancel' : 'Back'}
           </button>
-          {isLast ? (
+          {isLast && photoNotices ? (
+            <button type="button" onClick={continueToPlay} className={primaryButton}>
+              Continue to Play →
+            </button>
+          ) : isLast ? (
             <button type="button" onClick={enterPlay} disabled={saving} className={primaryButton}>
               {saving ? 'Saving…' : editing ? 'Save changes ✦' : 'Enter Play ✦'}
             </button>

@@ -11,8 +11,8 @@ import {
   regenerateBio,
   removeProfilePhoto,
   saveSparkEdits,
-  uploadProfilePhoto,
 } from '../services/profile'
+import { MODERATION_MESSAGES, uploadModeratedPhoto } from '../services/moderatedPhotos'
 import type { DiscoverProfile } from '../services/discover'
 import { SPARK_PROMPT_BANK, type PromptAnswer } from '../types/dualProfile'
 import { profileGenderLabel, promptQuestion } from '../components/discover/labels'
@@ -138,14 +138,11 @@ export default function EditProfile() {
     if (problem) return setPhotoMessage(problem)
     setPhotoBusy(true)
     setPhotoMessage(null)
-    try {
-      const url = await uploadProfilePhoto(uid, file)
-      setPhotos((p) => [...p, url])
-    } catch {
-      setPhotoMessage("Couldn't upload that photo. Try again.")
-    } finally {
-      setPhotoBusy(false)
-    }
+    // Waits for moderation (up to 30s); only a passed photo joins the grid.
+    const { outcome, url } = await uploadModeratedPhoto(uid, 'spark', file)
+    if (outcome === 'approved' && url) setPhotos((p) => (p.includes(url) ? p : [...p, url]))
+    else if (outcome !== 'approved') setPhotoMessage(MODERATION_MESSAGES[outcome])
+    setPhotoBusy(false)
   }
 
   async function deletePhoto(url: string) {
@@ -290,7 +287,7 @@ export default function EditProfile() {
             )}
           </div>
           <input ref={fileInput} type="file" accept="image/*" onChange={addPhoto} className="hidden" />
-          <p className="text-xs text-white/30">Photo changes save right away.</p>
+          <p className="text-xs text-white/30">Photo changes save right away. New photos are checked before they appear.</p>
           {photoMessage && <p className="text-sm text-red-400">{photoMessage}</p>}
         </Section>
 
