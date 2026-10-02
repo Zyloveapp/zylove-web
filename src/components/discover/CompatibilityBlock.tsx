@@ -3,13 +3,17 @@ import {
   displayScore,
   fetchCompatibility,
   fetchMyProfile,
+  fetchPlayArchetype,
   recordReveal,
+  type ArchetypeMatch,
   type CompatibilityResult,
   type DiscoverProfile,
 } from '../../services/discover'
 import BreakTheIce from './BreakTheIce'
 import { useAuthStore } from '../../store/authStore'
-import ProfileComparison from './ProfileComparison'
+import ProfileComparison, { PlayComparison } from './ProfileComparison'
+import { comparePlay, playWhyLines, type PlayFacts } from './playCompare'
+import { loadPlayProfile } from '../../services/playProfile'
 import { compareProfiles, whyThisWorks, type ProfileFacts } from './compare'
 import { DEALBREAKER_LABELS, type Dealbreaker } from '../../types/profile'
 import type { Mode } from '../../store/modeStore'
@@ -44,14 +48,20 @@ const ALL_CATEGORIES: Record<Mode, { key: string; label: string }[]> = {
 const INSIGHT_THRESHOLD = 60
 
 // Mobile's score scale (green / cobalt / amber / red).
-function scoreColor(score: number): string {
+function scoreColor(score: number, mode: Mode): string {
   if (score >= 80) return 'text-green-400'
-  if (score >= 60) return 'text-[#1B4FD8]'
+  if (score >= 60) return mode === 'play' ? 'text-[#FF6B6B]' : 'text-[#1B4FD8]'
   if (score >= 40) return 'text-amber-400'
   return 'text-red-400'
 }
 
-function scoreQualifier(score: number): string | null {
+function scoreQualifier(score: number, mode: Mode): string | null {
+  if (mode === 'play') {
+    if (score >= 80) return 'High chemistry'
+    if (score >= 60) return 'Good energy'
+    if (score >= 40) return 'Worth exploring'
+    return 'Different frequencies'
+  }
   if (score >= 80) return 'Strong match'
   if (score >= 60) return 'Good potential'
   if (score >= 40) return 'Worth exploring'
@@ -122,6 +132,30 @@ export default function CompatibilityBlock({
     }
   }, [showComparison, uid])
 
+  // Play: both Play profiles for the comparison (full report only), and the
+  // pair's Play archetype for the banner.
+  const revealed = status === 'revealed' && uid !== ''
+  const [play, setPlay] = useState<{ key: string; facts: PlayFacts | null; archetype: ArchetypeMatch | null } | null>(null)
+  const playKey = `${targetUid}:${fullReport}`
+  useEffect(() => {
+    if (!revealed || mode !== 'play') return
+    let cancelled = false
+    const theirs = profile.playProfile ? Promise.resolve(profile.playProfile) : loadPlayProfile(targetUid)
+    Promise.all([
+      fullReport ? loadPlayProfile(uid) : Promise.resolve(null),
+      fullReport ? theirs : Promise.resolve(null),
+      fullReport ? fetchMyProfile(uid).catch(() => null) : Promise.resolve(null),
+      fetchPlayArchetype(uid, targetUid),
+    ]).then(([mine, them, myRoot, archetype]) => {
+      if (cancelled) return
+      const facts = mine && them ? comparePlay(mine, them, myRoot?.relationshipStatus) : null
+      setPlay({ key: playKey, facts, archetype })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [revealed, mode, fullReport, uid, targetUid, profile.playProfile, playKey])
+
   useEffect(() => {
     if (autoReveal && !revealedScores.has(targetUid)) void reveal()
     // reveal only reads targetUid, so this runs once per profile.
@@ -146,7 +180,12 @@ export default function CompatibilityBlock({
 
   if (status === 'revealed' && result) {
     const myProfile = showComparison && me?.uid === uid ? me.profile : null
-    const comparison = myProfile ? <ProfileComparison me={myProfile} them={profile} /> : null
+    const playState = mode === 'play' && play?.key === playKey ? play : null
+    const comparison = myProfile ? (
+      <ProfileComparison me={myProfile} them={profile} />
+    ) : playState?.facts ? (
+      <PlayComparison facts={playState.facts} />
+    ) : null
     return (
       <RevealedScore
         result={result}
@@ -156,6 +195,8 @@ export default function CompatibilityBlock({
         fullReport={fullReport}
         comparison={comparison}
         facts={myProfile ? compareProfiles(myProfile, profile) : null}
+        playFacts={playState?.facts ?? null}
+        playArchetype={playState?.archetype ?? null}
         breakTheIce={match ? <BreakTheIce matchId={match.matchId} otherUid={targetUid} /> : null}
       />
     )
@@ -200,6 +241,8 @@ function RevealedScore({
   fullReport,
   comparison,
   facts,
+  playFacts,
+  playArchetype,
   breakTheIce,
 }: {
   result: CompatibilityResult
@@ -211,6 +254,9 @@ function RevealedScore({
   // Both profiles compared, for data-driven "Why this works" lines (null
   // until the viewer's profile loads, and in Play).
   facts: ProfileFacts | null
+  // Play: both Play profiles compared, and the pair's Play archetype.
+  playFacts: PlayFacts | null
+  playArchetype: ArchetypeMatch | null
   breakTheIce: ReactNode
 }) {
   const theme = discoverTheme(mode)
@@ -238,13 +284,21 @@ function RevealedScore({
         .filter(hasValue)
         .filter((c) => c.value > INSIGHT_THRESHOLD)
     : []
-  const dealbreakers = result.triggeredDealbreakers ?? []
-  // tier1 is computed from Spark data only, so it never shows in Play mode.
-  const tier1 = mode === 'spark' ? (result.tier1 ?? null) : null
-  const archetype = tier1?.archetype && tier1.archetype.confidence > 0.4 ? tier1.archetype : null
+  const isPlay = mode === 'play'
+  // Spark dealbreakers have no place in a Play report.
+  const dealbreakers = isPlay ? [] : (result.triggeredDealbreakers ?? [])
+  // onTap's tier1 is Spark-only; Play's archetype comes from the pair doc.
+  const tier1 = isPlay ? null : (result.tier1 ?? null)
+  const archetype = isPlay
+    ? playArchetype
+    : tier1?.archetype && tier1.archetype.confidence > 0.4
+      ? tier1.archetype
+      : null
+  // Play "Why this works" is built from both Play profiles once they load.
+  const playLines = isPlay && fullReport && playFacts ? playWhyLines(playFacts) : null
   // Deep Fit replaces the base score as the headline when it's trustworthy.
   const rounded = score.value
-  const qualifier = scoreQualifier(rounded)
+  const qualifier = scoreQualifier(rounded, mode)
 
   return (
     <div
@@ -252,12 +306,14 @@ function RevealedScore({
     >
       {archetype && (
         <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/5 p-4">
-          <p className="text-sm font-semibold text-[#1B4FD8]">✦ {archetype.label}</p>
+          <p className={`text-sm font-semibold ${isPlay ? 'text-[#E03131]' : 'text-[#1B4FD8]'}`}>
+            {isPlay ? '🔥' : '✦'} {archetype.label}
+          </p>
           {archetype.copy && <p className="mt-1 text-sm text-white/60">{archetype.copy}</p>}
         </div>
       )}
 
-      <p className={`text-5xl font-bold ${scoreColor(rounded)}`}>{rounded}%</p>
+      <p className={`text-5xl font-bold ${scoreColor(rounded, mode)}`}>{rounded}%</p>
       <p className="mt-1 text-xs uppercase tracking-widest text-white/30">
         {score.deep ? 'Compatibility' : mode === 'play' ? 'Play Odds' : 'Spark Odds'}
       </p>
@@ -280,7 +336,20 @@ function RevealedScore({
         </div>
       )}
 
-      {insights.length > 0 && (
+      {playLines && playLines.length > 0 ? (
+        <div className="mt-6">
+          <p className="text-[11px] uppercase tracking-widest text-white font-semibold mb-4">Why this works</p>
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {playLines.map((l) => (
+              <li key={l.label} className="text-sm">
+                <span className="text-white/55">{l.label}</span>
+                <span className="mx-2 text-white/20">·</span>
+                <span className="text-white/80">{l.detail}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : insights.length > 0 && (
         <div className="mt-6">
           <p className="text-[11px] uppercase tracking-widest text-white font-semibold mb-4">Why this works</p>
           <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">

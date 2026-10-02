@@ -56,6 +56,8 @@ export default function SparkProfileView({
   }, [spark])
 
   const profile = loaded?.likerUid === spark.likerUid ? loaded.profile : spark.profile
+  // A like sent in Play: red, Play copy, Play profile and report.
+  const isFlame = spark.mode === 'play'
   const photo = (profile.playProfile?.photoURLs.length ? profile.playProfile.photoURLs : profile.photoURLs)?.[0]
   // Name from the like snapshot; only bots and matched people are named.
   const headerName = ((spark.isBot || matched) && spark.profile.displayName?.trim()) || 'Someone'
@@ -96,13 +98,21 @@ export default function SparkProfileView({
           ← Back
         </button>
         <span className={`text-sm ${spark.isWeeklySpark ? 'text-[#F59E0B]' : 'text-white/40'}`}>
-          {spark.isWeeklySpark ? '✦ Weekly Spark' : `${headerName} feels a Spark.. Do you?`}
+          {spark.isWeeklySpark
+            ? '✦ Weekly Spark'
+            : isFlame
+              ? `🔥 ${headerName} wants to play. You in?`
+              : `${headerName} feels a Spark.. Do you?`}
         </span>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-6 py-8">
-          <div className="relative mb-8 aspect-[4/5] w-full max-w-sm overflow-hidden rounded-2xl bg-gradient-to-br from-[#1B4FD8]/60 to-white/10">
+          <div
+            className={`relative mb-8 aspect-[4/5] w-full max-w-sm overflow-hidden rounded-2xl bg-gradient-to-br to-white/10 ${
+              isFlame ? 'from-[#E03131]/60' : 'from-[#1B4FD8]/60'
+            }`}
+          >
             {photo && <img src={photo} alt="" className="h-full w-full object-cover" />}
           </div>
           <ProfileDetails profile={profile} mode={spark.mode} autoRevealScore />
@@ -125,10 +135,18 @@ export default function SparkProfileView({
               type="button"
               onClick={handleMatch}
               disabled={busy}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1B4FD8] px-5 py-3 font-semibold text-white transition-opacity disabled:opacity-50"
+              className={`flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3 font-semibold text-white transition-opacity disabled:opacity-50 ${
+                isFlame ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
+              }`}
             >
-              <SparkleIcon className="h-5 w-5" />
-              It's a Spark
+              {isFlame ? (
+                '🔥 Light it up'
+              ) : (
+                <>
+                  <SparkleIcon className="h-5 w-5" />
+                  It's a Spark
+                </>
+              )}
             </button>
             <button
               type="button"
@@ -136,7 +154,7 @@ export default function SparkProfileView({
               disabled={busy}
               className="text-sm text-white/50 underline hover:text-white/70 disabled:opacity-50"
             >
-              Not for me
+              {isFlame ? 'Not my vibe' : 'Not for me'}
             </button>
           </div>
         </div>

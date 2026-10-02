@@ -357,3 +357,23 @@ export function displayScore(result: CompatibilityResult, mode: Mode): DisplaySc
 function clampScore(n: number): number {
   return Math.max(0, Math.min(100, Math.round(n)))
 }
+
+// ─── Play archetype ──────────────────────────────────────────────────────────
+
+// Copy for the Play archetypes the scoring engine emits (tier1/archetypes.ts).
+const PLAY_ARCHETYPE_COPY: Record<string, { label: string; copy: string }> = {
+  intense_pair: { label: 'Intense Pair', copy: "The energy between you two doesn't need explaining." },
+  talkers_first: { label: 'Talkers First', copy: 'The conversation will be just as electric as everything else.' },
+  same_frequency: { label: 'Same Frequency', copy: "You're tuned to the same channel. Rare." },
+  curious_and_willing: { label: 'Curious & Willing', copy: "You're both open to where this goes. That's the whole point." },
+}
+
+// The pair's Play archetype. onTap only returns the Spark tier1, so this reads
+// pairs/{a_b}.tier1Play directly (participants can). Null when there's none.
+export async function fetchPlayArchetype(uid: string, targetUid: string): Promise<ArchetypeMatch | null> {
+  const snap = await getDoc(doc(db, 'pairs', [uid, targetUid].sort().join('_'))).catch(() => null)
+  const tier1: unknown = snap?.data()?.tier1Play
+  const archetype = typeof tier1 === 'object' && tier1 !== null ? parseArchetype((tier1 as Record<string, unknown>).archetype) : null
+  const copy = archetype ? PLAY_ARCHETYPE_COPY[archetype.id] : undefined
+  return archetype && copy ? { ...archetype, ...copy } : null
+}

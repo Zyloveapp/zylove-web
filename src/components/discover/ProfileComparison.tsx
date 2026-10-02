@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { DiscoverProfile } from '../../services/discover'
 import { lifestyleLabel, loveLanguageLabel, personalityLabel, valueLabel } from './labels'
 import { compareProfiles, joinNames } from './compare'
+import { playCommons, playConversations, type PlayFacts } from './playCompare'
 
 // Side-by-side Spark insights from both profiles (mirrors mobile's
 // MatchScorecard): Things in Common, Worth a Conversation, Love Languages.
@@ -112,6 +113,32 @@ export default function ProfileComparison({ me, them }: { me: DiscoverProfile; t
             <LoveLangCell title="They give" items={theirGive} matched={theyGiveINeed} />
             <LoveLangCell title="They need" items={theirNeed} matched={iGiveTheyNeed} />
           </div>
+        </Section>
+      )}
+    </>
+  )
+}
+
+// Play version: Things in common and Worth a conversation from both Play
+// profiles. No love-languages grid — Play doesn't use them.
+export function PlayComparison({ facts }: { facts: PlayFacts }) {
+  const commons = playCommons(facts)
+  const conversations = playConversations(facts)
+  return (
+    <>
+      {commons.length > 0 && (
+        <Section icon="🔥" title="Things in common" iconClass="text-[#E03131]">
+          {commons.map((c) => (
+            <Row key={c.label} label={c.label} detail={c.detail} accent="border-[#E03131]/60" />
+          ))}
+        </Section>
+      )}
+
+      {conversations.length > 0 && (
+        <Section icon="◎" title="Worth a conversation" iconClass="text-amber-400">
+          {conversations.map((c) => (
+            <Row key={c.label} label={c.label} detail={c.detail} accent="border-amber-400/60" />
+          ))}
         </Section>
       )}
     </>
