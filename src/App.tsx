@@ -1,7 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { BrowserRouter, Outlet, Routes, Route } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
 import { refreshLocationIfStale } from './services/location'
+import { claimFounderBadge, founderCheckDone } from './services/founders'
+import FounderCelebration from './components/FounderCelebration'
 import AuthGuard from './components/AuthGuard'
 import PauseGuard from './components/PauseGuard'
 import Header from './components/Header'
@@ -27,18 +29,30 @@ import Settings from './pages/Settings'
 import Chat from './pages/Chat'
 
 // Protected pages share the nav. Leaves room for the mobile bottom bar.
-// Location is checked once per user per page load.
+// Location (and the founder check) run once per user per page load.
 const locationChecked = new Set<string>()
+const CELEBRATION_MS = 1500
 
 function AppLayout() {
   const uid = useAuthStore((s) => s.user?.uid)
+  const [founderNumber, setFounderNumber] = useState<number | null>(null)
 
   // Signed in and onboarded: refresh a missing or week-old location in the
-  // background. Never blocks or errors.
+  // background, then — once per user, for people who finished onboarding
+  // before founder badges existed — check for the Austin founding badge.
+  // Never blocks or errors.
   useEffect(() => {
     if (!uid || locationChecked.has(uid)) return
     locationChecked.add(uid)
-    void refreshLocationIfStale(uid)
+    void (async () => {
+      await refreshLocationIfStale(uid)
+      if (founderCheckDone(uid)) return
+      const result = await claimFounderBadge(uid)
+      if (result?.eligible) {
+        setFounderNumber(result.cohortNumber)
+        setTimeout(() => setFounderNumber(null), CELEBRATION_MS)
+      }
+    })()
   }, [uid])
 
   return (
@@ -49,6 +63,7 @@ function AppLayout() {
         <Outlet />
       </div>
       <ReviewPrompter />
+      {founderNumber !== null && <FounderCelebration number={founderNumber} />}
     </div>
   )
 }
