@@ -88,8 +88,8 @@ body {
    Play → Spark "the drain":
      0–900 two heartbeat pulses + shake · 800–1600 red drains, cobalt bleeds
      in from the edges (purple overlap ~1100) · 1400–2200 12 dots orbit then
-     converge, flash, ✦ · 2200 "Back to real." · 2400 subline · 2500–3400
-     hold · 3400–3900 settle · onComplete 4000.
+     converge, flash, ✦ · 2200 "Back to real." · 2400 subline · 2500–3200
+     hold · settle from 3000 (0.2s pause, 3200–4000 fade) · onComplete 4000.
    Transforms that would collide (emerge + slow spin, fade + float) live on
    nested elements. Direction/size/timing per particle come in inline. */
 
@@ -270,7 +270,8 @@ body {
 }
 .mt-drain-edges { animation: mt-edges-cobalt 1000ms ease-in-out 2500ms 2 both; }
 .mt-rise { opacity: 0; animation-name: mt-rise; animation-timing-function: ease-out; animation-fill-mode: both; }
-.mt-settle { animation: mt-settle 500ms ease-out both; }
+/* 0.2s pause, then a slow 0.8s fade so "Back to real." has room to land. */
+.mt-settle { animation: mt-settle 800ms ease-out 200ms both; }
 
 /* Reduced motion: solid colour, text fades in, holds, fades out (1.5s). */
 .mt-reduced-in { animation: mt-appear 400ms ease-out both; }
