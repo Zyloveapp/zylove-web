@@ -5,9 +5,26 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
     <title>zylove-web</title>
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- 'black' rather than 'black-translucent': translucent lets the page run
+         under the iOS status bar, and the header/nav don't pad for it. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="Zylove" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <meta name="theme-color" content="#030712" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Not on localhost: a service worker there would cache the dev server.
+      if ('serviceWorker' in navigator && location.hostname !== 'localhost') {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+        })
+      }
+    </script>
   </body>
 </html>

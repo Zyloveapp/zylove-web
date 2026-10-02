@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#030712" />
+    <title>Zylove — offline</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #030712; color: #fff; }
+      body {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 12px; padding: 24px; text-align: center;
+        font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      }
+      .mark { color: #1B4FD8; font-size: 48px; line-height: 1; }
+      h1 { margin: 8px 0 0; font-size: 24px; }
+      p { margin: 0; color: rgba(255, 255, 255, 0.6); max-width: 22rem; }
+      button {
+        margin-top: 12px; padding: 12px 24px; border: 0; border-radius: 12px;
+        background: #1B4FD8; color: #fff; font-size: 16px; font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mark" aria-hidden="true">✦</div>
+    <h1>You're offline</h1>
+    <p>Zylove needs a connection to load. Check your signal and try again.</p>
+    <button type="button" onclick="location.reload()">Try again</button>
+  </body>
+</html>
