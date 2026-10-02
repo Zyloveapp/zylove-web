@@ -35,6 +35,11 @@ function Pills({ items, icon }: { items: string[]; icon?: string }) {
   )
 }
 
+// Locations are snapped to ~3 miles, so distances are approximate.
+function distanceLabel(miles: number): string {
+  return miles < 5 ? 'Nearby' : `~${Math.round(miles)} mi away`
+}
+
 export default function ProfileDetails({
   profile,
   mode,
@@ -75,7 +80,13 @@ export default function ProfileDetails({
         <div className="mt-2 empty:hidden">
           <TierBadge tier={(profile as Record<string, unknown>).zyloveScoreTier} />
         </div>
-        {profile.locationLabel && <p className="mt-1 text-sm text-white/40">{profile.locationLabel}</p>}
+        {(profile.locationLabel || profile.distanceMiles !== undefined) && (
+          <p className="mt-1 text-sm text-white/40">
+            {[profile.locationLabel, profile.distanceMiles !== undefined && distanceLabel(profile.distanceMiles)]
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
+        )}
         <CompatibilityBlock
           key={profile.uid}
           profile={profile}

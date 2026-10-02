@@ -1,4 +1,7 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Outlet, Routes, Route } from 'react-router-dom'
+import { useAuthStore } from './store/authStore'
+import { refreshLocationIfStale } from './services/location'
 import AuthGuard from './components/AuthGuard'
 import PauseGuard from './components/PauseGuard'
 import Header from './components/Header'
@@ -24,7 +27,20 @@ import Settings from './pages/Settings'
 import Chat from './pages/Chat'
 
 // Protected pages share the nav. Leaves room for the mobile bottom bar.
+// Location is checked once per user per page load.
+const locationChecked = new Set<string>()
+
 function AppLayout() {
+  const uid = useAuthStore((s) => s.user?.uid)
+
+  // Signed in and onboarded: refresh a missing or week-old location in the
+  // background. Never blocks or errors.
+  useEffect(() => {
+    if (!uid || locationChecked.has(uid)) return
+    locationChecked.add(uid)
+    void refreshLocationIfStale(uid)
+  }, [uid])
+
   return (
     <div className="min-h-screen bg-gray-950">
       <Header />

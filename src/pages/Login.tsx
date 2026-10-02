@@ -7,19 +7,24 @@ import { auth } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import PublicFooter from '../components/public/PublicFooter'
 import Wordmark from '../components/public/Wordmark'
+import { requestLocation, saveUserLocation } from '../services/location'
 
-// Accepts "+<country><number>" as-is; bare 10-digit or 1-prefixed 11-digit
-// numbers are treated as US. Returns null if it can't be made valid E.164.
-function toE164(input: string): string | null {
-  const trimmed = input.trim()
-  const digits = trimmed.replace(/\D/g, '')
+// US numbers only: the field shows a fixed +1 and holds just the 10 digits.
+// Pasting "+1 555…" or "1555…" drops the leading country code.
+function nationalDigits(input: string): string {
+  const digits = input.replace(/\D/g, '')
+  return (digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits).slice(0, 10)
+}
 
-  if (trimmed.startsWith('+')) {
-    return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : null
-  }
-  if (digits.length === 10) return `+1${digits}`
-  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
-  return null
+// (555) 123-4567, built up as they type.
+function formatPhone(d: string): string {
+  if (d.length <= 3) return d.length ? `(${d}` : ''
+  if (d.length <= 6) return `(${d.slice(0, 3)}) ${d.slice(3)}`
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`
+}
+
+function toE164(digits: string): string | null {
+  return /^\d{10}$/.test(digits) ? `+1${digits}` : null
 }
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -50,17 +55,17 @@ const FEATURES = [
   },
   { icon: '🔒', title: 'Private by design', body: 'End-to-end encrypted conversations. Consent-based photos.' },
   {
-    icon: '🛡',
-    title: 'Women first',
-    body: 'Free for women. Always. Built so you can focus on the person, not the safety math.',
+    icon: '🔥',
+    title: 'Two worlds, one app',
+    body: 'Spark for something real. Play for something honest. Both on your terms.',
   },
 ]
 
-const FOUNDING_BENEFITS = ['Forever free', 'First in the queue', 'Founding badge', 'Direct line to Matthew']
+const FOUNDING_BENEFITS = ['Founding member for life', 'First in the queue', 'Founding badge', 'Direct line to Matthew']
 
 const STATS = [
   { value: '2', label: 'modes' },
-  { value: 'Free', label: 'for women' },
+  { value: 'Free', label: 'to join' },
   { value: '2026', label: 'Austin launch' },
 ]
 
@@ -107,7 +112,7 @@ function SignInCard() {
 
     const e164 = toE164(phone)
     if (!e164) {
-      setError('Enter a valid phone number, e.g. (555) 123-4567 or +44 7700 900123.')
+      setError('Enter your 10-digit phone number, e.g. (555) 123-4567.')
       return
     }
 
@@ -134,7 +139,9 @@ function SignInCard() {
 
     setSubmitting(true)
     try {
-      await confirmOtp(confirmation, code)
+      const { user } = await confirmOtp(confirmation, code)
+      // Fire and forget: location never blocks sign-in, and a denial is silent.
+      void requestLocation().then((loc) => (loc ? saveUserLocation(user.uid, loc) : undefined)).catch(() => {})
       navigate('/discover', { replace: true })
     } catch (err) {
       setError(errorMessage(err))
@@ -163,24 +170,37 @@ function SignInCard() {
           </div>
           <label className="block space-y-1">
             <span className="text-sm text-white/60">Phone number</span>
-            <input
-              type="tel"
-              autoComplete="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="(555) 123-4567"
-              className={inputClass}
-            />
+            <div className="flex items-center rounded-xl border border-white/10 bg-white/5 focus-within:border-[#1B4FD8]/60">
+              <span className="select-none border-r border-white/10 py-3 pl-4 pr-3 text-base text-white/60" aria-hidden>
+                +1
+              </span>
+              <input
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel-national"
+                aria-label="Phone number (US)"
+                value={formatPhone(phone)}
+                onChange={(e) => setPhone(nationalDigits(e.target.value))}
+                placeholder="(555) 123-4567"
+                className="min-w-0 flex-1 bg-transparent px-3 py-3 text-base text-white placeholder:text-white/30 focus:outline-none"
+              />
+            </div>
           </label>
           {error && <p className="text-sm text-red-400">{error}</p>}
-          <button type="submit" disabled={submitting || !toE164(phone)} className={buttonClass}>
+          {/* Always full strength: the form is the page's call to action.
+              An incomplete number gets a message on submit instead. */}
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full rounded-xl bg-[#1B4FD8] px-4 py-3 font-semibold text-white transition-colors hover:bg-[#1B4FD8]/90"
+          >
             {submitting ? 'Sending…' : 'Send code'}
           </button>
         </form>
       ) : (
         <form onSubmit={handleVerify} className="space-y-4">
           <h2 className="text-lg font-semibold text-white">Enter your code</h2>
-          <p className="text-sm text-white/60">We texted a 6-digit code to {toE164(phone)}.</p>
+          <p className="text-sm text-white/60">We texted a 6-digit code to +1 {formatPhone(phone)}.</p>
           <input
             type="text"
             inputMode="numeric"
@@ -290,7 +310,6 @@ export default function Login() {
           <div className="rounded-2xl border border-[#E03131]/40 bg-[#E03131]/10 p-6">
             <p className="text-2xl font-bold">🔴 Play</p>
             <p className="mt-2 text-white/70">A different side of Zylove. Honest. Adult. On your terms.</p>
-            <p className="mt-3 text-sm text-red-300/80">Coming for those who qualify</p>
           </div>
         </div>
       </section>
@@ -301,7 +320,9 @@ export default function Login() {
           <h2 className="text-3xl font-bold">
             <span className="text-[#1B4FD8]">✦</span> Austin Founding Circle
           </h2>
-          <p className="mt-3 text-lg text-white/70">50 women. Lifetime Elite access. The reason it works.</p>
+          <p className="mt-3 text-lg text-white/70">
+            First 100 members. Automatic founding badge. Lifetime free access. The reason it works.
+          </p>
           <ul className="mt-6 flex flex-wrap justify-center gap-2">
             {FOUNDING_BENEFITS.map((b) => (
               <li key={b} className="rounded-full border border-[#1B4FD8]/40 bg-[#1B4FD8]/15 px-4 py-1.5 text-sm text-[#B4C6FF]">

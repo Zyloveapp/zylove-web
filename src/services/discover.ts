@@ -2,6 +2,7 @@ import { collection, doc, getDoc, getDocs, limit, query, serverTimestamp, setDoc
 import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from './firebase'
+import { getDistanceMiles, isAustinArea } from './location'
 import { genderToAttractedToCategory } from '../utils/genderUtils'
 import type { DatingProfile } from '../types/profile'
 import type { Mode } from '../store/modeStore'
@@ -18,6 +19,11 @@ export type DiscoverProfile = Partial<Omit<DatingProfile, 'attractedTo'>> & {
   playVisibility?: string
   // Play Explore only: the candidate's playProfile/data, used for display.
   playProfile?: PlayProfileData
+  // Snapped coordinates (see services/location.ts).
+  locationLat?: number
+  locationLng?: number
+  // Set on candidates when both people have a location.
+  distanceMiles?: number
 }
 
 // ─── Swiped list (per user + mode, this browser only) ───────────────────────
@@ -134,7 +140,28 @@ export async function fetchCandidates(uid: string, mode: Mode): Promise<Discover
     })
 
   // Everyone left has photos, so "photos first" is already satisfied.
-  return shuffle(mode === 'play' ? await withPlayProfiles(candidates) : candidates)
+  const located = withDistance(me, candidates)
+  return austinFirst(mode === 'play' ? await withPlayProfiles(located) : located)
+}
+
+function hasLocation(p: DiscoverProfile): p is DiscoverProfile & { locationLat: number; locationLng: number } {
+  return typeof p.locationLat === 'number' && typeof p.locationLng === 'number'
+}
+
+function withDistance(me: DiscoverProfile, candidates: DiscoverProfile[]): DiscoverProfile[] {
+  if (!hasLocation(me)) return candidates
+  return candidates.map((p) =>
+    hasLocation(p) ? { ...p, distanceMiles: getDistanceMiles(me.locationLat, me.locationLng, p.locationLat, p.locationLng) } : p,
+  )
+}
+
+// Austin launch: a soft sort, never a filter. Austin-area profiles come
+// first, everyone else after (no location counts as elsewhere); each group
+// is shuffled.
+function austinFirst(candidates: DiscoverProfile[]): DiscoverProfile[] {
+  const austin = candidates.filter((p) => hasLocation(p) && isAustinArea(p.locationLat, p.locationLng))
+  const rest = candidates.filter((p) => !austin.includes(p))
+  return [...shuffle(austin), ...shuffle(rest)]
 }
 
 // Play Explore only shows people with a Play profile, and shows them with it:
