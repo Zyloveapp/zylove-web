@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
@@ -133,6 +133,7 @@ export default function Header() {
   const mode = useModeStore((s) => s.mode)
   const setMode = useModeStore((s) => s.setMode)
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [visibility, setVisibilityState] = useState<VisibilityState | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [pinFlow, setPinFlow] = useState(false)
@@ -145,6 +146,16 @@ export default function Header() {
     if (!uid) return
     return subscribeVisibility(uid, setVisibilityState, () => setVisibilityState(null))
   }, [uid])
+
+  // Just finished Play onboarding: drop the param and run the normal way in —
+  // PIN (setup, since there's none yet), then the "Play time." transition.
+  useEffect(() => {
+    if (searchParams.get('play_setup_complete') !== 'true') return
+    const next = new URLSearchParams(searchParams)
+    next.delete('play_setup_complete')
+    setSearchParams(next, { replace: true })
+    setPinFlow(true)
+  }, [searchParams, setSearchParams])
 
   const isPlay = mode === 'play'
   const current = visibility?.[mode] ?? null

@@ -184,8 +184,10 @@ export default function PlayOnboarding() {
     setSaveError(null)
     try {
       await savePlayOnboarding(uid, draft)
-      setMode('play')
-      navigate('/discover', { replace: true })
+      // Not straight into Play: Header sees the param and runs the normal
+      // entry (PIN setup, then the "Play time." transition).
+      setMode('spark')
+      navigate('/discover?play_setup_complete=true', { replace: true })
     } catch {
       setSaveError("Couldn't save your Play profile. Check your connection and try again.")
       setSaving(false)
