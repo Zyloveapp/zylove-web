@@ -5,6 +5,7 @@ import { decryptMessage } from '../../services/encryption'
 import { getPrivateKey, keysReady, subscribePublicKey } from '../../services/keys'
 import { markMatchRead, type MatchEntry } from '../../services/matches'
 import { markVibeCheckFired, shouldTriggerVibeCheck } from '../../services/vibeCheck'
+import { clearTyping, setTyping, subscribeTyping } from '../../services/typing'
 import {
   coldReviewShown,
   conversationCold,
@@ -14,6 +15,7 @@ import {
 } from '../../services/zyloveScore'
 import ConversationNudge from './ConversationNudge'
 import FirstChatModal from './FirstChatModal'
+import TypingIndicator from './TypingIndicator'
 import ReviewModal from './ReviewModal'
 import VibeCheckModal from './VibeCheckModal'
 import { firstChatSeen, firstChatSeenRemotely } from './firstChatSeen'
@@ -40,6 +42,11 @@ type Loaded = { matchId: string; messages: ChatMessage[]; error: boolean }
 type PartnerKey = { partnerUid: string; key: string; error: boolean }
 
 const UNDECRYPTABLE = 'Unable to decrypt message'
+// Own typing: write at most every 2s, clear after 3s idle. Partner's counts
+// as typing while their typingAt is under 5s old.
+const TYPING_WRITE_MS = 2000
+const TYPING_IDLE_MS = 3000
+const TYPING_FRESH_MS = 5000
 const VIBE_CHECK_DELAY_MS = 1500
 
 export default function ChatView({ uid, match, onBack }: ChatViewProps) {
@@ -59,6 +66,10 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const navigate = useNavigate()
   const reviewChecked = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const lastTypingWrite = useRef(0)
+  const typingIdleTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const [partnerTypingAt, setPartnerTypingAt] = useState<{ matchId: string; at: number | null } | null>(null)
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
     // Opening the chat counts as reading it (same marker the mobile chat writes).
@@ -163,6 +174,54 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     setShowReview(true)
   }, [messages, showFirstChat, conversation, partnerUid, matchId])
 
+  // Leaving the chat (or switching matches) clears our typing status.
+  useEffect(
+    () => () => {
+      clearTimeout(typingIdleTimer.current)
+      lastTypingWrite.current = 0
+      clearTyping(matchId, uid).catch(() => {})
+    },
+    [matchId, uid],
+  )
+
+  useEffect(
+    () => subscribeTyping(matchId, partnerUid, (at) => setPartnerTypingAt({ matchId, at })),
+    [matchId, partnerUid],
+  )
+
+  const partnerTyping = partnerTypingAt?.matchId === matchId ? partnerTypingAt.at : null
+  // Re-check freshness every second while a typing doc exists, in case the
+  // partner's delete never lands (closed tab, lost connection).
+  useEffect(() => {
+    if (partnerTyping === null) return
+    const tick = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(tick)
+  }, [partnerTyping])
+  const showTyping = partnerTyping !== null && now - partnerTyping < TYPING_FRESH_MS
+
+  useEffect(() => {
+    if (showTyping) bottomRef.current?.scrollIntoView({ block: 'end' })
+  }, [showTyping])
+
+  function stopTyping() {
+    clearTimeout(typingIdleTimer.current)
+    if (lastTypingWrite.current === 0) return
+    lastTypingWrite.current = 0
+    clearTyping(matchId, uid).catch(() => {})
+  }
+
+  function handleTextChange(value: string) {
+    setText(value)
+    if (!value.trim()) return stopTyping()
+    const t = Date.now()
+    if (t - lastTypingWrite.current >= TYPING_WRITE_MS) {
+      lastTypingWrite.current = t
+      setTyping(matchId, uid).catch(() => {})
+    }
+    clearTimeout(typingIdleTimer.current)
+    typingIdleTimer.current = setTimeout(stopTyping, TYPING_IDLE_MS)
+  }
+
   const trimmed = text.trim()
   const ownBubble = match.mode === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
   // Never fall back to plaintext just because the partner's key failed to load.
@@ -173,6 +232,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     if (!trimmed || sending || !canSend) return
     setSending(true)
     setSendError(null)
+    stopTyping()
     try {
       await sendMessage(matchId, uid, trimmed, partnerKey.key)
       setText('')
@@ -263,6 +323,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
               )
             })
           )}
+          <TypingIndicator visible={showTyping} mode={match.mode} />
           <div ref={bottomRef} />
         </div>
       </div>
@@ -284,7 +345,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
             rows={1}
             value={text}
             maxLength={MAX_MESSAGE_LENGTH}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => handleTextChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={`Message ${match.name}…`}
             className="max-h-32 flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-white placeholder:text-white/30 focus:border-white/30 focus:outline-none"
