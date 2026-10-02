@@ -1,3 +1,8 @@
+// TODO: Admin dashboard — behavioral metadata, score trends, report patterns, match rates
+// Data exists in: users/{uid}.behaviorSignals, users/{uid}.behaviorRiskScore,
+// reviewQueue collection, config/launch, publicStats/founding
+// Build as /admin route gated on isAdmin: true when Stripe is complete
+// (Behavior signals and risk scores actually live server-only in behaviorSignals/{uid}; see behavior.ts.)
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { defineSecret } from 'firebase-functions/params'
@@ -9,6 +14,7 @@ import { buildPlayBioPrompt, parsePlayBioRequest } from './playBioPrompt'
 
 export { assignFounderBadge, onLaunchConfigUpdated } from './founders'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
+import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
 import {
   FLAG_CATEGORY_IDS,
   MAX_NEGATIVE_DELTA,
@@ -369,6 +375,11 @@ export const recordVibeRating = onCall(
     }
     batch.update(db.collection('users').doc(callerId), { 'zylovScore.participationPoints': FieldValue.increment(1) })
     await batch.commit()
+    if (!BOT_PREFIXES.some((p) => otherUid.startsWith(p))) {
+      await recordVibeSignal(otherUid, vibe === 'loving_it').catch((err: unknown) =>
+        logger.error('recordVibeRating: vibe signal failed', { matchId, message: err instanceof Error ? err.message : String(err) }),
+      )
+    }
 
     logger.info('recordVibeRating', { matchId, rating: vibe })
     return { success: true }
@@ -654,6 +665,16 @@ export const submitReview = onCall(
         message: err instanceof Error ? err.message : String(err),
       }),
     )
+
+    // Safety reports re-score behavior risk now rather than at the 2am run.
+    if (categories.some((c) => c === 'felt_unsafe' || c === 'aggressive')) {
+      await recomputeBehaviorRisk(reviewedUid).catch((err: unknown) =>
+        logger.error('submitReview: behavior risk recompute failed', {
+          matchId,
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      )
+    }
 
     logger.info('submitReview', { matchId, positive: positive.length, neutral: neutral.length, negative: negative.length, ended })
     return { success: true, ...result }
@@ -1196,3 +1217,4 @@ export const getCuriousVisitors = onCall(
 
 // Bot chats: "typing…" while a bot reply is on its way (see botTyping.ts).
 export { botTypingStart, botTypingStop } from './botTyping'
+export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate } from './behavior'

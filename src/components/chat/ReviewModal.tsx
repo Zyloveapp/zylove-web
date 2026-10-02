@@ -8,6 +8,7 @@ interface ReviewModalProps {
   partnerUid: string
   name: string
   onClose: () => void
+  doneText?: string
 }
 
 const PILL_TINT: Record<ReviewTone, { on: string; off: string }> = {
@@ -33,7 +34,13 @@ const SECTIONS: { tone: ReviewTone; title: string; note?: string }[] = [
 
 // Anonymous review of a connection, feeding the reviewed person's Zylove
 // Score. Only offered once a match has ended or gone cold, never mid-chat.
-export default function ReviewModal({ matchId, partnerUid, name, onClose }: ReviewModalProps) {
+export default function ReviewModal({
+  matchId,
+  partnerUid,
+  name,
+  onClose,
+  doneText = '✦ Thank you. Your honesty helps Zylove stay real.',
+}: ReviewModalProps) {
   const [selected, setSelected] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
@@ -97,7 +104,7 @@ export default function ReviewModal({ matchId, partnerUid, name, onClose }: Revi
         {done ? (
           <div className="py-6 text-center">
             <p id="review-title" className="text-lg font-semibold">
-              ✦ Thank you. Your honesty helps Zylove stay real.
+              {doneText}
             </p>
             <button
               type="button"
