@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { signInWithEmailAndPassword, type ConfirmationResult } from 'firebase/auth'
 import { FirebaseError } from 'firebase/app'
@@ -66,7 +66,7 @@ const STATS = [
 
 // Phone sign-in (OTP). Signing in and signing up are the same flow: a new
 // number lands in onboarding via AuthGuard.
-function SignInCard({ phoneRef }: { phoneRef: RefObject<HTMLInputElement | null> }) {
+function SignInCard() {
   const navigate = useNavigate()
   const [phone, setPhone] = useState('')
   const [code, setCode] = useState('')
@@ -164,7 +164,6 @@ function SignInCard({ phoneRef }: { phoneRef: RefObject<HTMLInputElement | null>
           <label className="block space-y-1">
             <span className="text-sm text-white/60">Phone number</span>
             <input
-              ref={phoneRef}
               type="tel"
               autoComplete="tel"
               value={phone}
@@ -228,17 +227,11 @@ function SignInCard({ phoneRef }: { phoneRef: RefObject<HTMLInputElement | null>
 export default function Login() {
   const user = useAuthStore((s) => s.user)
   const loading = useAuthStore((s) => s.loading)
-  const phoneRef = useRef<HTMLInputElement>(null)
 
   // Blank (same background) while auth resolves, so signed-in users never
   // see the landing page flash before the redirect.
   if (loading) return <div className="min-h-screen bg-gray-950" />
   if (user) return <Navigate to="/discover" replace />
-
-  function scrollToSignIn() {
-    document.getElementById('signin')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    phoneRef.current?.focus({ preventScroll: true })
-  }
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -252,30 +245,18 @@ export default function Login() {
           <h1 className="text-5xl">
             <Wordmark />
           </h1>
-          <p className="mt-4 text-2xl text-white/80">Match your energy.</p>
-          <p className="mt-2 text-white/50">Dating fatigue is real. The apps aren't working.</p>
+          <p className="mt-3 text-2xl text-white/80">Match your energy.</p>
+          <p className="mt-1 text-white/50">Dating fatigue is real. The apps aren't working.</p>
 
-          <div className="mt-8 flex w-full max-w-sm flex-col gap-3">
-            <button
-              type="button"
-              onClick={scrollToSignIn}
-              className="w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold transition-opacity hover:opacity-90"
-            >
-              Sign in / Join
-            </button>
-            <a
-              href="#features"
-              className="w-full rounded-xl border border-white/20 py-3 font-semibold text-white/70 transition-colors hover:bg-white/5 hover:text-white"
-            >
-              Learn more ↓
-            </a>
+          {/* The form is the call to action. */}
+          <div className="mt-6 flex w-full justify-center">
+            <SignInCard />
           </div>
 
           <p className="mt-5 text-sm text-[#7C9BFF]">Now recruiting Austin founding circle · 50 spots</p>
-
-          <div className="mt-8 flex w-full justify-center">
-            <SignInCard phoneRef={phoneRef} />
-          </div>
+          <a href="#features" className="mt-3 text-sm text-white/40 transition-colors hover:text-white/70">
+            Learn more ↓
+          </a>
         </div>
       </section>
 
