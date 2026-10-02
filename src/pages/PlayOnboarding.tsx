@@ -52,6 +52,74 @@ function promptText(id: string): string {
   return PLAY_PROMPT_BANK.find((p) => p.id === id)?.text ?? id
 }
 
+// "↻ Different question": the whole Play prompt bank in a dark red sheet.
+// ✓ marks prompts you've written an answer for.
+function PlayPromptPicker({
+  current,
+  answers,
+  onPick,
+  onClose,
+}: {
+  current: string
+  answers: Record<string, string>
+  onPick: (id: string) => void
+  onClose: () => void
+}) {
+  useEffect(() => {
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/70 backdrop-blur-sm lg:items-center lg:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="play-prompt-picker-title"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="flex max-h-[80dvh] w-full flex-col rounded-t-2xl border border-[#E03131]/30 bg-[#140707] text-white lg:max-w-md lg:rounded-2xl">
+        <div className="flex items-center justify-between border-b border-[#E03131]/20 px-6 py-4">
+          <h2 id="play-prompt-picker-title" className="font-semibold">
+            Choose a question
+          </h2>
+          <button type="button" onClick={onClose} className="text-sm text-white/50 hover:text-white">
+            Cancel
+          </button>
+        </div>
+        <ul className="overflow-y-auto px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]">
+          {PLAY_PROMPT_BANK.map((p) => {
+            const answered = (answers[p.id] ?? '').trim() !== ''
+            const isCurrent = p.id === current
+            return (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  onClick={() => onPick(p.id)}
+                  aria-current={isCurrent}
+                  className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-3 text-left text-sm transition-colors hover:bg-[#E03131]/10 ${
+                    isCurrent ? 'bg-[#E03131]/15 text-white' : 'text-white/85'
+                  }`}
+                >
+                  <span>{p.text}</span>
+                  {answered && (
+                    <span className="shrink-0 font-semibold text-[#FF6B6B]" aria-label="Answered">
+                      ✓
+                    </span>
+                  )}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      </div>
+    </div>
+  )
+}
+
 // ─── UI pieces ───────────────────────────────────────────────────────────────
 
 function Pill({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: ReactNode }) {
@@ -102,6 +170,8 @@ export default function PlayOnboarding() {
   const [bioMessage, setBioMessage] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  // The prompt slot whose question is being replaced from the picker.
+  const [pickerSlot, setPickerSlot] = useState<number | null>(null)
   // Gender and attraction for the bio prompt come from the shared root profile.
   const [identity, setIdentity] = useState<{ genderIdentity: unknown; attractedTo: unknown }>({
     genderIdentity: null,
@@ -163,20 +233,17 @@ export default function PlayOnboarding() {
     setBioBusy(false)
   }
 
-  // Swaps in the next bank prompt that isn't already shown.
-  function swapPrompt(index: number) {
-    const used = new Set(draft.promptIds)
-    const start = PLAY_PROMPT_BANK.findIndex((p) => p.id === draft.promptIds[index])
-    for (let i = 1; i <= PLAY_PROMPT_BANK.length; i++) {
-      const candidate = PLAY_PROMPT_BANK[(start + i) % PLAY_PROMPT_BANK.length]
-      if (!used.has(candidate.id)) {
-        const old = draft.promptIds[index]
-        const answers = { ...draft.answers }
-        delete answers[old]
-        update({ promptIds: draft.promptIds.map((id, j) => (j === index ? candidate.id : id)), answers })
-        return
-      }
-    }
+  // Puts the picked prompt in the slot being replaced. A prompt already shown
+  // in another slot swaps places instead. Answers stay in the draft (only
+  // shown prompts are saved), so picking an earlier prompt brings its answer back.
+  function pickPrompt(slot: number, id: string) {
+    setPickerSlot(null)
+    const ids = [...draft.promptIds]
+    const other = ids.indexOf(id)
+    if (other === slot) return
+    if (other !== -1) ids[other] = ids[slot]
+    ids[slot] = id
+    update({ promptIds: ids })
   }
 
   async function enterPlay() {
@@ -338,7 +405,7 @@ export default function PlayOnboarding() {
                       <p className="font-semibold text-white">{promptText(id)}</p>
                       <button
                         type="button"
-                        onClick={() => swapPrompt(i)}
+                        onClick={() => setPickerSlot(i)}
                         className="shrink-0 text-sm text-[#E03131]/80 hover:text-red-400"
                       >
                         ↻ Different question
@@ -359,6 +426,14 @@ export default function PlayOnboarding() {
                 )
               })}
             </div>
+            {pickerSlot !== null && (
+              <PlayPromptPicker
+                current={draft.promptIds[pickerSlot]}
+                answers={draft.answers}
+                onPick={(id) => pickPrompt(pickerSlot, id)}
+                onClose={() => setPickerSlot(null)}
+              />
+            )}
           </>
         )
 

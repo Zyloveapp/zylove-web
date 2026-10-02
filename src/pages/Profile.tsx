@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
-import { loadOwnProfile, profileCompleteness, type OwnProfile } from '../services/profile'
+import { useModeStore } from '../store/modeStore'
+import {
+  loadOwnProfile,
+  loadPlayProfile,
+  profileCompleteness,
+  type OwnProfile,
+  type PlayProfileData,
+} from '../services/profile'
+import PlayProfileSections from '../components/profile/PlayProfileSections'
 import VisibilityControl from '../components/profile/VisibilityControl'
 import JustForYouCard from '../components/profile/JustForYouCard'
 import ProfileReviewModal from '../components/profile/ProfileReviewModal'
@@ -42,6 +50,20 @@ export default function Profile() {
     if (flash) navigate(location.pathname, { replace: true, state: null })
   }, [flash, navigate, location.pathname])
 
+  // Play mode shows the Play profile (users/{uid}/playProfile/data).
+  const mode = useModeStore((s) => s.mode)
+  const [play, setPlay] = useState<{ uid: string; data: PlayProfileData | null } | null>(null)
+  useEffect(() => {
+    if (!uid || mode !== 'play') return
+    let cancelled = false
+    loadPlayProfile(uid).then((data) => {
+      if (!cancelled) setPlay({ uid, data })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [uid, mode])
+
   useEffect(() => {
     if (!uid) return
     let cancelled = false
@@ -57,7 +79,8 @@ export default function Profile() {
 
   const page = 'min-h-[calc(100dvh-7rem)] bg-gray-950 text-white'
 
-  if (loaded?.uid !== uid) {
+  const playLoaded = play?.uid === uid ? play : null
+  if (loaded?.uid !== uid || (mode === 'play' && !playLoaded)) {
     return (
       <div className={`flex items-center justify-center ${page}`}>
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
@@ -73,6 +96,55 @@ export default function Profile() {
   }
 
   const own = loaded.data
+
+  if (mode === 'play') {
+    const playData = playLoaded?.data ?? null
+    return (
+      <div className={page}>
+        <div className="mx-auto max-w-xl space-y-8 px-4 pt-6 pb-8">
+          <h1 className="text-sm font-semibold uppercase tracking-widest text-red-400">🔴 Play Profile</h1>
+          {playData ? (
+            <PlayProfileSections profile={own.profile} play={playData} />
+          ) : (
+            <section className="rounded-2xl border border-[#E03131]/30 bg-[#E03131]/10 p-6 text-center">
+              <p className="text-lg font-semibold text-white">You don't have a Play profile yet</p>
+              <p className="mt-1 text-sm text-white/60">Play has its own photos, bio and preferences.</p>
+              <Link
+                to="/play-onboarding"
+                className="mt-4 inline-block rounded-xl bg-[#E03131] px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90"
+              >
+                Set up Play
+              </Link>
+            </section>
+          )}
+          <VisibilityControl />
+        </div>
+
+        {/* Sits above the mobile bottom nav (h-16). */}
+        <div className="sticky bottom-16 border-t border-[#E03131]/20 bg-gray-950 px-4 py-3">
+          <div className="mx-auto grid max-w-xl grid-cols-2 gap-2 text-sm leading-tight">
+            {/* No Play profile editor yet; Play onboarding starts blank, so it
+                isn't offered as an edit path. */}
+            <button
+              type="button"
+              disabled
+              title="Play profile editing is coming soon"
+              className="flex flex-col items-center justify-center rounded-xl border border-[#E03131]/50 px-2 py-2.5 text-center font-semibold text-white/60"
+            >
+              ✏ Edit Play profile
+              <span className="text-[10px] font-normal text-white/40">Coming soon</span>
+            </button>
+            <Link
+              to="/zylove-score"
+              className="flex items-center justify-center rounded-xl border border-white/20 px-2 py-3 text-center font-semibold text-white/80 transition-colors hover:bg-white/10"
+            >
+              🛡 Zylove Score
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className={page}>
