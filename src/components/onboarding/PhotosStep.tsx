@@ -5,11 +5,42 @@ interface PhotosStepProps {
   photos: PhotoDraft[]
   onChange: (photos: PhotoDraft[]) => void
   maxPhotos?: number
+  // Play onboarding: dark red styling and its own heading.
+  variant?: 'spark' | 'play'
+  title?: string
+  subtitle?: string
+}
+
+const STYLES = {
+  spark: {
+    title: 'text-2xl font-semibold',
+    subtitle: 'text-gray-600',
+    tile: 'bg-gray-100',
+    badge: 'bg-gray-900/80',
+    add: 'border-gray-300 text-gray-400 hover:border-gray-500',
+    error: 'text-red-600',
+  },
+  play: {
+    title: 'text-2xl font-bold text-white',
+    subtitle: 'text-white/50',
+    tile: 'bg-white/5',
+    badge: 'bg-[#E03131]/90',
+    add: 'border-[#E03131]/40 text-[#E03131] hover:border-[#E03131]/80',
+    error: 'text-red-400',
+  },
 }
 
 // Photos stay local (object-URL previews) until the final step uploads them,
 // so abandoning onboarding never leaves orphaned files in Storage.
-export default function PhotosStep({ photos, onChange, maxPhotos = MAX_PHOTOS }: PhotosStepProps) {
+export default function PhotosStep({
+  photos,
+  onChange,
+  maxPhotos = MAX_PHOTOS,
+  variant = 'spark',
+  title = 'Add your photos',
+  subtitle,
+}: PhotosStepProps) {
+  const s = STYLES[variant]
   const inputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -53,19 +84,19 @@ export default function PhotosStep({ photos, onChange, maxPhotos = MAX_PHOTOS }:
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">Add your photos</h1>
-      <p className="text-gray-600">
-        Add 1–{maxPhotos} photos. The first one is your main photo — tap another to make it first.
+      <h1 className={s.title}>{title}</h1>
+      <p className={s.subtitle}>
+        {subtitle ?? `Add 1–${maxPhotos} photos.`} The first one is your main photo — tap another to make it first.
       </p>
 
       <div className="grid grid-cols-3 gap-2">
         {photos.map((p, i) => (
-          <div key={p.id} className="relative aspect-[3/4] overflow-hidden rounded-lg bg-gray-100">
+          <div key={p.id} className={`relative aspect-[3/4] overflow-hidden rounded-lg ${s.tile}`}>
             <button type="button" onClick={() => makePrimary(p.id)} className="h-full w-full">
               <img src={p.previewUrl} alt={`Photo ${i + 1}`} className="h-full w-full object-cover" />
             </button>
             {i === 0 && (
-              <span className="absolute left-1 top-1 rounded bg-gray-900/80 px-1.5 py-0.5 text-xs text-white">
+              <span className={`absolute left-1 top-1 rounded px-1.5 py-0.5 text-xs text-white ${s.badge}`}>
                 Main
               </span>
             )}
@@ -83,7 +114,7 @@ export default function PhotosStep({ photos, onChange, maxPhotos = MAX_PHOTOS }:
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            className="flex aspect-[3/4] items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-3xl text-gray-400 hover:border-gray-500"
+            className={`flex aspect-[3/4] items-center justify-center rounded-lg border-2 border-dashed text-3xl ${s.add}`}
             aria-label="Add photos"
           >
             +
@@ -92,7 +123,7 @@ export default function PhotosStep({ photos, onChange, maxPhotos = MAX_PHOTOS }:
       </div>
 
       <input ref={inputRef} type="file" accept="image/*" multiple onChange={handleFiles} className="hidden" />
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className={`text-sm ${s.error}`}>{error}</p>}
     </div>
   )
 }

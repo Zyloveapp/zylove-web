@@ -5,6 +5,7 @@ import { logger } from 'firebase-functions'
 import { initializeApp } from 'firebase-admin/app'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 import { buildBioPrompt, parseBioRequest } from './bioPrompt'
+import { buildPlayBioPrompt, parsePlayBioRequest } from './playBioPrompt'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import {
   FLAG_CATEGORY_IDS,
@@ -80,6 +81,71 @@ export const generateSparkBio = onCall(
       return { bio: truncateAtWord(bio, MAX_BIO_LENGTH) }
     } catch (err) {
       logger.error('generateSparkBio failed', { message: err instanceof Error ? err.message : String(err) })
+      return { bio: '' }
+    }
+  },
+)
+
+// Play bio generations allowed per rolling week, per user.
+const PLAY_BIO_WEEKLY_LIMIT = 3
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+
+// Successful generations in the last week, from users/{uid}.bioGenerations.play
+// (a list of epoch-ms timestamps).
+function recentGenerations(data: DocumentData | undefined, now: number): number[] {
+  const raw: unknown = data?.bioGenerations?.play
+  return Array.isArray(raw) ? raw.filter((t): t is number => typeof t === 'number' && now - t < WEEK_MS) : []
+}
+
+// Writes a Play bio from Play onboarding answers. Unlike generateSparkBio this
+// is rate limited (3 per rolling week), so hitting the limit is an error the
+// client can show; any other failure returns an empty bio.
+export const generatePlayBio = onCall(
+  { timeoutSeconds: 120, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
+  async (request): Promise<BioResponse> => {
+    // invoker is public (org policy), so gate spend on a signed-in caller.
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to generate a bio.')
+    const userRef = getFirestore().doc(`users/${request.auth.uid}`)
+
+    const snap = await userRef.get()
+    if (recentGenerations(snap.data(), Date.now()).length >= PLAY_BIO_WEEKLY_LIMIT) {
+      throw new HttpsError('resource-exhausted', 'Play bio generation limit reached. Try again next week.')
+    }
+
+    try {
+      const input = parsePlayBioRequest(request.data)
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': anthropicKey.value(),
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: 300,
+          messages: [{ role: 'user', content: buildPlayBioPrompt(input) }],
+        }),
+      })
+
+      if (!response.ok) {
+        logger.error('generatePlayBio: Anthropic API error', { status: response.status })
+        return { bio: '' }
+      }
+
+      const bio = truncateAtWord(extractText(await response.json()), MAX_BIO_LENGTH)
+      if (!bio) return { bio: '' }
+
+      // Only successful generations count. Re-checked in the transaction so
+      // parallel calls can't record past the limit.
+      await getFirestore().runTransaction(async (tx) => {
+        const now = Date.now()
+        const recent = recentGenerations((await tx.get(userRef)).data(), now)
+        tx.set(userRef, { bioGenerations: { play: [...recent, now].slice(-PLAY_BIO_WEEKLY_LIMIT) } }, { merge: true })
+      })
+      return { bio }
+    } catch (err) {
+      logger.error('generatePlayBio failed', { message: err instanceof Error ? err.message : String(err) })
       return { bio: '' }
     }
   },

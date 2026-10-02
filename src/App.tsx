@@ -7,6 +7,7 @@ import ReviewPrompter from './components/ReviewPrompter'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
+import PlayOnboarding from './pages/PlayOnboarding'
 import Discover from './pages/Discover'
 import Links from './pages/Links'
 import Sparks from './pages/Sparks'
@@ -40,6 +41,8 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/onboarding" element={<Onboarding />} />
         <Route element={<AuthGuard />}>
+          {/* Full-screen flow: no header or nav. */}
+          <Route path="/play-onboarding" element={<PlayOnboarding />} />
           <Route element={<PauseGuard />}>
             <Route element={<AppLayout />}>
               <Route path="/discover" element={<Discover />} />

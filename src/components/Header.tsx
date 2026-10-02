@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
@@ -81,7 +81,7 @@ function VisibilitySheet({ current, onPick, onClose }: { current: Visibility; on
 
 // Shown instead of the PIN when the user has no Play profile yet. Portaled
 // to <body> so it sits above the header and nav.
-function PlaySetupSheet({ onClose }: { onClose: () => void }) {
+function PlaySetupSheet({ onClose, onStart }: { onClose: () => void; onStart: () => void }) {
   useEffect(() => {
     function onKey(e: globalThis.KeyboardEvent) {
       if (e.key === 'Escape') onClose()
@@ -108,10 +108,9 @@ function PlaySetupSheet({ onClose }: { onClose: () => void }) {
         <p className="mt-2 text-sm text-white/60">
           Play is a separate experience with its own profile. Set it up to get started.
         </p>
-        {/* Play onboarding isn't on web yet, so this just closes for now. */}
         <button
           type="button"
-          onClick={onClose}
+          onClick={onStart}
           autoFocus
           className="mt-6 w-full rounded-xl bg-[#E03131] py-3 font-semibold text-white transition-opacity hover:opacity-90"
         >
@@ -133,6 +132,7 @@ export default function Header() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const mode = useModeStore((s) => s.mode)
   const setMode = useModeStore((s) => s.setMode)
+  const navigate = useNavigate()
   const [visibility, setVisibilityState] = useState<VisibilityState | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [pinFlow, setPinFlow] = useState(false)
@@ -220,7 +220,15 @@ export default function Header() {
         {sheetOpen && current && <VisibilitySheet current={current} onPick={pick} onClose={() => setSheetOpen(false)} />}
       </div>
 
-      {playSetup && <PlaySetupSheet onClose={() => setPlaySetup(false)} />}
+      {playSetup && (
+        <PlaySetupSheet
+          onClose={() => setPlaySetup(false)}
+          onStart={() => {
+            setPlaySetup(false)
+            navigate('/play-onboarding')
+          }}
+        />
+      )}
 
       {transition && (
         <ModeTransition
