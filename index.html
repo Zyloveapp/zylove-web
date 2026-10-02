@@ -22,7 +22,8 @@
       // Not on localhost: a service worker there would cache the dev server.
       if ('serviceWorker' in navigator && location.hostname !== 'localhost') {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
+          // Check for a new worker on every load, not just the browser's daily check.
+          navigator.serviceWorker.register('/sw.js').then((reg) => reg.update())
         })
       }
     </script>

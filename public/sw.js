@@ -1,59 +1,33 @@
-// Zylove service worker: offline support for the app shell.
+// Zylove service worker: an offline fallback page, nothing more.
 //
-// Pages are network-first so a new deploy is picked up immediately; the cached
-// shell (then offline.html) is only a fallback. Built assets under /assets/
-// have content-hashed names, so they're safe to serve cache-first. Cross-origin
-// requests (Firebase, Google APIs, fonts) are never touched.
+// The app itself (index.html, JS, CSS) always comes from the network and is
+// never cached here: serving a stale or redirected shell is what left the
+// home-screen app on a black screen. Only offline.html and the icons are
+// cached. __BUILD_ID__ is replaced at build time (see vite.config.ts), so each
+// deploy gets a fresh cache and old ones are deleted on activate.
 
-const CACHE = 'zylove-shell-v1'
-const SHELL = ['/', '/offline.html', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png']
-
-// Pre-caches the shell plus the JS/CSS bundles the current index.html loads.
-async function precache() {
-  const cache = await caches.open(CACHE)
-  await cache.addAll(SHELL)
-  const html = await (await cache.match('/')).text()
-  const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1])
-  await Promise.all(assets.map((url) => cache.add(url).catch(() => {})))
-}
+const BUILD_ID = '__BUILD_ID__'
+const CACHE_NAME = 'zylove-v' + BUILD_ID
+const OFFLINE_URL = '/offline.html'
+const PRECACHE = [OFFLINE_URL, '/icons/icon-192.png', '/icons/icon-512.png']
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(precache().then(() => self.skipWaiting()))
+  event.waitUntil(
+    caches
+      .open(CACHE_NAME)
+      .then((cache) => cache.addAll(PRECACHE))
+      .then(() => self.skipWaiting()),
+  )
 })
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   )
 })
-
-async function networkFirstPage(request) {
-  try {
-    const response = await fetch(request)
-    // The SPA serves index.html for every route; keep the latest copy as '/'.
-    if (response.ok) {
-      const copy = response.clone()
-      caches.open(CACHE).then((cache) => cache.put('/', copy))
-    }
-    return response
-  } catch {
-    return (await caches.match('/')) || (await caches.match('/offline.html')) || Response.error()
-  }
-}
-
-async function cacheFirst(request) {
-  const cached = await caches.match(request)
-  if (cached) return cached
-  const response = await fetch(request)
-  if (response.ok) {
-    const copy = response.clone()
-    caches.open(CACHE).then((cache) => cache.put(request, copy))
-  }
-  return response
-}
 
 self.addEventListener('fetch', (event) => {
   const { request } = event
@@ -61,9 +35,15 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
 
+  // Pages: network only; the offline page only when the network fails.
   if (request.mode === 'navigate') {
-    event.respondWith(networkFirstPage(request))
-  } else if (url.pathname.startsWith('/assets/') || SHELL.includes(url.pathname)) {
-    event.respondWith(cacheFirst(request))
+    event.respondWith(fetch(request).catch(() => caches.match(OFFLINE_URL).then((r) => r || Response.error())))
+    return
   }
+
+  // Icons: from the cache when there, else the network.
+  if (url.pathname.startsWith('/icons/')) {
+    event.respondWith(caches.match(request).then((cached) => cached || fetch(request)))
+  }
+  // Everything else (including /assets/ bundles) goes straight to the network.
 })
