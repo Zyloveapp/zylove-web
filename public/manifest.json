@@ -2,7 +2,7 @@
   "name": "Zylove",
   "short_name": "Zylove",
   "description": "Match your energy.",
-  "start_url": "/",
+  "start_url": "/discover",
   "display": "standalone",
   "background_color": "#030712",
   "theme_color": "#030712",
