@@ -1,114 +1,26 @@
-import { useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import PublicLayout from '../../components/public/PublicLayout'
-import { MAX_LONG, MAX_SHORT, applyFounding, joinWaitlist, normalizeEmail, type SubmitResult } from '../../services/publicForms'
+import FoundingCounter from '../../components/public/FoundingCounter'
 
 const BENEFITS = [
-  { title: 'Elite access, forever free', body: 'Every premium feature, for life. No trials, no billing, no catch — ever.' },
+  {
+    title: 'Founding member for life',
+    body: 'Lifetime free access and a permanent founding badge. No trials, no billing, no catch — ever.',
+  },
   { title: 'First in the queue', body: "You'll be among the first profiles seen when we go live in Austin." },
   { title: 'Founding member badge', body: 'A permanent mark on your profile. You were here at the very beginning.' },
   { title: 'Direct line to the founder', body: 'A real voice. A real conversation. Your feedback shapes the product.' },
 ]
 
 const STATS = [
-  { value: '50', label: 'Founding spots — Austin only' },
+  { value: '100', label: 'Founding spots — Austin only' },
   { value: '0', label: 'Unsolicited photos — impossible by design' },
   { value: '$0', label: 'Cost to founding members — ever' },
 ]
 
-const input =
-  'w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder:text-white/30 focus:border-[#1B4FD8]/60 focus:outline-none'
-
-function resultMessage(r: SubmitResult): string {
-  return r === 'duplicate-or-denied'
-    ? "Couldn't submit — this email may already be on the list."
-    : "Couldn't submit right now. Check your connection and try again."
-}
-
-function FoundingForm() {
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [instagram, setInstagram] = useState('')
-  const [why, setWhy] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState(false)
-
-  async function submit(e: FormEvent) {
-    e.preventDefault()
-    const normalized = normalizeEmail(email)
-    if (!name.trim() || !normalized) return setError('Add your first name and a valid email.')
-    setBusy(true)
-    setError(null)
-    const result = await applyFounding({ name, email: normalized, instagram, why })
-    setBusy(false)
-    if (result === 'ok') setDone(true)
-    else setError(resultMessage(result))
-  }
-
-  if (done) {
-    return (
-      <div className="rounded-2xl border border-[#1B4FD8]/40 bg-[#1B4FD8]/10 p-6 text-center">
-        <p className="text-lg font-semibold">Application received ✦</p>
-        <p className="mt-2 text-white/60">Thank you — we'll be in touch.</p>
-        <p className="mt-1 text-sm text-white/40">Matthew reviews every application personally. You'll hear back within 48 hours.</p>
-      </div>
-    )
-  }
-
-  return (
-    <form onSubmit={submit} className="space-y-3">
-      <input className={input} value={name} onChange={(e) => setName(e.target.value)} maxLength={MAX_SHORT} placeholder="Your first name" autoComplete="given-name" />
-      <input className={input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address" autoComplete="email" />
-      <input className={input} value={instagram} onChange={(e) => setInstagram(e.target.value)} maxLength={MAX_SHORT} placeholder="Instagram handle (optional)" />
-      <textarea
-        className={`${input} resize-none`}
-        rows={3}
-        value={why}
-        onChange={(e) => setWhy(e.target.value)}
-        maxLength={MAX_LONG}
-        placeholder="What does better dating look like to you? (optional)"
-      />
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      <button type="submit" disabled={busy} className="w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold transition-opacity hover:opacity-90 disabled:opacity-50">
-        {busy ? 'Sending…' : 'Join the founding circle'}
-      </button>
-      <p className="text-center text-xs text-white/40">No spam, ever · Private &amp; secure · Austin women only</p>
-    </form>
-  )
-}
-
-function WaitlistForm() {
-  const [email, setEmail] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState(false)
-
-  async function submit(e: FormEvent) {
-    e.preventDefault()
-    const normalized = normalizeEmail(email)
-    if (!normalized) return setError('Enter a valid email.')
-    setBusy(true)
-    setError(null)
-    const result = await joinWaitlist(normalized)
-    setBusy(false)
-    if (result === 'ok') setDone(true)
-    else setError(resultMessage(result))
-  }
-
-  if (done) return <p className="text-center font-medium text-[#B4C6FF]">Thank you — we'll be in touch ✦</p>
-
-  return (
-    <form onSubmit={submit} className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-      <input className={`${input} sm:w-auto sm:flex-1`} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address" autoComplete="email" />
-      <button type="submit" disabled={busy} className="shrink-0 rounded-xl border border-white/20 px-6 py-3 font-semibold text-white/80 hover:bg-white/5 disabled:opacity-50">
-        {busy ? 'Joining…' : 'Join the waitlist →'}
-      </button>
-      {error && <p className="text-sm text-red-400 sm:basis-full">{error}</p>}
-    </form>
-  )
-}
-
-// The Austin founding circle (was zylove-website/founding.html).
+// The Austin founding circle (was zylove-website/founding.html). Membership
+// is automatic now (assignFounderBadge at the end of onboarding), so this page
+// sends people to sign up rather than collecting applications.
 export default function Join() {
   return (
     <PublicLayout>
@@ -119,7 +31,7 @@ export default function Join() {
         </h1>
         <p className="mx-auto mt-4 max-w-xl text-white/60">
           Dating fatigue is real. The apps aren't working. <strong className="text-white">Zylove is built differently</strong> — and
-          we're starting in Austin with 50 founding women who help shape what that actually means.
+          we're starting with the first 100 founding members in Austin, who help shape what that actually means.
         </p>
       </section>
 
@@ -143,19 +55,18 @@ export default function Join() {
         ))}
       </section>
 
-      <section className="mt-10 rounded-2xl border border-white/10 bg-white/5 p-6">
-        <h2 className="text-2xl font-bold">Claim your founding spot</h2>
-        <p className="mt-1 mb-5 text-sm text-white/50">We review every application personally and follow up within 48 hours.</p>
-        <FoundingForm />
-      </section>
-
-      <section className="mt-10">
-        <p className="text-center text-white/60">
-          Ladies first. The waitlist is open for everyone else — and trust us, you'll be glad we did it this way.
+      <section className="mt-10 rounded-2xl border border-[#1B4FD8]/30 bg-[radial-gradient(ellipse_at_top,rgba(27,79,216,0.18),transparent_70%)] p-8 text-center">
+        <h2 className="text-2xl font-bold">Founding membership is automatic</h2>
+        <p className="mx-auto mt-3 max-w-md text-white/70">
+          Sign up at zylove.app and if you're one of the first 100 Austin members, the badge is yours.
         </p>
-        <div className="mt-4">
-          <WaitlistForm />
-        </div>
+        <Link
+          to="/"
+          className="mt-6 inline-block rounded-xl bg-[#1B4FD8] px-8 py-3 font-semibold text-white transition-colors hover:bg-[#1B4FD8]/90"
+        >
+          Sign up now →
+        </Link>
+        <FoundingCounter />
       </section>
     </PublicLayout>
   )

@@ -7,6 +7,7 @@ import { auth } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import PublicFooter from '../components/public/PublicFooter'
 import Wordmark from '../components/public/Wordmark'
+import FoundingCounter from '../components/public/FoundingCounter'
 import { requestLocation, saveUserLocation } from '../services/location'
 
 // US numbers only: the field shows a fixed +1 and holds just the 10 digits.
@@ -273,7 +274,7 @@ export default function Login() {
             <SignInCard />
           </div>
 
-          <p className="mt-5 text-sm text-[#7C9BFF]">Now recruiting Austin founding circle · 50 spots</p>
+          <p className="mt-5 text-sm text-[#7C9BFF]">First 100 founding members in Austin</p>
           <a href="#features" className="mt-3 text-sm text-white/40 transition-colors hover:text-white/70">
             Learn more ↓
           </a>
@@ -320,8 +321,9 @@ export default function Login() {
           <h2 className="text-3xl font-bold">
             <span className="text-[#1B4FD8]">✦</span> Austin Founding Circle
           </h2>
-          <p className="mt-3 text-lg text-white/70">
-            First 100 members. Automatic founding badge. Lifetime free access. The reason it works.
+          <p className="mt-3 text-lg text-white/70">First 100 founding members in Austin. Lifetime free access. The reason it works.</p>
+          <p className="mt-2 text-sm text-white/50">
+            Sign up now — founding badges are assigned automatically to the first 100 Austin members.
           </p>
           <ul className="mt-6 flex flex-wrap justify-center gap-2">
             {FOUNDING_BENEFITS.map((b) => (
@@ -333,6 +335,7 @@ export default function Login() {
           <Link to="/join" className="mt-8 inline-block font-semibold text-[#7C9BFF] hover:text-white">
             Learn more about the founding circle →
           </Link>
+          <FoundingCounter />
         </div>
       </section>
 

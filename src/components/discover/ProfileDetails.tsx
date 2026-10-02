@@ -3,6 +3,7 @@ import { displayAge, type DiscoverProfile } from '../../services/discover'
 import type { Mode } from '../../store/modeStore'
 import CompatibilityBlock from './CompatibilityBlock'
 import TierBadge from '../TierBadge'
+import FounderBadge from '../FounderBadge'
 import { PlayDetailsBody } from '../profile/PlayProfileSections'
 import {
   goDeeperRows,
@@ -77,7 +78,8 @@ export default function ProfileDetails({
             {mode === 'play' ? '🔴 Play' : '🔵 Spark'}
           </span>
         </div>
-        <div className="mt-2 empty:hidden">
+        <div className="mt-2 flex flex-wrap gap-2 empty:hidden">
+          <FounderBadge profile={profile} />
           <TierBadge tier={(profile as Record<string, unknown>).zyloveScoreTier} />
         </div>
         {(profile.locationLabel || profile.distanceMiles !== undefined) && (

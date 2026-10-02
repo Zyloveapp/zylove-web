@@ -6,6 +6,8 @@ import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
 import { loadRefreshDraft, recordLegalAcceptance, saveSparkOnboarding } from '../services/onboarding'
 import type { PromptAnswer } from '../types/dualProfile'
 import { generateSparkBio } from '../services/bio'
+import { claimFounderBadge } from '../services/founders'
+import FounderCelebration from '../components/FounderCelebration'
 import TermsStep from '../components/onboarding/TermsStep'
 import NameStep from '../components/onboarding/NameStep'
 import PhotosStep from '../components/onboarding/PhotosStep'
@@ -46,6 +48,10 @@ import {
   releasePhotoPreview,
   type OnboardingDraft,
 } from '../components/onboarding/types'
+
+// Founder badge check after the final save, and how long the celebration shows.
+const FOUNDER_CHECK_MS = 12_000
+const FOUNDER_CELEBRATION_MS = 1500
 
 const STEPS = [
   { id: 'terms', title: 'Terms' },
@@ -176,6 +182,7 @@ export default function Onboarding() {
   const [bioUsedFallback, setBioUsedFallback] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [founderNumber, setFounderNumber] = useState<number | null>(null)
   // Incremented to discard an in-flight bio request (skip or regenerate).
   const bioRequest = useRef(0)
 
@@ -285,9 +292,23 @@ export default function Onboarding() {
       const photoNotices = await saveSparkOnboarding(uid, draft, { extraPrompts: refreshInfo?.extraPrompts })
       // A photo still under review (or slow) goes on the profile page, where
       // the notice shows; Discover needs a published photo anyway.
-      if (photoNotices.length > 0) navigate('/profile', { replace: true, state: { flash: photoNotices.join(' ') } })
-      else if (refresh) navigate('/profile', { replace: true, state: { flash: '✦ Profile refreshed.' } })
-      else navigate('/discover', { replace: true })
+      const finish = () => {
+        if (photoNotices.length > 0) navigate('/profile', { replace: true, state: { flash: photoNotices.join(' ') } })
+        else if (refresh) navigate('/profile', { replace: true, state: { flash: '✦ Profile refreshed.' } })
+        else navigate('/discover', { replace: true })
+      }
+      // Austin Founding Circle: capped so a location prompt left open can't
+      // hold onboarding up; any failure just carries on.
+      const founder = await Promise.race([
+        claimFounderBadge(uid),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), FOUNDER_CHECK_MS)),
+      ])
+      if (founder?.eligible) {
+        setFounderNumber(founder.cohortNumber)
+        setTimeout(finish, FOUNDER_CELEBRATION_MS)
+      } else {
+        finish()
+      }
     } catch (err) {
       setSaveError(saveErrorMessage(err))
       setSaving(false)
@@ -455,6 +476,8 @@ export default function Onboarding() {
           )}
         </div>
       </nav>
+
+      {founderNumber !== null && <FounderCelebration number={founderNumber} />}
     </div>
   )
 }

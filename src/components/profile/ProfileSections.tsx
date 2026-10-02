@@ -5,6 +5,7 @@ import { cmToFeetInches } from '../../types/profile'
 import HowIOperate from './HowIOperate'
 import { goDeeperAnswers } from './goDeeper'
 import TierBadge, { badgeTier, type BadgeTier } from '../TierBadge'
+import FounderBadge from '../FounderBadge'
 import {
   bodyTypeLabel,
   habitLabel,
@@ -134,9 +135,9 @@ export function ProfileHeader({ profile: p, nameFallback }: { profile: DiscoverP
         </div>
       )}
       {isFounder && (
-        <span className="mt-2 inline-block rounded-full border border-[#1B4FD8]/40 bg-[#1B4FD8]/15 px-3 py-1 text-xs font-semibold text-[#B4C6FF]">
-          ✦ Austin Founding Circle
-        </span>
+        <div className="mt-2">
+          <FounderBadge profile={p} />
+        </div>
       )}
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-white/60">
         {p.locationLabel && <span>📍 {p.locationLabel}</span>}

@@ -6,6 +6,8 @@ import { initializeApp } from 'firebase-admin/app'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 import { buildBioPrompt, parseBioRequest } from './bioPrompt'
 import { buildPlayBioPrompt, parsePlayBioRequest } from './playBioPrompt'
+
+export { assignFounderBadge, onLaunchConfigUpdated } from './founders'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import {
   FLAG_CATEGORY_IDS,
