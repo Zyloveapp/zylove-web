@@ -239,11 +239,13 @@ export default function Header() {
           <Link
             to="/settings"
             aria-label={settingsDot ? 'Settings — set up notifications' : 'Settings'}
-            className="relative flex h-9 w-9 items-center justify-center rounded-full text-lg text-white/50 hover:bg-white/10 hover:text-white"
+            className="relative flex items-center justify-center rounded-full p-2 text-white/50 hover:bg-white/10 hover:text-white"
           >
-            ⚙
+            <span className="flex h-6 w-6 items-center justify-center text-2xl leading-none" aria-hidden>
+              ⚙
+            </span>
             {settingsDot && (
-              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#1B4FD8] ring-2 ring-gray-950" aria-hidden />
+              <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[#1B4FD8] ring-2 ring-gray-950" aria-hidden />
             )}
           </Link>
         </div>

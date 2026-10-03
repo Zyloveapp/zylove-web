@@ -1265,7 +1265,8 @@ export const smsOnSpark = onDocumentCreated(
 )
 
 // New message: texts the other participant, at most once per match every
-// 2 minutes. Protocol and system messages don't count.
+// 2 minutes. Protocol and system messages don't count, and neither do bot
+// chats — a bot reply never texts anyone.
 export const smsOnMessage = onDocumentCreated(
   { document: 'matches/{matchId}/messages/{messageId}', secrets: SMS_SECRETS },
   async (event) => {
@@ -1275,6 +1276,9 @@ export const smsOnMessage = onDocumentCreated(
     if (typeof senderId !== 'string' || !senderId) return
     const ciphertext = typeof msg.ciphertext === 'string' ? msg.ciphertext : ''
     if (
+      msg.isBot === true ||
+      senderId.startsWith('zbot-') ||
+      senderId.startsWith('seed-') ||
       msg.nonce === 'system' ||
       msg.messageType === 'system' ||
       msg.messageType === 'consent_request' ||
@@ -1286,7 +1290,7 @@ export const smsOnMessage = onDocumentCreated(
     const db = getFirestore()
     const matchRef = db.doc(`matches/${event.params.matchId}`)
     const match = (await matchRef.get()).data()
-    if (!match || match.isBlocked === true) return
+    if (!match || match.isBlocked === true || match.isBot === true) return
     const recipientUid = participantsOf(match).find((u) => u !== senderId)
     if (!recipientUid) return
 
