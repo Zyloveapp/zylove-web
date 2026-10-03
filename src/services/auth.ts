@@ -52,17 +52,20 @@ export function clearRecaptcha(): void {
   recaptchaInitialized = false;
 }
 
-// Twilio Lookup line-type check before the OTP is sent (VoIP, virtual and
-// landline numbers are blocked). Fails open: if the check itself can't run,
-// sign-in proceeds.
-export async function checkPhoneNumber(phoneNumber: string): Promise<boolean> {
+export type PhoneCheck = { allowed: true } | { allowed: false; reason: 'voip' | 'rate_limited' };
+
+// Server check before the OTP is sent: per-number rate limit, then a Twilio
+// Lookup line-type check for new numbers (VoIP, virtual and landline are
+// blocked). Fails open: if the check itself can't run, sign-in proceeds.
+export async function checkPhoneNumber(phoneNumber: string): Promise<PhoneCheck> {
   try {
     const { data } = await httpsCallable<{ phoneNumber: string }, { allowed: boolean; reason?: string }>(
       functions,
       'validatePhoneNumber',
     )({ phoneNumber });
-    return data.allowed !== false;
+    if (data.allowed !== false) return { allowed: true };
+    return { allowed: false, reason: data.reason === 'rate_limited' ? 'rate_limited' : 'voip' };
   } catch {
-    return true;
+    return { allowed: true };
   }
 }

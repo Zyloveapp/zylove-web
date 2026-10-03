@@ -8,7 +8,9 @@ import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/fire
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
+import { createHash } from 'node:crypto'
 import { initializeApp } from 'firebase-admin/app'
+import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 import { buildBioPrompt, parseBioRequest } from './bioPrompt'
 import { buildPlayBioPrompt, parsePlayBioRequest } from './playBioPrompt'
@@ -1412,9 +1414,58 @@ const BLOCKED_LINE_TYPES = new Set([
   'non-fixed-voip',
 ])
 
+const PHONE_ATTEMPT_LIMIT = 5
+const PHONE_ATTEMPT_WINDOW_MS = 60 * 60 * 1000
+
+// phoneVerificationAttempts/{sha256(phone)}: a fixed 1-hour window per
+// number. Returns false once the number exceeds the limit. Server-only
+// collection (client rules deny it). expiresAt lets a Firestore TTL policy
+// clean up old windows.
+async function underPhoneAttemptLimit(phoneNumber: string): Promise<boolean> {
+  const db = getFirestore()
+  const id = createHash('sha256').update(phoneNumber).digest('hex')
+  const ref = db.collection('phoneVerificationAttempts').doc(id)
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref)
+    const now = Timestamp.now()
+    const first: unknown = snap.get('firstAttempt')
+    const windowOpen =
+      snap.exists && first instanceof Timestamp && now.toMillis() - first.toMillis() < PHONE_ATTEMPT_WINDOW_MS
+    if (!windowOpen) {
+      tx.set(ref, {
+        count: 1,
+        firstAttempt: now,
+        lastAttempt: FieldValue.serverTimestamp(),
+        expiresAt: Timestamp.fromMillis(now.toMillis() + PHONE_ATTEMPT_WINDOW_MS),
+      })
+      return true
+    }
+    const count = (typeof snap.get('count') === 'number' ? (snap.get('count') as number) : 0) + 1
+    tx.update(ref, { count: FieldValue.increment(1), lastAttempt: FieldValue.serverTimestamp() })
+    return count <= PHONE_ATTEMPT_LIMIT
+  })
+}
+
+// True when the number already belongs to a Firebase Auth account. Unknown
+// on error, which counts as "not existing" so the Lookup still runs.
+async function phoneHasAccount(phoneNumber: string): Promise<boolean> {
+  try {
+    await getAuth().getUserByPhoneNumber(phoneNumber)
+    return true
+  } catch (err) {
+    const code = typeof err === 'object' && err !== null && 'code' in err ? (err as { code: unknown }).code : null
+    if (code !== 'auth/user-not-found') {
+      logger.warn('validatePhoneNumber: account lookup failed', { message: err instanceof Error ? err.message : String(err) })
+    }
+    return false
+  }
+}
+
 // Runs before the OTP is sent so VoIP / virtual / landline numbers can't sign
-// up. Callable without auth (it gates sign-in). Fails open: if Lookup errors
-// or returns no type, the number is allowed.
+// up. Callable without auth (it gates sign-in). Order: rate limit first (it
+// also stops this being used to probe which numbers have accounts), then
+// existing accounts skip the paid Lookup, then the Lookup itself. Fails open
+// on any Lookup or Firestore error.
 export const validatePhoneNumber = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: LOOKUP_SECRETS },
   async (request): Promise<{ allowed: boolean; reason?: string }> => {
@@ -1424,6 +1475,18 @@ export const validatePhoneNumber = onCall(
     if (typeof phoneNumber !== 'string' || !/^\+[1-9]\d{6,14}$/.test(phoneNumber)) {
       throw new HttpsError('invalid-argument', 'phoneNumber must be E.164, e.g. +15551234567')
     }
+
+    const underLimit = await underPhoneAttemptLimit(phoneNumber).catch((err: unknown) => {
+      logger.warn('validatePhoneNumber: rate limit check failed', { message: err instanceof Error ? err.message : String(err) })
+      return true
+    })
+    if (!underLimit) {
+      logger.info('validatePhoneNumber: rate limited')
+      return { allowed: false, reason: 'rate_limited' }
+    }
+
+    // Existing users are never locked out, and don't cost a Lookup.
+    if (await phoneHasAccount(phoneNumber)) return { allowed: true }
 
     const lineType = await lookupLineType(phoneNumber)
     if (lineType !== null && BLOCKED_LINE_TYPES.has(lineType)) {
