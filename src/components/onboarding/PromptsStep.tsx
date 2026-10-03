@@ -34,7 +34,7 @@ export default function PromptsStep({ draft, update }: StepProps) {
         title="Your prompts"
         subtitle={`Pick ${PROMPT_COUNT} and answer at least ${MIN_PROMPT_ANSWERS}. These shape your bio.`}
       />
-      <p className="mb-4 text-sm text-gray-500">
+      <p className="mb-4 text-sm text-white/50">
         {selected.length}/{PROMPT_COUNT} chosen · {answeredPromptCount(draft)} answered
       </p>
 
@@ -44,7 +44,7 @@ export default function PromptsStep({ draft, update }: StepProps) {
           if (!prompt) return null
           const answer = draft.promptAnswers[id] ?? ''
           return (
-            <div key={id} className="rounded-xl border border-gray-200 p-4">
+            <div key={id} className="rounded-xl border border-white/10 p-4">
               <p className="mb-2 font-medium">{prompt.text}</p>
               <textarea
                 rows={3}
@@ -52,14 +52,14 @@ export default function PromptsStep({ draft, update }: StepProps) {
                 value={answer}
                 placeholder={prompt.placeholder}
                 onChange={(e) => setAnswer(id, e.target.value)}
-                className="w-full resize-none rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-800 focus:outline-none"
+                className="w-full resize-none rounded-lg border border-white/15 px-3 py-2 focus:border-[#1B4FD8] focus:outline-none"
               />
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                 {prompt.inspirations && prompt.inspirations.length > 0 && (
                   <button
                     type="button"
                     onClick={() => setInspiring(inspiring === id ? null : id)}
-                    className="rounded-full border border-gray-300 px-3 py-1 text-gray-600"
+                    className="rounded-full border border-white/15 px-3 py-1 text-white/60"
                   >
                     ✦ Need a spark?
                   </button>
@@ -67,11 +67,11 @@ export default function PromptsStep({ draft, update }: StepProps) {
                 <button
                   type="button"
                   onClick={() => setSwapping(swapping === id ? null : id)}
-                  className="rounded-full border border-gray-300 px-3 py-1 text-gray-600"
+                  className="rounded-full border border-white/15 px-3 py-1 text-white/60"
                 >
                   ↻ Different question
                 </button>
-                <span className="ml-auto text-gray-500">
+                <span className="ml-auto text-white/50">
                   {answer.length}/{PROMPT_MAX_LENGTH}
                 </span>
               </div>
@@ -86,7 +86,7 @@ export default function PromptsStep({ draft, update }: StepProps) {
                         setAnswer(id, ins)
                         setInspiring(null)
                       }}
-                      className="block w-full rounded-lg bg-gray-50 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                      className="block w-full rounded-lg bg-white/5 px-3 py-2 text-left text-sm text-white/80 hover:bg-white/10"
                     >
                       "{ins}"
                     </button>
@@ -95,8 +95,8 @@ export default function PromptsStep({ draft, update }: StepProps) {
               )}
 
               {swapping === id && (
-                <div className="mt-3 border-t border-gray-100 pt-3">
-                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">Choose a different question</p>
+                <div className="mt-3 border-t border-white/5 pt-3">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-white/50">Choose a different question</p>
                   <PromptList prompts={available} onPick={(newId) => swap(id, newId)} />
                 </div>
               )}
@@ -107,7 +107,7 @@ export default function PromptsStep({ draft, update }: StepProps) {
 
       {selected.length < PROMPT_COUNT && (
         <div className="mt-5">
-          <p className="mb-2 text-sm font-medium text-gray-800">Choose a prompt</p>
+          <p className="mb-2 text-sm font-medium text-white/90">Choose a prompt</p>
           <PromptList prompts={available} onPick={add} />
         </div>
       )}
@@ -117,10 +117,10 @@ export default function PromptsStep({ draft, update }: StepProps) {
 
 function PromptList({ prompts, onPick }: { prompts: AppPrompt[]; onPick: (id: string) => void }) {
   return (
-    <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200">
+    <ul className="divide-y divide-white/5 rounded-xl border border-white/10">
       {prompts.map((p) => (
         <li key={p.id}>
-          <button type="button" onClick={() => onPick(p.id)} className="w-full px-4 py-3 text-left text-sm hover:bg-gray-50">
+          <button type="button" onClick={() => onPick(p.id)} className="w-full px-4 py-3 text-left text-sm hover:bg-white/10">
             {p.text}
           </button>
         </li>

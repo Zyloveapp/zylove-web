@@ -66,7 +66,7 @@ function parentalIntentOptions(current: ParentalCurrent) {
   )
 }
 
-const textInputClass = 'w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-800 focus:outline-none'
+const textInputClass = 'w-full rounded-lg border border-white/15 px-3 py-2 focus:border-[#1B4FD8] focus:outline-none'
 
 export function GenderStep({ draft, update }: StepProps) {
   return (
@@ -195,7 +195,7 @@ export function HeightStep({ draft, update }: StepProps) {
           className="flex-1"
         />
       </div>
-      <p className="mt-2 text-sm text-gray-500">{feetInchesToCm(draft.height.feet, draft.height.inches)} cm</p>
+      <p className="mt-2 text-sm text-white/50">{feetInchesToCm(draft.height.feet, draft.height.inches)} cm</p>
     </div>
   )
 }
@@ -223,7 +223,7 @@ export function HabitsStep({ draft, update }: StepProps) {
       <select
         value={draft.drinkingHabit ?? ''}
         onChange={(e) => update({ drinkingHabit: e.target.value === '' ? null : (e.target.value as DrinkingHabit) })}
-        className="rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-gray-800 focus:outline-none"
+        className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 focus:border-[#1B4FD8] focus:outline-none"
       >
         <option value="">—</option>
         {DRINKING_OPTIONS.map((o) => (

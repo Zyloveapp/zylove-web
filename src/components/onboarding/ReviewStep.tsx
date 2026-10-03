@@ -64,17 +64,17 @@ export default function ReviewStep({ draft, saving, error, onCreate }: ReviewSte
 
       {draft.bio.trim() && (
         <section>
-          <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Bio</h2>
+          <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-white/50">Bio</h2>
           <p className="whitespace-pre-line leading-relaxed">{draft.bio.trim()}</p>
         </section>
       )}
 
       {answers.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Prompts</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-white/50">Prompts</h2>
           {answers.map((a) => (
-            <div key={a.id} className="rounded-xl border border-gray-200 p-3">
-              <p className="text-sm text-gray-600">{a.question}</p>
+            <div key={a.id} className="rounded-xl border border-white/10 p-3">
+              <p className="text-sm text-white/60">{a.question}</p>
               <p className="mt-1 font-medium">{a.answer}</p>
             </div>
           ))}
@@ -83,28 +83,28 @@ export default function ReviewStep({ draft, saving, error, onCreate }: ReviewSte
 
       {deeper.length > 0 && (
         <section className="space-y-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Go Deeper</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-white/50">Go Deeper</h2>
           {deeper.map((d) => (
             <p key={d.q} className="text-sm">
-              <span className="text-gray-600">{d.q}</span> <span className="font-medium">{d.a}</span>
+              <span className="text-white/60">{d.q}</span> <span className="font-medium">{d.a}</span>
             </p>
           ))}
         </section>
       )}
 
       {includesPlay(draft.intent) && (
-        <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+        <p className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-200">
           Play profile setup comes after your Spark profile is created.
         </p>
       )}
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-400">{error}</p>}
 
       <button
         type="button"
         onClick={onCreate}
         disabled={saving}
-        className="w-full rounded-lg bg-gray-900 px-4 py-3 font-medium text-white disabled:opacity-50"
+        className="w-full rounded-lg bg-[#1B4FD8] px-4 py-3 font-medium text-white disabled:opacity-50"
       >
         {saving ? 'Creating your profile…' : 'Create my profile'}
       </button>

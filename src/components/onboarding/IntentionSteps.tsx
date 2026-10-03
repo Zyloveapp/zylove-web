@@ -23,8 +23,8 @@ export function recommendPath(answers: string[]): OnboardingPath {
   return 'unsure'
 }
 
-// The intent Explore and scoring run on. Play-only people still build a Spark
-// profile, so they're 'open' and show in both feeds.
+// The intent Explore and scoring run on. Play-only people still have the
+// basic profile, so they're 'open' and show in both feeds.
 export function intentForPath(path: OnboardingPath): DatingIntent {
   return path === 'spark' || path === 'unsure' ? 'spark' : 'open'
 }
@@ -54,7 +54,7 @@ export function IntentionStep({ draft, update }: StepProps) {
               aria-pressed={on}
               onClick={() => toggle(o.id)}
               className={`rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
-                on ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-300 bg-white text-gray-800 hover:border-gray-500'
+                on ? 'border-[#1B4FD8] bg-[#1B4FD8] text-white' : 'border-white/15 bg-white/5 text-white/90 hover:border-white/40'
               }`}
             >
               <span aria-hidden>{o.emoji}</span> {o.label}
@@ -68,7 +68,7 @@ export function IntentionStep({ draft, update }: StepProps) {
 
 const RECOMMENDATION: Record<
   OnboardingPath,
-  { glow: string; title: string; body: string; button: string; note?: string }
+  { glow: string; title: string; body: string; button: string }
 > = {
   spark: {
     glow: 'radial-gradient(circle at 50% 35%, rgba(27,79,216,0.55), transparent 65%)',
@@ -78,16 +78,15 @@ const RECOMMENDATION: Record<
   },
   play: {
     glow: 'radial-gradient(circle at 50% 35%, rgba(224,49,49,0.55), transparent 65%)',
-    title: '🔥 It sounds like Play mode is calling.',
-    body: 'Adult. No labels. On your terms.',
-    button: 'Set up Play →',
-    note: "You'll set up a quick Spark profile first, then unlock Play.",
+    title: '🔥 Play mode is calling.',
+    body: 'Know what you want. Find who gets it.',
+    button: 'Enter Play →',
   },
   both: {
     glow: 'linear-gradient(90deg, rgba(27,79,216,0.45), transparent 45%, transparent 55%, rgba(224,49,49,0.45))',
     title: '✦ Zylove has two sides.',
     body: 'Start with Spark. You can unlock Play anytime.',
-    button: 'Start with Spark →',
+    button: '✦ Start with Spark →',
   },
   unsure: {
     glow: 'radial-gradient(circle at 50% 35%, rgba(27,79,216,0.4), transparent 65%)',
@@ -97,8 +96,18 @@ const RECOMMENDATION: Record<
   },
 }
 
-// Full-screen, dark, over the light onboarding page.
-export function RecommendationScreen({ path, onContinue, onBack }: { path: OnboardingPath; onContinue: () => void; onBack: () => void }) {
+// Full-screen, with the path's glow. "Both" also offers going straight to Play.
+export function RecommendationScreen({
+  path,
+  onContinue,
+  onPlay,
+  onBack,
+}: {
+  path: OnboardingPath
+  onContinue: () => void
+  onPlay: () => void
+  onBack: () => void
+}) {
   const r = RECOMMENDATION[path]
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gray-950 text-white">
@@ -134,7 +143,15 @@ export function RecommendationScreen({ path, onContinue, onBack }: { path: Onboa
         >
           {r.button}
         </button>
-        {r.note && <p className="mt-3 text-center text-sm text-white/50">{r.note}</p>}
+        {path === 'both' && (
+          <button
+            type="button"
+            onClick={onPlay}
+            className="mt-3 w-full rounded-xl bg-[#E03131] py-4 font-semibold text-white transition-opacity hover:opacity-90"
+          >
+            🔥 Start with Play →
+          </button>
+        )}
         <button type="button" onClick={onBack} className="mt-2 w-full py-2 text-sm text-white/40 hover:text-white">
           Back
         </button>

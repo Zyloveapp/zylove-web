@@ -6,14 +6,14 @@ export function GoDeeperIntro({ onStart, onSkip }: { onStart: () => void; onSkip
     <div className="pt-6 text-center">
       <div className="mb-4 text-5xl">✦</div>
       <h1 className="mb-3 text-2xl font-semibold">Want sharper matches?</h1>
-      <p className="mb-8 text-gray-600">
+      <p className="mb-8 text-white/60">
         Three quick questions help us understand how you actually operate in a relationship — not just what you say
         you want.
       </p>
       <button
         type="button"
         onClick={onStart}
-        className="w-full rounded-lg bg-gray-900 px-4 py-3 font-medium text-white"
+        className="w-full rounded-lg bg-[#1B4FD8] px-4 py-3 font-medium text-white"
       >
         Let's go →
       </button>

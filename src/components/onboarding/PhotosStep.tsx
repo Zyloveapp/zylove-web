@@ -14,11 +14,11 @@ interface PhotosStepProps {
 const STYLES = {
   spark: {
     title: 'text-2xl font-semibold',
-    subtitle: 'text-gray-600',
-    tile: 'bg-gray-100',
+    subtitle: 'text-white/60',
+    tile: 'bg-white/10',
     badge: 'bg-gray-900/80',
-    add: 'border-gray-300 text-gray-400 hover:border-gray-500',
-    error: 'text-red-600',
+    add: 'border-white/15 text-white/40 hover:border-white/40',
+    error: 'text-red-400',
   },
   play: {
     title: 'text-2xl font-bold text-white',

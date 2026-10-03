@@ -9,7 +9,7 @@ interface NameStepProps {
   onChange: (patch: { displayName?: string; birthdayRaw?: string }) => void
 }
 
-const inputClass = 'w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-800 focus:outline-none'
+const inputClass = 'w-full rounded-lg border border-white/15 px-3 py-2 focus:border-[#1B4FD8] focus:outline-none'
 
 const MONTH_OPTIONS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -54,7 +54,7 @@ export default function NameStep({ displayName, birthdayRaw, birthdayLocked = fa
     <div>
       <StepHeader title="What should we call you?" subtitle="This is what others will see on your profile." />
       <label className="block space-y-1">
-        <span className="text-sm font-medium text-gray-800">First name</span>
+        <span className="text-sm font-medium text-white/90">First name</span>
         <input
           type="text"
           autoComplete="given-name"
@@ -66,12 +66,12 @@ export default function NameStep({ displayName, birthdayRaw, birthdayLocked = fa
       </label>
       {birthdayLocked && (
         <div className="mt-5 space-y-1">
-          <span className="block text-sm font-medium text-gray-800">🔒 Birthday</span>
-          <p className="text-sm text-gray-500">Locked after account setup.</p>
+          <span className="block text-sm font-medium text-white/90">🔒 Birthday</span>
+          <p className="text-sm text-white/50">Locked after account setup.</p>
         </div>
       )}
       <div className={`mt-5 space-y-1 ${birthdayLocked ? 'hidden' : ''}`}>
-        <span className="block text-sm font-medium text-gray-800">Birthday</span>
+        <span className="block text-sm font-medium text-white/90">Birthday</span>
         <div className="flex gap-2">
           <StyledSelect
             ariaLabel="Birth month"
@@ -99,9 +99,9 @@ export default function NameStep({ displayName, birthdayRaw, birthdayLocked = fa
           />
         </div>
       </div>
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
       {parsed && !error && (
-        <p className="mt-2 text-sm text-green-700">
+        <p className="mt-2 text-sm text-emerald-300">
           🎂{' '}
           {new Date(`${parsed.iso}T00:00:00`).toLocaleDateString('en-US', {
             month: 'long',

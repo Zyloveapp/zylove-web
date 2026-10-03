@@ -5,7 +5,7 @@ export function StepHeader({ title, subtitle }: { title: string; subtitle?: stri
   return (
     <div className="mb-5 space-y-1">
       <h1 className="text-2xl font-semibold leading-tight">{title}</h1>
-      {subtitle && <p className="text-gray-600">{subtitle}</p>}
+      {subtitle && <p className="text-white/60">{subtitle}</p>}
     </div>
   )
 }
@@ -13,15 +13,15 @@ export function StepHeader({ title, subtitle }: { title: string; subtitle?: stri
 export function FieldLabel({ children, hint }: { children: ReactNode; hint?: string }) {
   return (
     <div className="mb-2 mt-5 first:mt-0">
-      <p className="text-sm font-medium text-gray-800">{children}</p>
-      {hint && <p className="text-xs text-gray-500">{hint}</p>}
+      <p className="text-sm font-medium text-white/90">{children}</p>
+      {hint && <p className="text-xs text-white/50">{hint}</p>}
     </div>
   )
 }
 
 function chipClass(selected: boolean): string {
   return `rounded-full border px-3 py-1.5 text-sm transition-colors disabled:opacity-40 ${
-    selected ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-300 bg-white text-gray-700 hover:border-gray-500'
+    selected ? 'border-[#1B4FD8] bg-[#1B4FD8] text-white' : 'border-white/15 bg-white/5 text-white/80 hover:border-white/40'
   }`
 }
 
@@ -100,7 +100,7 @@ export function ChipMultiSelect<T extends string>({
 
 function cardClass(selected: boolean): string {
   return `w-full rounded-xl border-2 p-3.5 text-left transition-colors disabled:opacity-40 ${
-    selected ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:border-gray-400'
+    selected ? 'border-[#1B4FD8] bg-white/5' : 'border-white/10 hover:border-white/40'
   }`
 }
 
@@ -124,7 +124,7 @@ export function CardSelect<T extends string>({
           className={cardClass(value === o.value)}
         >
           <div className="font-medium">{o.label}</div>
-          {o.description && <div className="mt-0.5 text-sm text-gray-600">{o.description}</div>}
+          {o.description && <div className="mt-0.5 text-sm text-white/60">{o.description}</div>}
         </button>
       ))}
     </div>
@@ -160,7 +160,7 @@ export function CardMultiSelect<T extends string>({
               <span>{o.label}</span>
               {selected && <span aria-hidden>✓</span>}
             </div>
-            {o.description && <div className="mt-0.5 text-sm text-gray-600">{o.description}</div>}
+            {o.description && <div className="mt-0.5 text-sm text-white/60">{o.description}</div>}
           </button>
         )
       })}
@@ -169,7 +169,7 @@ export function CardMultiSelect<T extends string>({
 }
 
 const selectClass =
-  'rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-gray-800 focus:outline-none'
+  'rounded-lg border border-white/15 bg-white/5 px-3 py-2 focus:border-[#1B4FD8] focus:outline-none'
 
 export function HeightPicker({
   value,
@@ -239,14 +239,14 @@ export function NumberSelect({
 
 export function SkipLink({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="mt-6 w-full text-center text-sm text-gray-500 underline">
+    <button type="button" onClick={onClick} className="mt-6 w-full text-center text-sm text-white/50 underline">
       {label}
     </button>
   )
 }
 
 const styledSelectClass =
-  'w-full rounded-xl border border-gray-200 bg-white px-4 py-3 pr-10 text-base appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500'
+  'w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 pr-10 text-base appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500'
 
 export function StyledSelect({
   value,
@@ -269,7 +269,7 @@ export function StyledSelect({
         aria-label={ariaLabel}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={`${styledSelectClass} ${value === '' ? 'text-gray-400' : 'text-gray-900'}`}
+        className={`${styledSelectClass} ${value === '' ? 'text-white/40' : 'text-white'}`}
       >
         {placeholder !== undefined && (
           <option value="" disabled>
@@ -277,7 +277,7 @@ export function StyledSelect({
           </option>
         )}
         {options.map((o) => (
-          <option key={o.value} value={o.value} className="text-gray-900">
+          <option key={o.value} value={o.value} className="text-white">
             {o.label}
           </option>
         ))}
@@ -286,7 +286,7 @@ export function StyledSelect({
         aria-hidden="true"
         viewBox="0 0 20 20"
         fill="currentColor"
-        className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
+        className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/50"
       >
         <path
           fillRule="evenodd"

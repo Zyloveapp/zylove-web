@@ -69,17 +69,17 @@ export default function TermsStep({ accepted, onAccept }: TermsStepProps) {
 
   function row(c: Consent) {
     return (
-      <div key={c.id} className="border-b border-gray-100 py-3 last:border-0">
+      <div key={c.id} className="border-b border-white/5 py-3 last:border-0">
         <label className="flex cursor-pointer items-start gap-3">
           <input
             type="checkbox"
             checked={checked[c.id]}
             disabled={accepted}
             onChange={(e) => setChecked((s) => ({ ...s, [c.id]: e.target.checked }))}
-            className="mt-1 h-5 w-5 shrink-0 accent-gray-900"
+            className="mt-1 h-5 w-5 shrink-0 accent-[#1B4FD8]"
           />
           <span className="text-sm leading-relaxed">
-            {c.label} <span className="text-red-600">*</span>
+            {c.label} <span className="text-red-400">*</span>
           </span>
         </label>
         {c.details && (
@@ -87,12 +87,12 @@ export default function TermsStep({ accepted, onAccept }: TermsStepProps) {
             <button
               type="button"
               onClick={() => setExpanded(expanded === c.id ? null : c.id)}
-              className="mt-1 text-xs font-medium text-gray-600 underline"
+              className="mt-1 text-xs font-medium text-white/60 underline"
             >
               {expanded === c.id ? 'Show less ▲' : 'Read more ▼'}
             </button>
             {expanded === c.id && (
-              <p className="mt-2 rounded-lg bg-gray-50 p-3 text-xs leading-relaxed text-gray-600">{c.details}</p>
+              <p className="mt-2 rounded-lg bg-white/5 p-3 text-xs leading-relaxed text-white/60">{c.details}</p>
             )}
           </div>
         )}
@@ -103,15 +103,15 @@ export default function TermsStep({ accepted, onAccept }: TermsStepProps) {
   return (
     <div>
       <h1 className="mb-1 text-2xl font-semibold">Before you join Zylove</h1>
-      <p className="mb-5 text-gray-600">Please read and accept our terms. We've written them to be honest and clear.</p>
+      <p className="mb-5 text-white/60">Please read and accept our terms. We've written them to be honest and clear.</p>
 
-      <section className="mb-5 rounded-xl border border-gray-200 p-4">
-        <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Age requirement</h2>
+      <section className="mb-5 rounded-xl border border-white/10 p-4">
+        <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-white/50">Age requirement</h2>
         {row(AGE_CONSENT)}
       </section>
 
-      <section className="mb-4 rounded-xl border border-gray-200 p-4">
-        <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Terms</h2>
+      <section className="mb-4 rounded-xl border border-white/10 p-4">
+        <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-white/50">Terms</h2>
         {TERMS_CONSENTS.map(row)}
       </section>
 
@@ -120,24 +120,24 @@ export default function TermsStep({ accepted, onAccept }: TermsStepProps) {
         <a href={BRAND.privacyUrl} target="_blank" rel="noreferrer">Privacy Policy ↗</a>
         <a href="https://zylove.app/community" target="_blank" rel="noreferrer">Community Guidelines ↗</a>
       </div>
-      <p className="mb-5 text-xs text-gray-500">* All items marked with an asterisk are required.</p>
+      <p className="mb-5 text-xs text-white/50">* All items marked with an asterisk are required.</p>
 
-      {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
+      {error && <p className="mb-3 text-sm text-red-400">{error}</p>}
 
       {accepted ? (
-        <p className="rounded-lg bg-green-50 p-3 text-center text-sm font-medium text-green-800">✓ Accepted</p>
+        <p className="rounded-lg bg-emerald-500/10 p-3 text-center text-sm font-medium text-emerald-300">✓ Accepted</p>
       ) : (
         <button
           type="button"
           onClick={handleAccept}
           disabled={!allChecked || saving}
-          className="w-full rounded-lg bg-gray-900 px-4 py-3 font-medium text-white disabled:opacity-40"
+          className="w-full rounded-lg bg-[#1B4FD8] px-4 py-3 font-medium text-white disabled:opacity-40"
         >
           {saving ? 'Saving…' : 'I agree — continue'}
         </button>
       )}
 
-      <p className="mt-4 text-center text-xs leading-relaxed text-gray-500">
+      <p className="mt-4 text-center text-xs leading-relaxed text-white/50">
         By tapping "I agree," you confirm you have read and accept all of the above. Your acceptance is logged with a
         timestamp for your protection and ours.
       </p>

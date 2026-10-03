@@ -53,14 +53,14 @@ export function PhysicalPrefsStep({ draft, update }: StepProps) {
           type="checkbox"
           checked={draft.seekingHeightNoPreference}
           onChange={(e) => update({ seekingHeightNoPreference: e.target.checked })}
-          className="h-4 w-4 accent-gray-900"
+          className="h-4 w-4 accent-[#1B4FD8]"
         />
         Doesn't matter to me
       </label>
       {!draft.seekingHeightNoPreference && (
         <div className="space-y-2">
           <div className="flex items-center gap-3">
-            <span className="w-10 text-sm text-gray-600">Min</span>
+            <span className="w-10 text-sm text-white/60">Min</span>
             <HeightPicker
               label="Minimum height"
               value={draft.seekingHeightMin}
@@ -68,14 +68,14 @@ export function PhysicalPrefsStep({ draft, update }: StepProps) {
             />
           </div>
           <div className="flex items-center gap-3">
-            <span className="w-10 text-sm text-gray-600">Max</span>
+            <span className="w-10 text-sm text-white/60">Max</span>
             <HeightPicker
               label="Maximum height"
               value={draft.seekingHeightMax}
               onChange={(seekingHeightMax) => update({ seekingHeightMax })}
             />
           </div>
-          {rangeInvalid && <p className="text-sm text-red-600">Minimum height must be below the maximum.</p>}
+          {rangeInvalid && <p className="text-sm text-red-400">Minimum height must be below the maximum.</p>}
         </div>
       )}
 
@@ -115,11 +115,11 @@ export function IntentStep({ draft, update }: StepProps) {
     <div>
       <StepHeader title="What are you here for?" subtitle="We keep it real here." />
       <CardSelect options={INTENT_OPTIONS} value={draft.intent} onChange={(intent) => update({ intent })} />
-      <p className="mt-4 text-center text-sm text-gray-500">
+      <p className="mt-4 text-center text-sm text-white/50">
         Serious daters won't see casual profiles unless you both opt in.
       </p>
       {includesPlay(draft.intent) && (
-        <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+        <p className="mt-3 rounded-lg bg-amber-500/10 p-3 text-sm text-amber-200">
           You'll set up your Spark profile first. Play profile setup comes after Spark is complete.
         </p>
       )}
@@ -142,7 +142,7 @@ export function DiscoveryStep({ draft, update }: StepProps) {
             aria-pressed={draft.radiusMiles === d}
             onClick={() => update({ radiusMiles: d })}
             className={`rounded-full border px-3 py-1.5 text-sm ${
-              draft.radiusMiles === d ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-300 text-gray-700'
+              draft.radiusMiles === d ? 'border-[#1B4FD8] bg-[#1B4FD8] text-white' : 'border-white/15 text-white/80'
             }`}
           >
             {d} mi
@@ -158,7 +158,7 @@ export function DiscoveryStep({ draft, update }: StepProps) {
           options={AGE_OPTIONS.filter((a) => a < draft.ageMax)}
           onChange={(ageMin) => update({ ageMin })}
         />
-        <span className="text-gray-400">—</span>
+        <span className="text-white/40">—</span>
         <NumberSelect
           label="Maximum age"
           value={draft.ageMax}

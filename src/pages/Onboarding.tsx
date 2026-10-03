@@ -58,10 +58,10 @@ const FOUNDER_CELEBRATION_MS = 1500
 const STEPS = [
   { id: 'terms', title: 'Terms' },
   { id: 'name', title: 'Name' },
-  { id: 'photos', title: 'Photos' },
   { id: 'gender', title: 'Gender' },
   { id: 'intention', title: 'What you want' },
   { id: 'recommendation', title: 'Your path' },
+  { id: 'photos', title: 'Photos' },
   { id: 'attractedTo', title: 'Attraction' },
   { id: 'relationship', title: 'Status' },
   { id: 'bodyType', title: 'Body type' },
@@ -89,11 +89,12 @@ const STEPS = [
 
 type StepId = (typeof STEPS)[number]['id']
 
-// The Play path builds a quick Spark profile — the basics plus what matching
-// needs (who they're into, status, who they see) — then goes to Play setup.
+// The Play path is just the basics plus what matching needs (who they're
+// into, who they see), saved from the last step, then straight to Play setup.
+// Every path shares the steps up to the recommendation, so switching path
+// there keeps the step index valid.
 const PLAY_PATH_STEPS: StepId[] = [
-  'terms', 'name', 'photos', 'gender', 'intention', 'recommendation',
-  'attractedTo', 'relationship', 'discovery', 'bio', 'review',
+  'terms', 'name', 'gender', 'intention', 'recommendation', 'photos', 'attractedTo', 'discovery',
 ]
 
 // A refresh skips terms (already accepted), the intention steps (first run
@@ -231,8 +232,8 @@ export default function Onboarding() {
 
   if (authLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-gray-800" />
+      <div className="flex min-h-screen items-center justify-center bg-gray-950">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-white/15 border-t-white" />
       </div>
     )
   }
@@ -242,9 +243,9 @@ export default function Onboarding() {
 
   if (refresh && refreshLoad === 'error') {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-4 text-center">
-        <p className="text-gray-700">We couldn't load your profile to refresh it.</p>
-        <button type="button" onClick={() => navigate('/profile/edit')} className="text-sm text-gray-500 underline">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-gray-950 px-4 text-center">
+        <p className="text-white/80">We couldn't load your profile to refresh it.</p>
+        <button type="button" onClick={() => navigate('/profile/edit')} className="text-sm text-white/50 underline">
           Back to Edit Profile
         </button>
       </div>
@@ -253,8 +254,8 @@ export default function Onboarding() {
   // Wait for the pre-fill so nothing is edited (or saved) over an empty draft.
   if (refresh && (refreshLoad === null || refreshLoad === 'error' || refreshLoad.uid !== uid)) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-gray-800" />
+      <div className="flex min-h-screen items-center justify-center bg-gray-950">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-white/15 border-t-white" />
       </div>
     )
   }
@@ -354,7 +355,16 @@ export default function Onboarding() {
         return <IntentionStep {...props} />
       case 'recommendation':
         return draft.onboardingPath ? (
-          <RecommendationScreen path={draft.onboardingPath} onContinue={next} onBack={() => setStepIndex((i) => i - 1)} />
+          <RecommendationScreen
+            path={draft.onboardingPath}
+            onContinue={next}
+            onPlay={() => {
+              // "Both" → Play: take the Play path from here.
+              update({ onboardingPath: 'play' })
+              setStepIndex((i) => i + 1)
+            }}
+            onBack={() => setStepIndex((i) => i - 1)}
+          />
         ) : null
       case 'attractedTo':
         return <AttractedToStep {...props} />
@@ -453,47 +463,59 @@ export default function Onboarding() {
     step.id === 'goDeeper' ||
     step.id === 'review' ||
     step.id === 'recommendation'
+  // Play path: the last step saves and goes to Play onboarding.
+  const playPathFinish = !refresh && draft.onboardingPath === 'play' && stepIndex === steps.length - 1
   const canAdvance = isStepValid(step.id, draft, bioGenerating, identityLocked, maxPhotos)
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-gray-950 text-white [color-scheme:dark]">
       <div className="mx-auto w-full max-w-md px-4 pb-28 pt-6">
         {refresh && (
-          <p className="mb-5 rounded-lg bg-gray-100 px-4 py-3 text-sm text-gray-700">
+          <p className="mb-5 rounded-lg bg-white/10 px-4 py-3 text-sm text-white/80">
             Refreshing your profile — your existing answers are pre-filled. Update anything that's changed.
           </p>
         )}
         <div className="mb-6">
-          <div className="h-1.5 overflow-hidden rounded-full bg-gray-200">
+          <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
             <div
-              className="h-full rounded-full bg-gray-900 transition-all"
+              className="h-full rounded-full bg-[#1B4FD8] transition-all"
               style={{ width: `${((stepIndex + 1) / steps.length) * 100}%` }}
             />
           </div>
-          <p className="mt-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+          <p className="mt-2 text-xs font-medium uppercase tracking-wide text-white/50">
             Step {stepIndex + 1} of {steps.length} · {step.title}
           </p>
         </div>
 
         <main>{renderStep()}</main>
+        {playPathFinish && saveError && <p className="mt-4 text-center text-sm text-red-400">{saveError}</p>}
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 border-t border-gray-200 bg-white/95 backdrop-blur">
+      <nav className="fixed inset-x-0 bottom-0 border-t border-white/10 bg-gray-950/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-md gap-3 px-4 py-3">
           <button
             type="button"
             onClick={() => setStepIndex((i) => i - 1)}
             disabled={stepIndex === 0 || saving}
-            className="flex-1 rounded-lg border border-gray-300 px-4 py-3 font-medium text-gray-700 disabled:opacity-40"
+            className="flex-1 rounded-lg border border-white/15 px-4 py-3 font-medium text-white/80 disabled:opacity-40"
           >
             Back
           </button>
-          {!ownsPrimary && (
+          {playPathFinish ? (
+            <button
+              type="button"
+              onClick={createProfile}
+              disabled={!canAdvance || saving}
+              className="flex-1 rounded-lg bg-[#E03131] px-4 py-3 font-medium text-white disabled:opacity-40"
+            >
+              {saving ? 'Saving…' : 'Enter Play →'}
+            </button>
+          ) : !ownsPrimary && (
             <button
               type="button"
               onClick={next}
               disabled={!canAdvance}
-              className="flex-1 rounded-lg bg-gray-900 px-4 py-3 font-medium text-white disabled:opacity-40"
+              className="flex-1 rounded-lg bg-[#1B4FD8] px-4 py-3 font-medium text-white disabled:opacity-40"
             >
               {step.id === 'intention' ? 'Continue →' : 'Next'}
             </button>
