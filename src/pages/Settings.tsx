@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { signOut } from 'firebase/auth'
+import { auth } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { hasPin } from '../services/playPin'
 import PlayPinFlow from '../components/PlayPinFlow'
@@ -59,6 +61,20 @@ export default function Settings() {
             </span>
           </button>
           <BlockedUsersLink />
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/5">
+          <h2 className="px-5 pt-4 text-xs font-semibold uppercase tracking-widest text-white/40">Account</h2>
+          <button
+            type="button"
+            onClick={async () => {
+              await signOut(auth)
+              navigate('/login', { replace: true })
+            }}
+            className="w-full px-5 py-4 text-left font-medium text-red-400 hover:bg-white/[0.03]"
+          >
+            Sign out
+          </button>
         </section>
       </div>
 
