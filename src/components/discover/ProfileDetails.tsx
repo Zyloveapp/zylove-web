@@ -177,13 +177,13 @@ export default function ProfileDetails({
             <section className="grid gap-8 md:grid-cols-2">
               {loveGive.length > 0 && (
                 <div>
-                  <SectionHeading>Shows love by</SectionHeading>
+                  <SectionHeading>How I show love</SectionHeading>
                   <Pills items={loveGive} icon="♥" />
                 </div>
               )}
               {loveReceive.length > 0 && (
                 <div>
-                  <SectionHeading>Feels loved when</SectionHeading>
+                  <SectionHeading>How I feel loved</SectionHeading>
                   <Pills items={loveReceive} icon="♥" />
                 </div>
               )}

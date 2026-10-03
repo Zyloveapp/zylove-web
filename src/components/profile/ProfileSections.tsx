@@ -230,21 +230,17 @@ export default function ProfileSections({
 
       {lookingFor}
 
-      {(loveGive.length > 0 || loveReceive.length > 0) && (
+      {loveGive.length > 0 && (
         <section>
-          <SectionHeading>Love languages</SectionHeading>
-          {loveGive.length > 0 && (
-            <>
-              <p className="mb-2 text-sm text-white/50">Gives 💝</p>
-              <Pills items={loveGive} />
-            </>
-          )}
-          {loveReceive.length > 0 && (
-            <>
-              <p className={`mb-2 text-sm text-white/50 ${loveGive.length > 0 ? 'mt-4' : ''}`}>Receives 💞</p>
-              <Pills items={loveReceive} />
-            </>
-          )}
+          <SectionHeading>How I show love</SectionHeading>
+          <Pills items={loveGive} />
+        </section>
+      )}
+
+      {loveReceive.length > 0 && (
+        <section>
+          <SectionHeading>How I feel loved</SectionHeading>
+          <Pills items={loveReceive} />
         </section>
       )}
 
