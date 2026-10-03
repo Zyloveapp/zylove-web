@@ -11,22 +11,6 @@ function expiresIn(expiresAt: number): string {
   return hours >= 1 ? `Expires in ${hours}h` : `Expires in ${Math.max(1, Math.floor(ms / 60_000))}m`
 }
 
-const INTENT_PILL: Record<string, string> = {
-  spark: 'Here for something real',
-  play: 'Here for a good time',
-  open: 'Open to connection',
-}
-
-function IntentPill({ intent }: { intent: unknown }) {
-  const label = typeof intent === 'string' ? INTENT_PILL[intent] : undefined
-  if (!label) return null
-  return (
-    <span className="inline-block rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-[11px] text-white/70">
-      {label}
-    </span>
-  )
-}
-
 function ScorePill({ score, mode }: { score: number; mode: Mode }) {
   const tone = mode === 'play' ? 'border-[#E03131]/40 bg-[#E03131]/15 text-red-300' : 'border-[#1B4FD8]/40 bg-[#1B4FD8]/15 text-[#9DB4FF]'
   return <span className={`shrink-0 rounded-full border px-2.5 py-1 text-sm font-bold ${tone}`}>{Math.round(score)}%</span>
@@ -128,10 +112,7 @@ export default function SparksList({ sparks, mode, matchedUids, onSelect, scores
             {revealed && s.profile.locationLabel && (
               <span className="mt-0.5 block truncate text-sm text-white/50">📍 {s.profile.locationLabel}</span>
             )}
-            <span className="mt-2 flex flex-wrap items-center gap-2">
-              <IntentPill intent={s.profile.intent} />
-              {matched && <span className="text-[11px] text-emerald-300">You're linked</span>}
-            </span>
+            {matched && <span className="mt-2 block text-[11px] text-emerald-300">You're linked</span>}
             <span className="mt-1 block text-xs text-white/35">
               {s.likedAt > 0 && relativeTime(s.likedAt)}
               {s.expiresAt !== null && <span className="ml-2 text-amber-400">{expiresIn(s.expiresAt)}</span>}
@@ -230,9 +211,6 @@ export function CuriousList({
           {v.profile.locationLabel && (
             <span className="mt-0.5 block truncate text-sm text-white/50">📍 {v.profile.locationLabel}</span>
           )}
-          <span className="mt-2 block">
-            <IntentPill intent={v.profile.intent} />
-          </span>
         </Card>
       ))}
     </ul>

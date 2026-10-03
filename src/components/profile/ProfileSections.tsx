@@ -12,9 +12,8 @@ import {
   kidsDetail,
   lifestyleLabel,
   loveLanguageLabel,
-  openToLabel,
   personalityLabel,
-  profileGenderLabel,
+  identityLine,
   promptQuestion,
   relationshipStatusLabel,
   valueLabel,
@@ -115,20 +114,17 @@ export function PhotoHero({ photos, name, glow }: { photos: string[]; name: stri
 export function ProfileHeader({ profile: p, nameFallback }: { profile: DiscoverProfile; nameFallback: string }) {
   const name = p.displayName ?? ''
   const age = displayAge(p)
-  const gender = profileGenderLabel(p)
+  const identity = identityLine(p)
   const isFounder = (p as Record<string, unknown>).isFounder === true
   const tier = (p as Record<string, unknown>).zyloveScoreTier
   const bodyType = p.bodyType && p.bodyType !== 'prefer_not_to_say' ? bodyTypeLabel(p.bodyType) : null
   return (
     <header>
-      <div className="flex flex-wrap items-baseline gap-x-2">
-        <h1 className="text-3xl font-bold">
-          {name || nameFallback}
-          {age !== null && <span className="font-normal text-white/70">, {age}</span>}
-        </h1>
-        {gender && <span className="text-white/60">· {gender}</span>}
-        {p.pronouns && <span className="text-sm text-white/40">{p.pronouns}</span>}
-      </div>
+      <h1 className="text-3xl font-bold">
+        {name || nameFallback}
+        {age !== null && <span className="font-normal text-white/70">, {age}</span>}
+      </h1>
+      {identity && <p className="mt-1 text-sm text-white/50">{identity}</p>}
       {badgeTier(tier) && (
         <div className="mt-2 [&>span]:px-3 [&>span]:py-1 [&>span]:text-sm">
           <TierBadge tier={tier} />
@@ -202,8 +198,6 @@ export default function ProfileSections({
       )}
 
       <HowIOperate answers={goDeeperAnswers(p)} />
-
-      {list(p.openTo).length > 0 && <Pills items={list(p.openTo).map(openToLabel)} tone="cobalt" />}
 
       <TagSection title="Personality" items={list(p.personalityTraits).map(personalityLabel)} />
       <TagSection title="Lifestyle" items={list(p.lifestyleTags).map(lifestyleLabel)} />

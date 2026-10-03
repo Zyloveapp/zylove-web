@@ -7,6 +7,7 @@ import FounderBadge from '../FounderBadge'
 import { PlayDetailsBody } from '../profile/PlayProfileSections'
 import {
   goDeeperRows,
+  identityLine,
   lifeDetails,
   lifestyleLabel,
   loveLanguageLabel,
@@ -65,6 +66,7 @@ export default function ProfileDetails({
   const loveGive = (profile.loveLangGive ?? []).map(loveLanguageLabel)
   const loveReceive = (profile.loveLangReceive ?? []).map(loveLanguageLabel)
   const details = lifeDetails(profile)
+  const identity = identityLine(profile)
 
   return (
     <div className="space-y-8">
@@ -78,6 +80,7 @@ export default function ProfileDetails({
             {mode === 'play' ? '🔴 Play' : '🔵 Spark'}
           </span>
         </div>
+        {identity && <p className="mt-1 text-sm text-white/50">{identity}</p>}
         <div className="mt-2 flex flex-wrap gap-2 empty:hidden">
           <FounderBadge profile={profile} />
           <TierBadge tier={(profile as Record<string, unknown>).zyloveScoreTier} />

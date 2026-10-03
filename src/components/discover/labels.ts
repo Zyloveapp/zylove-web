@@ -60,6 +60,19 @@ export function profileGenderLabel(p: DiscoverProfile): string | null {
   return g === 'self_describe' ? p.genderSelfDescribe?.trim() || null : genderLabel(g)
 }
 
+// Shown under the name: gender only when it isn't man/woman (implied), then
+// pronouns — e.g. "non-binary · they/them", or just "she/her".
+export function identityLine(p: DiscoverProfile): string | null {
+  const raw: unknown = p.genderIdentity
+  const g = Array.isArray(raw) ? raw[0] : raw
+  const label = typeof g === 'string' && g !== 'man' && g !== 'woman' ? profileGenderLabel(p) : null
+  // Self-described text is shown as the person wrote it.
+  const gender = g === 'self_describe' ? label : (label?.toLowerCase() ?? null)
+  const pronouns = p.pronouns?.trim() || null
+  const parts = [gender, pronouns].filter((x): x is string => Boolean(x))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 export const relationshipStatusLabel = (k: string) => labelOf(RELATIONSHIP_STATUS_LABELS, k)
 
 function emojiLabel(record: object, k: string): string {
@@ -106,7 +119,6 @@ export function kidsDetail(p: DiscoverProfile): string | null {
 }
 
 export function lifeDetails(p: DiscoverProfile): { label: string; value: string }[] {
-  const openTo = (p.openTo ?? []).map((k) => labelOf(OPEN_TO_LABELS, k)).join(', ')
   const kids = kidsDetail(p)
   const skip = (k: string | undefined) => !k || k === 'prefer_not_to_say'
   return [
@@ -114,7 +126,6 @@ export function lifeDetails(p: DiscoverProfile): { label: string; value: string 
       label: 'Relationship status',
       value: labelOf(RELATIONSHIP_STATUS_LABELS, p.relationshipStatus ?? ''),
     },
-    openTo && { label: 'Open to', value: openTo },
     kids && { label: 'Kids', value: kids },
     !skip(p.religion) && { label: 'Religion', value: labelOf(RELIGION_LABELS, p.religion ?? '') },
     !skip(p.politicalView) && { label: 'Politics', value: labelOf(POLITICAL_VIEW_LABELS, p.politicalView ?? '') },
