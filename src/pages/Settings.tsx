@@ -339,19 +339,6 @@ export default function Settings() {
           {notice && <p className="px-5 pb-4 text-sm text-emerald-300">{notice}</p>}
           <button
             type="button"
-            onClick={() => navigate('/settings/report')}
-            className="flex w-full border-t border-white/5 items-center justify-between px-5 py-4 text-left hover:bg-white/[0.03]"
-          >
-            <span>
-              <span className="block font-medium">Report a past connection</span>
-              <span className="block text-sm text-white/50">Anyone you matched with in the last 90 days.</span>
-            </span>
-            <span className="text-white/30" aria-hidden>
-              ›
-            </span>
-          </button>
-          <button
-            type="button"
             onClick={handleSignOut}
             className="w-full border-t border-white/5 px-5 py-4 text-left font-medium text-red-400 hover:bg-white/[0.03]"
           >
