@@ -204,13 +204,17 @@ function cityOf(label: string | undefined): string | null {
   return city || null
 }
 
-// Bots only appear in their own city's feed ("Austin, TX" → Austin). Real
-// people are never filtered by city, and a viewer with no city sees all bots.
+// Bots only appear in their own city's feed ("Austin, TX" → Austin). Austin
+// bots count the whole Austin area (Round Rock, Georgetown, …) by the
+// viewer's coordinates, not just the city name. Real people are never
+// filtered by city, and a viewer with no city sees all bots.
 function botInMyCity(me: DiscoverProfile, p: DiscoverProfile): boolean {
   if (!p.uid.startsWith(BOT_PREFIX)) return true
   const botCity = cityOf(p.locationLabel)
+  if (!botCity) return true
+  if (botCity === 'austin' && hasLocation(me) && isAustinArea(me.locationLat, me.locationLng)) return true
   const myCity = cityOf(me.locationLabel)
-  return !botCity || !myCity || botCity === myCity
+  return !myCity || botCity === myCity
 }
 
 function hasLocation(p: DiscoverProfile): p is DiscoverProfile & { locationLat: number; locationLng: number } {
