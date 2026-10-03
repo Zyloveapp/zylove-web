@@ -1,4 +1,5 @@
-import { auth } from './firebase';
+import { auth, functions } from './firebase';
+import { httpsCallable } from 'firebase/functions';
 import { signInWithPhoneNumber, RecaptchaVerifier, type ConfirmationResult, type UserCredential } from 'firebase/auth';
 
 let recaptchaVerifier: RecaptchaVerifier | null = null;
@@ -49,4 +50,19 @@ export function clearRecaptcha(): void {
   recaptchaVerifier?.clear();
   recaptchaVerifier = null;
   recaptchaInitialized = false;
+}
+
+// Twilio Lookup line-type check before the OTP is sent (VoIP, virtual and
+// landline numbers are blocked). Fails open: if the check itself can't run,
+// sign-in proceeds.
+export async function checkPhoneNumber(phoneNumber: string): Promise<boolean> {
+  try {
+    const { data } = await httpsCallable<{ phoneNumber: string }, { allowed: boolean; reason?: string }>(
+      functions,
+      'validatePhoneNumber',
+    )({ phoneNumber });
+    return data.allowed !== false;
+  } catch {
+    return true;
+  }
 }

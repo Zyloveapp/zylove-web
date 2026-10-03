@@ -13,6 +13,42 @@ const twilioFromNumber = defineSecret('TWILIO_FROM_NUMBER')
 // Bind these on every function that calls sendSMS.
 export const SMS_SECRETS = [twilioAccountSid, twilioAuthToken, twilioFromNumber]
 
+// Lookup only needs the account credentials.
+export const LOOKUP_SECRETS = [twilioAccountSid, twilioAuthToken]
+
+// Twilio Lookup v2 line type ('mobile', 'landline', 'fixedVoip',
+// 'nonFixedVoip', 'tollFree', 'personal', …) or null when unknown or the
+// lookup failed. Callers treat null as "allow". ~$0.01 per call.
+export async function lookupLineType(phoneNumber: string): Promise<string | null> {
+  try {
+    const sid = twilioAccountSid.value()
+    const token = twilioAuthToken.value()
+    if (!sid || !token) {
+      logger.warn('lookupLineType: Twilio secrets not configured, skipping')
+      return null
+    }
+    const url = `https://lookups.twilio.com/v2/PhoneNumbers/${encodeURIComponent(phoneNumber)}?Fields=line_type_intelligence`
+    const res = await fetch(url, {
+      headers: { Authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}` },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) {
+      logger.warn('lookupLineType: Twilio Lookup error', { status: res.status })
+      return null
+    }
+    const body: unknown = await res.json()
+    const lti =
+      typeof body === 'object' && body !== null && 'line_type_intelligence' in body
+        ? (body as { line_type_intelligence: unknown }).line_type_intelligence
+        : null
+    const type = typeof lti === 'object' && lti !== null && 'type' in lti ? (lti as { type: unknown }).type : null
+    return typeof type === 'string' ? type : null
+  } catch (err) {
+    logger.warn('lookupLineType failed', { message: err instanceof Error ? err.message : String(err) })
+    return null
+  }
+}
+
 export type SmsPreference = 'newSpark' | 'newMessage' | 'newMatch' | 'quietNudge'
 export type SmsMode = 'spark' | 'play'
 

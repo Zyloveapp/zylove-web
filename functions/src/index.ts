@@ -12,7 +12,7 @@ import { initializeApp } from 'firebase-admin/app'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 import { buildBioPrompt, parseBioRequest } from './bioPrompt'
 import { buildPlayBioPrompt, parsePlayBioRequest } from './playBioPrompt'
-import { SMS_SECRETS, claimSparkSmsSlot, nameFor, sendSMS, smsTarget } from './sms'
+import { LOOKUP_SECRETS, SMS_SECRETS, claimSparkSmsSlot, lookupLineType, nameFor, sendSMS, smsTarget } from './sms'
 
 export { assignFounderBadge, onLaunchConfigUpdated } from './founders'
 export { ensureSortKey } from './discovery'
@@ -1371,5 +1371,42 @@ export const nudgeQuietChats = onSchedule(
       if (nudged) await doc.ref.update({ lastNudgeSmsAt: FieldValue.serverTimestamp() })
     }
     logger.info('nudgeQuietChats: done', { candidates: quiet.size, sent })
+  },
+)
+
+// ─── validatePhoneNumber ─────────────────────────────────────────────────────
+
+// Twilio Lookup v2 reports camelCase types; the other spellings are kept in
+// case older/alternate values show up.
+const BLOCKED_LINE_TYPES = new Set([
+  'landline',
+  'fixedVoip',
+  'nonFixedVoip',
+  'tollFree',
+  'voip',
+  'virtual',
+  'toll-free',
+  'non-fixed-voip',
+])
+
+// Runs before the OTP is sent so VoIP / virtual / landline numbers can't sign
+// up. Callable without auth (it gates sign-in). Fails open: if Lookup errors
+// or returns no type, the number is allowed.
+export const validatePhoneNumber = onCall(
+  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: LOOKUP_SECRETS },
+  async (request): Promise<{ allowed: boolean; reason?: string }> => {
+    const data: unknown = request.data
+    const phoneNumber =
+      typeof data === 'object' && data !== null && 'phoneNumber' in data ? (data as { phoneNumber: unknown }).phoneNumber : null
+    if (typeof phoneNumber !== 'string' || !/^\+[1-9]\d{6,14}$/.test(phoneNumber)) {
+      throw new HttpsError('invalid-argument', 'phoneNumber must be E.164, e.g. +15551234567')
+    }
+
+    const lineType = await lookupLineType(phoneNumber)
+    if (lineType !== null && BLOCKED_LINE_TYPES.has(lineType)) {
+      logger.info('validatePhoneNumber: blocked', { lineType })
+      return { allowed: false, reason: 'voip' }
+    }
+    return { allowed: true }
   },
 )

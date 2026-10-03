@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { signInWithEmailAndPassword, type ConfirmationResult } from 'firebase/auth'
 import { FirebaseError } from 'firebase/app'
-import { clearRecaptcha, confirmOtp, initRecaptcha, sendOtp } from '../services/auth'
+import { checkPhoneNumber, clearRecaptcha, confirmOtp, initRecaptcha, sendOtp } from '../services/auth'
 import { auth } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import PublicFooter from '../components/public/PublicFooter'
@@ -79,6 +79,8 @@ function SignInCard() {
   const [confirmation, setConfirmation] = useState<ConfirmationResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  // Which step of sending a code is running, for the button label.
+  const [sendStep, setSendStep] = useState<'verifying' | 'sending'>('sending')
 
   // Dev-only shortcut past phone auth. Defined behind the DEV check so the
   // handler and its credentials are dropped from production builds entirely.
@@ -119,6 +121,12 @@ function SignInCard() {
 
     setSubmitting(true)
     try {
+      setSendStep('verifying')
+      if (!(await checkPhoneNumber(e164))) {
+        setError("This number type isn't supported. Please use a mobile phone number to sign up for Zylove.")
+        return
+      }
+      setSendStep('sending')
       setConfirmation(await sendOtp(e164))
       setCode('')
     } catch (err) {
@@ -195,7 +203,7 @@ function SignInCard() {
             disabled={submitting}
             className="w-full rounded-xl bg-[#1B4FD8] px-4 py-3 font-semibold text-white transition-colors hover:bg-[#1B4FD8]/90"
           >
-            {submitting ? 'Sending…' : 'Send code'}
+            {submitting ? (sendStep === 'verifying' ? 'Verifying number…' : 'Sending…') : 'Send code'}
           </button>
         </form>
       ) : (
