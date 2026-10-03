@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore'
 import { DEFAULT_SCORE, subscribeScore, type ScoreDetail } from '../services/zyloveScore'
 import { SPARK_PERKS, TIER_META, getUnlockedPerks, type ZyloveScoreTier } from '../types/zyloveScore'
 import { REVIEW_CATEGORY_DEFS } from '../types/reviewCategories'
+import { PaywallCard, useCanAccess } from '../components/PaywallGate'
 
 // Web palette for the ring and tier label.
 const TIER_COLOR: Record<ZyloveScoreTier, string> = {
@@ -70,6 +71,7 @@ type Loaded = { uid: string; score: ScoreDetail }
 export default function ZyloveScore() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const [loaded, setLoaded] = useState<Loaded | null>(null)
+  const allowed = useCanAccess('zylove_score')
 
   useEffect(() => {
     if (!uid) return
@@ -83,7 +85,38 @@ export default function ZyloveScore() {
 
   const page = 'min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] bg-gray-950 text-white'
 
-  if (loaded?.uid !== uid) {
+  // Locked: a blurred ring and what the score is, never the user's own number.
+  if (allowed === false) {
+    return (
+      <div className={page}>
+        <div className="mx-auto max-w-xl space-y-6 px-4 py-6">
+          <header className="flex items-center justify-between">
+            <Link to="/profile" className="text-xl text-white/50 hover:text-white" aria-label="Back to profile">
+              ←
+            </Link>
+            <h1 className="text-xl font-bold">Your Zylove Score</h1>
+            <span className="w-5" aria-hidden />
+          </header>
+          <PaywallCard
+            feature="zylove_score"
+            teaser={
+              <div className="flex flex-col items-center gap-4">
+                <div className="relative select-none blur-md" aria-hidden>
+                  <ScoreRing score={78} color={TIER_COLOR.trusted} />
+                </div>
+                <p className="text-sm text-white/50">
+                  Your score is built from anonymous reviews by people you've connected with — how you communicate,
+                  respect boundaries and show up. Higher tiers unlock perks and a glow on your profile.
+                </p>
+              </div>
+            }
+          />
+        </div>
+      </div>
+    )
+  }
+
+  if (loaded?.uid !== uid || allowed === null) {
     return (
       <div className={`flex items-center justify-center ${page}`}>
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />

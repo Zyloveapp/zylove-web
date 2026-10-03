@@ -173,9 +173,16 @@ const TRUST_DEFAULTS = {
   sparkScore: 50,
 } as const
 
+// Women and other non-male identities get lifetime Elite on the web ('nonbinary'
+// is how it's stored). Mobile still elevates only woman / trans_woman.
+const ALWAYS_ELITE_IDENTITIES = ['woman', 'trans_woman', 'nonbinary', 'non_binary', 'genderfluid', 'agender', 'self_describe']
+const TRIAL_MS = 30 * 24 * 60 * 60 * 1000
+
 // Fills in whichever trust/safety fields are missing on the caller's own
 // users/{uid} doc. Only missing fields are written, so values set elsewhere
 // (e.g. Elite from a founder code) are never overwritten. Idempotent.
+// Also starts the 30-day trial for anyone without one — existing users too,
+// since Explore calls this on every load.
 export const initUserDefaults = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
@@ -190,11 +197,20 @@ export const initUserDefaults = onCall(
     const missing: Record<string, unknown> = Object.fromEntries(
       Object.entries(TRUST_DEFAULTS).filter(([field]) => data[field] === undefined),
     )
+    if (data.subscriptionTier === undefined) {
+      const gender: unknown = Array.isArray(data.genderIdentity) ? data.genderIdentity[0] : data.genderIdentity
+      const elite = data.isFounder === true || (typeof gender === 'string' && ALWAYS_ELITE_IDENTITIES.includes(gender))
+      missing.subscriptionTier = elite ? 'elite' : 'free'
+    }
+    if (data.trialStartedAt === undefined) {
+      missing.trialStartedAt = FieldValue.serverTimestamp()
+      missing.trialEndsAt = Timestamp.fromMillis(Date.now() + TRIAL_MS)
+    }
     // Explore pool position (see discovery.ts): set once, never changed.
     if (typeof data.sortKey !== 'number') missing.sortKey = Math.random()
     if (Object.keys(missing).length > 0) {
       await ref.set(missing, { merge: true })
-      logger.info('initUserDefaults: filled missing trust fields', { fields: Object.keys(missing) })
+      logger.info('initUserDefaults: filled missing fields', { fields: Object.keys(missing) })
     }
     return { success: true }
   },
@@ -1224,6 +1240,7 @@ export const getCuriousVisitors = onCall(
 export { botTypingStart, botTypingStop } from './botTyping'
 export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate } from './behavior'
 export { markChatPhotoViewed, sweepChatPhotos } from './photos'
+export { checkTrialStatus } from './trial'
 export { acceptPhotoConsent, getBlockedUsers, onBeforeSignIn, reportAndBan, unblockMember } from './trust'
 
 // ─── SMS notifications ───────────────────────────────────────────────────────

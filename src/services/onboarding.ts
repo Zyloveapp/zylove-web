@@ -237,6 +237,10 @@ export async function saveSparkOnboarding(
     aiPhotoScanningConsent: true,
   }
 
+  // First onboarding only; a refresh leaves the original answers alone.
+  const intention =
+    d.onboardingPath !== null ? { intentionAnswers: d.intentionAnswers, onboardingPath: d.onboardingPath } : {}
+
   const batch = writeBatch(db)
 
   if (existing.exists()) {
@@ -254,6 +258,7 @@ export async function saveSparkOnboarding(
         ...matchable,
         ...deletions,
         ...(keys.changed && { publicKey: keys.publicKey }),
+        ...intention,
         ...meta,
       },
       { merge: true },
@@ -277,6 +282,7 @@ export async function saveSparkOnboarding(
       phoneVerified: false,
       publicKey: keys.publicKey,
       createdAt: now,
+      ...intention,
       ...meta,
     }
     batch.set(rootRef, profile)

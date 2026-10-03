@@ -18,6 +18,7 @@ import { compareProfiles, whyThisWorks, type ProfileFacts } from './compare'
 import { DEALBREAKER_LABELS, type Dealbreaker } from '../../types/profile'
 import type { Mode } from '../../store/modeStore'
 import { discoverTheme } from './theme'
+import { PaywallCard, useCanAccess } from '../PaywallGate'
 
 // Up to 4 categories per mode, highest-weighted first (see scoring weights).
 const CATEGORIES: Record<Mode, { key: string; label: string }[]> = {
@@ -260,6 +261,8 @@ function RevealedScore({
   breakTheIce: ReactNode
 }) {
   const theme = discoverTheme(mode)
+  // Free: the score only; the breakdown, report and starters are Spark+.
+  const fullAccess = useCanAccess('compatibility')
   // Start hidden only when freshly revealed, then fade/slide in on the next frame.
   const [visible, setVisible] = useState(!animate)
   useEffect(() => {
@@ -304,7 +307,7 @@ function RevealedScore({
     <div
       className={`mt-4 transition-all duration-500 ${visible ? 'translate-y-0 opacity-100 blur-0' : 'translate-y-1 opacity-0 blur-sm'}`}
     >
-      {archetype && (
+      {fullAccess && archetype && (
         <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/5 p-4">
           <p className={`text-sm font-semibold ${isPlay ? 'text-[#E03131]' : 'text-[#1B4FD8]'}`}>
             {isPlay ? '🔥' : '✦'} {archetype.label}
@@ -320,7 +323,9 @@ function RevealedScore({
       {qualifier && <p className="mt-0.5 text-xs text-white/50">{qualifier}</p>}
       <p className="mt-1 text-xs text-white/35">{score.deep ? '✦ Deep compatibility score' : 'Compatibility estimate'}</p>
 
-      {bars.length > 0 && (
+      {fullAccess === false && <PaywallCard feature="compatibility" />}
+
+      {fullAccess && bars.length > 0 && (
         <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
           {bars.map((b) => (
             <div key={b.key}>
@@ -336,7 +341,7 @@ function RevealedScore({
         </div>
       )}
 
-      {playLines && playLines.length > 0 ? (
+      {!fullAccess ? null : playLines && playLines.length > 0 ? (
         <div className="mt-6">
           <p className="text-[11px] uppercase tracking-widest text-white font-semibold mb-4">Why this works</p>
           <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -364,9 +369,9 @@ function RevealedScore({
         </div>
       )}
 
-      {comparison}
+      {fullAccess && comparison}
 
-      {dealbreakers.length > 0 && (
+      {fullAccess && dealbreakers.length > 0 && (
         <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3">
           <p className="text-sm text-amber-400">
             You flagged a dealbreaker — {dealbreakerLabel(dealbreakers[0])} — this is your call to make.
@@ -374,7 +379,7 @@ function RevealedScore({
         </div>
       )}
 
-      {breakTheIce}
+      {fullAccess && breakTheIce}
     </div>
   )
 }

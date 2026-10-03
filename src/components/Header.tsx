@@ -9,6 +9,9 @@ import { setVisibility, subscribeVisibility, type Visibility, type VisibilitySta
 import PlayPinFlow from './PlayPinFlow'
 import { subscribeSmsSettings } from '../services/notifications'
 import ModeTransition from './ModeTransition'
+import { PaywallModal } from './PaywallGate'
+import { useSubscriptionStore } from '../store/subscriptionStore'
+import { canAccess } from '../services/subscription'
 
 const VISIBILITY: { value: Visibility; label: string; pill: string; description: string; dot: string; tone: string }[] = [
   {
@@ -140,6 +143,11 @@ export default function Header() {
   const [pinFlow, setPinFlow] = useState(false)
   const [playSetup, setPlaySetup] = useState(false)
   const [checkingPlay, setCheckingPlay] = useState(false)
+  const [playPaywall, setPlayPaywall] = useState(false)
+  const tier = useSubscriptionStore((s) => (s.uid === uid ? s.tier : null))
+  const trialDaysLeft = useSubscriptionStore((s) => (s.uid === uid ? s.daysLeft : null))
+  // Last week of the trial: a quiet nudge under the header.
+  const showTrialBanner = tier === 'trial' && trialDaysLeft !== null && trialDaysLeft <= 7
   // The mode being switched to while its transition plays.
   const [transition, setTransition] = useState<'spark' | 'play' | null>(null)
 
@@ -174,11 +182,13 @@ export default function Header() {
   const current = visibility?.[mode] ?? null
   const dot = VISIBILITY.find((o) => o.value === current)
 
-  // Into Play: needs a Play profile, then the PIN. Back to Spark needs neither.
+  // Into Play: needs Play access (Elite or trial), a Play profile, then the
+  // PIN. Back to Spark needs none of it.
   async function togglePill() {
     if (transition) return
     if (isPlay) return setTransition('spark')
     if (checkingPlay) return
+    if (tier !== null && !canAccess(tier, 'play_mode')) return setPlayPaywall(true)
     setCheckingPlay(true)
     // A failed read shouldn't lock anyone out of Play: fall through to the PIN.
     const hasPlay = await getDoc(doc(db, `users/${uid}/playProfile/data`))
@@ -272,6 +282,17 @@ export default function Header() {
           }}
         />
       )}
+
+      {showTrialBanner && (
+        <div className="absolute inset-x-0 top-full border-b border-amber-500/20 bg-amber-500/10 px-4 py-1.5 text-center text-xs text-amber-200 backdrop-blur">
+          ✦ {trialDaysLeft} {trialDaysLeft === 1 ? 'day' : 'days'} left in your free trial ·{' '}
+          <Link to="/upgrade" className="font-semibold underline underline-offset-2 hover:text-white">
+            Upgrade
+          </Link>
+        </div>
+      )}
+
+      {playPaywall && <PaywallModal feature="play_mode" onClose={() => setPlayPaywall(false)} />}
 
       {pinFlow && (
         <PlayPinFlow

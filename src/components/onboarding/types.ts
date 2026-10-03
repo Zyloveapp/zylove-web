@@ -99,6 +99,10 @@ export interface OnboardingDraft {
   seekingTraits: SeekingTrait[]
   dealbreakers: Dealbreaker[]
   intent: DatingIntent | null
+  // "What are you hoping to find?" answers and the path they led to. Empty /
+  // null on a profile refresh (the intention steps only run once).
+  intentionAnswers: string[]
+  onboardingPath: OnboardingPath | null
   radiusMiles: number
   ageMin: number
   ageMax: number
@@ -110,6 +114,8 @@ export interface OnboardingDraft {
   bio: string
   bioGeneratedAt: number | null
 }
+
+export type OnboardingPath = 'spark' | 'play' | 'both' | 'unsure'
 
 export const INITIAL_DRAFT: OnboardingDraft = {
   termsAccepted: false,
@@ -144,6 +150,8 @@ export const INITIAL_DRAFT: OnboardingDraft = {
   seekingTraits: [],
   dealbreakers: [],
   intent: null,
+  intentionAnswers: [],
+  onboardingPath: null,
   radiusMiles: 25,
   ageMin: 21,
   ageMax: 45,

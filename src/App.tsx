@@ -29,6 +29,8 @@ import ZyloveScore from './pages/ZyloveScore'
 import Settings from './pages/Settings'
 import ReportPastConnection from './pages/ReportPastConnection'
 import BlockedUsers from './pages/BlockedUsers'
+import Upgrade from './pages/Upgrade'
+import SubscriptionSync from './components/SubscriptionSync'
 import Chat from './pages/Chat'
 
 // Protected pages share the nav. Leaves room for the mobile bottom bar.
@@ -76,6 +78,7 @@ function AppLayout() {
 export default function App() {
   return (
     <BrowserRouter>
+      <SubscriptionSync />
       <Routes>
         {/* Public: landing (signed-in users are sent to /discover) and static pages. */}
         <Route path="/" element={<Login />} />
@@ -85,6 +88,7 @@ export default function App() {
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/community" element={<Community />} />
         <Route path="/contact" element={<Contact />} />
+        <Route path="/upgrade" element={<Upgrade />} />
         <Route path="/onboarding" element={<Onboarding />} />
         <Route element={<AuthGuard />}>
           {/* Full-screen flow: no header or nav. */}

@@ -30,7 +30,8 @@ import {
   ValuesStep,
   WeekendStep,
 } from '../components/onboarding/AboutSteps'
-import { DiscoveryStep, IntentStep, NeedsStep, PhysicalPrefsStep } from '../components/onboarding/SeekingSteps'
+import { DiscoveryStep, NeedsStep, PhysicalPrefsStep } from '../components/onboarding/SeekingSteps'
+import { IntentionStep, RecommendationScreen } from '../components/onboarding/IntentionSteps'
 import { GoDeeperIntro, GoDeeperQuestion } from '../components/onboarding/GoDeeperSteps'
 import {
   CONFLICT_STYLE_LABELS,
@@ -47,6 +48,7 @@ import {
   parseBirthday,
   releasePhotoPreview,
   type OnboardingDraft,
+  type OnboardingPath,
 } from '../components/onboarding/types'
 
 // Founder badge check after the final save, and how long the celebration shows.
@@ -58,6 +60,8 @@ const STEPS = [
   { id: 'name', title: 'Name' },
   { id: 'photos', title: 'Photos' },
   { id: 'gender', title: 'Gender' },
+  { id: 'intention', title: 'What you want' },
+  { id: 'recommendation', title: 'Your path' },
   { id: 'attractedTo', title: 'Attraction' },
   { id: 'relationship', title: 'Status' },
   { id: 'bodyType', title: 'Body type' },
@@ -73,7 +77,6 @@ const STEPS = [
   { id: 'kids', title: 'Kids' },
   { id: 'physicalPrefs', title: 'Physical preferences' },
   { id: 'needs', title: 'What you need' },
-  { id: 'intent', title: 'Intent' },
   { id: 'discovery', title: 'Who you see' },
   { id: 'prompts', title: 'Prompts' },
   { id: 'goDeeper', title: 'Go Deeper' },
@@ -86,10 +89,22 @@ const STEPS = [
 
 type StepId = (typeof STEPS)[number]['id']
 
-// A refresh skips terms (already accepted) and, once identity is locked,
-// gender (it can't change).
-function stepsFor(refresh: boolean, identityLocked: boolean) {
-  return STEPS.filter((s) => !(refresh && s.id === 'terms') && !(identityLocked && s.id === 'gender'))
+// The Play path builds a quick Spark profile — the basics plus what matching
+// needs (who they're into, status, who they see) — then goes to Play setup.
+const PLAY_PATH_STEPS: StepId[] = [
+  'terms', 'name', 'photos', 'gender', 'intention', 'recommendation',
+  'attractedTo', 'relationship', 'discovery', 'bio', 'review',
+]
+
+// A refresh skips terms (already accepted), the intention steps (first run
+// only) and, once identity is locked, gender (it can't change).
+function stepsFor(refresh: boolean, identityLocked: boolean, path: OnboardingPath | null) {
+  return STEPS.filter(
+    (s) =>
+      !(refresh && (s.id === 'terms' || s.id === 'intention' || s.id === 'recommendation')) &&
+      !(identityLocked && s.id === 'gender') &&
+      (refresh || path !== 'play' || PLAY_PATH_STEPS.includes(s.id)),
+  )
 }
 
 function isStepValid(
@@ -115,6 +130,8 @@ function isStepValid(
         (d.genderIdentity !== 'self_describe' || d.genderSelfDescribe.trim() !== '') &&
         (!OFF_MAP_GENDER_IDENTITIES.includes(d.genderIdentity) || d.matchableAs.length > 0)
       )
+    case 'intention':
+      return d.intentionAnswers.length > 0 && d.onboardingPath !== null
     case 'attractedTo':
       return d.attractedTo.length > 0
     case 'relationship':
@@ -133,8 +150,6 @@ function isStepValid(
       return d.loveLangReceive.length > 0
     case 'physicalPrefs':
       return d.seekingHeightNoPreference || heightToInches(d.seekingHeightMin) <= heightToInches(d.seekingHeightMax)
-    case 'intent':
-      return d.intent !== null
     case 'discovery':
       return d.ageMin < d.ageMax
     case 'prompts':
@@ -247,7 +262,7 @@ export default function Onboarding() {
   const refreshInfo = refresh && typeof refreshLoad === 'object' ? refreshLoad : null
   const identityLocked = refreshInfo?.locked ?? false
   const maxPhotos = refresh ? MAX_REFRESH_PHOTOS : MAX_PHOTOS
-  const steps = stepsFor(refresh, identityLocked)
+  const steps = stepsFor(refresh, identityLocked, draft.onboardingPath)
   const step = steps[stepIndex]
   const update = (patch: Partial<OnboardingDraft>) => setDraft((d) => ({ ...d, ...patch }))
 
@@ -293,7 +308,9 @@ export default function Onboarding() {
       // A photo still under review (or slow) goes on the profile page, where
       // the notice shows; Discover needs a published photo anyway.
       const finish = () => {
-        if (photoNotices.length > 0) navigate('/profile', { replace: true, state: { flash: photoNotices.join(' ') } })
+        // Play path: straight on to Play setup once the Spark basics are saved.
+        if (!refresh && draft.onboardingPath === 'play') navigate('/play-onboarding', { replace: true })
+        else if (photoNotices.length > 0) navigate('/profile', { replace: true, state: { flash: photoNotices.join(' ') } })
         else if (refresh) navigate('/profile', { replace: true, state: { flash: '✦ Profile refreshed.' } })
         else navigate('/discover', { replace: true })
       }
@@ -333,6 +350,12 @@ export default function Onboarding() {
         return <PhotosStep photos={draft.photos} onChange={(photos) => update({ photos })} maxPhotos={maxPhotos} />
       case 'gender':
         return <GenderStep {...props} />
+      case 'intention':
+        return <IntentionStep {...props} />
+      case 'recommendation':
+        return draft.onboardingPath ? (
+          <RecommendationScreen path={draft.onboardingPath} onContinue={next} onBack={() => setStepIndex((i) => i - 1)} />
+        ) : null
       case 'attractedTo':
         return <AttractedToStep {...props} />
       case 'relationship':
@@ -363,8 +386,6 @@ export default function Onboarding() {
         return <PhysicalPrefsStep {...props} />
       case 'needs':
         return <NeedsStep {...props} />
-      case 'intent':
-        return <IntentStep {...props} />
       case 'discovery':
         return <DiscoveryStep {...props} />
       case 'prompts':
@@ -428,7 +449,10 @@ export default function Onboarding() {
 
   // Steps that render their own primary action instead of the bottom Next.
   const ownsPrimary =
-    (step.id === 'terms' && !draft.termsAccepted) || step.id === 'goDeeper' || step.id === 'review'
+    (step.id === 'terms' && !draft.termsAccepted) ||
+    step.id === 'goDeeper' ||
+    step.id === 'review' ||
+    step.id === 'recommendation'
   const canAdvance = isStepValid(step.id, draft, bioGenerating, identityLocked, maxPhotos)
 
   return (
@@ -471,7 +495,7 @@ export default function Onboarding() {
               disabled={!canAdvance}
               className="flex-1 rounded-lg bg-gray-900 px-4 py-3 font-medium text-white disabled:opacity-40"
             >
-              Next
+              {step.id === 'intention' ? 'Continue →' : 'Next'}
             </button>
           )}
         </div>

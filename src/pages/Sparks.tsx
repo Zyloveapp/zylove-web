@@ -8,6 +8,7 @@ import MatchOverlay, { type NewMatch } from '../components/discover/MatchOverlay
 import { subscribeMatches, type MatchEntry } from '../services/matches'
 import { CURIOUS_MAX, fetchCurious, fetchSentSparks, subscribeSparkQueue, type CuriousResult, type SentSpark, type SparkEntry } from '../services/sparks'
 import { displayScore, fetchCompatibility } from '../services/discover'
+import { PaywallCard, useCanAccess } from '../components/PaywallGate'
 
 type Tab = 'sparks' | 'curious' | 'picks' | 'sent'
 
@@ -42,6 +43,7 @@ export default function Sparks() {
   // Calculated scores for sparks opened this session, keyed by likerUid.
   const [scores, setScores] = useState<{ key: string; map: Map<string, number> }>({ key, map: new Map() })
   const [newMatch, setNewMatch] = useState<NewMatch | null>(null)
+  const sparksAllowed = useCanAccess('sparks')
 
   useEffect(() => {
     if (!uid) return
@@ -142,6 +144,37 @@ export default function Sparks() {
         })
       })
       .catch(() => {})
+  }
+
+  // Free: how many people are interested, never who.
+  if (sparksAllowed === false) {
+    const count = loaded ? loaded.live.length + loaded.viewed.length : null
+    return (
+      <div className="min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] bg-gray-950 px-4 py-8 text-white">
+        <PaywallCard
+          feature="sparks"
+          teaser={
+            <div className="flex flex-col items-center gap-3">
+              <div className="flex -space-x-3" aria-hidden>
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className={`h-12 w-12 rounded-full border-2 border-gray-900 blur-[2px] ${
+                      isPlay ? 'bg-gradient-to-br from-[#E03131]/70 to-white/20' : 'bg-gradient-to-br from-[#1B4FD8]/70 to-white/20'
+                    }`}
+                  />
+                ))}
+              </div>
+              {count !== null && count > 0 && (
+                <p className="text-sm font-semibold">
+                  {count} {count === 1 ? 'person is' : 'people are'} interested in you
+                </p>
+              )}
+            </div>
+          }
+        />
+      </div>
+    )
   }
 
   return (

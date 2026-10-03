@@ -39,6 +39,7 @@ import PhotoConsentBanner from './PhotoConsentBanner'
 import PhotoConsentRequest from './PhotoConsentRequest'
 import PhotoMessage from './PhotoMessage'
 import PhotoPicker from './PhotoPicker'
+import { PaywallModal, useCanAccess } from '../PaywallGate'
 import TypingIndicator from './TypingIndicator'
 import ReviewModal from './ReviewModal'
 import VibeCheckModal from './VibeCheckModal'
@@ -96,6 +97,8 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const [showPhotoPicker, setShowPhotoPicker] = useState(false)
   const [photoNotice, setPhotoNotice] = useState<{ text: string; offerRequest: boolean } | null>(null)
   const [consentBusy, setConsentBusy] = useState(false)
+  const photosAllowed = useCanAccess('photo_sharing')
+  const [photoPaywall, setPhotoPaywall] = useState(false)
   const navigate = useNavigate()
   const reviewChecked = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -316,6 +319,8 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
 
   function handlePhotoTap() {
     setPhotoNotice(null)
+    // Free: 📷 still shows, but sending photos is Spark+.
+    if (photosAllowed === false) return setPhotoPaywall(true)
     if (!partnerCanReceivePhotos) {
       return setPhotoNotice({
         text:
@@ -596,6 +601,8 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           }}
         />
       )}
+
+      {photoPaywall && <PaywallModal feature="photo_sharing" onClose={() => setPhotoPaywall(false)} />}
 
       {showPhotoPicker && (
         <PhotoPicker matchId={matchId} uid={uid} partnerUid={partnerUid} onClose={() => setShowPhotoPicker(false)} />

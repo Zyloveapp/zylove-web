@@ -374,6 +374,9 @@ export default function Settings() {
         </Section>
 
         <Section title="Account">
+          <p className="px-5 pt-2 text-sm text-white/40">
+            ✦ Zylove has two modes — Spark and Play. Tap the mode pill in the header to explore.
+          </p>
           <button
             type="button"
             onClick={() => {
