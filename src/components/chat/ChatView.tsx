@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ENCRYPTION_KEY_MISSING, MAX_MESSAGE_LENGTH, markMessagesRead, sendMessage, subscribeMessages, type ChatMessage } from '../../services/chat'
+import {
+  ENCRYPTION_KEY_MISSING,
+  MAX_MESSAGE_LENGTH,
+  consentCode,
+  markMessagesRead,
+  sendMessage,
+  subscribeMessages,
+  type ChatMessage,
+} from '../../services/chat'
 import { decryptMessage } from '../../services/encryption'
 import { getPrivateKey, keysReady, subscribePublicKey } from '../../services/keys'
 import { markMatchRead, type MatchEntry } from '../../services/matches'
@@ -15,9 +23,22 @@ import {
   reviewed,
 } from '../../services/zyloveScore'
 import { blockMatch, unmatch } from '../../services/safety'
+import {
+  markPhotoBannerSeen,
+  pausePhotoSharing,
+  photoBannerSeen,
+  requestPhotoConsent,
+  respondToPhotoConsent,
+  subscribePhotoConsent,
+  type PhotoConsent,
+} from '../../services/photos'
 import ChatActionsSheet, { type ChatAction } from './ChatActionsSheet'
 import ConversationNudge from './ConversationNudge'
 import FirstChatModal from './FirstChatModal'
+import PhotoConsentBanner from './PhotoConsentBanner'
+import PhotoConsentRequest from './PhotoConsentRequest'
+import PhotoMessage from './PhotoMessage'
+import PhotoPicker from './PhotoPicker'
 import TypingIndicator from './TypingIndicator'
 import ReviewModal from './ReviewModal'
 import VibeCheckModal from './VibeCheckModal'
@@ -70,6 +91,11 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const [showReport, setShowReport] = useState(false)
   // Block/unmatch done: the review card, then back to the list.
   const [exitReview, setExitReview] = useState(false)
+  const [consentState, setConsentState] = useState<{ matchId: string; consent: PhotoConsent | null } | null>(null)
+  const [showPhotoBanner, setShowPhotoBanner] = useState(false)
+  const [showPhotoPicker, setShowPhotoPicker] = useState(false)
+  const [photoNotice, setPhotoNotice] = useState<{ text: string; offerRequest: boolean } | null>(null)
+  const [consentBusy, setConsentBusy] = useState(false)
   const navigate = useNavigate()
   const reviewChecked = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -95,6 +121,11 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
       () => setLoaded({ matchId, messages: [], error: true }),
     )
   }, [matchId, uid])
+
+  useEffect(
+    () => subscribePhotoConsent(matchId, (consent) => setConsentState({ matchId, consent })),
+    [matchId],
+  )
 
   // Hide the first-chat modal if it was already dismissed on mobile.
   useEffect(() => {
@@ -254,6 +285,54 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     }
   }
 
+  // ── Photo sharing ──────────────────────────────────────────────────────────
+  const consent = consentState?.matchId === matchId ? consentState.consent : null
+  // Photos are always encrypted, so both people need real keys — bots and
+  // mobile-only users (stubbed keys) can't receive them.
+  const photosAvailable = !match.ended && !isBotUid(partnerUid) && partnerKey !== null && partnerKey.key !== ''
+  const latestRequestId = useMemo(
+    () => [...(messages ?? [])].reverse().find((m) => consentCode(m) === 'photo_consent_request')?.id ?? null,
+    [messages],
+  )
+
+  async function runConsent(action: () => Promise<void>) {
+    setConsentBusy(true)
+    setPhotoNotice(null)
+    try {
+      await action()
+    } catch {
+      setPhotoNotice({ text: "Couldn't update photo sharing. Try again.", offerRequest: false })
+    } finally {
+      setConsentBusy(false)
+    }
+  }
+
+  function startRequest() {
+    if (photoBannerSeen(matchId)) void runConsent(() => requestPhotoConsent(matchId, uid))
+    else setShowPhotoBanner(true)
+  }
+
+  function handlePhotoTap() {
+    setPhotoNotice(null)
+    switch (consent?.status) {
+      case 'accepted':
+        return setShowPhotoPicker(true)
+      case 'pending':
+        return setPhotoNotice({
+          text:
+            consent.requestedBy === uid
+              ? `Waiting for ${match.name} to accept`
+              : `${match.name} asked to share photos — answer above.`,
+          offerRequest: false,
+        })
+      case 'declined':
+      case 'paused':
+        return setPhotoNotice({ text: 'Photo sharing is paused. Send a new request?', offerRequest: true })
+      default:
+        return startRequest()
+    }
+  }
+
   function leave() {
     onBack?.()
     navigate('/matches')
@@ -326,6 +405,36 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
             <p className="py-10 text-center text-sm text-white/40">Couldn't load messages.</p>
           ) : (
             messages.map((m) => {
+              const code = consentCode(m)
+              if (code) {
+                return (
+                  <PhotoConsentRequest
+                    key={m.id}
+                    code={code}
+                    isMine={m.senderId === uid}
+                    partnerName={match.name}
+                    live={m.id === latestRequestId && consent?.status === 'pending'}
+                    busy={consentBusy}
+                    onRespond={(accept) => void runConsent(() => respondToPhotoConsent(matchId, uid, accept))}
+                  />
+                )
+              }
+              if (m.messageType === 'photo' && m.photo) {
+                const own = m.senderId === uid
+                return (
+                  <div key={m.id} className={`flex flex-col ${own ? 'items-end' : 'items-start'}`}>
+                    <PhotoMessage
+                      matchId={matchId}
+                      messageId={m.id}
+                      photo={m.photo}
+                      isMine={own}
+                      uid={uid}
+                      partnerPublicKey={partnerKey?.key ?? ''}
+                    />
+                    <span className="mt-1 text-xs text-white/30">{messageTime(m.sentAt)}</span>
+                  </div>
+                )
+              }
               if (m.nonce === 'system') {
                 return (
                   <p key={m.id} className="text-center text-xs italic text-white/30">
@@ -363,9 +472,24 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           matchId={matchId}
           partnerUid={partnerUid}
           messages={conversation}
-          suppressed={showFirstChat || showVibeCheck || showReview || showReport || exitReview}
+          suppressed={showFirstChat || showVibeCheck || showReview || showReport || exitReview || showPhotoPicker || showPhotoBanner}
           onPick={setText}
         />
+        {photoNotice && (
+          <div className="mb-2 flex items-center justify-center gap-3 text-sm text-white/60">
+            <span>{photoNotice.text}</span>
+            {photoNotice.offerRequest && (
+              <button
+                type="button"
+                onClick={startRequest}
+                disabled={consentBusy}
+                className="font-semibold text-[#7C9BFF] hover:text-white disabled:opacity-50"
+              >
+                Send request
+              </button>
+            )}
+          </div>
+        )}
         {sendError && <p className="mb-2 text-center text-sm text-red-400">{sendError}</p>}
         {partnerKey?.error && (
           <p className="mb-2 text-center text-sm text-red-400">Couldn't load encryption keys. Reopen the chat to retry.</p>
@@ -374,6 +498,17 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           <p className="py-2 text-center text-sm text-white/40">This connection has ended.</p>
         ) : (
           <form onSubmit={handleSend} className="flex items-end gap-2">
+            {photosAvailable && (
+              <button
+                type="button"
+                onClick={handlePhotoTap}
+                disabled={consentBusy}
+                aria-label="Share a photo"
+                className="rounded-xl px-2 py-2.5 text-xl leading-none text-white/60 hover:bg-white/10 hover:text-white disabled:opacity-40"
+              >
+                📷
+              </button>
+            )}
             <textarea
               rows={1}
               value={text}
@@ -418,7 +553,41 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           }}
           onEnd={endConnection}
           onClose={() => setShowActions(false)}
+          photoAction={
+            !photosAvailable
+              ? undefined
+              : consent?.status === 'accepted'
+                ? {
+                    label: 'Pause photo sharing',
+                    run: () => {
+                      setShowActions(false)
+                      void runConsent(() => pausePhotoSharing(matchId, uid))
+                    },
+                  }
+                : {
+                    label: 'Request photo sharing',
+                    run: () => {
+                      setShowActions(false)
+                      handlePhotoTap()
+                    },
+                  }
+          }
         />
+      )}
+
+      {showPhotoBanner && (
+        <PhotoConsentBanner
+          onCancel={() => setShowPhotoBanner(false)}
+          onProceed={() => {
+            markPhotoBannerSeen(matchId)
+            setShowPhotoBanner(false)
+            void runConsent(() => requestPhotoConsent(matchId, uid))
+          }}
+        />
+      )}
+
+      {showPhotoPicker && (
+        <PhotoPicker matchId={matchId} uid={uid} partnerUid={partnerUid} onClose={() => setShowPhotoPicker(false)} />
       )}
 
       {showReport && (

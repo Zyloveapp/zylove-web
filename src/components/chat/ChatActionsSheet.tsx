@@ -8,11 +8,13 @@ interface ChatActionsSheetProps {
   // Rejects on failure; the sheet shows the error and stays open.
   onEnd: (action: 'block' | 'unmatch') => Promise<void>
   onClose: () => void
+  // Request / pause photo sharing; absent when photos aren't possible here.
+  photoAction?: { label: string; run: () => void }
 }
 
-// The chat header's ••• menu: Report, Block, Unmatch. Block and Unmatch ask
+// The chat header's ••• menu: photo sharing, Report, Block, Unmatch. Block and Unmatch ask
 // for confirmation first.
-export default function ChatActionsSheet({ name, onReport, onEnd, onClose }: ChatActionsSheetProps) {
+export default function ChatActionsSheet({ name, onReport, onEnd, onClose, photoAction }: ChatActionsSheetProps) {
   const [confirm, setConfirm] = useState<'block' | 'unmatch' | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -52,6 +54,11 @@ export default function ChatActionsSheet({ name, onReport, onEnd, onClose }: Cha
       >
         {confirm === null ? (
           <div className="divide-y divide-white/5">
+            {photoAction && (
+              <button type="button" onClick={photoAction.run} className={option}>
+                {photoAction.label}
+              </button>
+            )}
             <button type="button" onClick={onReport} className={option} autoFocus>
               Report {name}
             </button>

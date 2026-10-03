@@ -1,8 +1,8 @@
 import { useEffect } from 'react'
 import { markFirstChatSeen } from './firstChatSeen'
 
-// Mobile's Spark FirstMessageSafetyCard copy, minus the screenshot-blocking
-// item (mobile-only).
+// Mobile's Spark FirstMessageSafetyCard copy, adjusted for the web: browsers
+// can't block screenshots, so that item says so instead.
 const FEATURES: { icon: string; title: string; body: string }[] = [
   {
     icon: '✓',
@@ -17,7 +17,12 @@ const FEATURES: { icon: string; title: string; body: string }[] = [
   {
     icon: '📸',
     title: 'Photo sharing requires consent',
-    body: "Neither of you can send photos until you both agree to it. You're always in control of that.",
+    body: 'Neither of you can send photos until you both agree. Photos are end-to-end encrypted.',
+  },
+  {
+    icon: '⚠',
+    title: 'Screenshots',
+    body: "Web browsers can't block screenshots — only share what you're comfortable with.",
   },
   {
     icon: '✦',

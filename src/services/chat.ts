@@ -25,11 +25,59 @@ export interface ChatMessage {
   sentAt: number | null // null while the server timestamp is pending
   status: string
   messageType: string
+  // Set on encrypted photo messages (messageType 'photo' sent from the web).
+  photo?: PhotoPayload
 }
 
-// Photo-consent protocol messages written by the mobile app. Not rendered here.
-const CONSENT_PREFIX = 'photo_consent'
-const HIDDEN_TYPES = new Set(['consent_request'])
+// Everything needed to fetch and open an encrypted photo, plus its timer.
+// Times are ms; photoExpiresAt is set by markChatPhotoViewed on first view.
+export interface PhotoPayload {
+  storageRef: string | null // null once destructed
+  photoNonce: string
+  encryptedKeyForSender: string
+  encryptedKeyForRecipient: string
+  keyNonceForSender: string
+  keyNonceForRecipient: string
+  timerSeconds: number // 0 = no timer
+  firstViewedAt: number | null
+  photoExpiresAt: number | null
+  destructedAt: number | null
+}
+
+// Photo-consent system messages (same format as mobile): messageType
+// 'consent_request', ciphertext one of these codes, nonce 'system'.
+export const CONSENT_CODES = ['photo_consent_request', 'photo_consent_accepted', 'photo_consent_declined', 'photo_consent_paused'] as const
+export type ConsentCode = (typeof CONSENT_CODES)[number]
+
+export function consentCode(m: ChatMessage): ConsentCode | null {
+  return m.messageType === 'consent_request' && (CONSENT_CODES as readonly string[]).includes(m.ciphertext)
+    ? (m.ciphertext as ConsentCode)
+    : null
+}
+
+function str(v: unknown): string {
+  return typeof v === 'string' ? v : ''
+}
+
+function parsePhoto(data: Record<string, unknown>): PhotoPayload | undefined {
+  // `encrypted` stays after the sweep strips the keys, so a destroyed photo
+  // still renders as one.
+  if (data.messageType !== 'photo' || (data.encrypted !== true && typeof data.encryptedKeyForRecipient !== 'string')) {
+    return undefined
+  }
+  return {
+    storageRef: typeof data.storageRef === 'string' && data.storageRef ? data.storageRef : null,
+    photoNonce: str(data.photoNonce),
+    encryptedKeyForSender: str(data.encryptedKeyForSender),
+    encryptedKeyForRecipient: str(data.encryptedKeyForRecipient),
+    keyNonceForSender: str(data.keyNonceForSender),
+    keyNonceForRecipient: str(data.keyNonceForRecipient),
+    timerSeconds: typeof data.timerSeconds === 'number' && data.timerSeconds > 0 ? data.timerSeconds : 0,
+    firstViewedAt: toMillis(data.firstViewedAt),
+    photoExpiresAt: toMillis(data.photoExpiresAt),
+    destructedAt: toMillis(data.destructedAt),
+  }
+}
 
 export const MAX_MESSAGE_LENGTH = 2000
 
@@ -59,7 +107,7 @@ export function subscribeMessages(
         if (Array.isArray(deletedFor) && deletedFor.includes(uid)) continue
         const ciphertext = typeof data.ciphertext === 'string' ? data.ciphertext : ''
         const messageType = typeof data.messageType === 'string' ? data.messageType : 'text'
-        if (ciphertext.startsWith(CONSENT_PREFIX) || HIDDEN_TYPES.has(messageType)) continue
+        const photo = parsePhoto(data)
         messages.push({
           id: d.id,
           senderId: typeof data.senderId === 'string' ? data.senderId : '',
@@ -68,6 +116,7 @@ export function subscribeMessages(
           sentAt: toMillis(data.sentAt),
           status: typeof data.status === 'string' ? data.status : 'sent',
           messageType,
+          ...(photo ? { photo } : {}),
         })
       }
       onChange(messages)

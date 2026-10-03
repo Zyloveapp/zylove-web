@@ -64,3 +64,75 @@ export function decryptMessage(
     return null
   }
 }
+
+// ─── Photos ──────────────────────────────────────────────────────────────────
+// Each photo gets its own random 32-byte key. The photo bytes are sealed with
+// nacl.secretbox under that key, and the key itself is wrapped with nacl.box
+// twice: once for the recipient and once for the sender (box to their own
+// public key), so both can open it. Storage only ever holds ciphertext.
+
+export interface EncryptedPhoto {
+  encryptedPhoto: Uint8Array
+  photoNonce: string // base64
+  encryptedKeyForSender: string // base64
+  encryptedKeyForRecipient: string // base64
+  keyNonceForSender: string // base64
+  keyNonceForRecipient: string // base64
+}
+
+// Keys are the same base64 strings the message functions take. Throws if any
+// key is missing or malformed — a photo is never sent unencrypted.
+export function encryptPhoto(
+  photoBytes: Uint8Array,
+  senderPrivateKeyB64: string,
+  senderPublicKeyB64: string,
+  recipientPublicKeyB64: string,
+): EncryptedPhoto {
+  const senderPrivateKey = decodeKey(senderPrivateKeyB64, nacl.box.secretKeyLength)
+  const senderPublicKey = decodeKey(senderPublicKeyB64, nacl.box.publicKeyLength)
+  const recipientPublicKey = decodeKey(recipientPublicKeyB64, nacl.box.publicKeyLength)
+  if (!senderPrivateKey || !senderPublicKey || !recipientPublicKey) throw new Error(ENCRYPTION_KEYS_UNAVAILABLE)
+
+  const symmetricKey = nacl.randomBytes(nacl.secretbox.keyLength)
+  const photoNonce = nacl.randomBytes(nacl.secretbox.nonceLength)
+  const nonceA = nacl.randomBytes(nacl.box.nonceLength)
+  const nonceB = nacl.randomBytes(nacl.box.nonceLength)
+  const result: EncryptedPhoto = {
+    encryptedPhoto: nacl.secretbox(photoBytes, photoNonce, symmetricKey),
+    photoNonce: naclUtil.encodeBase64(photoNonce),
+    encryptedKeyForSender: naclUtil.encodeBase64(nacl.box(symmetricKey, nonceA, senderPublicKey, senderPrivateKey)),
+    encryptedKeyForRecipient: naclUtil.encodeBase64(nacl.box(symmetricKey, nonceB, recipientPublicKey, senderPrivateKey)),
+    keyNonceForSender: naclUtil.encodeBase64(nonceA),
+    keyNonceForRecipient: naclUtil.encodeBase64(nonceB),
+  }
+  symmetricKey.fill(0)
+  return result
+}
+
+export const ENCRYPTION_KEYS_UNAVAILABLE = 'encryption_keys_unavailable'
+
+// senderPublicKeyB64 is the photo sender's key — the viewer's own key when
+// they're looking at a photo they sent. Null on any failure.
+export function decryptPhoto(
+  encryptedPhoto: Uint8Array,
+  photoNonceB64: string,
+  encryptedKeyB64: string,
+  keyNonceB64: string,
+  myPrivateKeyB64: string,
+  senderPublicKeyB64: string,
+): Uint8Array | null {
+  const myPrivateKey = decodeKey(myPrivateKeyB64, nacl.box.secretKeyLength)
+  const senderPublicKey = decodeKey(senderPublicKeyB64, nacl.box.publicKeyLength)
+  const keyNonce = decodeKey(keyNonceB64, nacl.box.nonceLength)
+  const photoNonce = decodeKey(photoNonceB64, nacl.secretbox.nonceLength)
+  if (!myPrivateKey || !senderPublicKey || !keyNonce || !photoNonce) return null
+  try {
+    const symmetricKey = nacl.box.open(naclUtil.decodeBase64(encryptedKeyB64), keyNonce, senderPublicKey, myPrivateKey)
+    if (!symmetricKey || symmetricKey.length !== nacl.secretbox.keyLength) return null
+    const photo = nacl.secretbox.open(encryptedPhoto, photoNonce, symmetricKey)
+    symmetricKey.fill(0)
+    return photo
+  } catch {
+    return null
+  }
+}

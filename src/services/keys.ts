@@ -58,7 +58,7 @@ export async function getPrivateKey(uid: string): Promise<string | null> {
   }
 }
 
-function publicKeyFor(privateKeyB64: string): string | null {
+export function publicKeyFor(privateKeyB64: string): string | null {
   try {
     const secret = naclUtil.decodeBase64(privateKeyB64)
     if (secret.length !== nacl.box.secretKeyLength) return null
