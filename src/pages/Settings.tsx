@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { hasPin } from '../services/playPin'
 import PlayPinFlow from '../components/PlayPinFlow'
+import DiscoverySettings from '../components/DiscoverySettings'
 
 // Stub settings page. For now: the Play PIN.
 export default function Settings() {
@@ -17,6 +18,8 @@ export default function Settings() {
     <div className="min-h-[calc(100dvh-7rem)] bg-gray-950 px-4 py-6 text-white">
       <div className="mx-auto max-w-xl space-y-6">
         <h1 className="text-2xl font-bold">Settings</h1>
+
+        <DiscoverySettings />
 
         <section className="rounded-2xl border border-white/10 bg-white/5">
           <h2 className="px-5 pt-4 text-xs font-semibold uppercase tracking-widest text-white/40">Privacy</h2>

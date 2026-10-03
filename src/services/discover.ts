@@ -1,4 +1,18 @@
-import { collection, doc, getDoc, getDocs, limit, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore'
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  startAfter,
+  updateDoc,
+  where,
+  type QueryConstraint,
+} from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from './firebase'
@@ -10,6 +24,11 @@ import { parsePlayProfile, type PlayProfileData } from './playProfile'
 import { loadBlockedUids } from './safety'
 
 const CANDIDATE_LIMIT = 50
+// Below this many eligible profiles, a load tops up from further queries.
+const MIN_CANDIDATES = 20
+// radiusMiles missing on the profile; null means "No limit".
+const DEFAULT_RADIUS_MILES = 25
+const BOT_PREFIX = 'zbot-'
 
 // Firestore docs are written by several clients over time, so every field is
 // treated as possibly missing. attractedTo was a single string on older docs.
@@ -20,6 +39,10 @@ export type DiscoverProfile = Partial<Omit<DatingProfile, 'attractedTo'>> & {
   playVisibility?: string
   // Play Explore only: the candidate's playProfile/data, used for display.
   playProfile?: PlayProfileData
+  // Max distance for their Explore feed (Settings → Discovery); null = no limit.
+  radiusMiles?: number | null
+  // Random 0–1 pool position (see functions/src/discovery.ts).
+  sortKey?: number
   // Snapped coordinates (see services/location.ts).
   locationLat?: number
   locationLng?: number
@@ -117,33 +140,77 @@ function shuffle<T>(items: T[]): T[] {
   return a
 }
 
+// Explore candidates. The pool is read from a random point in sortKey order so
+// each load sees a different slice; if too few survive the filters it wraps
+// around from the start, then falls back to an unordered read (which also
+// reaches profiles that don't have a sortKey yet, or works while the index
+// builds). Results are filtered here, not in the queries.
 export async function fetchCandidates(uid: string, mode: Mode): Promise<DiscoverProfile[]> {
   const meSnap = await getDoc(doc(db, 'users', uid))
   if (!meSnap.exists()) return []
   const me = { ...(meSnap.data() as DiscoverProfile), uid }
 
-  const [snap, blocked] = await Promise.all([
-    getDocs(query(collection(db, 'users'), where('isSuspended', '==', false), limit(CANDIDATE_LIMIT))),
-    loadBlockedUids(uid),
-  ])
+  const blocked = await loadBlockedUids(uid)
   const swiped = loadSwiped(uid, mode)
-  const visibilityField = mode === 'play' ? 'playVisibility' : 'sparkVisibility'
+  const eligible = (p: DiscoverProfile) => isEligible(me, p, mode, swiped, blocked)
 
-  const candidates = snap.docs
-    .map((d) => ({ ...(d.data() as DiscoverProfile), uid: d.id }))
-    .filter((p) => {
-      if (p.uid === uid || swiped.has(p.uid) || blocked.has(p.uid)) return false
-      if (!p.photoURLs?.length) return false
-      if (!intentMatchesMode(p, mode)) return false
-      if (p[visibilityField] === 'paused' || p[visibilityField] === 'hidden') return false
-      const age = displayAge(p)
-      if (age !== null && me.ageMin && me.ageMax && (age < me.ageMin || age > me.ageMax)) return false
-      return mutuallyAttracted(me, p)
-    })
+  const users = collection(db, 'users')
+  const notSuspended = where('isSuspended', '==', false)
+  const passes: QueryConstraint[][] = [
+    [notSuspended, orderBy('sortKey'), startAfter(Math.random()), limit(CANDIDATE_LIMIT)],
+    [notSuspended, orderBy('sortKey'), limit(CANDIDATE_LIMIT)],
+    [notSuspended, limit(CANDIDATE_LIMIT)],
+  ]
+
+  const found = new Map<string, DiscoverProfile>()
+  for (const constraints of passes) {
+    if (found.size >= MIN_CANDIDATES) break
+    const snap = await getDocs(query(users, ...constraints)).catch(() => null)
+    for (const d of snap?.docs ?? []) {
+      const p = { ...(d.data() as DiscoverProfile), uid: d.id }
+      if (!found.has(p.uid) && eligible(p)) found.set(p.uid, p)
+    }
+  }
 
   // Everyone left has photos, so "photos first" is already satisfied.
-  const located = withDistance(me, candidates)
+  const located = withDistance(me, [...found.values()])
   return austinFirst(mode === 'play' ? await withPlayProfiles(located) : located)
+}
+
+function isEligible(me: DiscoverProfile, p: DiscoverProfile, mode: Mode, swiped: Set<string>, blocked: Set<string>): boolean {
+  const visibilityField = mode === 'play' ? 'playVisibility' : 'sparkVisibility'
+  if (p.uid === me.uid || swiped.has(p.uid) || blocked.has(p.uid)) return false
+  if (!p.photoURLs?.length) return false
+  if (!intentMatchesMode(p, mode)) return false
+  if (p[visibilityField] === 'paused' || p[visibilityField] === 'hidden') return false
+  const age = displayAge(p)
+  if (age !== null && me.ageMin && me.ageMax && (age < me.ageMin || age > me.ageMax)) return false
+  if (!withinRadius(me, p)) return false
+  if (!botInMyCity(me, p)) return false
+  return mutuallyAttracted(me, p)
+}
+
+// Max distance from Settings → Discovery. Skipped when either side has no
+// location (missing data never hides anyone).
+function withinRadius(me: DiscoverProfile, p: DiscoverProfile): boolean {
+  if (me.radiusMiles === null) return true
+  const radius = typeof me.radiusMiles === 'number' && me.radiusMiles > 0 ? me.radiusMiles : DEFAULT_RADIUS_MILES
+  if (!hasLocation(me) || !hasLocation(p)) return true
+  return getDistanceMiles(me.locationLat, me.locationLng, p.locationLat, p.locationLng) <= radius
+}
+
+function cityOf(label: string | undefined): string | null {
+  const city = label?.split(',')[0]?.trim().toLowerCase()
+  return city || null
+}
+
+// Bots only appear in their own city's feed ("Austin, TX" → Austin). Real
+// people are never filtered by city, and a viewer with no city sees all bots.
+function botInMyCity(me: DiscoverProfile, p: DiscoverProfile): boolean {
+  if (!p.uid.startsWith(BOT_PREFIX)) return true
+  const botCity = cityOf(p.locationLabel)
+  const myCity = cityOf(me.locationLabel)
+  return !botCity || !myCity || botCity === myCity
 }
 
 function hasLocation(p: DiscoverProfile): p is DiscoverProfile & { locationLat: number; locationLng: number } {
@@ -158,10 +225,14 @@ function withDistance(me: DiscoverProfile, candidates: DiscoverProfile[]): Disco
 }
 
 // Austin launch: a soft sort, never a filter. Austin-area profiles come
-// first, everyone else after (no location counts as elsewhere); each group
-// is shuffled.
+// first, everyone else after; each group is shuffled. Without coordinates
+// (bots, most older profiles) an "Austin" location label counts.
+function inAustin(p: DiscoverProfile): boolean {
+  return hasLocation(p) ? isAustinArea(p.locationLat, p.locationLng) : cityOf(p.locationLabel) === 'austin'
+}
+
 function austinFirst(candidates: DiscoverProfile[]): DiscoverProfile[] {
-  const austin = candidates.filter((p) => hasLocation(p) && isAustinArea(p.locationLat, p.locationLng))
+  const austin = candidates.filter(inAustin)
   const rest = candidates.filter((p) => !austin.includes(p))
   return [...shuffle(austin), ...shuffle(rest)]
 }

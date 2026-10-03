@@ -1,9 +1,12 @@
-// Austin Founding Circle: the first 50 + 50 members within 40 miles of
-// downtown Austin get a permanent founder badge, assigned automatically at
-// the end of onboarding. When both halves fill, bots are switched off.
+// Austin Founding Circle: members within 40 miles of downtown Austin get a
+// permanent founder badge (and Elite, as with a founder code), assigned
+// automatically at the end of onboarding, until each half is full. When both
+// halves fill, bots are switched off.
 //
-// config/launch (server-only) holds the counters; publicStats/founding is the
-// public copy the landing page reads (members / capacity, nothing else).
+// config/launch (server-only) holds the counters, shared with the mobile
+// founder-code program (redeemFounderCode): founderCount, womenCount,
+// menCount against founderTarget, womenTarget, menTarget. publicStats/founding
+// is the public copy the landing page reads (members / capacity only).
 
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { onDocumentUpdated } from 'firebase-functions/v2/firestore'
@@ -12,7 +15,8 @@ import { FieldPath, FieldValue, getFirestore } from 'firebase-admin/firestore'
 
 const AUSTIN = { lat: 30.2672, lng: -97.7431 }
 const AUSTIN_RADIUS_MILES = 40
-const DEFAULT_THRESHOLD = 50
+// Used only if config/launch is missing a target.
+const DEFAULTS = { founderTarget: 100, womenTarget: 50, menTarget: 50 }
 // Everyone else counts toward the other half.
 const MEN_IDENTITIES = new Set(['man', 'trans_man'])
 const BOT_PREFIX = 'zbot-'
@@ -66,38 +70,46 @@ export const assignFounderBadge = onCall(
       if (!user || user.onboardingComplete !== true) return { eligible: false, reason: 'no_profile' }
       if (user.isFounder === true) return { eligible: false, reason: 'already_assigned' }
 
-      // First assignment ever creates config/launch with the launch defaults
-      // (same as scripts/init-launch-config.mjs), so nothing depends on the script.
-      const config = configSnap.data() ?? { launchThreshold: DEFAULT_THRESHOLD, botsActive: true }
-      const threshold = typeof config.launchThreshold === 'number' ? config.launchThreshold : DEFAULT_THRESHOLD
-      const women = typeof config.austinWomenCount === 'number' ? config.austinWomenCount : 0
-      const men = typeof config.austinMenCount === 'number' ? config.austinMenCount : 0
-      const total = typeof config.totalActiveUsers === 'number' ? config.totalActiveUsers : 0
+      // A missing config/launch is created with the default targets.
+      const config = configSnap.data() ?? { ...DEFAULTS, botsActive: true }
+      const num = (v: unknown, fallback: number) => (typeof v === 'number' ? v : fallback)
+      const founderTarget = num(config.founderTarget, DEFAULTS.founderTarget)
+      const womenTarget = num(config.womenTarget, DEFAULTS.womenTarget)
+      const menTarget = num(config.menTarget, DEFAULTS.menTarget)
+      const founders = num(config.founderCount, 0)
+      const women = num(config.womenCount, 0)
+      const men = num(config.menCount, 0)
 
       const bucket = bucketFor(user.genderIdentity)
-      if ((bucket === 'women' ? women : men) >= threshold) return { eligible: false, reason: 'cohort_full' }
+      if (bucket === 'women' ? women >= womenTarget : men >= menTarget) return { eligible: false, reason: 'cohort_full' }
 
       const nextWomen = bucket === 'women' ? women + 1 : women
       const nextMen = bucket === 'men' ? men + 1 : men
-      const cohortNumber = total + 1
+      const cohortNumber = founders + 1
 
-      tx.set(configRef, {
-        ...(!configSnap.exists && { launchThreshold: threshold, botsActive: true, createdAt: FieldValue.serverTimestamp() }),
-        austinWomenCount: nextWomen,
-        austinMenCount: nextMen,
-        totalActiveUsers: cohortNumber,
-        // Both halves full: launch is real, bots go (see onLaunchConfigUpdated).
-        ...(nextWomen >= threshold && nextMen >= threshold && { botsActive: false }),
-      }, { merge: true })
+      tx.set(
+        configRef,
+        {
+          ...(!configSnap.exists && { ...DEFAULTS, botsActive: true, createdAt: FieldValue.serverTimestamp() }),
+          founderCount: cohortNumber,
+          womenCount: nextWomen,
+          menCount: nextMen,
+          // Both halves full: launch is real, bots go (see onLaunchConfigUpdated).
+          ...(nextWomen >= womenTarget && nextMen >= menTarget && { botsActive: false }),
+        },
+        { merge: true },
+      )
       tx.update(userRef, {
         isFounder: true,
         founderCohort: 'Austin',
         founderNumber: cohortNumber,
         founderBadgeAssignedAt: FieldValue.serverTimestamp(),
+        // Same perk as a founder code (redeemFounderCode).
+        subscriptionTier: 'elite',
       })
       tx.set(
         db.doc('publicStats/founding'),
-        { members: cohortNumber, capacity: threshold * 2, updatedAt: FieldValue.serverTimestamp() },
+        { members: cohortNumber, capacity: founderTarget, updatedAt: FieldValue.serverTimestamp() },
         { merge: true },
       )
       return { eligible: true, cohortNumber }

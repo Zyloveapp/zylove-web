@@ -13,6 +13,7 @@ import { buildBioPrompt, parseBioRequest } from './bioPrompt'
 import { buildPlayBioPrompt, parsePlayBioRequest } from './playBioPrompt'
 
 export { assignFounderBadge, onLaunchConfigUpdated } from './founders'
+export { ensureSortKey } from './discovery'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
 import {
@@ -184,9 +185,11 @@ export const initUserDefaults = onCall(
     if (!snap.exists) throw new HttpsError('failed-precondition', 'Profile not found')
 
     const data = snap.data() ?? {}
-    const missing = Object.fromEntries(
+    const missing: Record<string, unknown> = Object.fromEntries(
       Object.entries(TRUST_DEFAULTS).filter(([field]) => data[field] === undefined),
     )
+    // Explore pool position (see discovery.ts): set once, never changed.
+    if (typeof data.sortKey !== 'number') missing.sortKey = Math.random()
     if (Object.keys(missing).length > 0) {
       await ref.set(missing, { merge: true })
       logger.info('initUserDefaults: filled missing trust fields', { fields: Object.keys(missing) })
