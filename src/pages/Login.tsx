@@ -318,7 +318,7 @@ export default function Login() {
           </div>
           <div className="rounded-2xl border border-[#E03131]/40 bg-[#E03131]/10 p-6">
             <p className="text-2xl font-bold">🔴 Play</p>
-            <p className="mt-2 text-white/70">Adult. No labels. On your terms.</p>
+            <p className="mt-2 text-white/70">Know what you want. Find who gets it.</p>
           </div>
         </div>
       </section>
