@@ -19,6 +19,7 @@ import {
 } from '../services/notifications'
 import PlayPinFlow from '../components/PlayPinFlow'
 import DiscoverySettings from '../components/DiscoverySettings'
+import InstallAppSection from '../components/InstallAppSection'
 import BlockedUsersLink from '../components/BlockedUsersLink'
 
 // On colour: cobalt by default (settings that cover both modes), red for Play.
@@ -236,6 +237,8 @@ export default function Settings() {
           </button>
           <h1 className="text-2xl font-bold">Settings</h1>
         </div>
+
+        <InstallAppSection />
 
         <DiscoverySettings />
 
