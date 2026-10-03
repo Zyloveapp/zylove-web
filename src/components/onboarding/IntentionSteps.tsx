@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { DatingIntent } from '../../types/profile'
 import type { OnboardingPath, StepProps } from './types'
 import { StepHeader } from './ui'
@@ -96,19 +97,23 @@ const RECOMMENDATION: Record<
   },
 }
 
-// Full-screen, with the path's glow. "Both" also offers going straight to Play.
+// Full-screen, with the path's glow. Every screen has a way out if the
+// recommendation is wrong: onChoose switches path and either moves on
+// (advance) or stays to show that path's screen ("Show me both sides").
 export function RecommendationScreen({
   path,
   onContinue,
-  onPlay,
+  onChoose,
   onBack,
 }: {
   path: OnboardingPath
   onContinue: () => void
-  onPlay: () => void
+  onChoose: (path: OnboardingPath, advance: boolean) => void
   onBack: () => void
 }) {
   const r = RECOMMENDATION[path]
+  const [differentOpen, setDifferentOpen] = useState(false)
+  const choice = 'w-full rounded-xl border border-white/15 bg-white/5 py-3 text-sm font-medium text-white/80 hover:bg-white/10'
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gray-950 text-white">
       <div className="pointer-events-none absolute inset-0" style={{ background: r.glow }} aria-hidden />
@@ -144,14 +149,59 @@ export function RecommendationScreen({
           {r.button}
         </button>
         {path === 'both' && (
-          <button
-            type="button"
-            onClick={onPlay}
-            className="mt-3 w-full rounded-xl bg-[#E03131] py-4 font-semibold text-white transition-opacity hover:opacity-90"
-          >
-            🔥 Start with Play →
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => onChoose('play', true)}
+              className="mt-3 w-full rounded-xl bg-[#E03131] py-4 font-semibold text-white transition-opacity hover:opacity-90"
+            >
+              🔥 Start with Play →
+            </button>
+            <p className="mt-2 text-center text-xs text-white/30">
+              <button type="button" onClick={() => onChoose('spark', true)} className="hover:text-white">
+                Just Spark for now
+              </button>
+              <span className="mx-2" aria-hidden>
+                ·
+              </span>
+              <button type="button" onClick={() => onChoose('play', true)} className="hover:text-white">
+                Just Play for now
+              </button>
+            </p>
+          </>
         )}
+        {(path === 'spark' || path === 'play') &&
+          (differentOpen ? (
+            <div className="mt-3 space-y-2">
+              {path === 'spark' ? (
+                <button type="button" onClick={() => onChoose('play', true)} className={choice}>
+                  🔥 Take me to Play
+                </button>
+              ) : (
+                <button type="button" onClick={() => onChoose('spark', true)} className={choice}>
+                  💙 Take me to Spark
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setDifferentOpen(false)
+                  onChoose('both', false)
+                }}
+                className={choice}
+              >
+                ✨ Show me both sides
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setDifferentOpen(true)}
+              className="mt-3 w-full text-center text-sm text-white/40 hover:text-white"
+            >
+              Actually, I'm looking for something different →
+            </button>
+          ))}
         <button type="button" onClick={onBack} className="mt-2 w-full py-2 text-sm text-white/40 hover:text-white">
           Back
         </button>

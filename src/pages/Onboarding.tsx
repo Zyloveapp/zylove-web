@@ -31,7 +31,7 @@ import {
   WeekendStep,
 } from '../components/onboarding/AboutSteps'
 import { DiscoveryStep, NeedsStep, PhysicalPrefsStep } from '../components/onboarding/SeekingSteps'
-import { IntentionStep, RecommendationScreen } from '../components/onboarding/IntentionSteps'
+import { IntentionStep, RecommendationScreen, intentForPath } from '../components/onboarding/IntentionSteps'
 import { GoDeeperIntro, GoDeeperQuestion } from '../components/onboarding/GoDeeperSteps'
 import {
   CONFLICT_STYLE_LABELS,
@@ -358,10 +358,10 @@ export default function Onboarding() {
           <RecommendationScreen
             path={draft.onboardingPath}
             onContinue={next}
-            onPlay={() => {
-              // "Both" → Play: take the Play path from here.
-              update({ onboardingPath: 'play' })
-              setStepIndex((i) => i + 1)
+            onChoose={(path, advance) => {
+              // Every path shares the steps up to here, so the index stays valid.
+              update({ onboardingPath: path, intent: intentForPath(path) })
+              if (advance) setStepIndex((i) => i + 1)
             }}
             onBack={() => setStepIndex((i) => i - 1)}
           />
