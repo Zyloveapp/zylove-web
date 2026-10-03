@@ -11,6 +11,7 @@ import {
   lifeDetails,
   lifestyleLabel,
   loveLanguageLabel,
+  openToLabel,
   personalityLabel,
   promptQuestion,
   valueLabel,
@@ -67,19 +68,15 @@ export default function ProfileDetails({
   const loveReceive = (profile.loveLangReceive ?? []).map(loveLanguageLabel)
   const details = lifeDetails(profile)
   const identity = identityLine(profile)
+  const openTo = (profile.openTo ?? []).map(openToLabel)
 
   return (
     <div className="space-y-8">
       <header className="border-b border-white/10 pb-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <h2 className="text-4xl font-bold">
-            {profile.displayName ?? 'Someone'}
-            {age !== null && <span className="font-normal text-white/70">, {age}</span>}
-          </h2>
-          <span className="rounded-full bg-white/10 px-3 py-1 text-sm">
-            {mode === 'play' ? '🔴 Play' : '🔵 Spark'}
-          </span>
-        </div>
+        <h2 className="text-4xl font-bold">
+          {profile.displayName ?? 'Someone'}
+          {age !== null && <span className="font-normal text-white/70">, {age}</span>}
+        </h2>
         {identity && <p className="mt-1 text-sm text-white/50">{identity}</p>}
         <div className="mt-2 flex flex-wrap gap-2 empty:hidden">
           <FounderBadge profile={profile} />
@@ -142,6 +139,13 @@ export default function ProfileDetails({
                   </li>
                 ))}
               </ul>
+            </section>
+          )}
+
+          {openTo.length > 0 && (
+            <section>
+              <SectionHeading>Open to</SectionHeading>
+              <Pills items={openTo} />
             </section>
           )}
 

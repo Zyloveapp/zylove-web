@@ -14,6 +14,7 @@ import {
   loveLanguageLabel,
   personalityLabel,
   identityLine,
+  openToLabel,
   promptQuestion,
   relationshipStatusLabel,
   valueLabel,
@@ -198,6 +199,8 @@ export default function ProfileSections({
       )}
 
       <HowIOperate answers={goDeeperAnswers(p)} />
+
+      {list(p.openTo).length > 0 && <Pills items={list(p.openTo).map(openToLabel)} tone="cobalt" />}
 
       <TagSection title="Personality" items={list(p.personalityTraits).map(personalityLabel)} />
       <TagSection title="Lifestyle" items={list(p.lifestyleTags).map(lifestyleLabel)} />
