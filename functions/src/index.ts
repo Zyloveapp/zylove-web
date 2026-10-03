@@ -202,6 +202,12 @@ export const initUserDefaults = onCall(
       const elite = data.isFounder === true || (typeof gender === 'string' && ALWAYS_ELITE_IDENTITIES.includes(gender))
       missing.subscriptionTier = elite ? 'elite' : 'free'
     }
+    // Gender is locked once onboarding is done (rules then refuse changes to
+    // birthday, genderIdentity, matchableAs) — Elite comes from gender, so it
+    // can't be switched later. Mobile locks at its onboarding step 2.
+    if (data.identityLockedAt == null && data.genderIdentity != null) {
+      missing.identityLockedAt = FieldValue.serverTimestamp()
+    }
     if (data.trialStartedAt === undefined) {
       missing.trialStartedAt = FieldValue.serverTimestamp()
       missing.trialEndsAt = Timestamp.fromMillis(Date.now() + TRIAL_MS)
