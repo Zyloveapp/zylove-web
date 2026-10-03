@@ -311,7 +311,7 @@ export default function PlayOnboarding() {
         return (
           <div className="flex min-h-[60dvh] flex-col justify-center text-center">
             <h1 className="text-5xl font-bold text-white">🔴 Play</h1>
-            <p className="mt-4 text-xl text-white/80">Adult. No labels. On your terms.</p>
+            <p className="mt-4 text-xl text-white/80">Same you. Different energy. Entirely yours.</p>
             <p className="mt-4 text-white/50">
               Your Spark profile stays completely separate. What happens in Play, stays in Play.
             </p>
