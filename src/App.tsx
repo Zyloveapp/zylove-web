@@ -3,6 +3,7 @@ import { BrowserRouter, Outlet, Routes, Route } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
 import { refreshLocationIfStale } from './services/location'
 import { claimFounderBadge, founderCheckDone } from './services/founders'
+import { loadPin } from './services/playPin'
 import FounderCelebration from './components/FounderCelebration'
 import AuthGuard from './components/AuthGuard'
 import PauseGuard from './components/PauseGuard'
@@ -46,6 +47,8 @@ function AppLayout() {
   useEffect(() => {
     if (!uid || locationChecked.has(uid)) return
     locationChecked.add(uid)
+    // Pull the Play PIN into this browser's cache (Settings reads it sync).
+    void loadPin(uid)
     void (async () => {
       await refreshLocationIfStale(uid)
       if (founderCheckDone(uid)) return

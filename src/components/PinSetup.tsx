@@ -34,7 +34,9 @@ export default function PinSetup({ uid, onDone, onCancel }: PinSetupProps) {
       return
     }
     setSaving(true)
-    await savePin(uid, next)
+    // Saved locally first; if the Firestore write fails, the next loadPin
+    // uploads the local copy.
+    await savePin(uid, next).catch(() => {})
     onDone()
   }
 

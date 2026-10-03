@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import PinEntry from './PinEntry'
 import PinReset from './PinReset'
 import PinSetup from './PinSetup'
-import { hasPin } from '../services/playPin'
+import { hasPin, loadPin } from '../services/playPin'
 
 type Step = 'entry' | 'reset' | 'setup'
 
@@ -15,9 +15,23 @@ interface PlayPinFlowProps {
 }
 
 // Entry → (forgot → SMS reset) → setup, as needed. With no PIN yet, starts
-// at setup. Changing a PIN means entering the current one first.
+// at setup. Changing a PIN means entering the current one first. The saved
+// PIN is checked in Firestore first, so a browser that lost its copy asks
+// for the existing PIN instead of making the user set a new one.
 export default function PlayPinFlow({ uid, purpose, onDone, onCancel }: PlayPinFlowProps) {
-  const [step, setStep] = useState<Step>(() => (hasPin(uid) ? 'entry' : 'setup'))
+  const [step, setStep] = useState<Step | null>(() => (hasPin(uid) ? 'entry' : null))
+
+  useEffect(() => {
+    let cancelled = false
+    loadPin(uid).then((set) => {
+      if (!cancelled) setStep((s) => s ?? (set ? 'entry' : 'setup'))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [uid])
+
+  if (step === null) return null
 
   if (step === 'reset') return <PinReset uid={uid} onVerified={() => setStep('setup')} onCancel={onCancel} />
   if (step === 'setup') return <PinSetup uid={uid} onDone={onDone} onCancel={onCancel} />

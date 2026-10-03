@@ -1,10 +1,14 @@
 import { RecaptchaVerifier, reauthenticateWithPhoneNumber, type ConfirmationResult } from 'firebase/auth'
-import { auth } from './firebase'
+import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore'
+import { auth, db } from './firebase'
 
 // Play mode PIN: a privacy lock for shared devices. Only a SHA-256 hash of
-// "{uid}:{pin}" is kept, in this browser's localStorage — never the PIN, and
-// never Firestore. It hides Play from someone else at the keyboard; it isn't
-// account security (clearing site data removes it).
+// "{uid}:{pin}" is kept — never the PIN. The hash lives in
+// users/{uid}/settings/playPin (readable only by its owner), so it survives
+// signing out, cleared site data, Safari's storage expiry and switching
+// between the browser and the home-screen app. localStorage holds a cached
+// copy so checks work offline. It hides Play from someone else at the
+// keyboard; it isn't account security.
 
 export const PIN_LENGTH = 4
 const MAX_ATTEMPTS = 3
@@ -40,18 +44,43 @@ function write(key: string, value: string | null): void {
   }
 }
 
+const remoteRef = (uid: string) => doc(db, `users/${uid}/settings/playPin`)
+
+// From the cache: accurate once loadPin has run for this user.
 export function hasPin(uid: string): boolean {
   return read(hashKey(uid)) !== null
 }
 
-export async function savePin(uid: string, pin: string): Promise<void> {
-  write(hashKey(uid), await hashPin(uid, pin))
-  write(lockKey(uid), null)
+// Syncs the cache with Firestore and resolves whether a PIN is set. A PIN
+// only this browser knows (set before PINs were stored remotely) is uploaded.
+// If Firestore can't be reached, the cache answers.
+export async function loadPin(uid: string): Promise<boolean> {
+  if (!uid) return false
+  const local = read(hashKey(uid))
+  try {
+    const remote: unknown = (await getDoc(remoteRef(uid))).data()?.hash
+    if (typeof remote === 'string' && remote) {
+      write(hashKey(uid), remote)
+      return true
+    }
+    if (local) await setDoc(remoteRef(uid), { hash: local, updatedAt: serverTimestamp() })
+  } catch {
+    // Offline or unreadable — fall back to the cache.
+  }
+  return local !== null
 }
 
-export function clearPin(uid: string): void {
+export async function savePin(uid: string, pin: string): Promise<void> {
+  const hash = await hashPin(uid, pin)
+  write(hashKey(uid), hash)
+  write(lockKey(uid), null)
+  await setDoc(remoteRef(uid), { hash, updatedAt: serverTimestamp() })
+}
+
+export async function clearPin(uid: string): Promise<void> {
   write(hashKey(uid), null)
   write(lockKey(uid), null)
+  await deleteDoc(remoteRef(uid))
 }
 
 // ─── Attempts ────────────────────────────────────────────────────────────────

@@ -287,9 +287,11 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
 
   // ── Photo sharing ──────────────────────────────────────────────────────────
   const consent = consentState?.matchId === matchId ? consentState.consent : null
-  // Photos are always encrypted, so both people need real keys — bots and
-  // mobile-only users (stubbed keys) can't receive them.
-  const photosAvailable = !match.ended && !isBotUid(partnerUid) && partnerKey !== null && partnerKey.key !== ''
+  // 📷 shows in every live chat with a person. Photos are always encrypted,
+  // so sending also needs the partner's real key — mobile-only users have a
+  // stubbed one until they sign in on the web — and tapping explains that.
+  const photosAvailable = !match.ended && !isBotUid(partnerUid)
+  const partnerCanReceivePhotos = partnerKey !== null && partnerKey.key !== ''
   const latestRequestId = useMemo(
     () => [...(messages ?? [])].reverse().find((m) => consentCode(m) === 'photo_consent_request')?.id ?? null,
     [messages],
@@ -314,6 +316,15 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
 
   function handlePhotoTap() {
     setPhotoNotice(null)
+    if (!partnerCanReceivePhotos) {
+      return setPhotoNotice({
+        text:
+          partnerKey === null
+            ? 'Loading encryption keys — try again in a moment.'
+            : `${match.name} needs to sign in to Zylove on the web before you can share encrypted photos.`,
+        offerRequest: false,
+      })
+    }
     switch (consent?.status) {
       case 'accepted':
         return setShowPhotoPicker(true)

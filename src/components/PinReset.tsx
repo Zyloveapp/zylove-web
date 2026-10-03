@@ -48,7 +48,8 @@ export default function PinReset({ uid, onVerified, onCancel }: PinResetProps) {
     setError(null)
     try {
       await confirmation.confirm(code)
-      clearPin(uid)
+      // Setting the new PIN overwrites the old one anyway.
+      await clearPin(uid).catch(() => {})
       onVerified()
     } catch {
       setError("That code didn't work. Check it and try again.")
