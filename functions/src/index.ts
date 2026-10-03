@@ -1232,7 +1232,7 @@ export { acceptPhotoConsent, getBlockedUsers, onBeforeSignIn, reportAndBan, unbl
 // hours (a text in quiet hours is dropped, not delayed); sendSMS
 // never throws, so a texting problem never affects the write that fired it.
 
-const MESSAGE_SMS_COOLDOWN_MS = 2 * 60 * 1000
+const MESSAGE_SMS_COOLDOWN_MS = 5 * 60 * 1000
 const NUDGE_COOLDOWN_MS = 48 * 60 * 60 * 1000
 const HOUR_MS = 60 * 60 * 1000
 
@@ -1265,7 +1265,7 @@ export const smsOnSpark = onDocumentCreated(
 )
 
 // New message: texts the other participant, at most once per match every
-// 2 minutes. Protocol and system messages don't count, and neither do bot
+// 5 minutes. Protocol and system messages don't count, and neither do bot
 // chats — a bot reply never texts anyone.
 export const smsOnMessage = onDocumentCreated(
   { document: 'matches/{matchId}/messages/{messageId}', secrets: SMS_SECRETS },

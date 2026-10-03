@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
-// Copy and colours match mobile's ModeTransition exactly.
+// Copy and colours follow mobile's ModeTransition; the Play subline has
+// since been extended on web ("…Entirely yours.").
 const COPY = {
-  play: { emoji: '🔥', headline: 'Play time.', sub: 'Same you. Different energy.', color: '#E03131' },
+  play: { emoji: '🔥', headline: 'Play time.', sub: 'Same you. Different energy. Entirely yours.', color: '#E03131' },
   spark: { emoji: '✦', headline: 'Back to real.', sub: 'Find something worth keeping.', color: '#1B4FD8' },
 } as const
 
