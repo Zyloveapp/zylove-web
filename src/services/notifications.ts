@@ -1,21 +1,81 @@
 import { doc, onSnapshot, serverTimestamp, updateDoc, type Unsubscribe } from 'firebase/firestore'
 import { db } from './firebase'
 
-export type SmsPreference = 'newSpark' | 'newMessage' | 'newMatch' | 'quietNudge'
+export type SmsMode = 'spark' | 'play'
 
-export const SMS_PREFERENCES: { key: SmsPreference; label: string; description: string }[] = [
-  { key: 'newSpark', label: 'New Spark', description: 'Someone liked you' },
-  { key: 'newMessage', label: 'New message', description: 'A new chat message' },
-  { key: 'newMatch', label: 'New match', description: 'You both felt it' },
-  { key: 'quietNudge', label: 'Quiet chat nudge', description: 'A conversation has gone quiet' },
+// users/{uid}.smsNotifications = {
+//   spark: { newSpark, newMessage, newMatch },
+//   play:  { newFlame, newMessage, newMatch },
+//   quietNudge,   // both modes
+// }
+export interface SmsPreferences {
+  spark: { newSpark: boolean; newMessage: boolean; newMatch: boolean }
+  play: { newFlame: boolean; newMessage: boolean; newMatch: boolean }
+  quietNudge: boolean
+}
+
+export const SMS_SECTIONS: {
+  mode: SmsMode
+  title: string
+  items: { key: string; label: string; description: string }[]
+}[] = [
+  {
+    mode: 'spark',
+    title: 'Spark notifications',
+    items: [
+      { key: 'newSpark', label: 'New Spark', description: 'Someone liked you in Spark' },
+      { key: 'newMessage', label: 'New message', description: 'A new message in a Spark chat' },
+      { key: 'newMatch', label: 'New match', description: 'You connected in Spark' },
+    ],
+  },
+  {
+    mode: 'play',
+    title: 'Play notifications',
+    items: [
+      { key: 'newFlame', label: 'New Flame', description: 'Someone liked you in Play' },
+      { key: 'newMessage', label: 'New message', description: 'A new message in a Play chat' },
+      { key: 'newMatch', label: 'New entanglement', description: 'You connected in Play' },
+    ],
+  },
 ]
 
 // Defaults written with consent; quiet nudges start off.
-const DEFAULT_PREFERENCES: Record<SmsPreference, boolean> = {
-  newSpark: true,
-  newMessage: true,
-  newMatch: true,
+const DEFAULT_PREFERENCES: SmsPreferences = {
+  spark: { newSpark: true, newMessage: true, newMatch: true },
+  play: { newFlame: true, newMessage: true, newMatch: true },
   quietNudge: false,
+}
+
+// Settings saved before the Spark/Play split were flat ({ newSpark,
+// newMessage, newMatch, quietNudge }); each missing mode key falls back to
+// its flat equivalent, then the default.
+function parsePreferences(raw: unknown): SmsPreferences {
+  const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
+  const bool = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback)
+  const section = (mode: SmsMode) => {
+    const v = r[mode]
+    return (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>
+  }
+  const spark = section('spark')
+  const play = section('play')
+  const d = DEFAULT_PREFERENCES
+  return {
+    spark: {
+      newSpark: bool(spark.newSpark, bool(r.newSpark, d.spark.newSpark)),
+      newMessage: bool(spark.newMessage, bool(r.newMessage, d.spark.newMessage)),
+      newMatch: bool(spark.newMatch, bool(r.newMatch, d.spark.newMatch)),
+    },
+    play: {
+      newFlame: bool(play.newFlame, bool(r.newSpark, d.play.newFlame)),
+      newMessage: bool(play.newMessage, bool(r.newMessage, d.play.newMessage)),
+      newMatch: bool(play.newMatch, bool(r.newMatch, d.play.newMatch)),
+    },
+    quietNudge: bool(r.quietNudge, d.quietNudge),
+  }
+}
+
+export function sectionPreferences(p: SmsPreferences, mode: SmsMode): Record<string, boolean> {
+  return mode === 'spark' ? p.spark : p.play
 }
 
 // users/{uid}.smsQuietHours. Times are 'HH:MM' (24h) in `timezone`, the
@@ -57,7 +117,7 @@ export interface SmsSettings {
   // null: never set up (the field is missing), which drives the ⚙ dot.
   enabled: boolean | null
   consented: boolean
-  preferences: Record<SmsPreference, boolean>
+  preferences: SmsPreferences
   quietHours: QuietHours
 }
 
@@ -66,10 +126,7 @@ export function subscribeSmsSettings(uid: string, onChange: (s: SmsSettings) => 
     doc(db, 'users', uid),
     (snap) => {
       const d = snap.data() ?? {}
-      const raw = (typeof d.smsNotifications === 'object' && d.smsNotifications) || {}
-      const preferences = Object.fromEntries(
-        SMS_PREFERENCES.map(({ key }) => [key, typeof raw[key] === 'boolean' ? raw[key] : DEFAULT_PREFERENCES[key]]),
-      ) as Record<SmsPreference, boolean>
+      const preferences = parsePreferences(d.smsNotifications)
       onChange({
         enabled: typeof d.smsNotificationsEnabled === 'boolean' ? d.smsNotificationsEnabled : null,
         consented: typeof d.smsConsent === 'object' && d.smsConsent !== null,
@@ -102,6 +159,17 @@ export async function setSmsEnabled(uid: string, enabled: boolean): Promise<void
   await updateDoc(doc(db, 'users', uid), { smsNotificationsEnabled: enabled })
 }
 
-export async function setSmsPreference(uid: string, key: SmsPreference, value: boolean): Promise<void> {
-  await updateDoc(doc(db, 'users', uid), { [`smsNotifications.${key}`]: value })
+// One toggle inside a mode section.
+export async function setSmsPreference(uid: string, mode: SmsMode, key: string, value: boolean): Promise<void> {
+  await updateDoc(doc(db, 'users', uid), { [`smsNotifications.${mode}.${key}`]: value })
+}
+
+// A section's master toggle: sets all three of that mode's toggles.
+export async function setSmsSection(uid: string, mode: SmsMode, value: boolean): Promise<void> {
+  const keys = SMS_SECTIONS.find((s) => s.mode === mode)?.items.map((i) => i.key) ?? []
+  await updateDoc(doc(db, 'users', uid), Object.fromEntries(keys.map((k) => [`smsNotifications.${mode}.${k}`, value])))
+}
+
+export async function setQuietNudge(uid: string, value: boolean): Promise<void> {
+  await updateDoc(doc(db, 'users', uid), { 'smsNotifications.quietNudge': value })
 }

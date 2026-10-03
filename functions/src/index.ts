@@ -1252,9 +1252,9 @@ function participantsOf(match: DocumentData | undefined): string[] {
 export const smsOnSpark = onDocumentCreated(
   { document: 'users/{uid}/likeQueue/{likerUid}', secrets: SMS_SECRETS },
   async (event) => {
-    const target = await smsTarget(event.params.uid, 'newSpark')
-    if (!target || !(await claimSparkSmsSlot(target.uid))) return
     const play = event.data?.data()?.mode === 'play'
+    const target = await smsTarget(event.params.uid, 'newSpark', play ? 'play' : 'spark')
+    if (!target || !(await claimSparkSmsSlot(target.uid))) return
     await sendSMS(
       target.phone,
       play
@@ -1290,7 +1290,7 @@ export const smsOnMessage = onDocumentCreated(
     const recipientUid = participantsOf(match).find((u) => u !== senderId)
     if (!recipientUid) return
 
-    const target = await smsTarget(recipientUid, 'newMessage')
+    const target = await smsTarget(recipientUid, 'newMessage', match.mode === 'play' ? 'play' : 'spark')
     if (!target) return
 
     // Claim the cooldown slot before sending, so a burst of messages sends one text.
@@ -1319,7 +1319,7 @@ export const smsOnMatch = onDocumentCreated(
     const play = match.mode === 'play'
     await Promise.all(
       users.map(async (uid) => {
-        const target = await smsTarget(uid, 'newMatch')
+        const target = await smsTarget(uid, 'newMatch', play ? 'play' : 'spark')
         if (!target) return
         const otherUid = users.find((u) => u !== uid) ?? ''
         const body = play

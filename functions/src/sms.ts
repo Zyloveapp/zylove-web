@@ -14,6 +14,25 @@ const twilioFromNumber = defineSecret('TWILIO_FROM_NUMBER')
 export const SMS_SECRETS = [twilioAccountSid, twilioAuthToken, twilioFromNumber]
 
 export type SmsPreference = 'newSpark' | 'newMessage' | 'newMatch' | 'quietNudge'
+export type SmsMode = 'spark' | 'play'
+
+// users/{uid}.smsNotifications = {
+//   spark: { newSpark, newMessage, newMatch },
+//   play:  { newFlame, newMessage, newMatch },
+//   quietNudge,
+// }
+// A Play like is a "Flame", so newSpark reads play.newFlame. Settings saved
+// before the split were flat ({ newSpark, newMessage, newMatch, quietNudge });
+// a missing mode key falls back to the flat one.
+export function smsPreferenceOn(prefs: unknown, preference: SmsPreference, mode: SmsMode): boolean {
+  if (typeof prefs !== 'object' || prefs === null) return false
+  const p = prefs as Record<string, unknown>
+  if (preference === 'quietNudge') return p.quietNudge === true
+  const section = p[mode]
+  const key = mode === 'play' && preference === 'newSpark' ? 'newFlame' : preference
+  const value = typeof section === 'object' && section !== null ? (section as Record<string, unknown>)[key] : undefined
+  return typeof value === 'boolean' ? value : p[preference] === true
+}
 
 const E164 = /^\+[1-9]\d{6,14}$/
 
@@ -97,13 +116,13 @@ export interface SmsTarget {
 // The user's phone number if they've turned SMS on and this kind of text is
 // enabled, else null. The number comes from Firebase Auth (phone sign-in),
 // falling back to the one recorded at consent.
-export async function smsTarget(uid: string, preference: SmsPreference): Promise<SmsTarget | null> {
+export async function smsTarget(uid: string, preference: SmsPreference, mode: SmsMode = 'spark'): Promise<SmsTarget | null> {
   try {
     const snap = await getFirestore().doc(`users/${uid}`).get()
     const user = snap.data()
-    if (!user || user.smsNotificationsEnabled !== true || user.smsNotifications?.[preference] !== true) return null
+    if (!user || user.smsNotificationsEnabled !== true || !smsPreferenceOn(user.smsNotifications, preference, mode)) return null
     if (inQuietHours(user.smsQuietHours)) {
-      logger.info('Skipped — quiet hours', { preference })
+      logger.info('Skipped — quiet hours', { preference, mode })
       return null
     }
     const authPhone = await getAuth()

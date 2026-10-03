@@ -5,30 +5,37 @@ import { auth } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { hasPin } from '../services/playPin'
 import {
-  SMS_PREFERENCES,
+  SMS_SECTIONS,
   grantSmsConsent,
+  sectionPreferences,
   setSmsEnabled,
   setQuietHours,
+  setQuietNudge,
   setSmsPreference,
+  setSmsSection,
   subscribeSmsSettings,
   type QuietHours,
-  type SmsPreference,
   type SmsSettings,
 } from '../services/notifications'
 import PlayPinFlow from '../components/PlayPinFlow'
 import DiscoverySettings from '../components/DiscoverySettings'
 import BlockedUsersLink from '../components/BlockedUsersLink'
 
+// On colour: cobalt by default (settings that cover both modes), red for Play.
+const SWITCH_ON = { spark: 'bg-[#1B4FD8]', play: 'bg-[#E03131]' } as const
+
 function Switch({
   checked,
   disabled,
   label,
   onChange,
+  tone = 'spark',
 }: {
   checked: boolean
   disabled?: boolean
   label: string
   onChange: (next: boolean) => void
+  tone?: keyof typeof SWITCH_ON
 }) {
   return (
     <button
@@ -39,7 +46,7 @@ function Switch({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed ${
-        checked ? 'bg-[#1B4FD8]' : 'bg-white/15'
+        checked ? SWITCH_ON[tone] : 'bg-white/15'
       }`}
     >
       <span
@@ -248,22 +255,66 @@ export default function Settings() {
             />
           </div>
 
-          <ul className={`border-t border-white/5 transition-opacity ${enabled ? '' : 'opacity-40'}`}>
-            {SMS_PREFERENCES.map(({ key, label, description }) => (
-              <li key={key} className="flex items-center justify-between gap-4 px-5 py-3">
-                <span>
-                  <span className="block text-sm font-medium">{label}</span>
-                  <span className="block text-xs text-white/40">{description}</span>
-                </span>
-                <Switch
-                  checked={sms?.preferences[key as SmsPreference] ?? false}
-                  disabled={!enabled || busy}
-                  label={label}
-                  onChange={(next) => void run(() => setSmsPreference(uid, key, next))}
-                />
-              </li>
-            ))}
-          </ul>
+          {SMS_SECTIONS.map(({ mode, title, items }) => {
+            const prefs = sms ? sectionPreferences(sms.preferences, mode) : null
+            // The section switch is on while any of its texts are; flipping
+            // it sets all three.
+            const sectionOn = prefs !== null && items.some((i) => prefs[i.key])
+            return (
+              <div key={mode} className={`border-t border-white/5 transition-opacity ${enabled ? '' : 'opacity-40'}`}>
+                <div className="flex items-center justify-between gap-4 px-5 pt-4 pb-2">
+                  <h3
+                    className={`text-xs font-semibold uppercase tracking-widest ${
+                      mode === 'play' ? 'text-red-400' : 'text-[#6B8FFF]'
+                    }`}
+                  >
+                    {title}
+                  </h3>
+                  <Switch
+                    checked={sectionOn}
+                    disabled={!enabled || busy}
+                    label={title}
+                    tone={mode}
+                    onChange={(next) => void run(() => setSmsSection(uid, mode, next))}
+                  />
+                </div>
+                <ul className={`pb-2 transition-opacity ${sectionOn ? '' : 'opacity-50'}`}>
+                  {items.map(({ key, label, description }) => (
+                    <li key={key} className="flex items-center justify-between gap-4 px-5 py-2.5">
+                      <span>
+                        <span className="block text-sm font-medium">{label}</span>
+                        <span className="block text-xs text-white/40">{description}</span>
+                      </span>
+                      <Switch
+                        checked={prefs?.[key] ?? false}
+                        disabled={!enabled || !sectionOn || busy}
+                        label={`${title}: ${label}`}
+                        tone={mode}
+                        onChange={(next) => void run(() => setSmsPreference(uid, mode, key, next))}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          })}
+
+          <div
+            className={`flex items-center justify-between gap-4 border-t border-white/5 px-5 py-4 transition-opacity ${
+              enabled ? '' : 'opacity-40'
+            }`}
+          >
+            <span>
+              <span className="block text-sm font-medium">Quiet chat nudge</span>
+              <span className="block text-xs text-white/40">A conversation has gone quiet (Spark and Play)</span>
+            </span>
+            <Switch
+              checked={sms?.preferences.quietNudge ?? false}
+              disabled={!enabled || busy}
+              label="Quiet chat nudge"
+              onChange={(next) => void run(() => setQuietNudge(uid, next))}
+            />
+          </div>
 
           <div className={`border-t border-white/5 px-5 py-4 transition-opacity ${enabled ? '' : 'opacity-40'}`}>
             <h3 className="text-xs font-semibold uppercase tracking-widest text-white/40">Quiet hours</h3>
