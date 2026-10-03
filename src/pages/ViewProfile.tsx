@@ -56,7 +56,7 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
 
   if (targetUid === uid) return <Navigate to="/profile" replace />
 
-  const page = 'min-h-[calc(100dvh-7rem)] bg-gray-950 text-white'
+  const page = 'min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] bg-gray-950 text-white'
   const current = loaded?.uid === targetUid ? loaded : null
   if (!current || matches === null) {
     return (

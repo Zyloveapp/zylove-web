@@ -116,7 +116,7 @@ export default function Discover() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[calc(100dvh-7rem)] items-center justify-center bg-gray-950">
+      <div className="flex min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] items-center justify-center bg-gray-950">
         <Spinner />
       </div>
     )
@@ -124,7 +124,7 @@ export default function Discover() {
 
   if (queue.error) {
     return (
-      <div className="flex min-h-[calc(100dvh-7rem)] flex-col items-center justify-center gap-3 bg-gray-950 text-white">
+      <div className="flex min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] flex-col items-center justify-center gap-3 bg-gray-950 text-white">
         <p className="text-white/70">Couldn't load profiles</p>
         <button
           type="button"
@@ -142,7 +142,7 @@ export default function Discover() {
 
   if (!current) {
     return (
-      <div className="flex min-h-[calc(100dvh-7rem)] flex-col items-center justify-center bg-gray-950 px-6 text-center text-white">
+      <div className="flex min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] flex-col items-center justify-center bg-gray-950 px-6 text-center text-white">
         <div className="w-full max-w-xl [&>*]:mx-0 [&>*]:w-full">
           <LaunchBanner />
         </div>
@@ -157,12 +157,12 @@ export default function Discover() {
   const actions = <DiscoverActions mode={mode} busy={busy} error={actionError} onAction={handleAction} />
 
   return (
-    <div className="min-h-[calc(100dvh-7rem)] bg-gray-950 text-white">
+    <div className="min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] bg-gray-950 text-white">
       <div className="pt-4 empty:hidden">
         <LaunchBanner />
       </div>
       <div className="bg-gray-950 text-white lg:flex">
-        <aside ref={asideRef} className="flex flex-col p-6 lg:sticky lg:top-12 lg:h-[calc(100dvh-7rem)] lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:py-10">
+        <aside ref={asideRef} className="flex flex-col p-6 lg:sticky lg:top-14 lg:h-[calc(100dvh-7.5rem)] lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:py-10">
           <PhotoGallery key={current.uid} photos={photosOf(current)} name={name} />
           <div className="mt-8 hidden lg:block">{actions}</div>
         </aside>

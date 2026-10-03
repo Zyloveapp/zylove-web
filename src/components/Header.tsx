@@ -7,6 +7,7 @@ import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import { setVisibility, subscribeVisibility, type Visibility, type VisibilityState } from '../services/visibility'
 import PlayPinFlow from './PlayPinFlow'
+import { subscribeSmsSettings } from '../services/notifications'
 import ModeTransition from './ModeTransition'
 
 const VISIBILITY: { value: Visibility; label: string; pill: string; description: string; dot: string; tone: string }[] = [
@@ -48,7 +49,7 @@ function VisibilitySheet({ current, onPick, onClose }: { current: Visibility; on
 
   return (
     <>
-      <button type="button" aria-label="Close" onClick={onClose} className="fixed inset-0 top-12 z-40 cursor-default bg-black/30" />
+      <button type="button" aria-label="Close" onClick={onClose} className="fixed inset-0 top-12 z-40 cursor-default bg-black/30 lg:top-14" />
       <div className="zy-drop absolute right-2 top-[calc(100%+0.5rem)] z-50 w-72 overflow-hidden rounded-2xl border border-white/10 bg-gray-900 shadow-2xl">
         <p className="px-4 pt-3 text-xs font-semibold uppercase tracking-widest text-white/40">Profile visibility</p>
         <ul className="p-2">
@@ -147,6 +148,18 @@ export default function Header() {
     return subscribeVisibility(uid, setVisibilityState, () => setVisibilityState(null))
   }, [uid])
 
+  // ⚙ gets a dot until SMS notifications have been set up (on or off).
+  const [smsSetUp, setSmsSetUp] = useState<{ uid: string; done: boolean } | null>(null)
+  useEffect(() => {
+    if (!uid) return
+    return subscribeSmsSettings(
+      uid,
+      (s) => setSmsSetUp({ uid, done: s.enabled !== null }),
+      () => setSmsSetUp(null),
+    )
+  }, [uid])
+  const settingsDot = smsSetUp?.uid === uid && !smsSetUp.done
+
   // Just finished Play onboarding: drop the param and run the normal way in —
   // PIN (setup, since there's none yet), then the "Play time." transition.
   useEffect(() => {
@@ -183,13 +196,17 @@ export default function Header() {
 
   return (
     <header
-      className={`sticky top-0 z-40 h-12 border-b bg-gray-950 transition-colors ${
+      className={`sticky top-0 z-40 h-12 border-b bg-gray-950 transition-colors lg:h-14 ${
         isPlay ? 'border-[#E03131]/20' : 'border-white/10'
       }`}
     >
-      <div className="relative mx-auto grid h-full max-w-5xl grid-cols-3 items-center px-4">
-        <Link to="/discover" className="justify-self-start text-sm font-semibold text-white">
-          ✦ Zylove
+      <div className="relative mx-auto grid h-full max-w-5xl grid-cols-3 items-center gap-x-4 px-4 lg:max-w-6xl lg:gap-x-8 lg:px-8">
+        {/* Wordmark: "✦ Zy" in the mode color, "love" in white. */}
+        <Link to="/discover" className="justify-self-start whitespace-nowrap text-sm font-semibold lg:text-xl lg:font-bold">
+          <span className={`transition-colors ${isPlay ? 'text-[#E03131]' : 'text-[#1B4FD8]'}`}>
+            ✦ <span className="font-bold">Zy</span>
+          </span>
+          <span className="font-bold text-white">love</span>
         </Link>
 
         <button
@@ -197,7 +214,7 @@ export default function Header() {
           onClick={togglePill}
           disabled={checkingPlay || transition !== null}
           aria-label={isPlay ? 'Play mode — switch to Spark' : 'Spark mode — switch to Play'}
-          className={`justify-self-center rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+          className={`justify-self-center rounded-full border px-3 py-1 text-xs font-semibold transition-colors lg:px-4 lg:py-1.5 lg:text-sm ${
             isPlay
               ? 'zy-play-pulse border-[#E03131]/30 bg-[#E03131]/20 text-red-400'
               : 'border-[#1B4FD8]/30 bg-[#1B4FD8]/20 text-[#6B8FFF]'
@@ -206,14 +223,14 @@ export default function Header() {
           {isPlay ? '🔴 Play' : '🔵 Spark'}
         </button>
 
-        <div className="flex items-center gap-1 justify-self-end">
+        <div className="flex items-center gap-1 justify-self-end lg:gap-2">
           <button
             type="button"
             onClick={() => setSheetOpen((o) => !o)}
             disabled={current === null}
             aria-label={`Visibility: ${dot?.label ?? 'loading'}`}
             aria-expanded={sheetOpen}
-            className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold transition-opacity hover:opacity-80 ${
+            className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold transition-opacity hover:opacity-80 lg:px-4 lg:py-1.5 lg:text-sm ${
               dot?.tone ?? 'border-white/10 bg-white/5 text-white/30'
             }`}
           >
@@ -221,10 +238,13 @@ export default function Header() {
           </button>
           <Link
             to="/settings"
-            aria-label="Settings"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-lg text-white/50 hover:bg-white/10 hover:text-white"
+            aria-label={settingsDot ? 'Settings — set up notifications' : 'Settings'}
+            className="relative flex h-9 w-9 items-center justify-center rounded-full text-lg text-white/50 hover:bg-white/10 hover:text-white"
           >
             ⚙
+            {settingsDot && (
+              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#1B4FD8] ring-2 ring-gray-950" aria-hidden />
+            )}
           </Link>
         </div>
 

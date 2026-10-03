@@ -4,13 +4,15 @@
 // Build as /admin route gated on isAdmin: true when Stripe is complete
 // (Behavior signals and risk scores actually live server-only in behaviorSignals/{uid}; see behavior.ts.)
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
-import { onDocumentWritten } from 'firebase-functions/v2/firestore'
+import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/firestore'
+import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
 import { initializeApp } from 'firebase-admin/app'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 import { buildBioPrompt, parseBioRequest } from './bioPrompt'
 import { buildPlayBioPrompt, parsePlayBioRequest } from './playBioPrompt'
+import { SMS_SECRETS, claimSparkSmsSlot, nameFor, sendSMS, smsTarget } from './sms'
 
 export { assignFounderBadge, onLaunchConfigUpdated } from './founders'
 export { ensureSortKey } from './discovery'
@@ -1223,3 +1225,147 @@ export { botTypingStart, botTypingStop } from './botTyping'
 export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate } from './behavior'
 export { markChatPhotoViewed, sweepChatPhotos } from './photos'
 export { acceptPhotoConsent, getBlockedUsers, onBeforeSignIn, reportAndBan, unblockMember } from './trust'
+
+// ─── SMS notifications ───────────────────────────────────────────────────────
+// Opt-in texts (Settings → SMS Notifications). Each checks the recipient's
+// users/{uid}.smsNotificationsEnabled, the per-kind preference and their quiet
+// hours (a text in quiet hours is dropped, not delayed); sendSMS
+// never throws, so a texting problem never affects the write that fired it.
+
+const MESSAGE_SMS_COOLDOWN_MS = 2 * 60 * 1000
+const NUDGE_COOLDOWN_MS = 48 * 60 * 60 * 1000
+const HOUR_MS = 60 * 60 * 1000
+
+function millis(v: unknown): number | null {
+  if (v instanceof Timestamp) return v.toMillis()
+  return typeof v === 'number' ? v : null
+}
+
+function participantsOf(match: DocumentData | undefined): string[] {
+  const users: unknown = match?.users ?? match?.participants
+  return Array.isArray(users) ? users.filter((u): u is string => typeof u === 'string') : []
+}
+
+// New Spark: someone landed in this user's like queue. Anonymous on purpose:
+// the app only names a liker once it's a match (or a bot). At most one every
+// 4 hours per user.
+export const smsOnSpark = onDocumentCreated(
+  { document: 'users/{uid}/likeQueue/{likerUid}', secrets: SMS_SECRETS },
+  async (event) => {
+    const target = await smsTarget(event.params.uid, 'newSpark')
+    if (!target || !(await claimSparkSmsSlot(target.uid))) return
+    const play = event.data?.data()?.mode === 'play'
+    await sendSMS(
+      target.phone,
+      play
+        ? "🔥 Someone's interested on Zylove Play. Check your Flames. zylove.app/sparks"
+        : '✦ Someone feels a Spark with you on Zylove. Open your Sparks to see more. zylove.app/sparks',
+    )
+  },
+)
+
+// New message: texts the other participant, at most once per match every
+// 2 minutes. Protocol and system messages don't count.
+export const smsOnMessage = onDocumentCreated(
+  { document: 'matches/{matchId}/messages/{messageId}', secrets: SMS_SECRETS },
+  async (event) => {
+    const msg = event.data?.data()
+    if (!msg) return
+    const senderId: unknown = msg.senderId
+    if (typeof senderId !== 'string' || !senderId) return
+    const ciphertext = typeof msg.ciphertext === 'string' ? msg.ciphertext : ''
+    if (
+      msg.nonce === 'system' ||
+      msg.messageType === 'system' ||
+      msg.messageType === 'consent_request' ||
+      ciphertext.startsWith('photo_consent')
+    ) {
+      return
+    }
+
+    const db = getFirestore()
+    const matchRef = db.doc(`matches/${event.params.matchId}`)
+    const match = (await matchRef.get()).data()
+    if (!match || match.isBlocked === true) return
+    const recipientUid = participantsOf(match).find((u) => u !== senderId)
+    if (!recipientUid) return
+
+    const target = await smsTarget(recipientUid, 'newMessage')
+    if (!target) return
+
+    // Claim the cooldown slot before sending, so a burst of messages sends one text.
+    const claimed = await db.runTransaction(async (tx) => {
+      const last = millis((await tx.get(matchRef)).data()?.lastMessageSmsAt)
+      if (last !== null && Date.now() - last < MESSAGE_SMS_COOLDOWN_MS) return false
+      tx.update(matchRef, { lastMessageSmsAt: FieldValue.serverTimestamp() })
+      return true
+    })
+    if (!claimed) return
+
+    const senderName = await nameFor(senderId, match.participantSnapshots)
+    await sendSMS(target.phone, `💬 ${senderName} sent you a message on Zylove. zylove.app/matches`)
+  },
+)
+
+// New match: texts each participant who has it on. A trigger on the match doc
+// rather than inside likeBack, so matches from onLike (mobile and web
+// Discover) and bots are covered too.
+export const smsOnMatch = onDocumentCreated(
+  { document: 'matches/{matchId}', secrets: SMS_SECRETS },
+  async (event) => {
+    const match = event.data?.data()
+    const users = participantsOf(match)
+    if (!match || users.length !== 2) return
+    const play = match.mode === 'play'
+    await Promise.all(
+      users.map(async (uid) => {
+        const target = await smsTarget(uid, 'newMatch')
+        if (!target) return
+        const otherUid = users.find((u) => u !== uid) ?? ''
+        const body = play
+          ? "🔥 You're now entangled on Zylove Play. zylove.app/matches"
+          : `✦ Sparks are flying. You and ${await nameFor(otherUid, match.participantSnapshots)} connected on Zylove. zylove.app/matches`
+        await sendSMS(target.phone, body)
+      }),
+    )
+  },
+)
+
+// Quiet chat nudge: conversations whose last message was 24–48h ago. Each
+// match is nudged at most once per 48h. Runs at 9am, 3pm and 9pm Central so
+// nobody gets a nudge in the middle of the night.
+export const nudgeQuietChats = onSchedule(
+  { schedule: '0 9,15,21 * * *', timeZone: 'America/Chicago', secrets: SMS_SECRETS, timeoutSeconds: 300 },
+  async () => {
+    const db = getFirestore()
+    const now = Date.now()
+    const quiet = await db
+      .collection('matches')
+      .where('lastMessageAt', '>=', Timestamp.fromMillis(now - 48 * HOUR_MS))
+      .where('lastMessageAt', '<=', Timestamp.fromMillis(now - 24 * HOUR_MS))
+      .get()
+
+    let sent = 0
+    for (const doc of quiet.docs) {
+      const match = doc.data()
+      if (match.isBlocked === true) continue
+      const lastNudge = millis(match.lastNudgeSmsAt)
+      if (lastNudge !== null && now - lastNudge < NUDGE_COOLDOWN_MS) continue
+      const users = participantsOf(match)
+      if (users.length !== 2) continue
+
+      let nudged = false
+      for (const uid of users) {
+        const target = await smsTarget(uid, 'quietNudge')
+        if (!target) continue
+        const otherName = await nameFor(users.find((u) => u !== uid) ?? '', match.participantSnapshots)
+        if (await sendSMS(target.phone, `☕ Your conversation with ${otherName} has been quiet. Need a spark? zylove.app/matches`)) {
+          nudged = true
+          sent++
+        }
+      }
+      if (nudged) await doc.ref.update({ lastNudgeSmsAt: FieldValue.serverTimestamp() })
+    }
+    logger.info('nudgeQuietChats: done', { candidates: quiet.size, sent })
+  },
+)

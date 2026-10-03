@@ -6,8 +6,9 @@ import { isNewMatch, isUnread, subscribeLastRead, subscribeMatches, type MatchEn
 import { subscribeSparks } from '../services/sparks'
 import SparkleIcon from './icons/SparkleIcon'
 
-// Heights reserved by the bars: Header h-12 on top, this bar h-16 at the
-// bottom. Pages use h-[calc(100dvh-7rem)] to fit between them.
+// Heights reserved by the bars: Header h-12 (lg:h-14) on top, this bar h-16
+// at the bottom. Pages use h-[calc(100dvh-7rem)] lg:h-[calc(100dvh-7.5rem)]
+// to fit between them.
 
 function CompassIcon() {
   return (

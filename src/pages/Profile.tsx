@@ -72,7 +72,7 @@ export default function Profile() {
     }
   }, [uid])
 
-  const page = 'min-h-[calc(100dvh-7rem)] bg-gray-950 text-white'
+  const page = 'min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] bg-gray-950 text-white'
 
   const playLoaded = play?.uid === uid ? play : null
   if (loaded?.uid !== uid || (mode === 'play' && !playLoaded)) {

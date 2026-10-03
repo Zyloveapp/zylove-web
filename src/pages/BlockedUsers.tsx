@@ -41,7 +41,7 @@ export default function BlockedUsers() {
   }
 
   return (
-    <div className="min-h-[calc(100dvh-7rem)] bg-gray-950 px-4 py-6 text-white">
+    <div className="min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] bg-gray-950 px-4 py-6 text-white">
       <div className="mx-auto max-w-xl space-y-6">
         <div className="flex items-center gap-3">
           <button type="button" onClick={() => navigate(-1)} className="text-sm font-medium text-[#7C9BFF] hover:text-white">

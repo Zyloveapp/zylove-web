@@ -50,7 +50,7 @@ export default function Links() {
 
   if (state?.key !== key) {
     return (
-      <div className="flex min-h-[calc(100dvh-7rem)] items-center justify-center bg-gray-950">
+      <div className="flex min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] items-center justify-center bg-gray-950">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
       </div>
     )
@@ -76,7 +76,7 @@ export default function Links() {
 
   if (!error && ignited.length === 0 && conversations.length === 0) {
     return (
-      <div className="h-[calc(100dvh-7rem)] bg-gray-950 lg:flex">
+      <div className="h-[calc(100dvh-7rem)] lg:h-[calc(100dvh-7.5rem)] bg-gray-950 lg:flex">
         <aside className="hidden w-80 shrink-0 border-r border-white/10 lg:block">
           <h1 className="px-4 py-5 text-2xl font-extrabold text-white">{title}</h1>
         </aside>
@@ -88,7 +88,7 @@ export default function Links() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-7rem)] bg-gray-950 text-white">
+    <div className="flex h-[calc(100dvh-7rem)] lg:h-[calc(100dvh-7.5rem)] bg-gray-950 text-white">
       <aside
         className={`w-full shrink-0 flex-col border-white/10 lg:flex lg:w-80 lg:border-r ${active ? 'hidden' : 'flex'}`}
       >

@@ -50,7 +50,7 @@ export default function GoDeeper() {
     }
   }
 
-  const page = 'min-h-[calc(100dvh-7rem)] bg-gray-950 text-white'
+  const page = 'min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] bg-gray-950 text-white'
 
   if (loaded === 'error') {
     return (

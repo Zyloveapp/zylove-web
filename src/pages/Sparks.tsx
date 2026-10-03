@@ -145,7 +145,7 @@ export default function Sparks() {
   }
 
   return (
-    <div className="min-h-[calc(100dvh-7rem)] bg-gray-950 text-white">
+    <div className="min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] bg-gray-950 text-white">
       <div className="mx-auto max-w-2xl px-4">
         <header className="flex items-center justify-between py-5">
           <h1 className="text-2xl font-extrabold">{isPlay ? '🔥 Flames ✦' : '✦ Sparks ✦'}</h1>
