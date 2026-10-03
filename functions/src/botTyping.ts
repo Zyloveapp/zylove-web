@@ -26,7 +26,7 @@ function botUidFor(match: DocumentData, senderId: string): string | null {
 }
 
 export const botTypingStart = onDocumentCreated(
-  { document: 'matches/{matchId}/messages/{messageId}', timeoutSeconds: 60, memory: '128MiB' },
+  { document: 'matches/{matchId}/messages/{messageId}', timeoutSeconds: 60, memory: '256MiB' },
   async (event) => {
     const msg = event.data?.data()
     if (!msg || msg.isBot === true || msg.nonce === 'system' || typeof msg.senderId !== 'string') return
@@ -56,7 +56,7 @@ export const botTypingStart = onDocumentCreated(
 )
 
 export const botTypingStop = onDocumentCreated(
-  { document: 'matches/{matchId}/messages/{messageId}', timeoutSeconds: 30, memory: '128MiB' },
+  { document: 'matches/{matchId}/messages/{messageId}', timeoutSeconds: 30, memory: '256MiB' },
   async (event) => {
     const msg = event.data?.data()
     if (msg?.isBot !== true || typeof msg.senderId !== 'string') return

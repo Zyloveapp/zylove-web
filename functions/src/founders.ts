@@ -47,7 +47,7 @@ function bucketFor(genderIdentity: unknown): 'women' | 'men' {
 // Location is self-reported (browser geolocation, snapped to ~3 miles), so
 // this is a launch-period gate, not proof of residence.
 export const assignFounderBadge = onCall(
-  { timeoutSeconds: 30, memory: '128MiB', invoker: 'public' },
+  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<FounderResult> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const uid = request.auth.uid

@@ -174,7 +174,7 @@ const TRUST_DEFAULTS = {
 // users/{uid} doc. Only missing fields are written, so values set elsewhere
 // (e.g. Elite from a founder code) are never overwritten. Idempotent.
 export const initUserDefaults = onCall(
-  { timeoutSeconds: 30, memory: '128MiB', invoker: 'public' },
+  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
 
@@ -337,7 +337,7 @@ const VIBE_COOLDOWN_MS = 24 * 60 * 60 * 1000
 // warmSignal. Server-side writes because rules only allow self-writes to
 // users/{uid} and deny the vibeChecks collection.
 export const recordVibeRating = onCall(
-  { timeoutSeconds: 30, memory: '128MiB', invoker: 'public' },
+  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const callerId = request.auth.uid
@@ -396,7 +396,7 @@ const VISIBILITIES: readonly Visibility[] = ['active', 'hidden', 'paused']
 // pauseControl.ts does: settings/pause (with the paused-at stamp mobile reads)
 // and the top-level field Discover filters on.
 export const setVisibility = onCall(
-  { timeoutSeconds: 15, memory: '128MiB', invoker: 'public' },
+  { timeoutSeconds: 15, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const uid = request.auth.uid
@@ -579,7 +579,7 @@ async function checkModeration(reviewedUid: string, reviewerUid: string, matchId
 
 // One anonymous review per reviewer per match.
 export const submitReview = onCall(
-  { timeoutSeconds: 30, memory: '128MiB', invoker: 'public' },
+  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true; newScore: number; newTier: ZyloveScoreTier }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const callerId = request.auth.uid
@@ -1159,7 +1159,7 @@ function revealedAt(pair: DocumentData, uid: string): number {
 // them here would unmask them). Women and Elite get the list; everyone else
 // gets only the count, enforced here so the list can't be fetched directly.
 export const getCuriousVisitors = onCall(
-  { timeoutSeconds: 30, memory: '128MiB', invoker: 'public' },
+  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ locked: boolean; count: number; visitors: CuriousVisitor[] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const uid = request.auth.uid

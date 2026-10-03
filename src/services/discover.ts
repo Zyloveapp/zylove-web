@@ -7,6 +7,7 @@ import { genderToAttractedToCategory } from '../utils/genderUtils'
 import type { DatingProfile } from '../types/profile'
 import type { Mode } from '../store/modeStore'
 import { parsePlayProfile, type PlayProfileData } from './playProfile'
+import { loadBlockedUids } from './safety'
 
 const CANDIDATE_LIMIT = 50
 
@@ -121,16 +122,17 @@ export async function fetchCandidates(uid: string, mode: Mode): Promise<Discover
   if (!meSnap.exists()) return []
   const me = { ...(meSnap.data() as DiscoverProfile), uid }
 
-  const snap = await getDocs(
-    query(collection(db, 'users'), where('isSuspended', '==', false), limit(CANDIDATE_LIMIT)),
-  )
+  const [snap, blocked] = await Promise.all([
+    getDocs(query(collection(db, 'users'), where('isSuspended', '==', false), limit(CANDIDATE_LIMIT))),
+    loadBlockedUids(uid),
+  ])
   const swiped = loadSwiped(uid, mode)
   const visibilityField = mode === 'play' ? 'playVisibility' : 'sparkVisibility'
 
   const candidates = snap.docs
     .map((d) => ({ ...(d.data() as DiscoverProfile), uid: d.id }))
     .filter((p) => {
-      if (p.uid === uid || swiped.has(p.uid)) return false
+      if (p.uid === uid || swiped.has(p.uid) || blocked.has(p.uid)) return false
       if (!p.photoURLs?.length) return false
       if (!intentMatchesMode(p, mode)) return false
       if (p[visibilityField] === 'paused' || p[visibilityField] === 'hidden') return false

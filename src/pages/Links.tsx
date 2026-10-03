@@ -58,12 +58,13 @@ export default function Links() {
 
   const { matches, error } = state
   const active = matches.find((m) => m.matchId === activeId) ?? null
-  const unreadCount = matches.filter((m) => isUnread(m, uid, lastRead)).length
+  const unreadCount = matches.filter((m) => !m.ended && isUnread(m, uid, lastRead)).length
   // Not yet messaged → the Ignited/Lit row; everything else is a conversation.
   const ignited = matches
     .filter((m) => !hasMessages(m) && !m.ended)
     .sort((a, b) => b.matchedAt - a.matchedAt)
-  const conversations = matches.filter(hasMessages)
+  // Blocked and unmatched connections leave the list.
+  const conversations = matches.filter((m) => hasMessages(m) && !m.ended)
   const isPlay = mode === 'play'
   const title = isPlay ? '🔥 Chats 🔥' : '✦ Links ✦'
   const accent = isPlay ? 'text-[#E03131]' : 'text-[#1B4FD8]'

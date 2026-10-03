@@ -11,8 +11,11 @@ import {
   conversationCold,
   isBotUid,
   markColdReviewShown,
+  markReviewed,
   reviewed,
 } from '../../services/zyloveScore'
+import { blockMatch, unmatch } from '../../services/safety'
+import ChatActionsSheet, { type ChatAction } from './ChatActionsSheet'
 import ConversationNudge from './ConversationNudge'
 import FirstChatModal from './FirstChatModal'
 import TypingIndicator from './TypingIndicator'
@@ -63,6 +66,10 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const vibeCheckFired = useRef(false)
   const vibeCheckTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [showReview, setShowReview] = useState(false)
+  const [showActions, setShowActions] = useState(false)
+  const [showReport, setShowReport] = useState(false)
+  // Block/unmatch done: the review card, then back to the list.
+  const [exitReview, setExitReview] = useState(false)
   const navigate = useNavigate()
   const reviewChecked = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -247,6 +254,21 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     }
   }
 
+  function leave() {
+    onBack?.()
+    navigate('/matches')
+  }
+
+  async function endConnection(action: Exclude<ChatAction, 'report'>) {
+    if (action === 'block') await blockMatch(matchId, partnerUid)
+    else await unmatch(matchId, uid)
+    setShowActions(false)
+    // Same rules as the app-wide prompt: a real person, a real conversation,
+    // not already reviewed.
+    if (!isBotUid(partnerUid) && conversation.length > 0 && !reviewed(matchId)) setExitReview(true)
+    else leave()
+  }
+
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
@@ -265,7 +287,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
             ←
           </button>
         )}
-        {/* Name and avatar open their profile. The ••• menu returns with Report/Block. */}
+        {/* Name and avatar open their profile; ••• (right) holds Report/Block/Unmatch. */}
         <button
           type="button"
           onClick={() => navigate(`/profile/${partnerUid}`)}
@@ -283,6 +305,14 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
             {match.name}
             {match.age !== null && <span className="font-normal text-white/50">, {match.age}</span>}
           </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowActions(true)}
+          aria-label="More options"
+          className="shrink-0 rounded-full px-2 py-1 text-xl leading-none text-white/60 hover:bg-white/10 hover:text-white"
+        >
+          •••
         </button>
       </header>
 
@@ -333,31 +363,35 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           matchId={matchId}
           partnerUid={partnerUid}
           messages={conversation}
-          suppressed={showFirstChat || showVibeCheck || showReview}
+          suppressed={showFirstChat || showVibeCheck || showReview || showReport || exitReview}
           onPick={setText}
         />
         {sendError && <p className="mb-2 text-center text-sm text-red-400">{sendError}</p>}
         {partnerKey?.error && (
           <p className="mb-2 text-center text-sm text-red-400">Couldn't load encryption keys. Reopen the chat to retry.</p>
         )}
-        <form onSubmit={handleSend} className="flex items-end gap-2">
-          <textarea
-            rows={1}
-            value={text}
-            maxLength={MAX_MESSAGE_LENGTH}
-            onChange={(e) => handleTextChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={`Message ${match.name}…`}
-            className="max-h-32 flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-white placeholder:text-white/30 focus:border-white/30 focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={!trimmed || sending || !canSend}
-            className={`rounded-xl px-5 py-2.5 font-medium text-white transition-opacity disabled:opacity-30 ${ownBubble}`}
-          >
-            Send
-          </button>
-        </form>
+        {match.ended ? (
+          <p className="py-2 text-center text-sm text-white/40">This connection has ended.</p>
+        ) : (
+          <form onSubmit={handleSend} className="flex items-end gap-2">
+            <textarea
+              rows={1}
+              value={text}
+              maxLength={MAX_MESSAGE_LENGTH}
+              onChange={(e) => handleTextChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={`Message ${match.name}…`}
+              className="max-h-32 flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-white placeholder:text-white/30 focus:border-white/30 focus:outline-none"
+            />
+            <button
+              type="submit"
+              disabled={!trimmed || sending || !canSend}
+              className={`rounded-xl px-5 py-2.5 font-medium text-white transition-opacity disabled:opacity-30 ${ownBubble}`}
+            >
+              Send
+            </button>
+          </form>
+        )}
       </div>
 
       {showFirstChat && (
@@ -374,6 +408,34 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
         />
       )}
 
+
+      {showActions && (
+        <ChatActionsSheet
+          name={match.name}
+          onReport={() => {
+            setShowActions(false)
+            setShowReport(true)
+          }}
+          onEnd={endConnection}
+          onClose={() => setShowActions(false)}
+        />
+      )}
+
+      {showReport && (
+        <ReviewModal matchId={matchId} partnerUid={partnerUid} name={match.name} onClose={() => setShowReport(false)} />
+      )}
+
+      {exitReview && (
+        <ReviewModal
+          matchId={matchId}
+          partnerUid={partnerUid}
+          name={match.name}
+          onClose={() => {
+            markReviewed(matchId)
+            leave()
+          }}
+        />
+      )}
 
       {showReview && (
         <ReviewModal matchId={matchId} partnerUid={partnerUid} name={match.name} onClose={() => setShowReview(false)} />
