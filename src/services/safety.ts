@@ -25,3 +25,36 @@ export async function loadBlockedUids(uid: string): Promise<Set<string>> {
     return new Set()
   }
 }
+
+// Serious reports also go on the reported person's phone record (hashed,
+// server-side) so a ban survives them making a new account.
+const SERIOUS_CATEGORIES = ['felt_unsafe', 'aggressive', 'pushed_boundaries', 'inappropriate']
+const URGENT_CATEGORIES = ['felt_unsafe', 'aggressive']
+
+export function isSeriousReport(categories: string[]): boolean {
+  return categories.some((c) => SERIOUS_CATEGORIES.includes(c))
+}
+
+export async function reportAndBan(reportedUid: string, matchId: string, categories: string[]): Promise<void> {
+  const severity = categories.some((c) => URGENT_CATEGORIES.includes(c)) ? 'urgent' : 'standard'
+  await httpsCallable<
+    { reportedUid: string; matchId: string; categories: string[]; severity: 'standard' | 'urgent' },
+    { success: true }
+  >(functions, 'reportAndBan')({ reportedUid, matchId, categories, severity })
+}
+
+export interface BlockedUser {
+  uid: string
+  name: string
+  blockedAt: number
+}
+
+// People the caller blocked (never people who blocked them).
+export async function fetchBlockedUsers(): Promise<BlockedUser[]> {
+  const res = await httpsCallable<void, { blocked: BlockedUser[] }>(functions, 'getBlockedUsers')()
+  return res.data.blocked
+}
+
+export async function unblockMember(targetUid: string): Promise<void> {
+  await httpsCallable<{ targetUid: string }, { success: true }>(functions, 'unblockMember')({ targetUid })
+}

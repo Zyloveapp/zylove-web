@@ -27,6 +27,7 @@ import GoDeeper from './pages/GoDeeper'
 import ZyloveScore from './pages/ZyloveScore'
 import Settings from './pages/Settings'
 import ReportPastConnection from './pages/ReportPastConnection'
+import BlockedUsers from './pages/BlockedUsers'
 import Chat from './pages/Chat'
 
 // Protected pages share the nav. Leaves room for the mobile bottom bar.
@@ -97,6 +98,7 @@ export default function App() {
               <Route path="/zylove-score" element={<ZyloveScore />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/settings/report" element={<ReportPastConnection />} />
+              <Route path="/settings/blocked" element={<BlockedUsers />} />
               <Route path="/chat/:matchId" element={<Chat />} />
             </Route>
           </Route>

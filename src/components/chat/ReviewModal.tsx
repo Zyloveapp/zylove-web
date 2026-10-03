@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { FirebaseError } from 'firebase/app'
 import { markReviewed, submitReview } from '../../services/zyloveScore'
+import { isSeriousReport, reportAndBan } from '../../services/safety'
 import { REVIEW_CATEGORY_DEFS, type ReviewCategoryDef, type ReviewTone } from '../../types/reviewCategories'
 
 interface ReviewModalProps {
@@ -62,12 +63,18 @@ export default function ReviewModal({
     if (selected.length === 0 || submitting) return
     setSubmitting(true)
     setError(null)
+    // Serious reports also flag the phone number. Best effort: a failure
+    // there never loses the review itself.
+    const flagPhone = () =>
+      isSeriousReport(selected) ? reportAndBan(partnerUid, matchId, selected).catch(() => {}) : Promise.resolve()
     try {
       await submitReview(matchId, partnerUid, selected)
+      await flagPhone()
       markReviewed(matchId)
       setDone(true)
     } catch (err) {
       if (err instanceof FirebaseError && err.code === 'functions/already-exists') {
+        await flagPhone()
         markReviewed(matchId)
         setDone(true)
       } else {

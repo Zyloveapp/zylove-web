@@ -59,9 +59,15 @@ export async function requestPhotoConsent(matchId: string, uid: string): Promise
   await consentMessage(matchId, uid, 'photo_consent_request')
 }
 
+// Accepting goes through the acceptPhotoConsent callable — Firestore rules
+// refuse a client setting 'accepted'. Declining is a plain write.
 export async function respondToPhotoConsent(matchId: string, uid: string, accept: boolean): Promise<void> {
-  await updateDoc(doc(db, 'matches', matchId), { 'photoConsent.status': accept ? 'accepted' : 'declined' })
-  await consentMessage(matchId, uid, accept ? 'photo_consent_accepted' : 'photo_consent_declined')
+  if (accept) {
+    await httpsCallable<{ matchId: string }, { success: true }>(functions, 'acceptPhotoConsent')({ matchId })
+    return
+  }
+  await updateDoc(doc(db, 'matches', matchId), { 'photoConsent.status': 'declined' })
+  await consentMessage(matchId, uid, 'photo_consent_declined')
 }
 
 export async function pausePhotoSharing(matchId: string, uid: string): Promise<void> {

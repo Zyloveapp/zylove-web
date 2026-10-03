@@ -1222,3 +1222,4 @@ export const getCuriousVisitors = onCall(
 export { botTypingStart, botTypingStop } from './botTyping'
 export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate } from './behavior'
 export { markChatPhotoViewed, sweepChatPhotos } from './photos'
+export { acceptPhotoConsent, getBlockedUsers, onBeforeSignIn, reportAndBan, unblockMember } from './trust'

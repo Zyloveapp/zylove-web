@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore'
 import { hasPin } from '../services/playPin'
 import PlayPinFlow from '../components/PlayPinFlow'
 import DiscoverySettings from '../components/DiscoverySettings'
+import BlockedUsersLink from '../components/BlockedUsersLink'
 
 // Stub settings page. For now: the Play PIN.
 export default function Settings() {
@@ -57,6 +58,7 @@ export default function Settings() {
               ›
             </span>
           </button>
+          <BlockedUsersLink />
         </section>
       </div>
 
