@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import MatchRow from '../components/matches/MatchRow'
+import { loadChatPreview, type ChatPreview } from '../services/chatPreview'
 import ChatView from '../components/chat/ChatView'
 import NoMatches from '../components/matches/NoMatches'
 import IgnitedRow from '../components/matches/IgnitedRow'
@@ -30,6 +31,9 @@ export default function Links() {
   const [state, setState] = useState<LinksState | null>(null)
   const [lastRead, setLastRead] = useState<Map<string, number>>(new Map())
   const [activeId, setActiveId] = useState<string | null>(null)
+  // Decrypted last-message previews, keyed `${matchId}:${lastMessageAt}` so a
+  // new message shows the loader line until its preview arrives.
+  const [previews, setPreviews] = useState<Map<string, ChatPreview | null>>(new Map())
   const navigate = useNavigate()
   const openProfile = (m: MatchEntry) => navigate(`/profile/${m.partnerUid}`)
 
@@ -47,6 +51,22 @@ export default function Links() {
     if (!uid) return
     return subscribeLastRead(uid, setLastRead)
   }, [uid])
+
+  const listedMatches = state?.key === key ? state.matches : null
+  useEffect(() => {
+    if (!uid || !listedMatches) return
+    let cancelled = false
+    for (const m of listedMatches) {
+      if (m.ended || m.lastMessageAt <= 0) continue
+      const previewKey = `${m.matchId}:${m.lastMessageAt}`
+      loadChatPreview(m, uid).then((preview) => {
+        if (!cancelled) setPreviews((prev) => (prev.get(previewKey) === preview ? prev : new Map(prev).set(previewKey, preview)))
+      })
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [uid, listedMatches])
 
   if (state?.key !== key) {
     return (
@@ -122,6 +142,7 @@ export default function Links() {
                     key={m.matchId}
                     match={m}
                     unread={isUnread(m, uid, lastRead)}
+                    preview={previews.get(`${m.matchId}:${m.lastMessageAt}`)}
                     active={m.matchId === activeId}
                     onSelect={() => select(m)}
                     onOpenProfile={() => openProfile(m)}

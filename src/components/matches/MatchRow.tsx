@@ -1,5 +1,6 @@
 import { relativeTime, type MatchEntry } from '../../services/matches'
 import { UserTierBadge } from '../TierBadge'
+import type { ChatPreview } from '../../services/chatPreview'
 
 function initials(name: string): string {
   return name
@@ -13,6 +14,8 @@ function initials(name: string): string {
 interface MatchRowProps {
   match: MatchEntry
   unread: boolean
+  // The decrypted last message: undefined while loading, null if unreadable.
+  preview?: ChatPreview | null
   active: boolean
   // Anywhere on the row: open the chat.
   onSelect: () => void
@@ -22,8 +25,20 @@ interface MatchRowProps {
 
 // The whole row opens the chat (a full-size button underneath); the avatar
 // and name sit above it as their own buttons for the profile.
-export default function MatchRow({ match, unread, active, onSelect, onOpenProfile }: MatchRowProps) {
+// The line under the name: an empty chat invites the first message; an
+// unread one from them says so; otherwise the last message itself.
+function previewLine(match: MatchEntry, unread: boolean, preview: ChatPreview | null | undefined): string {
+  const started = match.lastMessagePreview !== null || match.lastMessageAt > 0
+  if (!started) return match.mode === 'play' ? 'Say something 🔥' : 'Say hello 👋'
+  if (unread) return 'New message'
+  if (preview === undefined) return ''
+  if (preview === null) return 'New message'
+  return preview.fromMe ? `You: ${preview.text}` : preview.text
+}
+
+export default function MatchRow({ match, unread, preview, active, onSelect, onOpenProfile }: MatchRowProps) {
   const time = relativeTime(match.lastMessageAt || match.matchedAt)
+  const play = match.mode === 'play'
   return (
     <div className={`relative flex w-full items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03] ${active ? 'bg-white/5' : ''}`}>
       <button
@@ -35,7 +50,7 @@ export default function MatchRow({ match, unread, active, onSelect, onOpenProfil
       />
 
       <span className="pointer-events-none flex w-2 shrink-0 justify-center">
-        {unread && <span className="h-2 w-2 rounded-full bg-[#1B4FD8]" aria-label="Unread" />}
+        {unread && <span className={`h-2 w-2 rounded-full ${play ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'}`} aria-label="Unread" />}
       </span>
 
       <button
@@ -70,8 +85,8 @@ export default function MatchRow({ match, unread, active, onSelect, onOpenProfil
           </span>
           {time && <span className="shrink-0 text-xs text-white/35">{time}</span>}
         </span>
-        <span className={`block truncate text-sm ${unread ? 'text-white/80' : 'text-white/40'}`}>
-          {match.lastMessagePreview || match.lastMessageAt > 0 ? 'New message' : 'Say hello 👋'}
+        <span className={`block truncate text-sm ${unread ? 'font-medium text-white' : 'text-white/40'}`}>
+          {previewLine(match, unread, preview) || '\u00a0'}
         </span>
       </span>
     </div>
