@@ -4,7 +4,10 @@ import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
+import { friendlyError } from '../services/errors'
 import PhotosStep from '../components/onboarding/PhotosStep'
+import ExitLink from '../components/onboarding/ExitLink'
+import { clearDraft, loadDraft, saveDraft, storablePhotos } from '../components/onboarding/draftStorage'
 import { MAX_PHOTOS, releasePhotoPreview } from '../components/onboarding/types'
 import { selectPlayPrompts } from '../types/dualProfile'
 import { PLAY_BODY_TYPE_LABELS, type PlayBodyType } from '../types/playDescriptors'
@@ -85,6 +88,16 @@ export default function PlayOnboarding() {
   const [bioMessage, setBioMessage] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  // What the save is doing ("Uploading photos (2 of 4)…").
+  const [saveProgress, setSaveProgress] = useState<string | null>(null)
+  // Set once any draft saved on this device has been restored (or there was
+  // none); nothing is written back before then. Keyed by uid and flow.
+  const flow = wantsEdit ? 'play-edit' : 'play'
+  const [restoredKey, setRestoredKey] = useState<string | null>(null)
+  // A restored draft whose new photos couldn't be kept.
+  const [photoReminder, setPhotoReminder] = useState(false)
+  // Saved or exited: stop writing the draft back.
+  const finished = useRef(false)
   // Set after a successful first save when some photos didn't publish yet.
   const [photoNotices, setPhotoNotices] = useState<string[] | null>(null)
   // Gender and attraction for the bio prompt come from the shared root profile.
@@ -101,6 +114,53 @@ export default function PlayOnboarding() {
 
   const update = (patch: Partial<PlayDraft>) => setDraft((d) => ({ ...d, ...patch }))
 
+  // Picks up a draft saved on an earlier visit (draftStorage.ts) over `base`.
+  // New photos aren't stored, so they need re-adding.
+  function restoreSaved(base: PlayDraft, baseStep: number) {
+    const saved = loadDraft<{ draft: Partial<PlayDraft>; photosMissing: boolean }>(uid, flow)
+    if (saved) {
+      const d = saved.data.draft
+      setDraft({ ...base, ...d, photos: storablePhotos(Array.isArray(d?.photos) ? d.photos : []) })
+      setStepIndex(Math.min(Math.max(0, Math.floor(saved.stepIndex)), STEPS.length - 1))
+      setPhotoReminder(saved.data.photosMissing === true)
+    } else {
+      setDraft(base)
+      setStepIndex(baseStep)
+    }
+    setRestoredKey(`${uid}:${flow}`)
+  }
+
+  // First setup: restore straight away (editing restores after its load).
+  useEffect(() => {
+    if (!uid || wantsEdit) return
+    restoreSaved(emptyPlayDraft(uid), 0)
+    // restoreSaved only reads uid and flow, which these pin.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, wantsEdit])
+
+  // Keep the draft on this device as it changes.
+  useEffect(() => {
+    if (!uid || restoredKey !== `${uid}:${flow}` || finished.current) return
+    const photos = storablePhotos(draft.photos)
+    saveDraft(uid, flow, stepIndex, {
+      draft: { ...draft, photos },
+      photosMissing: photoReminder || photos.length < draft.photos.length,
+    })
+  }, [uid, flow, restoredKey, stepIndex, draft, photoReminder])
+
+  function markSaved() {
+    finished.current = true
+    clearDraft(uid, flow)
+  }
+
+  // Everyone here already has an account, so leaving goes to the profile
+  // (not history back, which can leave the app) and drops the saved draft.
+  function exit() {
+    finished.current = true
+    clearDraft(uid, flow)
+    navigate('/profile', { replace: true })
+  }
+
   useEffect(() => {
     if (!wantsEdit || !uid) return
     let cancelled = false
@@ -108,15 +168,20 @@ export default function PlayOnboarding() {
       .catch(() => null)
       .then((saved) => {
         if (cancelled) return
-        if (!saved) return setEdit('none')
-        setDraft(saved)
+        if (!saved) {
+          // Nothing saved to edit: a normal setup, under the edit flow's key.
+          restoreSaved(emptyPlayDraft(uid), 0)
+          return setEdit('none')
+        }
+        restoreSaved(saved, STEPS.indexOf('photos'))
         setBioEditing(saved.bio.trim() !== '')
-        setStepIndex(STEPS.indexOf('photos'))
         setEdit('ready')
       })
     return () => {
       cancelled = true
     }
+    // restoreSaved only reads uid and flow, which these pin.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantsEdit, uid])
 
   // Identity for the bio prompt; on a first setup, height and body type are
@@ -198,16 +263,23 @@ export default function PlayOnboarding() {
   }
 
   async function enterPlay() {
+    // A restored draft can be missing its photos (they aren't stored).
+    if (draft.photos.length === 0) {
+      return setSaveError("Add at least one photo first — photos aren't kept if the page reloads.")
+    }
     setSaving(true)
     setSaveError(null)
+    setSaveProgress(null)
     try {
       if (editing) {
-        const notices = await savePlayOnboarding(uid, draft, { keepIntent: true })
+        const notices = await savePlayOnboarding(uid, draft, { keepIntent: true, onProgress: setSaveProgress })
+        markSaved()
         const flash = notices.length > 0 ? notices.join(' ') : '✦ Play profile updated.'
         navigate('/profile', { replace: true, state: { flash } })
         return
       }
-      const notices = await savePlayOnboarding(uid, draft)
+      const notices = await savePlayOnboarding(uid, draft, { onProgress: setSaveProgress })
+      markSaved()
       // Saved; a photo still under review is explained before moving on.
       if (notices.length > 0) {
         setPhotoNotices(notices)
@@ -215,8 +287,9 @@ export default function PlayOnboarding() {
         return
       }
       continueToPlay()
-    } catch {
-      setSaveError("Couldn't save your Play profile. Check your connection and try again.")
+    } catch (err) {
+      console.error('Play onboarding save failed:', err)
+      setSaveError(friendlyError(err, "Couldn't save your Play profile. Check your connection and try again."))
       setSaving(false)
     }
   }
@@ -233,7 +306,10 @@ export default function PlayOnboarding() {
             title="Your Play photos"
             subtitle={`Up to ${MAX_PHOTOS} photos · Not shared with Spark.`}
             photos={draft.photos}
-            onChange={(photos) => update({ photos })}
+            onChange={(photos) => {
+              setPhotoReminder(false)
+              update({ photos })
+            }}
           />
         )
       case 'playName':
@@ -302,6 +378,26 @@ export default function PlayOnboarding() {
             Updating your Play profile — your answers are pre-filled.
           </p>
         )}
+        <div className="mb-3 flex justify-end">
+          <ExitLink
+            label="Exit"
+            question={editing ? 'Exit without saving?' : 'Exit Play setup? Your answers so far will be cleared.'}
+            onConfirm={exit}
+            disabled={saving || photoNotices !== null}
+          />
+        </div>
+        {photoReminder && step !== 'photos' && (
+          <div className="mb-5 flex items-center gap-3 rounded-xl bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            <p className="flex-1">Welcome back — your answers were saved, but photos need adding again.</p>
+            <button
+              type="button"
+              onClick={() => setStepIndex(STEPS.indexOf('photos'))}
+              className="shrink-0 font-semibold text-white underline underline-offset-2"
+            >
+              Add photos
+            </button>
+          </div>
+        )}
         <div className="mb-8">
           <div className="h-1 overflow-hidden rounded-full bg-white/10">
             <div
@@ -327,7 +423,7 @@ export default function PlayOnboarding() {
         <div className="mx-auto flex w-full max-w-md gap-3 px-4 py-3">
           <button
             type="button"
-            onClick={() => (isFirst ? navigate(-1) : setStepIndex((i) => i - 1))}
+            onClick={() => (isFirst ? exit() : setStepIndex((i) => i - 1))}
             disabled={saving || photoNotices !== null}
             className="rounded-xl border border-white/15 px-5 py-3 font-medium text-white/70 hover:bg-white/5 disabled:opacity-40"
           >
@@ -339,7 +435,7 @@ export default function PlayOnboarding() {
             </button>
           ) : isLast ? (
             <button type="button" onClick={enterPlay} disabled={saving} className={primaryButton}>
-              {saving ? 'Saving…' : editing ? 'Save changes ✦' : "🔥 Let's Play"}
+              {saving ? (saveProgress ?? 'Saving…') : editing ? 'Save changes ✦' : "🔥 Let's Play"}
             </button>
           ) : (
             <button

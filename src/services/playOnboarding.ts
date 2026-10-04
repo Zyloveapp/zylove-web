@@ -2,7 +2,7 @@ import { doc, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from './firebase'
-import { uploadModeratedPhotos } from './moderatedPhotos'
+import { photoProgress, uploadModeratedPhotos, type SaveProgress } from './moderatedPhotos'
 import { keysReady, resolveKeypair } from './keys'
 import { isAlwaysElite } from './subscription'
 import { changeDisplayName } from './displayNames'
@@ -194,7 +194,13 @@ export async function generatePlayGoDeeper(d: PlayDraft): Promise<GoDeeperResult
 // the promptAnswers array that mobile and the web profile view read.
 // Editing (keepIntent) leaves the root intent alone: a Play-only mobile user
 // must not be switched to 'open' just by updating their Play profile.
-export async function savePlayOnboarding(uid: string, d: PlayDraft, { keepIntent = false } = {}): Promise<string[]> {
+// onProgress: what the save is doing, for the button label.
+export async function savePlayOnboarding(
+  uid: string,
+  d: PlayDraft,
+  { keepIntent = false, onProgress }: { keepIntent?: boolean; onProgress?: SaveProgress } = {},
+): Promise<string[]> {
+  onProgress?.('Saving your Play profile…')
   const prompts = answeredPrompts(d)
   const bio = d.bio.trim()
   // Only already-published photos (editing) are written here.
@@ -250,7 +256,7 @@ export async function savePlayOnboarding(uid: string, d: PlayDraft, { keepIntent
   })
   await batch.commit()
 
-  const { notices } = await uploadModeratedPhotos(uid, 'play', newPhotos)
+  const { notices } = await uploadModeratedPhotos(uid, 'play', newPhotos, photoProgress(onProgress))
   const nameError = renaming ? await changeDisplayName('play', playName) : null
   return nameError ? [...notices, nameError] : notices
 }
@@ -262,7 +268,13 @@ export async function savePlayOnboarding(uid: string, d: PlayDraft, { keepIntent
 // filled by mirrorPlayOnlyPhotos once moderation approves the Play photos.
 const NO_LIMIT_RADIUS_MILES = 500
 
-export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, play: PlayDraft): Promise<string[]> {
+export async function savePlayOnlyOnboarding(
+  uid: string,
+  d: OnboardingDraft,
+  play: PlayDraft,
+  onProgress?: SaveProgress,
+): Promise<string[]> {
+  onProgress?.('Saving your profile…')
   const rootRef = doc(db, 'users', uid)
   const playRef = doc(db, `users/${uid}/playProfile/data`)
   const [existing, existingPlay] = await Promise.all([getDoc(rootRef), getDoc(playRef)])
@@ -373,6 +385,7 @@ export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, pl
   // Server sets the trust/trial fields clients can't write (isSuspended,
   // sparkScore, subscriptionTier, trial, sortKey). Awaited so the profile is
   // discoverable before Explore; idempotent, so a failure is safe to retry.
+  onProgress?.('Setting up your account…')
   try {
     await httpsCallable(functions, 'initUserDefaults')({})
   } catch (err) {
@@ -381,7 +394,7 @@ export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, pl
   httpsCallable(functions, 'claimWomenElite')({}).catch(() => {})
 
   // playProfile/data exists now, so onPhotoUpload can publish to it.
-  const { notices } = await uploadModeratedPhotos(uid, 'play', newPhotos)
+  const { notices } = await uploadModeratedPhotos(uid, 'play', newPhotos, photoProgress(onProgress))
   const nameErrors = [
     renamingSpark ? await changeDisplayName('spark', sparkName) : null,
     renamingPlay ? await changeDisplayName('play', playName) : null,

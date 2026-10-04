@@ -11,11 +11,15 @@ import {
 interface ReviewStepProps {
   draft: OnboardingDraft
   saving: boolean
+  // What the save is doing right now ("Uploading photos (2 of 4)…").
+  progress?: string | null
+  // Reimagine my profile (?refresh=true): saving changes, not creating.
+  refresh?: boolean
   error: string | null
   onCreate: () => void
 }
 
-export default function ReviewStep({ draft, saving, error, onCreate }: ReviewStepProps) {
+export default function ReviewStep({ draft, saving, progress, refresh = false, error, onCreate }: ReviewStepProps) {
   // Play path: the same full profile, then straight on to Play setup.
   const playPath = draft.onboardingPath === 'play'
   const age = parseBirthday(draft.birthdayRaw)?.age
@@ -109,8 +113,17 @@ export default function ReviewStep({ draft, saving, error, onCreate }: ReviewSte
           playPath ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
         }`}
       >
-        {saving ? 'Creating your profile…' : playPath ? 'Enter Play →' : 'Create my profile'}
+        {saving
+          ? (progress ?? (refresh ? 'Saving…' : 'Creating your profile…'))
+          : refresh
+            ? 'Save changes'
+            : playPath
+              ? 'Enter Play →'
+              : 'Create my profile'}
       </button>
+      {saving && (
+        <p className="text-center text-xs text-white/50">Photo checks can take up to a minute — keep this page open.</p>
+      )}
     </div>
   )
 }

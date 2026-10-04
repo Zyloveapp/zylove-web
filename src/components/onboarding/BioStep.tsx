@@ -13,11 +13,17 @@ interface BioStepProps {
 export default function BioStep({ bio, generating, usedFallback, onChange, onRegenerate, onSkip }: BioStepProps) {
   return (
     <div>
-      <StepHeader title="Your bio is ready." subtitle="Edit it, regenerate it, or keep it as is." />
+      {generating ? (
+        <StepHeader title="Writing your bio…" subtitle="This takes a few seconds. You can edit it once it's ready." />
+      ) : (
+        <StepHeader
+          title={bio.trim() ? 'Your bio is ready.' : 'Your bio'}
+          subtitle={bio.trim() ? 'Edit it, regenerate it, or keep it as is.' : 'Write your own, or generate one from your answers.'}
+        />
+      )}
       {generating ? (
         <div className="flex flex-col items-center gap-3 py-12 text-white/60">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-white/15 border-t-white" />
-          Writing your bio…
         </div>
       ) : (
         <>
@@ -42,7 +48,7 @@ export default function BioStep({ bio, generating, usedFallback, onChange, onReg
             onClick={onRegenerate}
             className="mt-3 w-full rounded-lg border border-[#1B4FD8] px-4 py-2.5 font-medium"
           >
-            ↺ Regenerate
+            {bio.trim() ? '↺ Regenerate' : '✦ Generate my bio'}
           </button>
         </>
       )}

@@ -178,7 +178,7 @@ const INCH_OPTIONS = Array.from({ length: 12 }, (_, i) => ({ value: String(i), l
 export function HeightStep({ draft, update }: StepProps) {
   return (
     <div>
-      <StepHeader title="My height" subtitle="Always saved — you choose whether to show it publicly." />
+      <StepHeader title="My height" subtitle="Shown on your profile." />
       <div className="flex gap-2">
         <StyledSelect
           ariaLabel="Height feet"

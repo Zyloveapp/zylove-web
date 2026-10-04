@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { BRAND } from '../../brand/zylove'
 import { CONSENT_IDS, type ConsentId } from '../../services/onboarding'
+import { friendlyError } from '../../services/errors'
 
 interface Consent {
   id: ConsentId
@@ -60,8 +61,9 @@ export default function TermsStep({ accepted, onAccept }: TermsStepProps) {
     setError(null)
     try {
       await onAccept()
-    } catch {
-      setError("Couldn't record your acceptance. Check your connection and try again.")
+    } catch (err) {
+      console.error('Legal acceptance failed:', err)
+      setError(friendlyError(err, "Couldn't record your acceptance. Check your connection and try again."))
     } finally {
       setSaving(false)
     }

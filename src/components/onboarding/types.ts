@@ -182,7 +182,6 @@ export const MAX_PHOTOS = 6
 export const MAX_REFRESH_PHOTOS = 9
 export const MAX_PHOTO_BYTES = 10 * 1024 * 1024 // matches storage.rules
 export const PROMPT_COUNT = 3
-export const MIN_PROMPT_ANSWERS = 2
 export const PROMPT_MAX_LENGTH = 200
 export const BIO_MAX_LENGTH = 300
 export const RADIUS_OPTIONS = [5, 10, 25, 50, 100] as const

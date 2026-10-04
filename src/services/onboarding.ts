@@ -9,7 +9,7 @@ import {
 } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
-import { uploadModeratedPhotos } from './moderatedPhotos'
+import { photoProgress, uploadModeratedPhotos, type SaveProgress } from './moderatedPhotos'
 import { keysReady, resolveKeypair } from './keys'
 import {
   OFF_MAP_GENDER_IDENTITIES,
@@ -148,8 +148,14 @@ export async function saveSparkOnboarding(
   d: OnboardingDraft,
   // newSparkProfile: a Play-only account building its first Spark profile —
   // the 'hidden' Spark visibility it had while Play-only isn't a choice to keep.
-  { extraPrompts = [], newSparkProfile = false }: { extraPrompts?: PromptAnswer[]; newSparkProfile?: boolean } = {},
+  // onProgress: what the save is doing, for the button label.
+  {
+    extraPrompts = [],
+    newSparkProfile = false,
+    onProgress,
+  }: { extraPrompts?: PromptAnswer[]; newSparkProfile?: boolean; onProgress?: SaveProgress } = {},
 ): Promise<string[]> {
+  onProgress?.('Saving your profile…')
   const rootRef = doc(db, 'users', uid)
   const existing = await getDoc(rootRef)
   // Once identity is locked the rules reject any change to birthday,
@@ -368,6 +374,7 @@ export async function saveSparkOnboarding(
   // Awaited so the profile is discoverable before the user reaches Discover.
   // A failure leaves the profile saved; the callable is idempotent and safe
   // to retry later.
+  onProgress?.('Setting up your account…')
   try {
     await httpsCallable(functions, 'initUserDefaults')({})
   } catch (err) {
@@ -380,7 +387,7 @@ export async function saveSparkOnboarding(
 
   // Discover also requires a published photo, so the profile only shows up
   // once moderation passes one.
-  const { notices } = await uploadModeratedPhotos(uid, 'spark', newPhotos)
+  const { notices } = await uploadModeratedPhotos(uid, 'spark', newPhotos, photoProgress(onProgress))
   const nameError = renaming ? await changeDisplayName('spark', newName) : null
   return nameError ? [...notices, nameError] : notices
 }

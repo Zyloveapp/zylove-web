@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { SPARK_PROMPT_BANK, type AppPrompt } from '../../types/dualProfile'
-import { MIN_PROMPT_ANSWERS, PROMPT_COUNT, PROMPT_MAX_LENGTH, answeredPromptCount, type StepProps } from './types'
+import { PROMPT_COUNT, PROMPT_MAX_LENGTH, REQUIRED_PROMPT_ANSWERS, answeredPromptCount, type StepProps } from './types'
 import { StepHeader } from './ui'
 import { InspirationToggle } from './Inspirations'
 
@@ -32,7 +32,7 @@ export default function PromptsStep({ draft, update }: StepProps) {
     <div>
       <StepHeader
         title="Your prompts"
-        subtitle={`Pick ${PROMPT_COUNT} and answer at least ${MIN_PROMPT_ANSWERS}. These shape your bio.`}
+        subtitle={`Pick ${PROMPT_COUNT} prompts. You need ${REQUIRED_PROMPT_ANSWERS} answers in total — Go Deeper answers below count too. These shape your bio.`}
       />
       <p className="mb-4 text-sm text-white/50">
         {selected.length}/{PROMPT_COUNT} chosen · {answeredPromptCount(draft)} answered

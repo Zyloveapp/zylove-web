@@ -58,16 +58,81 @@ function awaitVerdict(uid: string, mode: 'spark' | 'play', fileName: string): Pr
   })
 }
 
-// Uploads one photo for moderation and waits for the verdict.
-export async function uploadModeratedPhoto(uid: string, mode: 'spark' | 'play', file: File): Promise<ModeratedPhoto> {
-  const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : 'jpg'
+// Profile photos are re-encoded through a canvas before upload, as chat
+// photos are (preparePhoto in photos.ts): longest edge capped, JPEG, and all
+// metadata (EXIF, including GPS location) dropped. Transparent areas are
+// filled first, since JPEG has no alpha (they'd otherwise turn black).
+const MAX_EDGE = 1600
+const JPEG_QUALITY = 0.85
+const TRANSPARENT_FILL = '#ffffff'
+
+// The resized JPEG, or null when the browser can't decode the file (e.g.
+// HEIC outside Safari) — the original is then uploaded as before.
+async function resizeForUpload(file: Blob): Promise<Blob | null> {
+  try {
+    const bitmap = await createImageBitmap(file)
+    const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      bitmap.close()
+      return null
+    }
+    ctx.fillStyle = TRANSPARENT_FILL
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    bitmap.close()
+    return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY))
+  } catch {
+    return null
+  }
+}
+
+// Uploads one photo for moderation and waits for the verdict. onUploaded
+// runs once the upload itself is done (or has failed), before the verdict.
+export async function uploadModeratedPhoto(
+  uid: string,
+  mode: 'spark' | 'play',
+  file: File,
+  onUploaded?: () => void,
+): Promise<ModeratedPhoto> {
+  const resized = await resizeForUpload(file)
+  // The Storage rule wants an image/* content type: the resized photo is
+  // always image/jpeg; an original keeps its own type.
+  const ext = resized ? 'jpg' : file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : 'jpg'
   const fileName = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`
   try {
-    await uploadBytes(ref(storage, `photos/${uid}/${mode}/${fileName}`), file, { contentType: file.type })
-  } catch {
+    await uploadBytes(ref(storage, `photos/${uid}/${mode}/${fileName}`), resized ?? file, {
+      contentType: resized ? 'image/jpeg' : file.type,
+    })
+  } catch (err) {
+    console.error('Profile photo upload failed:', err)
+    onUploaded?.()
     return { outcome: 'failed', url: null }
   }
+  onUploaded?.()
   return awaitVerdict(uid, mode, fileName)
+}
+
+// Progress for a batch: how many uploads are done. Once uploaded === total
+// the photos are only waiting on moderation.
+export type PhotoUploadProgress = (uploaded: number, total: number) => void
+
+// Onboarding saves report what they're doing, for the button label.
+export type SaveProgress = (message: string) => void
+
+// SaveProgress messages for a photo batch.
+export function photoProgress(onProgress?: SaveProgress): PhotoUploadProgress {
+  return (uploaded, total) =>
+    onProgress?.(
+      uploaded < total
+        ? `Uploading photos (${Math.min(uploaded + 1, total)} of ${total})…`
+        : total === 1
+          ? 'Checking your photo…'
+          : 'Checking photos…',
+    )
 }
 
 // Several at once (onboarding). The messages to show for anything that didn't
@@ -76,8 +141,13 @@ export async function uploadModeratedPhotos(
   uid: string,
   mode: 'spark' | 'play',
   files: File[],
+  onProgress?: PhotoUploadProgress,
 ): Promise<{ results: ModeratedPhoto[]; notices: string[] }> {
-  const results = await Promise.all(files.map((f) => uploadModeratedPhoto(uid, mode, f)))
+  let uploaded = 0
+  if (files.length > 0) onProgress?.(0, files.length)
+  const results = await Promise.all(
+    files.map((f) => uploadModeratedPhoto(uid, mode, f, () => onProgress?.(++uploaded, files.length))),
+  )
   const outcomes = new Set(results.map((r) => r.outcome))
   const notices = (['pending', 'timeout', 'failed'] as const).filter((o) => outcomes.has(o)).map((o) => MODERATION_MESSAGES[o])
   return { results, notices }

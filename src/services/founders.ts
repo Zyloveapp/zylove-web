@@ -52,17 +52,33 @@ export interface FounderOffer {
   smsConsented: boolean
 }
 
+// Whether the browser has already granted geolocation, without asking.
+async function locationAlreadyGranted(): Promise<boolean> {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.permissions?.query) return false
+    return (await navigator.permissions.query({ name: 'geolocation' })).state === 'granted'
+  } catch {
+    return false
+  }
+}
+
 // A founder spot this user could take now, or null: already a founder,
 // converted, outside every launch city, their half is full, or anything
-// failed. ask: request the browser location when none is saved (onboarding
-// does; the profile banner doesn't). Never throws.
+// failed. Never throws.
+// ask: when no location is saved, take a fresh position — but only if the
+// browser has already granted geolocation, so the request is silent. This
+// never shows a location prompt: onboarding calls it at the end of a long
+// save, not from a tap, and Safari can record a prompt raised that way as a
+// denial the user never saw (so LocationGate's own, tap-driven ask fails
+// later). Without a saved or already-granted location the invite is skipped
+// here; once LocationGate has the location, the profile banner offers it.
 export async function founderOffer(uid: string, { ask }: { ask: boolean }): Promise<FounderOffer | null> {
   try {
     const ref = doc(db, 'users', uid)
     let user = (await getDoc(ref)).data()
     if (!user || user.isFounder === true || user.founderStatus === 'converted') return null
     if (typeof user.locationLat !== 'number' || typeof user.locationLng !== 'number') {
-      if (!ask) return null
+      if (!ask || !(await locationAlreadyGranted())) return null
       const fresh = await requestLocation()
       if (!fresh) return null
       await saveUserLocation(uid, fresh)

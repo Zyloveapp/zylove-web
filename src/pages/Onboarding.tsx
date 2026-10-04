@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
-import { FirebaseError } from 'firebase/app'
+import { signOut } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
 import { useAuthStore } from '../store/authStore'
-import { db } from '../services/firebase'
+import { auth, db } from '../services/firebase'
+import { friendlyError } from '../services/errors'
 import { useModeStore } from '../store/modeStore'
 import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
 import { loadRefreshDraft, recordLegalAcceptance, saveSparkOnboarding } from '../services/onboarding'
@@ -30,6 +31,8 @@ import PhotosStep from '../components/onboarding/PhotosStep'
 import PromptsStep from '../components/onboarding/PromptsStep'
 import BioStep from '../components/onboarding/BioStep'
 import ReviewStep from '../components/onboarding/ReviewStep'
+import ExitLink from '../components/onboarding/ExitLink'
+import { clearDraft, loadDraft, saveDraft, storablePhotos, type DraftFlow } from '../components/onboarding/draftStorage'
 import {
   AttractedToStep,
   BeliefsStep,
@@ -244,16 +247,35 @@ function isStepValid(
 }
 
 function saveErrorMessage(err: unknown): string {
-  if (err instanceof FirebaseError) {
-    if (err.code === 'storage/unauthorized') {
-      return "Couldn't upload your photos — the server rejected them (storage/unauthorized)."
-    }
-    if (err.code === 'permission-denied') {
-      return "Couldn't save your profile — the server rejected the write (permission-denied)."
-    }
-    return `Couldn't save your profile (${err.code}). Try again.`
+  console.error('Onboarding save failed:', err)
+  return friendlyError(err, "Couldn't save your profile. Check your connection and try again.")
+}
+
+// What's kept in localStorage between visits (see draftStorage.ts). New
+// photos can't be stored; photosMissing marks that some need re-adding.
+interface SavedProgress {
+  draft: OnboardingDraft
+  play: PlayDraft
+  photosMissing: boolean
+}
+
+function readSaved(
+  uid: string,
+  flow: DraftFlow,
+  base: OnboardingDraft,
+  basePlay: PlayDraft,
+): { draft: OnboardingDraft; play: PlayDraft; stepIndex: number; photosMissing: boolean } | null {
+  const saved = loadDraft<Partial<SavedProgress>>(uid, flow)
+  if (!saved) return null
+  const d = saved.data.draft
+  const p = saved.data.play
+  return {
+    // Over the defaults, so a field added since the draft was saved is set.
+    draft: { ...base, ...d, photos: storablePhotos(Array.isArray(d?.photos) ? d.photos : []) },
+    play: { ...basePlay, ...p, photos: storablePhotos(Array.isArray(p?.photos) ? p.photos : []) },
+    stepIndex: Math.max(0, Math.floor(saved.stepIndex)),
+    photosMissing: saved.data.photosMissing === true,
   }
-  return "Couldn't save your profile. Check your connection and try again."
 }
 
 export default function Onboarding() {
@@ -265,6 +287,13 @@ export default function Onboarding() {
   // "Reimagine my profile": same flow, pre-filled from the saved profile.
   const refresh = searchParams.get('refresh') === 'true'
   const sparkSetup = !refresh && searchParams.get('spark') === 'setup'
+  const firstRun = !refresh && !sparkSetup
+  // Which saved draft this visit uses (draftStorage.ts).
+  const flow: DraftFlow = refresh ? 'refresh' : sparkSetup ? 'spark-setup' : 'new'
+  // First run only: someone who has already finished onboarding is sent on
+  // (re-saving from a blank draft would replace their photos and answers).
+  const [firstRunCheck, setFirstRunCheck] = useState<{ uid: string; status: 'ok' | 'done' | 'error' } | null>(null)
+  const [firstRunAttempt, setFirstRunAttempt] = useState(0)
   const [setupLoad, setSetupLoad] = useState<{ uid: string; locked: boolean } | 'error' | null>(null)
   const [refreshLoad, setRefreshLoad] = useState<
     { uid: string; locked: boolean; extraPrompts: PromptAnswer[] } | 'error' | null
@@ -297,6 +326,17 @@ export default function Onboarding() {
   // After the Play save: whether the trial welcome is due, and whether it's showing.
   const [trialWelcomeDue, setTrialWelcomeDue] = useState(false)
   const [trialWelcomeOpen, setTrialWelcomeOpen] = useState(false)
+  // What the final save is doing ("Uploading photos (2 of 4)…").
+  const [saveProgress, setSaveProgress] = useState<string | null>(null)
+  // `${uid}:${flow}` once any saved draft has been restored (or there was
+  // none); nothing is written back before then, so it can't be overwritten.
+  const [restoredKey, setRestoredKey] = useState<string | null>(null)
+  // A restored draft whose new photos couldn't be kept.
+  const [photoReminder, setPhotoReminder] = useState(false)
+  // Saved or exited: stop writing the draft back.
+  const finished = useRef(false)
+  // Where to go back to after re-adding photos from the reminder.
+  const [resumeAt, setResumeAt] = useState<number | null>(null)
 
   // Release photo preview object URLs when leaving the page.
   const photosRef = useRef(draft.photos)
@@ -310,6 +350,52 @@ export default function Onboarding() {
   }, [stepIndex])
 
   const userId = user?.uid
+
+  // Picks up a draft saved on an earlier visit, over `base` (the blank or
+  // pre-filled draft this flow starts from).
+  function restoreSaved(uid: string, base: OnboardingDraft) {
+    const saved = readSaved(uid, flow, base, emptyPlayDraft(uid))
+    if (saved) {
+      setDraft(saved.draft)
+      setPlay(saved.play)
+      setStepIndex(saved.stepIndex)
+      setPhotoReminder(saved.photosMissing)
+    } else {
+      setDraft(base)
+    }
+    setRestoredKey(`${uid}:${flow}`)
+  }
+
+  useEffect(() => {
+    if (!firstRun || !userId) return
+    let cancelled = false
+    getDoc(doc(db, 'users', userId))
+      .then((snap) => {
+        if (cancelled) return
+        const done = snap.data()?.onboardingComplete === true
+        if (!done) restoreSaved(userId, INITIAL_DRAFT)
+        setFirstRunCheck({ uid: userId, status: done ? 'done' : 'ok' })
+      })
+      .catch(() => !cancelled && setFirstRunCheck({ uid: userId, status: 'error' }))
+    return () => {
+      cancelled = true
+    }
+    // restoreSaved only reads flow, which firstRun already pins.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstRun, userId, firstRunAttempt])
+
+  // Keep the draft on this device as it changes (see draftStorage.ts).
+  useEffect(() => {
+    if (!userId || restoredKey !== `${userId}:${flow}` || finished.current) return
+    const savedPhotos = storablePhotos(draft.photos)
+    const progress: SavedProgress = {
+      draft: { ...draft, photos: savedPhotos },
+      play: { ...play, photos: storablePhotos(play.photos) },
+      photosMissing: photoReminder || savedPhotos.length < draft.photos.length,
+    }
+    saveDraft(userId, flow, stepIndex, progress)
+  }, [userId, flow, restoredKey, stepIndex, draft, play, photoReminder])
+
   useEffect(() => {
     if (!refresh || !userId) return
     let cancelled = false
@@ -317,13 +403,15 @@ export default function Onboarding() {
       .then((loaded) => {
         if (cancelled) return
         if (!loaded) return setRefreshLoad('error')
-        setDraft(loaded.draft)
+        restoreSaved(userId, loaded.draft)
         setRefreshLoad({ uid: userId, locked: loaded.identityLocked, extraPrompts: loaded.extraPrompts })
       })
       .catch(() => !cancelled && setRefreshLoad('error'))
     return () => {
       cancelled = true
     }
+    // restoreSaved only reads flow, which refresh already pins.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh, userId])
 
   // Spark setup: identity and who-you-see carry over from the account; every
@@ -338,7 +426,7 @@ export default function Onboarding() {
         if (!loaded) return setSetupLoad('error')
         const d = loaded.draft
         const answers: unknown = root.data()?.intentionAnswers
-        setDraft({
+        restoreSaved(userId, {
           ...INITIAL_DRAFT,
           termsAccepted: true,
           displayName: d.displayName,
@@ -361,6 +449,8 @@ export default function Onboarding() {
     return () => {
       cancelled = true
     }
+    // restoreSaved only reads flow, which sparkSetup already pins.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sparkSetup, userId])
 
   if (authLoading) {
@@ -373,6 +463,48 @@ export default function Onboarding() {
   // Legal acceptance, Storage and Firestore paths all need a uid.
   if (!user) return <Navigate to="/login" replace />
   const uid = user.uid
+
+  function signOutOfOnboarding() {
+    finished.current = true
+    clearDraft(uid, flow)
+    signOut(auth)
+      .catch(() => {})
+      .finally(() => navigate('/login', { replace: true }))
+  }
+
+  if (firstRun) {
+    const check = firstRunCheck?.uid === uid ? firstRunCheck.status : null
+    // Already onboarded: Reimagine (?refresh=true) and Spark setup
+    // (?spark=setup) are the ways back in.
+    if (check === 'done') return <Navigate to="/discover" replace />
+    if (check === 'error') {
+      return (
+        <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-gray-950 px-4 text-center">
+          <p className="text-white/80">We couldn't load your account.</p>
+          <button
+            type="button"
+            onClick={() => {
+              setFirstRunCheck(null)
+              setFirstRunAttempt((n) => n + 1)
+            }}
+            className="rounded-lg bg-[#1B4FD8] px-4 py-2 font-medium text-white"
+          >
+            Try again
+          </button>
+          <button type="button" onClick={signOutOfOnboarding} className="text-sm text-white/50 underline">
+            Sign out
+          </button>
+        </div>
+      )
+    }
+    if (check === null) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-gray-950">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-white/15 border-t-white" />
+        </div>
+      )
+    }
+  }
 
   if (refresh && refreshLoad === 'error') {
     return (
@@ -418,13 +550,33 @@ export default function Onboarding() {
   const steps: readonly Step[] = sparkSetup
     ? SPARK_SETUP_STEPS.filter((s) => !(identityLocked && s.id === 'gender'))
     : stepsFor(refresh, identityLocked, draft.onboardingPath)
-  const step = steps[stepIndex]
+  // A restored step index can outrun a shorter step list.
+  const step = steps[Math.min(stepIndex, steps.length - 1)]
   const update = (patch: Partial<OnboardingDraft>) => setDraft((d) => ({ ...d, ...patch }))
   const updatePlay = (patch: Partial<PlayDraft>) => setPlay((p) => ({ ...p, ...patch }))
   // Play-only path turns red once the Play recommendation has been accepted.
   const playPath = !refresh && draft.onboardingPath === 'play'
   const red = playPath && stepIndex > steps.findIndex((s) => s.id === 'recommendation')
   const accent = red ? RED : COBALT
+
+  // Explicit exit: the saved draft goes. A first run signs out (there's no
+  // app to go back to yet); refresh and Spark setup return to the profile
+  // without saving.
+  function exitOnboarding() {
+    if (firstRun) return signOutOfOnboarding()
+    finished.current = true
+    clearDraft(uid, flow)
+    navigate('/profile', { replace: true })
+  }
+
+  // The profile is saved: nothing left to restore.
+  function markSaved() {
+    finished.current = true
+    clearDraft(uid, flow)
+  }
+
+  const photosStepIndex = steps.findIndex((s) => s.id === 'photos')
+  const missingPhotosError = "Add at least one photo first — photos aren't kept if the page reloads."
 
   function startBio() {
     const id = ++bioRequest.current
@@ -443,6 +595,10 @@ export default function Onboarding() {
   }
 
   function next() {
+    if (step.id === 'photos' && resumeAt !== null) {
+      setResumeAt(null)
+      return setStepIndex(resumeAt)
+    }
     const following = steps[stepIndex + 1]
     if (following) goTo(following.id)
   }
@@ -461,8 +617,11 @@ export default function Onboarding() {
   }
 
   // City founding circle: if their city has a spot open in their half,
-  // invite them before moving on. The check is capped so a location prompt
-  // left open can't hold onboarding up; any failure just carries on.
+  // invite them before moving on. No location prompt here — this runs at the
+  // end of the save, not from a tap, so founderOffer only uses a saved or
+  // already-granted location (see founders.ts) and otherwise skips; the
+  // profile banner offers it later. The check is capped so a slow position
+  // fix can't hold onboarding up; any failure just carries on.
   // Reimagine-my-profile runs skip it (the profile banner offers it).
   async function finishWithFounderInvite(finish: () => void, mode: 'spark' | 'play') {
     const offer = refresh
@@ -515,13 +674,19 @@ export default function Onboarding() {
   }
 
   async function createProfile() {
+    // A restored draft can be missing its photos (they aren't stored).
+    if (draft.photos.length === 0) return setSaveError(missingPhotosError)
     setSaving(true)
     setSaveError(null)
+    setSaveProgress(null)
     try {
       const photoNotices = await saveSparkOnboarding(uid, draft, {
         extraPrompts: refreshInfo?.extraPrompts,
         newSparkProfile: sparkSetup,
+        onProgress: setSaveProgress,
       })
+      markSaved()
+      setSaveProgress('Almost there…')
       // A photo still under review (or slow) goes on the profile page, where
       // the notice shows; Discover needs a published photo anyway.
       await finishWithFounderInvite(() => {
@@ -567,10 +732,14 @@ export default function Onboarding() {
   }
 
   async function launchPlay() {
+    if (draft.photos.length === 0) return setSaveError(missingPhotosError)
     setSaving(true)
     setSaveError(null)
+    setSaveProgress(null)
     try {
-      const notices = await savePlayOnlyOnboarding(uid, draft, play)
+      const notices = await savePlayOnlyOnboarding(uid, draft, play, setSaveProgress)
+      markSaved()
+      setSaveProgress('Almost there…')
       // Founder invitation first: a founder never sees the trial welcome.
       await finishWithFounderInvite(async () => {
         const welcomeDue = await needsPlayTrialWelcome(uid).catch(() => false)
@@ -622,7 +791,16 @@ export default function Onboarding() {
           />
         )
       case 'photos':
-        return <PhotosStep photos={draft.photos} onChange={(photos) => update({ photos })} maxPhotos={maxPhotos} />
+        return (
+          <PhotosStep
+            photos={draft.photos}
+            onChange={(photos) => {
+              setPhotoReminder(false)
+              update({ photos })
+            }}
+            maxPhotos={maxPhotos}
+          />
+        )
       case 'gender':
         return <GenderStep {...props} />
       case 'intention':
@@ -736,7 +914,16 @@ export default function Onboarding() {
           />
         )
       case 'review':
-        return <ReviewStep draft={draft} saving={saving} error={saveError} onCreate={createProfile} />
+        return (
+          <ReviewStep
+            draft={draft}
+            saving={saving}
+            progress={saveProgress}
+            refresh={refresh}
+            error={saveError}
+            onCreate={createProfile}
+          />
+        )
       case 'playName':
         return <PlayNameStep {...playProps} placeholder={draft.displayName.trim() || undefined} />
       case 'spice':
@@ -774,6 +961,7 @@ export default function Onboarding() {
 
   function nextLabel(id: StepId): string {
     if (id === 'intention') return 'Continue →'
+    if (id === 'photos' && resumeAt !== null) return 'Back to where you were →'
     if (!playPath) return 'Next'
     if (id === 'discovery') return "Let's go 🔥"
     if (id === 'aboutYou' || id === 'scene' || id === 'nonNegotiables' || id === 'myType') return 'Next (optional) →'
@@ -798,6 +986,29 @@ export default function Onboarding() {
             Refreshing your profile — your existing answers are pre-filled. Update anything that's changed.
           </p>
         )}
+        <div className="mb-3 flex justify-end">
+          <ExitLink
+            label={firstRun ? 'Sign out' : 'Exit'}
+            question={firstRun ? 'Sign out? Your answers so far will be cleared.' : 'Exit without saving?'}
+            onConfirm={exitOnboarding}
+            disabled={saving || invite !== null || founder !== null || playNotices !== null || trialWelcomeOpen}
+          />
+        </div>
+        {photoReminder && step.id !== 'photos' && photosStepIndex >= 0 && (
+          <div className="mb-5 flex items-center gap-3 rounded-lg bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            <p className="flex-1">Welcome back — your answers were saved, but photos need adding again.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setResumeAt(stepIndex)
+                setStepIndex(photosStepIndex)
+              }}
+              className="shrink-0 font-semibold text-white underline underline-offset-2"
+            >
+              Add photos
+            </button>
+          </div>
+        )}
         <div className="mb-6">
           <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
             <div
@@ -806,7 +1017,7 @@ export default function Onboarding() {
             />
           </div>
           <p className="mt-2 text-xs font-medium uppercase tracking-wide text-white/50">
-            Step {stepIndex + 1} of {steps.length} · {step.title}
+            Step {Math.min(stepIndex, steps.length - 1) + 1} of {steps.length} · {step.title}
           </p>
         </div>
 
@@ -837,7 +1048,7 @@ export default function Onboarding() {
               className="flex-[2] rounded-lg px-4 py-3 font-semibold text-white disabled:opacity-40"
               style={{ backgroundColor: RED }}
             >
-              {playNotices ? 'Continue to Play →' : saving ? 'Saving…' : "🔥 Let's Play"}
+              {playNotices ? 'Continue to Play →' : saving ? (saveProgress ?? 'Saving…') : "🔥 Let's Play"}
             </button>
           )}
           {!ownsPrimary && (
