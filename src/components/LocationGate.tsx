@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
+import { useModeStore } from '../store/modeStore'
 import { coordsOf, requestLocation, saveUserLocation } from '../services/location'
 
 type Permission = 'checking' | 'granted' | 'prompt' | 'denied'
@@ -36,6 +37,19 @@ function forgetGranted(): void {
   }
 }
 
+// Private windows that refuse storage writes (older Safari, some locked-down
+// browsers). Modern Safari and Chrome allow storage in private mode, so this
+// only catches some private windows.
+function isPrivateBrowser(): boolean {
+  try {
+    localStorage.setItem('zylove_storage_test', '1')
+    localStorage.removeItem('zylove_storage_test')
+    return false
+  } catch {
+    return true
+  }
+}
+
 // Explore needs a location to build the feed. Children render only when
 // BOTH the browser allows geolocation AND users/{uid} has coordinates saved
 // (locationLat/locationLng, or a _location map); otherwise a full-page ask in
@@ -54,7 +68,9 @@ export default function LocationGate({ children }: { children: ReactNode }) {
   const [saveError, setSaveError] = useState(false)
   // Admins (users/{uid}.isAdmin) get a small link to preview the gate.
   const [isAdmin, setIsAdmin] = useState(false)
-  const [preview, setPreview] = useState<'prompt' | 'denied' | null>(null)
+  const [preview, setPreview] = useState<'prompt' | 'denied' | 'private' | null>(null)
+  const [privateBrowser] = useState(isPrivateBrowser)
+  const play = useModeStore((s) => s.mode) === 'play'
   // One automatic save attempt per mount.
   const autoSaveTried = useRef(false)
 
@@ -141,7 +157,8 @@ export default function LocationGate({ children }: { children: ReactNode }) {
   }, [permission, hasSaved])
 
   let state: GateState
-  if (preview) state = preview
+  if (preview === 'private') state = 'denied'
+  else if (preview) state = preview
   else if (hasSaved === null || permission === 'checking') state = 'checking'
   else if (permission === 'granted' && hasSaved) state = 'granted'
   else if (permission === 'denied') state = 'denied'
@@ -177,6 +194,46 @@ export default function LocationGate({ children }: { children: ReactNode }) {
   }
 
   const denied = state === 'denied'
+
+  // Blocked in a private window: Try again and the settings steps can't help
+  // there, so point them at their regular browser instead.
+  if (denied && (privateBrowser || preview === 'private')) {
+    return (
+      <div className="flex min-h-[calc(100dvh-7rem)] flex-col items-center justify-center bg-gray-950 px-6 py-10 text-center lg:min-h-[calc(100dvh-7.5rem)]">
+        <span className="text-6xl" aria-hidden>
+          📍
+        </span>
+        <h1 className="mt-5 text-2xl font-bold text-white">We need your location</h1>
+        <div className="mt-3 max-w-xs space-y-3 text-white/60">
+          <p>Zylove requires location to show you real people nearby and verify your city.</p>
+          <p>You're in a private browser — location is blocked by default in private mode.</p>
+          <p>Open zylove.app in your regular browser instead.</p>
+          <p>
+            Your privacy is protected regardless of browser mode — we never share your location with other users or store
+            your exact coordinates.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            window.location.href = 'https://zylove.app'
+          }}
+          className={`mt-8 w-full max-w-xs rounded-full px-6 py-3.5 font-semibold text-white transition-opacity hover:opacity-90 ${
+            play ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
+          }`}
+        >
+          Open in regular browser →
+        </button>
+        <p className="mt-3 max-w-xs text-xs text-white/40">Zylove protects your privacy. Private browsing isn't required.</p>
+        {isAdmin && preview && (
+          <button type="button" onClick={() => setState('granted')} className="mt-6 text-xs text-white/30 underline hover:text-white/60">
+            Admin: close preview
+          </button>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="flex min-h-[calc(100dvh-7rem)] flex-col items-center justify-center bg-gray-950 px-6 py-10 text-center lg:min-h-[calc(100dvh-7.5rem)]">
       <span className="text-6xl" aria-hidden>
@@ -214,6 +271,11 @@ export default function LocationGate({ children }: { children: ReactNode }) {
           className="mt-6 text-xs text-white/30 underline hover:text-white/60"
         >
           Admin: preview {denied ? 'first-ask' : 'blocked'} view
+        </button>
+      )}
+      {isAdmin && (
+        <button type="button" onClick={() => setPreview('private')} className="mt-2 text-xs text-white/30 underline hover:text-white/60">
+          Admin: preview private-browser view
         </button>
       )}
       {isAdmin && preview && (
