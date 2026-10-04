@@ -18,8 +18,8 @@ import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, distanceMiles } from './cities'
-import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
-import { bucketFor, num, refreshCityMembers, type Bucket, type FounderStatus } from './founders'
+import { SMS_SECRETS } from './sms'
+import { bucketFor, num, refreshCityMembers, textFounder, type Bucket, type FounderStatus } from './founders'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const TRIAL_MS = 30 * DAY_MS
@@ -56,12 +56,6 @@ function millis(v: unknown): number | null {
 // Stripe owns the tier while a paid subscription is live.
 function hasPaidSubscription(user: DocumentData | undefined): boolean {
   return user?.subscriptionStatus === 'active' || user?.subscriptionStatus === 'past_due'
-}
-
-// Account-level texts: either mode's SMS switch will do.
-async function textFounder(uid: string, body: string): Promise<boolean> {
-  const target = (await smsTarget(uid, 'founder', 'spark')) ?? (await smsTarget(uid, 'founder', 'play'))
-  return target ? sendSMS(target.phone, body) : false
 }
 
 // ─── Heartbeat ───────────────────────────────────────────────────────────────

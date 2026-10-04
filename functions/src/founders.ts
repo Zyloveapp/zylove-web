@@ -25,6 +25,7 @@ import { onDocumentUpdated } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { FieldPath, FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, getNearestCity } from './cities'
+import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
 
 // Per half (women / men); a city's circle is twice this.
 export const DEFAULT_FOUNDER_TARGET = 50
@@ -36,6 +37,8 @@ type Ineligible = 'outside_coverage' | 'already_assigned' | 'cohort_full' | 'no_
 type FounderResult =
   | { eligible: true; cohortNumber: number; cityId: string; cityName: string }
   | { eligible: false; reason: Ineligible }
+// The transaction also says whether this claim was the one that filled the city.
+type Claim = FounderResult & { closedCity?: boolean }
 
 function parseCoords(data: unknown): { lat: number; lng: number } {
   const d = typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : {}
@@ -63,10 +66,46 @@ export function bucketFor(genderIdentity: unknown): Bucket {
 
 export const num = (v: unknown, fallback: number) => (typeof v === 'number' ? v : fallback)
 
+// Account-level founder texts: either mode's SMS switch will do (smsTarget
+// also checks quiet hours and that there's a number).
+export async function textFounder(uid: string, body: string): Promise<boolean> {
+  const target = (await smsTarget(uid, 'founder', 'spark')) ?? (await smsTarget(uid, 'founder', 'play'))
+  return target ? sendSMS(target.phone, body) : false
+}
+
+// The city's founders, current and older (founderCohort only), deduped.
+async function cityFounders(cityId: string, cityName: string) {
+  const users = getFirestore().collection('users')
+  const [byId, byName] = await Promise.all([
+    users.where('founderCityId', '==', cityId).select('isFounder', 'founderStatus').get(),
+    users.where('founderCohort', '==', cityName).select('isFounder', 'founderStatus').get(),
+  ])
+  const seen = new Map<string, FirebaseFirestore.DocumentData>()
+  for (const d of [...byId.docs, ...byName.docs]) if (!seen.has(d.id)) seen.set(d.id, d.data())
+  return seen
+}
+
+// Both halves just filled: the city is live (bots off, distance filtering
+// on — discover.ts reads botsActive). Tell its founders.
+async function announceCityLive(cityId: string, cityName: string): Promise<void> {
+  try {
+    const founders = await cityFounders(cityId, cityName)
+    const body = `✦ ${cityName} is live. Your founding circle is complete — real connections, real people, just in your area. Distance filtering is now active. zylove.app`
+    let sent = 0
+    for (const [uid, u] of founders) {
+      if (u.isFounder !== true) continue
+      if (await textFounder(uid, body)) sent++
+    }
+    logger.info('announceCityLive', { cityId, founders: founders.size, sent })
+  } catch (err) {
+    logger.error('announceCityLive failed', { cityId, message: err instanceof Error ? err.message : String(err) })
+  }
+}
+
 // Location is self-reported (browser geolocation, snapped to ~3 miles), so
 // this is a launch-period gate, not proof of residence.
 export const assignFounderBadge = onCall(
-  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
+  { timeoutSeconds: 60, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
   async (request): Promise<FounderResult> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const uid = request.auth.uid
@@ -82,7 +121,7 @@ export const assignFounderBadge = onCall(
     const recordRef = db.doc(`founderRecords/${uid}`)
     const isAustin = city.id === 'austin'
 
-    const result = await db.runTransaction(async (tx): Promise<FounderResult> => {
+    const claim = await db.runTransaction(async (tx): Promise<Claim> => {
       const [citySnap, userSnap, launchSnap, recordSnap] = await Promise.all([
         tx.get(cityRef),
         tx.get(userRef),
@@ -114,6 +153,7 @@ export const assignFounderBadge = onCall(
       // Member numbers never repeat, even after revocations free spots.
       const cohortNumber = Math.max(num(config.founderSeq, women + men), isAustin ? num(launch.founderCount, 0) : 0) + 1
       const capacity = target * 2
+      const fills = nextWomen >= target && nextMen >= target
 
       tx.set(
         cityRef,
@@ -133,7 +173,7 @@ export const assignFounderBadge = onCall(
           menCount: nextMen,
           founderSeq: cohortNumber,
           // Both halves full: this city is live, its bots go.
-          ...(nextWomen >= target && nextMen >= target && { botsActive: false }),
+          ...(fills && { botsActive: false }),
         },
         { merge: true },
       )
@@ -179,9 +219,11 @@ export const assignFounderBadge = onCall(
           { merge: true },
         )
       }
-      return { eligible: true, cohortNumber, cityId: city.id, cityName: city.name }
+      return { eligible: true, cohortNumber, cityId: city.id, cityName: city.name, closedCity: fills && config.botsActive !== false }
     })
+    const { closedCity, ...result } = claim
     if (result.eligible) await refreshCityMembers(city.id)
+    if (closedCity) await announceCityLive(city.id, city.name)
 
     logger.info('assignFounderBadge', {
       city: city.id,

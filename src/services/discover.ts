@@ -152,9 +152,9 @@ export async function fetchCandidates(uid: string, mode: Mode): Promise<Discover
   if (!meSnap.exists()) return []
   const me = { ...(meSnap.data() as DiscoverProfile), uid }
 
-  const [blocked, botsOn] = await Promise.all([loadBlockedUids(uid), botsActiveFor(me)])
+  const [blocked, founding] = await Promise.all([loadBlockedUids(uid), inFoundingPeriod(me)])
   const swiped = loadSwiped(uid, mode)
-  const eligible = (p: DiscoverProfile) => isEligible(me, p, mode, swiped, blocked, botsOn)
+  const eligible = (p: DiscoverProfile) => isEligible(me, p, mode, swiped, blocked, founding)
 
   const users = collection(db, 'users')
   const notSuspended = where('isSuspended', '==', false)
@@ -185,7 +185,7 @@ function isEligible(
   mode: Mode,
   swiped: Set<string>,
   blocked: Set<string>,
-  botsOn: boolean,
+  founding: boolean,
 ): boolean {
   const visibilityField = mode === 'play' ? 'playVisibility' : 'sparkVisibility'
   if (p.uid === me.uid || swiped.has(p.uid) || blocked.has(p.uid)) return false
@@ -194,13 +194,16 @@ function isEligible(
   if (p[visibilityField] === 'paused' || p[visibilityField] === 'hidden') return false
   const age = displayAge(p)
   if (age !== null && me.ageMin && me.ageMax && (age < me.ageMin || age > me.ageMax)) return false
-  if (!withinRadius(me, p)) return false
-  if (!botsOn && p.uid.startsWith(BOT_PREFIX)) return false
+  // Founding period: everyone, any distance, bots included. Once the
+  // viewer's city is live: their distance setting, and no bots.
+  if (!founding && !withinRadius(me, p)) return false
+  if (!founding && p.uid.startsWith(BOT_PREFIX)) return false
   return mutuallyAttracted(me, p)
 }
 
-// Max distance from Settings → Discovery. Skipped when either side has no
-// location (missing data never hides anyone).
+// Max distance from Settings → Discovery, once the viewer's city is live.
+// Skipped when either side has no location (missing data never hides
+// anyone; bots have none).
 function withinRadius(me: DiscoverProfile, p: DiscoverProfile): boolean {
   if (me.radiusMiles === null) return true
   const radius = typeof me.radiusMiles === 'number' && me.radiusMiles > 0 ? me.radiusMiles : DEFAULT_RADIUS_MILES
@@ -208,12 +211,14 @@ function withinRadius(me: DiscoverProfile, p: DiscoverProfile): boolean {
   return getDistanceMiles(me.locationLat, me.locationLng, p.locationLat, p.locationLng) <= radius
 }
 
-// Bots (all Austin-seeded) are the preview of Zylove, so every viewer sees
-// them, wherever they are, until the viewer's own launch city fills its
-// founding circle (config/city_{id}.botsActive false). No location, no
-// launch city or an unreadable config all mean bots stay on.
-async function botsActiveFor(me: DiscoverProfile): Promise<boolean> {
-  if (!hasLocation(me)) return true
+// Founding period: the viewer's launch city hasn't filled its founding
+// circle yet (config/city_{id}.botsActive isn't false). Until it has, Explore
+// shows everyone at any distance, bots included (they're the preview of
+// Zylove), so a new city never looks empty. Viewers outside every launch
+// city, without a location, or whose config can't be read are always in it.
+// Settings → Discovery locks the distance control on the same check.
+export async function inFoundingPeriod(me: { locationLat?: number; locationLng?: number }): Promise<boolean> {
+  if (typeof me.locationLat !== 'number' || typeof me.locationLng !== 'number') return true
   const city = getNearestCity(me.locationLat, me.locationLng)
   if (!city) return true
   const snap = await getDoc(doc(db, cityConfigPath(city.id))).catch(() => null)
