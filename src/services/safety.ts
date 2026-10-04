@@ -28,21 +28,21 @@ export async function loadBlockedUids(uid: string): Promise<Set<string>> {
   }
 }
 
-// Serious reports also go on the reported person's phone record (hashed,
-// server-side) so a ban survives them making a new account.
+// Serious categories: a review flagging one of these also files a report.
 const SERIOUS_CATEGORIES = ['felt_unsafe', 'aggressive', 'pushed_boundaries', 'inappropriate']
-const URGENT_CATEGORIES = ['felt_unsafe', 'aggressive']
 
 export function isSeriousReport(categories: string[]): boolean {
   return categories.some((c) => SERIOUS_CATEGORIES.includes(c))
 }
 
-export async function reportAndBan(reportedUid: string, matchId: string, categories: string[]): Promise<void> {
-  const severity = categories.some((c) => URGENT_CATEGORIES.includes(c)) ? 'urgent' : 'standard'
+// Files (or adds to) a confidential report — separate from reviews, so an
+// earlier review or an empty chat never blocks it. Negative categories only;
+// the server decides priority and any phone-level action.
+export async function submitReport(matchId: string, generation: number, reportedUid: string, categories: string[]): Promise<void> {
   await httpsCallable<
-    { reportedUid: string; matchId: string; categories: string[]; severity: 'standard' | 'urgent' },
+    { matchId: string; generation?: number; reportedUid: string; categories: string[] },
     { success: true }
-  >(functions, 'reportAndBan')({ reportedUid, matchId, categories, severity })
+  >(functions, 'submitReport')({ matchId, ...(generation > 0 ? { generation } : {}), reportedUid, categories })
 }
 
 export interface BlockedUser {

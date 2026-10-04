@@ -1719,7 +1719,8 @@ export {
   replyToFounder,
   sendFounderMessage,
 } from './founderMessages'
-export { acceptPhotoConsent, getBlockedUsers, onBeforeSignIn, reportAndBan, unblockMember } from './trust'
+export { acceptPhotoConsent, getBlockedUsers, onBeforeSignIn, unblockMember } from './trust'
+export { adminGetReports, adminModerate, liftExpiredSuspensions, reportAndBan, submitReport } from './reports'
 
 // ─── SMS notifications ───────────────────────────────────────────────────────
 // Opt-in texts (Settings → Notifications). Each checks the recipient's

@@ -337,59 +337,75 @@ export const adminUserAction = onCall(
 
     // delete
     if (user.isDeleted === true) throw new HttpsError('failed-precondition', 'Already deleted.')
-    await revokeFounderStatus(uid).catch(() => null)
-    const phone = await getAuth()
-      .getUser(uid)
-      .then((a) => a.phoneNumber ?? null)
-      .catch(() => null)
-    const now = Timestamp.now()
-    if (phone) {
-      const [asA, asB] = await Promise.all([
-        db.collection('pairs').where('userA', '==', uid).get(),
-        db.collection('pairs').where('userB', '==', uid).get(),
-      ])
-      await db.collection('deletedAccounts').doc(phone).set({
-        phoneNumber: phone,
-        previousUid: uid,
-        deletedAt: now,
-        birthday: user.birthday ?? null,
-        genderIdentity: user.genderIdentity ?? null,
-        matchableAs: user.matchableAs ?? [],
-        identityLockedAt: user.identityLockedAt ?? null,
-        pronouns: user.pronouns ?? null,
-        genderSelfDescribe: user.genderSelfDescribe ?? null,
-        displayName: user.displayName ?? '',
-        photoURLs: user.photoURLs ?? [],
-        bio: user.bio ?? '',
-        mode: user.mode ?? 'spark',
-        isFounder: false,
-        subscriptionTier: user.subscriptionTier ?? 'free',
-        reportCount: user.reportCount ?? 0,
-        banned: false,
-        previousPairIds: [...asA.docs, ...asB.docs].map((d) => d.id),
-        deletedByAdmin: adminUid,
-      })
-    }
-    await ref.update({
-      deleted: true,
-      isDeleted: true,
-      deletedAt: now,
-      isSuspended: true,
-      displayName: 'Deleted User',
-      bio: '',
-      photoURLs: [],
-      visible: false,
-      isVisible: false,
-      geohash: '',
-      locationLabel: '',
-    })
-    await getAuth()
-      .deleteUser(uid)
-      .catch((err: { code?: string }) => {
-        if (err.code !== 'auth/user-not-found') throw err
-      })
+    const phone = await softDeleteAccount(uid, user, adminUid, { banned: false })
     await log({ recoveryRecord: phone !== null })
     logger.info('adminUserAction: deleted', { recoveryRecord: phone !== null })
     return { ok: true }
   },
 )
+
+// The same soft delete as the mobile deleteAccount: releases any founder
+// spot, keeps a recovery record keyed by phone (banned: the number can't
+// restore or come back — reports.ts also bans it at sign-in), anonymizes the
+// user doc and removes the Auth account. Returns the phone, if any.
+export async function softDeleteAccount(
+  uid: string,
+  user: DocumentData,
+  adminUid: string,
+  { banned }: { banned: boolean },
+): Promise<string | null> {
+  const db = getFirestore()
+  const ref = db.doc(`users/${uid}`)
+  await revokeFounderStatus(uid).catch(() => null)
+  const phone = await getAuth()
+    .getUser(uid)
+    .then((a) => a.phoneNumber ?? null)
+    .catch(() => null)
+  const now = Timestamp.now()
+  if (phone) {
+    const [asA, asB] = await Promise.all([
+      db.collection('pairs').where('userA', '==', uid).get(),
+      db.collection('pairs').where('userB', '==', uid).get(),
+    ])
+    await db.collection('deletedAccounts').doc(phone).set({
+      phoneNumber: phone,
+      previousUid: uid,
+      deletedAt: now,
+      birthday: user.birthday ?? null,
+      genderIdentity: user.genderIdentity ?? null,
+      matchableAs: user.matchableAs ?? [],
+      identityLockedAt: user.identityLockedAt ?? null,
+      pronouns: user.pronouns ?? null,
+      genderSelfDescribe: user.genderSelfDescribe ?? null,
+      displayName: user.displayName ?? '',
+      photoURLs: user.photoURLs ?? [],
+      bio: user.bio ?? '',
+      mode: user.mode ?? 'spark',
+      isFounder: false,
+      subscriptionTier: user.subscriptionTier ?? 'free',
+      reportCount: user.reportCount ?? 0,
+      banned,
+      previousPairIds: [...asA.docs, ...asB.docs].map((d) => d.id),
+      deletedByAdmin: adminUid,
+    })
+  }
+  await ref.update({
+    deleted: true,
+    isDeleted: true,
+    deletedAt: now,
+    isSuspended: true,
+    displayName: 'Deleted User',
+    bio: '',
+    photoURLs: [],
+    visible: false,
+    isVisible: false,
+    geohash: '',
+    locationLabel: '',
+  })
+  await getAuth()
+    .deleteUser(uid)
+    .catch((err: { code?: string }) => {
+      if (err.code !== 'auth/user-not-found') throw err
+    })
+  return phone
+}

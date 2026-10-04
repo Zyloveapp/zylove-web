@@ -47,6 +47,8 @@ import AdminMessages from './pages/admin/AdminMessages'
 import AdminDeletions from './pages/admin/AdminDeletions'
 import AdminCities from './pages/admin/AdminCities'
 import AdminActivity from './pages/admin/AdminActivity'
+import AdminReports from './pages/admin/AdminReports'
+import AdminNotice from './components/AdminNotice'
 import { touchLastActive } from './services/adminActivity'
 
 // Protected pages share the nav. Leaves room for the mobile bottom bar.
@@ -140,6 +142,7 @@ function AppLayout() {
       <ReviewPrompter />
       <PlayLock />
       <TrialExpiry />
+      <AdminNotice />
     </div>
   )
 }
@@ -186,6 +189,7 @@ export default function App() {
                 <Route path="/admin/deletions" element={<AdminDeletions />} />
                 <Route path="/admin/cities" element={<AdminCities />} />
                 <Route path="/admin/activity" element={<AdminActivity />} />
+                <Route path="/admin/reports" element={<AdminReports />} />
               </Route>
             </Route>
           </Route>

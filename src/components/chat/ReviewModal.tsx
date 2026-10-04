@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { FirebaseError } from 'firebase/app'
 import { markReviewed, submitReview } from '../../services/zyloveScore'
-import { isSeriousReport, reportAndBan } from '../../services/safety'
+import { isSeriousReport, submitReport } from '../../services/safety'
 import { REVIEW_CATEGORY_DEFS, type ReviewCategoryDef, type ReviewTone } from '../../types/reviewCategories'
 
 interface ReviewModalProps {
@@ -32,7 +32,7 @@ const PILL_TINT: Record<ReviewTone, { on: string; off: string }> = {
 const SECTIONS: { tone: ReviewTone; title: string; note?: string }[] = [
   { tone: 'positive', title: 'What went well?' },
   { tone: 'neutral', title: 'Anything to note?' },
-  { tone: 'negative', title: 'Flag something?', note: 'Negative feedback is processed privately after your connection ends.' },
+  { tone: 'negative', title: 'Flag something?', note: 'Counts toward their score once your connection ends. Safety flags reach our team right away.' },
 ]
 
 // Anonymous review of a connection, feeding the reviewed person's Zylove
@@ -66,25 +66,26 @@ export default function ReviewModal({
     if (selected.length === 0 || submitting) return
     setSubmitting(true)
     setError(null)
-    // Serious reports also flag the phone number. Best effort: a failure
-    // there never loses the review itself.
-    const flagPhone = () =>
-      isSeriousReport(selected) ? reportAndBan(partnerUid, matchId, selected).catch(() => {}) : Promise.resolve()
+    // A serious flag is also a report, filed on its own: an earlier review
+    // (already-exists) or a failed review never drops it.
+    const negatives = selected.filter((id) => REVIEW_CATEGORY_DEFS.find((c) => c.id === id)?.tone === 'negative')
+    const report = isSeriousReport(negatives)
+      ? submitReport(matchId, generation, partnerUid, negatives).then(() => true, () => false)
+      : Promise.resolve(false)
+    let reviewed = false
     try {
       await submitReview(matchId, generation, partnerUid, selected)
-      await flagPhone()
+      reviewed = true
+    } catch (err) {
+      reviewed = err instanceof FirebaseError && err.code === 'functions/already-exists'
+    }
+    const reported = await report
+    setSubmitting(false)
+    if (reviewed || reported) {
       markReviewed(matchId, generation)
       setDone(true)
-    } catch (err) {
-      if (err instanceof FirebaseError && err.code === 'functions/already-exists') {
-        await flagPhone()
-        markReviewed(matchId, generation)
-        setDone(true)
-      } else {
-        setError("Couldn't send your review. Try again.")
-      }
-    } finally {
-      setSubmitting(false)
+    } else {
+      setError("Couldn't send your review. Try again.")
     }
   }
 
@@ -131,7 +132,7 @@ export default function ReviewModal({
               How was your time with {name}?
             </h2>
             <p className="mt-1 text-sm text-white/60">
-              Your review is anonymous and helps keep Zylove real. It's processed after your connection ends.
+              Your review is anonymous and helps keep Zylove real.
             </p>
 
             {SECTIONS.map((section) => (

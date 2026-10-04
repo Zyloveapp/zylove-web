@@ -2,17 +2,13 @@ import { createHash } from 'node:crypto'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { beforeUserSignedIn } from 'firebase-functions/v2/identity'
 import { logger } from 'firebase-functions'
-import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { connectionMode } from './behavior'
 
 // Trust & safety: phone-level bans, the caller's blocked list, and
 // server-side photo consent acceptance.
 
-const SERIOUS = ['felt_unsafe', 'aggressive', 'pushed_boundaries', 'inappropriate']
-const SUSPEND_AT = 3 // distinct reporters → account suspended
 const SIGN_IN_BLOCKED_AT = 2 // distinct reporters → phone can't sign in
-const BOT_PREFIXES = ['zbot-', 'seed-']
 
 function participants(d: DocumentData | undefined): string[] {
   const users: unknown = d?.users ?? d?.participants
@@ -33,7 +29,7 @@ export function phoneHash(phone: string): string {
 // Both people were in this match: a live match doc, or one of the 90-day
 // records behavior.ts keeps when a match ends — pastConnections/
 // {matchId}_{generation}, or {matchId} for records from before generations.
-async function wereMatched(matchId: string, a: string, b: string): Promise<boolean> {
+export async function wereMatched(matchId: string, a: string, b: string): Promise<boolean> {
   const db = getFirestore()
   const both = (data: DocumentData | undefined) => {
     const users = participants(data)
@@ -47,77 +43,8 @@ async function wereMatched(matchId: string, a: string, b: string): Promise<boole
 }
 
 // ─── Phone-level ban ─────────────────────────────────────────────────────────
-
-// Called alongside submitReview when a report is serious. Counts distinct
-// reporters per phone, so one person reporting repeatedly can't get someone
-// banned on their own.
-export const reportAndBan = onCall(
-  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
-  async (request): Promise<{ success: true }> => {
-    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
-    const callerUid = request.auth.uid
-    const reportedUid = str(request.data, 'reportedUid')
-    const matchId = str(request.data, 'matchId')
-    const rawCategories: unknown = (request.data as Record<string, unknown>).categories
-    const categories = Array.isArray(rawCategories)
-      ? rawCategories.filter((c): c is string => typeof c === 'string').slice(0, 24)
-      : []
-    const severity = (request.data as Record<string, unknown>).severity === 'urgent' ? 'urgent' : 'standard'
-    if (reportedUid === callerUid) throw new HttpsError('invalid-argument', 'Cannot report yourself')
-    if (BOT_PREFIXES.some((p) => reportedUid.startsWith(p))) return { success: true }
-    if (!(await wereMatched(matchId, callerUid, reportedUid))) {
-      throw new HttpsError('permission-denied', 'You can only report people you matched with')
-    }
-
-    const db = getFirestore()
-    await db.collection('reviewQueue').add({
-      reporterUid: callerUid,
-      reportedUid,
-      matchId,
-      categories,
-      severity,
-      source: 'reportAndBan',
-      createdAt: FieldValue.serverTimestamp(),
-    })
-
-    if (severity !== 'urgent' && !categories.some((c) => SERIOUS.includes(c))) return { success: true }
-
-    const phone = await getAuth()
-      .getUser(reportedUid)
-      .then((u) => u.phoneNumber ?? null)
-      .catch(() => null)
-    if (!phone) {
-      logger.warn('reportAndBan: reported user has no phone number', { matchId })
-      return { success: true }
-    }
-
-    const banRef = db.collection('bannedPhones').doc(phoneHash(phone))
-    const reporters = await db.runTransaction(async (tx) => {
-      const existing = (await tx.get(banRef)).data()
-      const reportedBy = Array.isArray(existing?.reportedBy) ? (existing.reportedBy as string[]) : []
-      const isNew = !reportedBy.includes(callerUid)
-      const count = reportedBy.length + (isNew ? 1 : 0)
-      tx.set(
-        banRef,
-        {
-          phoneHash: banRef.id,
-          reportCount: count,
-          reportedBy: FieldValue.arrayUnion(callerUid),
-          categories: FieldValue.arrayUnion(...(categories.length > 0 ? categories : [severity])),
-          lastReportedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      )
-      return count
-    })
-
-    if (reporters >= SUSPEND_AT) {
-      await db.collection('users').doc(reportedUid).update({ isSuspended: true }).catch(() => {})
-      logger.warn('reportAndBan: account suspended', { reporters })
-    }
-    return { success: true }
-  },
-)
+// Reports (reports.ts) add distinct reporters to bannedPhones/{hash}; an
+// admin ban sets a reportCount past any threshold.
 
 // Runs before every sign-in (new and returning). A phone reported by two or
 // more people is refused. Any lookup failure lets the sign-in through — an

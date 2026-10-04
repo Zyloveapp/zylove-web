@@ -26,6 +26,7 @@ import DeleteProfileControls from '../components/DeleteProfileControls'
 import MembershipSection from '../components/MembershipSection'
 import FounderSettingsSection from '../components/FounderSettingsSection'
 import { getFounderThreads } from '../services/founderMessages'
+import { getReportSummary } from '../services/adminReports'
 import PhotoConsentCopy from '../components/PhotoConsentCopy'
 import { isAdmin } from '../services/adminPhotos'
 import { listDeletions } from '../services/adminTools'
@@ -256,6 +257,8 @@ function AdminSection({ uid }: { uid: string }) {
   // Founder threads with something the admin hasn't opened.
   const [unread, setUnread] = useState(0)
   const [pendingDeletions, setPendingDeletions] = useState(0)
+  // People with open reports; urgent ones (felt unsafe, aggressive) counted apart.
+  const [reports, setReports] = useState<{ urgent: number; pending: number }>({ urgent: 0, pending: 0 })
 
   useEffect(() => {
     if (!uid) return
@@ -272,6 +275,9 @@ function AdminSection({ uid }: { uid: string }) {
           listDeletions()
             .then((d) => !cancelled && setPendingDeletions(d.length))
             .catch(() => {})
+          getReportSummary()
+            .then((r) => !cancelled && setReports(r))
+            .catch(() => {})
         }
       })
     return () => {
@@ -284,8 +290,26 @@ function AdminSection({ uid }: { uid: string }) {
     <Section title="Admin">
       <button
         type="button"
-        onClick={() => navigate('/admin/messages')}
+        onClick={() => navigate('/admin/reports')}
         className="flex w-full items-center justify-between px-5 py-4 text-left hover:bg-white/[0.03]"
+      >
+        <span className="flex items-center gap-2 font-medium">
+          Reports
+          {reports.urgent > 0 && (
+            <span className="rounded-full bg-[#E03131] px-2 py-0.5 text-xs font-semibold text-white">{reports.urgent} urgent</span>
+          )}
+          {reports.pending - reports.urgent > 0 && (
+            <span className="rounded-full bg-white/15 px-2 py-0.5 text-xs font-semibold text-white">{reports.pending - reports.urgent}</span>
+          )}
+        </span>
+        <span className="text-white/30" aria-hidden>
+          →
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => navigate('/admin/messages')}
+        className="flex w-full items-center justify-between border-t border-white/5 px-5 py-4 text-left hover:bg-white/[0.03]"
       >
         <span className="flex items-center gap-2 font-medium">
           Founder messages

@@ -52,6 +52,7 @@ import CameraIcon from '../icons/CameraIcon'
 import { PaywallModal, useCanAccess } from '../PaywallGate'
 import TypingIndicator from './TypingIndicator'
 import ReviewModal from './ReviewModal'
+import ReportModal from './ReportModal'
 import VibeCheckModal from './VibeCheckModal'
 import VibeCelebration, { CELEBRATION_MS } from './VibeCelebration'
 import { firstChatSeen, firstChatSeenRemotely } from './firstChatSeen'
@@ -679,10 +680,16 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
       {showActions && (
         <ChatActionsSheet
           name={match.name}
-          onReport={() => {
-            setShowActions(false)
-            setShowReport(true)
-          }}
+          // Real members only: curated profiles (by uid, or isBot on their
+          // doc — humanPartner is set once that's checked) can't be reported.
+          onReport={
+            humanPartner === partnerUid
+              ? () => {
+                  setShowActions(false)
+                  setShowReport(true)
+                }
+              : undefined
+          }
           onEnd={endConnection}
           onClose={() => setShowActions(false)}
           photo={
@@ -738,7 +745,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
       )}
 
       {showReport && (
-        <ReviewModal matchId={matchId} generation={match.startedAt} partnerUid={partnerUid} name={match.name} onClose={() => setShowReport(false)} />
+        <ReportModal matchId={matchId} generation={match.startedAt} partnerUid={partnerUid} name={match.name} onClose={() => setShowReport(false)} />
       )}
 
       {showReview && (

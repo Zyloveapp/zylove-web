@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useBackLinkClass } from '../store/modeStore'
 import { useNavigate } from 'react-router-dom'
-import ReviewModal from '../components/chat/ReviewModal'
+import ReportModal from '../components/chat/ReportModal'
 import { relativeTime } from '../services/matches'
 import { fetchPastConnections, type PastConnection } from '../services/pastConnections'
 import { useModeStore } from '../store/modeStore'
-
-const DONE_TEXT = 'Report submitted. Thank you for helping keep Zylove safe.'
 
 // Report someone from the last 90 days, including matches that have ended.
 // Names and dates only — no photos, no conversation.
@@ -77,12 +75,11 @@ export default function ReportPastConnection() {
       </div>
 
       {reporting && (
-        <ReviewModal
+        <ReportModal
           matchId={reporting.matchId}
           generation={reporting.generation ?? 0}
           partnerUid={reporting.otherUid}
           name={reporting.name}
-          doneText={DONE_TEXT}
           onClose={() => setReporting(null)}
         />
       )}

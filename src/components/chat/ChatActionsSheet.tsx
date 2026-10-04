@@ -4,7 +4,8 @@ export type ChatAction = 'report' | 'block' | 'unmatch'
 
 interface ChatActionsSheetProps {
   name: string
-  onReport: () => void
+  // Absent for curated profiles: there's nothing to report.
+  onReport?: () => void
   // Rejects on failure; the sheet shows the error and stays open.
   onEnd: (action: 'block' | 'unmatch') => Promise<void>
   onClose: () => void
@@ -78,9 +79,11 @@ export default function ChatActionsSheet({ name, onReport, onEnd, onClose, photo
                 {photo.state === 'incoming' && <span className="block text-sm font-normal text-white/50">{name} asked to share photos</span>}
               </button>
             )}
-            <button type="button" onClick={onReport} className={option} autoFocus>
-              Report {name}
-            </button>
+            {onReport && (
+              <button type="button" onClick={onReport} className={option} autoFocus>
+                Report {name}
+              </button>
+            )}
             <button type="button" onClick={() => setConfirm('block')} className={`${option} text-red-400`}>
               Block {name}
             </button>

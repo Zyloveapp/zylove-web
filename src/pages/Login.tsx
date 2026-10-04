@@ -38,6 +38,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   'auth/missing-verification-code': 'Enter the 6-digit code.',
   'auth/code-expired': 'That code has expired. Request a new one.',
   'auth/network-request-failed': 'Network error. Check your connection.',
+  'auth/user-disabled': 'This account is suspended. Email hello@zylove.app if you think this is a mistake.',
 }
 
 function errorMessage(err: unknown): string {
