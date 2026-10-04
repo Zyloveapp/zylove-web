@@ -4,6 +4,7 @@ import ScoreRing from '../ScoreRing'
 import { fetchProfileReview, type ProfileScorecard } from '../../services/profile'
 import { getPhotoConsentChoice, setPhotoConsent } from '../../services/photoConsent'
 import { useAuthStore } from '../../store/authStore'
+import PhotoConsentCopy from '../PhotoConsentCopy'
 
 type Mode = 'spark' | 'play'
 type State =
@@ -132,7 +133,7 @@ export default function ProfileReviewSheet({ mode, onClose }: { mode: Mode; onCl
               <span className="h-7 w-7 animate-spin rounded-full border-2 border-white/20" style={{ borderTopColor: theme.accent }} />
             </div>
           ) : state.status === 'asking' ? (
-            <PhotoChoice accent={theme.accent} onChoose={(choice) => void choosePhotos(choice)} />
+            <PhotoChoice mode={mode} accent={theme.accent} onChoose={(choice) => void choosePhotos(choice)} />
           ) : state.status === 'loading' ? (
             <div className="flex flex-col items-center gap-3 py-16 text-sm text-white/50">
               <span
@@ -174,9 +175,11 @@ export default function ProfileReviewSheet({ mode, onClose }: { mode: Mode; onCl
 }
 
 function PhotoChoice({
+  mode,
   accent,
   onChoose,
 }: {
+  mode: Mode
   accent: string
   onChoose: (choice: 'include' | 'skip' | 'never') => void
 }) {
@@ -185,9 +188,7 @@ function PhotoChoice({
       <h2 id="profile-review-title" className="text-xl font-bold">
         Include photo analysis?
       </h2>
-      <p className="mt-3 text-sm leading-relaxed text-white/70">
-        Get feedback on your photos as part of your profile review. Photos are processed by our AI review partner.
-      </p>
+      <PhotoConsentCopy mode={mode} className="mt-3 text-sm leading-relaxed text-white/70" />
       <div className="mt-6 space-y-2">
         <button
           type="button"

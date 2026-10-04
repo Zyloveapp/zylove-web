@@ -22,6 +22,7 @@ import PlayPinFlow from '../components/PlayPinFlow'
 import DiscoverySettings from '../components/DiscoverySettings'
 import InstallAppSection from '../components/InstallAppSection'
 import BlockedUsersLink from '../components/BlockedUsersLink'
+import PhotoConsentCopy from '../components/PhotoConsentCopy'
 import { isAdmin } from '../services/adminPhotos'
 import { setPhotoConsent, subscribePhotoConsent, type PhotoConsent, type PhotoConsentMode } from '../services/photoConsent'
 
@@ -121,7 +122,17 @@ const PHOTO_COACHING: { mode: PhotoConsentMode; label: string; description: stri
   { mode: 'play', label: 'Analyze my Play photos', description: 'Allows AI coaching to review your Play profile photos.' },
 ]
 
-function PhotoConsentModal({ onAccept, onCancel, busy }: { onAccept: () => void; onCancel: () => void; busy: boolean }) {
+function PhotoConsentModal({
+  mode,
+  onAccept,
+  onCancel,
+  busy,
+}: {
+  mode: PhotoConsentMode
+  onAccept: () => void
+  onCancel: () => void
+  busy: boolean
+}) {
   useEffect(() => {
     function onKey(e: globalThis.KeyboardEvent) {
       if (e.key === 'Escape') onCancel()
@@ -141,16 +152,13 @@ function PhotoConsentModal({ onAccept, onCancel, busy }: { onAccept: () => void;
         <h2 id="photo-consent-title" className="text-xl font-bold">
           Photo analysis consent
         </h2>
-        <p className="mt-3 text-sm leading-relaxed text-white/70">
-          Zylove uses AI-powered photo analysis for profile coaching. Photos are processed by our AI review partner for
-          coaching purposes only. Standard API data handling applies. Standard Zylove privacy protections apply.
-        </p>
+        <PhotoConsentCopy mode={mode} className="mt-3 text-sm leading-relaxed text-white/70" />
         <button
           type="button"
           onClick={onAccept}
           disabled={busy}
           autoFocus
-          className="mt-6 w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+          className={`mt-6 w-full rounded-xl ${SWITCH_ON[mode]} py-3 font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50`}
         >
           I understand, enable
         </button>
@@ -226,10 +234,10 @@ function PrivacySection({ uid }: { uid: string }) {
       </ul>
       {error && <p className="px-5 pb-2 text-sm text-red-400">{error}</p>}
       <p className="border-t border-white/5 px-5 py-3 text-xs text-white/40">
-        Zylove uses a third-party AI service to analyze photos for profile coaching. By enabling, you consent to your
-        photos being processed by that service.
+        Zylove uses a third-party AI service to analyze photos for profile coaching. Photos are analyzed for coaching
+        feedback and not used for any other purpose.
       </p>
-      {pending && <PhotoConsentModal busy={busy} onAccept={() => void accept()} onCancel={() => setPending(null)} />}
+      {pending && <PhotoConsentModal mode={pending} busy={busy} onAccept={() => void accept()} onCancel={() => setPending(null)} />}
     </Section>
   )
 }
