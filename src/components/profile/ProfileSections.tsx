@@ -6,6 +6,7 @@ import HowIOperate from './HowIOperate'
 import { goDeeperAnswers } from './goDeeper'
 import TierBadge, { badgeTier, type BadgeTier } from '../TierBadge'
 import FounderBadge from '../FounderBadge'
+import DistanceLabel from '../DistanceLabel'
 import {
   bodyTypeLabel,
   habitLabel,
@@ -137,7 +138,7 @@ export function ProfileHeader({ profile: p, nameFallback }: { profile: DiscoverP
         </div>
       )}
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-white/60">
-        {p.locationLabel && <span>📍 {p.locationLabel}</span>}
+        <DistanceLabel profile={p} />
         {typeof p.heightCm === 'number' && p.heightCm > 0 && <span>📏 {cmToFeetInches(p.heightCm)}</span>}
         {bodyType && <span>{bodyType}</span>}
       </div>

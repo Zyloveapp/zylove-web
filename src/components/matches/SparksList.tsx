@@ -3,6 +3,7 @@ import { CURIOUS_MAX, type CuriousResult, type SentSpark, type SparkEntry } from
 import { displayAge, type DiscoverProfile } from '../../services/discover'
 import { UserTierBadge } from '../TierBadge'
 import { UserFounderBadge } from '../FounderBadge'
+import DistanceLabel from '../DistanceLabel'
 import { relativeTime } from '../../services/matches'
 import type { Mode } from '../../store/modeStore'
 import { playNameOf } from '../../services/displayNames'
@@ -112,8 +113,8 @@ export default function SparksList({ sparks, mode, matchedUids, onSelect, scores
             ) : (
               <span className="block text-base font-semibold text-white">Your compatibility report is ready ✦</span>
             )}
-            {revealed && s.profile.locationLabel && (
-              <span className="mt-0.5 block truncate text-sm text-white/50">📍 {s.profile.locationLabel}</span>
+            {revealed && (
+              <DistanceLabel profile={{ ...s.profile, uid: s.likerUid }} className="mt-0.5 block truncate text-sm text-white/50" />
             )}
             {revealed && <UserFounderBadge uid={s.likerUid} />}
             {matched && <span className="mt-2 block text-[11px] text-emerald-300">You're linked</span>}
@@ -212,9 +213,7 @@ export function CuriousList({
         >
           <span className="block text-xs font-semibold text-[#9DB4FF]">Revealed your compatibility ✦</span>
           <NameLine profile={v.profile} uid={v.uid} mode={mode} />
-          {v.profile.locationLabel && (
-            <span className="mt-0.5 block truncate text-sm text-white/50">📍 {v.profile.locationLabel}</span>
-          )}
+          <DistanceLabel profile={{ ...v.profile, uid: v.uid }} className="mt-0.5 block truncate text-sm text-white/50" />
         </Card>
       ))}
     </ul>

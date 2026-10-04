@@ -98,3 +98,22 @@ export function getDistanceMiles(lat1: number, lng1: number, lat2: number, lng2:
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
   return 3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
+
+// A profile's coordinates: locationLat/locationLng (people) or the
+// _location map ({ latitude, longitude }) the seeded bots carry. Null when
+// neither is there.
+export function coordsOf(p: object | null | undefined): LatLng | null {
+  const d = (p ?? {}) as Record<string, unknown>
+  if (typeof d.locationLat === 'number' && typeof d.locationLng === 'number') return { lat: d.locationLat, lng: d.locationLng }
+  const geo = d._location as { latitude?: unknown; longitude?: unknown } | undefined
+  if (typeof geo?.latitude === 'number' && typeof geo?.longitude === 'number') return { lat: geo.latitude, lng: geo.longitude }
+  return null
+}
+
+// "Less than a mile away", "1 mile away", "12 miles away". Both ends are
+// snapped to ~3 miles, so it's approximate by design.
+export function distanceText(miles: number): string {
+  const rounded = Math.round(miles)
+  if (miles < 1 || rounded < 1) return 'Less than a mile away'
+  return rounded === 1 ? '1 mile away' : `${rounded.toLocaleString()} miles away`
+}

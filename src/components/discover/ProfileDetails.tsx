@@ -4,6 +4,7 @@ import type { Mode } from '../../store/modeStore'
 import CompatibilityBlock from './CompatibilityBlock'
 import TierBadge from '../TierBadge'
 import FounderBadge from '../FounderBadge'
+import DistanceLabel from '../DistanceLabel'
 import { PlayDetailsBody } from '../profile/PlayProfileSections'
 import {
   goDeeperRows,
@@ -36,11 +37,6 @@ function Pills({ items, icon }: { items: string[]; icon?: string }) {
       ))}
     </div>
   )
-}
-
-// Locations are snapped to ~3 miles, so distances are approximate.
-function distanceLabel(miles: number): string {
-  return miles < 5 ? 'Nearby' : `~${Math.round(miles)} mi away`
 }
 
 export default function ProfileDetails({
@@ -82,13 +78,7 @@ export default function ProfileDetails({
           <FounderBadge profile={profile} />
           <TierBadge tier={(profile as Record<string, unknown>).zyloveScoreTier} />
         </div>
-        {(profile.locationLabel || profile.distanceMiles !== undefined) && (
-          <p className="mt-1 text-sm text-white/40">
-            {[profile.locationLabel, profile.distanceMiles !== undefined && distanceLabel(profile.distanceMiles)]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
-        )}
+        <DistanceLabel profile={profile} prefix="" className="mt-1 block text-sm text-white/40" />
         <CompatibilityBlock
           key={profile.uid}
           profile={profile}
