@@ -1,6 +1,7 @@
 import { relativeTime, type MatchEntry } from '../../services/matches'
 import { UserTierBadge } from '../TierBadge'
 import type { ChatPreview } from '../../services/chatPreview'
+import { usePlayIdentity } from './usePlayIdentity'
 
 function initials(name: string): string {
   return name
@@ -39,13 +40,17 @@ function previewLine(match: MatchEntry, unread: boolean, preview: ChatPreview | 
 export default function MatchRow({ match, unread, preview, active, onSelect, onOpenProfile }: MatchRowProps) {
   const time = relativeTime(match.lastMessageAt || match.matchedAt)
   const play = match.mode === 'play'
+  // Play rows show the Play name and photo (older snapshots carry Spark's).
+  const identity = usePlayIdentity(match.partnerUid, play)
+  const name = identity?.name || match.name
+  const photoURL = identity === null ? match.photoURL : (identity?.photoURL ?? null)
   return (
     <div className={`relative flex w-full items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03] ${active ? 'bg-white/5' : ''}`}>
       <button
         type="button"
         onClick={onSelect}
         aria-current={active}
-        aria-label={`Open chat with ${match.name}`}
+        aria-label={`Open chat with ${name}`}
         className="absolute inset-0"
       />
 
@@ -56,14 +61,14 @@ export default function MatchRow({ match, unread, preview, active, onSelect, onO
       <button
         type="button"
         onClick={onOpenProfile}
-        aria-label={`View ${match.name}'s profile`}
+        aria-label={`View ${name}'s profile`}
         className="relative shrink-0 rounded-full"
       >
-        {match.photoURL ? (
-          <img src={match.photoURL} alt="" className="h-12 w-12 rounded-full object-cover" />
+        {photoURL ? (
+          <img src={photoURL} alt="" className="h-12 w-12 rounded-full object-cover" />
         ) : (
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-sm font-semibold text-white/70">
-            {initials(match.name)}
+            {initials(name)}
           </span>
         )}
       </button>
@@ -78,7 +83,7 @@ export default function MatchRow({ match, unread, preview, active, onSelect, onO
                 unread ? 'font-semibold text-white' : 'font-medium text-white/90'
               }`}
             >
-              {match.name}
+              {name}
               {match.age !== null && <span className="font-normal text-white/50">, {match.age}</span>}
             </button>
             <UserTierBadge uid={match.partnerUid} />

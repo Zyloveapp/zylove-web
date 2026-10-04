@@ -72,7 +72,7 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
       <div className={`flex flex-col items-center justify-center gap-3 px-4 ${page}`}>
         <p className="text-white/60">This profile isn't available.</p>
         <Link to="/matches" className="text-sm text-white/40 underline hover:text-white/60">
-          Back to Links
+          {mode === 'play' ? 'Back to Chats' : 'Back to Links'}
         </Link>
       </div>
     )
@@ -83,6 +83,18 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
   const link = matches.find((m) => m.partnerUid === targetUid && !m.ended) ?? null
   const viewMode = link?.mode ?? mode
   const accent = viewMode === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
+
+  // Play never falls back to the Spark profile (mode sealing).
+  if (viewMode === 'play' && !play) {
+    return (
+      <div className={`flex flex-col items-center justify-center gap-3 px-4 ${page}`}>
+        <p className="text-white/60">This person doesn't have a Play profile.</p>
+        <Link to="/matches" className="text-sm text-white/40 underline hover:text-white/60">
+          Back to Chats
+        </Link>
+      </div>
+    )
+  }
 
   const report = (
     <section>
@@ -115,7 +127,8 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
             theirUid: targetUid,
             theirName:
               (viewMode === 'play' ? playNameOf(current.data.profile, play) : current.data.profile.displayName) || 'Someone',
-            theirPhoto: current.data.profile.photoURLs?.[0] ?? null,
+            // Play: their Play photo only.
+            theirPhoto: (viewMode === 'play' ? play?.photoURLs[0] : current.data.profile.photoURLs?.[0]) ?? null,
             mode: viewMode,
           })
         } else {
@@ -147,17 +160,7 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
             prompts={prompts}
             dynamicPrompt={dynamicPrompt}
             nameFallback="Someone"
-            afterHeader={
-              <>
-                {/* In Play without a Play profile, say what's being shown. */}
-                {viewMode === 'play' && (
-                  <p className="-mt-4 text-xs text-white/40">
-                    <span className="rounded-full border border-[#1B4FD8]/40 bg-[#1B4FD8]/10 px-2 py-0.5 text-[#9DB4FF]">Spark profile</span>
-                  </p>
-                )}
-                {report}
-              </>
-            }
+            afterHeader={report}
           />
         )}
       </div>
@@ -176,7 +179,7 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
             </button>
           ) : sent ? (
             <p className="py-3 text-center text-sm text-white/60">
-              {viewMode === 'play' ? 'Flame' : 'Spark'} sent ✦ — waiting on them.
+              {viewMode === 'play' ? 'Flame sent 🔥' : 'Spark sent ✦'} — waiting on them.
             </p>
           ) : (
             <div className="flex gap-3">
@@ -194,14 +197,14 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
                 disabled={busy}
                 className={`flex-[2] rounded-xl py-3 font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50 ${accent}`}
               >
-                {viewMode === 'play' ? '✦ Send a Flame' : '✦ Send a Spark'}
+                {viewMode === 'play' ? '🔥 Send a Flame' : '✦ Send a Spark'}
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {newMatch && <MatchOverlay match={newMatch} />}
+      {newMatch && <MatchOverlay match={newMatch} onClose={() => setNewMatch(null)} />}
     </div>
   )
 }

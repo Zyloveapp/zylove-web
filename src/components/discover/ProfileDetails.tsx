@@ -44,12 +44,16 @@ export default function ProfileDetails({
   mode,
   autoRevealScore = false,
   match,
+  anonymous = false,
 }: {
   profile: DiscoverProfile
   mode: Mode
   autoRevealScore?: boolean
   // Viewing a linked profile: the report ends with a "Break the ice" opener.
   match?: { matchId: string }
+  // An unrevealed liker (Sparks): no name, age, place or badges — the same
+  // things their Sparks card keeps hidden until you link.
+  anonymous?: boolean
 }) {
   const age = displayAge(profile)
   // Set only by Play Explore, which loads each candidate's playProfile/data.
@@ -70,15 +74,19 @@ export default function ProfileDetails({
     <div className="space-y-8">
       <header className="border-b border-white/10 pb-6">
         <h2 className="text-4xl font-bold">
-          {profile.displayName ?? 'Someone'}
-          {age !== null && <span className="font-normal text-white/70">, {age}</span>}
+          {(!anonymous && profile.displayName) || 'Someone'}
+          {!anonymous && age !== null && <span className="font-normal text-white/70">, {age}</span>}
         </h2>
         {identity && <p className="mt-1 text-sm text-white/50">{identity}</p>}
-        <div className="mt-2 flex flex-wrap gap-2 empty:hidden">
-          <FounderBadge profile={profile} />
-          <TierBadge tier={(profile as Record<string, unknown>).zyloveScoreTier} />
-        </div>
-        <DistanceLabel profile={profile} prefix="" className="mt-1 block text-sm text-white/40" />
+        {!anonymous && (
+          <>
+            <div className="mt-2 flex flex-wrap gap-2 empty:hidden">
+              <FounderBadge profile={profile} />
+              <TierBadge tier={(profile as Record<string, unknown>).zyloveScoreTier} />
+            </div>
+            <DistanceLabel profile={profile} prefix="" className="mt-1 block text-sm text-white/40" />
+          </>
+        )}
         <CompatibilityBlock
           key={profile.uid}
           profile={profile}

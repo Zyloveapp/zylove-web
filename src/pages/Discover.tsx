@@ -157,7 +157,11 @@ function Explore() {
         <div className="w-full max-w-xl [&>*]:mx-0 [&>*]:w-full">
           <LaunchBanner />
         </div>
-        <span className="mb-6 text-6xl text-[#1B4FD8]">✦</span>
+        {mode === 'play' ? (
+          <span className="mb-6 text-6xl">🔥</span>
+        ) : (
+          <span className="mb-6 text-6xl text-[#1B4FD8]">✦</span>
+        )}
         <h1 className="text-2xl font-semibold">You've seen everyone for now</h1>
         <p className="mt-3 text-white/50">New profiles appear as people join. Check back soon.</p>
       </div>
@@ -165,7 +169,6 @@ function Explore() {
   }
 
   const name = current.displayName ?? 'Someone'
-  const actions = <DiscoverActions mode={mode} busy={busy} error={actionError} onAction={handleAction} />
 
   return (
     <div className="min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] bg-gray-950 text-white">
@@ -175,16 +178,23 @@ function Explore() {
       <div className="bg-gray-950 text-white lg:flex">
         <aside ref={asideRef} className="flex flex-col p-6 lg:sticky lg:top-14 lg:h-[calc(100dvh-7.5rem)] lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:py-10">
           <PhotoGallery key={current.uid} photos={photosOf(current)} name={name} />
-          <div className="mt-8 hidden lg:block">{actions}</div>
+          <div className="mt-8 hidden lg:block">
+            <DiscoverActions mode={mode} busy={busy} error={actionError} onAction={handleAction} />
+          </div>
         </aside>
 
         <main className="flex-1 px-6 pb-8 lg:px-12 lg:py-10">
           <ProfileDetails profile={current} mode={mode} />
         </main>
 
-        <div className="px-6 pb-10 lg:hidden">{actions}</div>
+        {/* Mobile: pinned above the bottom nav (h-16), so acting never
+            means scrolling past the whole profile. */}
+        <div className="sticky bottom-16 z-10 border-t border-white/10 bg-gray-950/95 px-4 py-3 backdrop-blur lg:hidden">
+          <DiscoverActions mode={mode} busy={busy} error={actionError} onAction={handleAction} compact />
+        </div>
 
-        {newMatch && <MatchOverlay match={newMatch} />}
+        {/* "Chat later" just closes it: you stay on Explore. */}
+        {newMatch && <MatchOverlay match={newMatch} onClose={() => setNewMatch(null)} />}
       </div>
     </div>
   )

@@ -413,19 +413,57 @@ function parseLikeBackRequest(data: unknown): LikeBackRequest {
   return { likerUid, mode }
 }
 
+function firstString(v: unknown): string | null {
+  return Array.isArray(v) && typeof v[0] === 'string' && v[0] ? v[0] : null
+}
+
+function nonEmpty(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
+// The name and photo someone shows in a mode. Spark: the root displayName
+// and photoURLs[0]. Play (`play` = their playProfile/data, possibly empty):
+// root playDisplayName, else the Play profile's own name, else displayName;
+// the Play photo only — never the Spark one (mode sealing). Mirrors
+// playNameOf in the web app's displayNames.ts.
+function modeIdentity(
+  user: DocumentData | undefined,
+  play: DocumentData | null,
+): { displayName: string; photoURL: string | null } {
+  if (play) {
+    return {
+      displayName:
+        nonEmpty(user?.playDisplayName) ??
+        nonEmpty(play.playDisplayName) ??
+        nonEmpty(play.displayName) ??
+        nonEmpty(user?.displayName) ??
+        'Someone',
+      photoURL: firstString(play.photoURLs),
+    }
+  }
+  return { displayName: nonEmpty(user?.displayName) ?? 'Someone', photoURL: firstString(user?.photoURLs) }
+}
+
 // Same snapshot shape the mobile app, botEngine and the web client write.
-function participantSnapshot(user: DocumentData | undefined): {
+// Pass `play` (their playProfile/data, {} if none) for a Play match.
+function participantSnapshot(
+  user: DocumentData | undefined,
+  play: DocumentData | null = null,
+): {
   displayName: string
   age: number | null
   photoURL: string | null
 } {
-  const photos: unknown = user?.photoURLs
-  const firstPhoto = Array.isArray(photos) && typeof photos[0] === 'string' ? photos[0] : null
   return {
-    displayName: typeof user?.displayName === 'string' && user.displayName ? user.displayName : 'Someone',
+    ...modeIdentity(user, play),
     age: typeof user?.age === 'number' && user.age > 0 ? user.age : null,
-    photoURL: firstPhoto,
   }
+}
+
+// someone's playProfile/data ({} when they have none or it can't be read).
+async function playDataOf(uid: string): Promise<DocumentData> {
+  const snap = await getFirestore().doc(`users/${uid}/playProfile/data`).get().catch(() => null)
+  return snap?.data() ?? {}
 }
 
 // Matches the caller with someone in their like queue ("It's a Spark").
@@ -461,9 +499,12 @@ export const likeBack = onCall(
         if (isBot && existing.data()?.isBot !== true) tx.update(matchRef, { isBot: true, botUid: likerUid })
         return false
       }
-      const [callerSnap, likerSnap] = await Promise.all([
+      const [callerSnap, likerSnap, callerPlay, likerPlay] = await Promise.all([
         tx.get(db.collection('users').doc(callerId)),
         tx.get(db.collection('users').doc(likerUid)),
+        // A Play match snapshots the Play names and photos.
+        mode === 'play' ? playDataOf(callerId) : Promise.resolve(null),
+        mode === 'play' ? playDataOf(likerUid) : Promise.resolve(null),
       ])
       if (!likerSnap.exists) throw new HttpsError('not-found', 'That profile no longer exists')
       // matchGeneration = matchedAt (see matchGeneration.ts).
@@ -480,8 +521,8 @@ export const likeBack = onCall(
         isBlocked: false,
         ...(isBot ? { isBot: true, botUid: likerUid } : {}),
         participantSnapshots: {
-          [callerId]: participantSnapshot(callerSnap.data()),
-          [likerUid]: participantSnapshot(likerSnap.data()),
+          [callerId]: participantSnapshot(callerSnap.data(), callerPlay),
+          [likerUid]: participantSnapshot(likerSnap.data(), likerPlay),
         },
       })
       return true
@@ -1580,10 +1621,12 @@ export const getSentSparks = onCall(
         const pair = pairSnap.data()
         const otherUid: unknown = pair.userA === uid ? pair.userB : pair.userA
         if (typeof otherUid !== 'string') return null
-        const [matchSnap, userSnap, queueSnap] = await Promise.all([
+        const [matchSnap, userSnap, queueSnap, play] = await Promise.all([
           db.collection('matches').doc(pairSnap.id).get(),
           db.collection('users').doc(otherUid).get(),
           db.doc(`users/${otherUid}/likeQueue/${uid}`).get(),
+          // Play lists show the Play name and photo.
+          mode === 'play' ? playDataOf(otherUid) : Promise.resolve(null),
         ])
         // likeBack creates matches without flipping pairs.matched.
         if (matchSnap.exists) return null
@@ -1591,12 +1634,10 @@ export const getSentSparks = onCall(
         if (!user || user.isSuspended === true) return null
         const queue = queueSnap.data()
         if (queue && (queue.mode === 'play' ? 'play' : 'spark') !== mode) return null
-        const photos: unknown = user.photoURLs
         return {
           uid: otherUid,
-          displayName: typeof user.displayName === 'string' && user.displayName ? user.displayName : 'Someone',
+          ...modeIdentity(user, play),
           age: typeof user.age === 'number' && user.age > 0 ? user.age : null,
-          photoURL: Array.isArray(photos) && typeof photos[0] === 'string' ? photos[0] : null,
           sparkScore: typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
           playScore: typeof pair.playScore === 'number' ? pair.playScore : null,
           tier1Spark: pair.tier1Spark ?? null,
@@ -1626,13 +1667,43 @@ interface CuriousVisitor {
 
 const CURIOUS_LIMIT = 20
 
-// Mirrors isWomanIdentity in the web app's subscription.ts. genderIdentity is
-// a string from Spark onboarding, an array from Play.
+// genderIdentity is a string from Spark onboarding, an array from Play.
 function isWoman(genderIdentity: unknown): boolean {
   const g = Array.isArray(genderIdentity) ? genderIdentity[0] : genderIdentity
   if (typeof g !== 'string') return false
   const v = g.toLowerCase().trim()
   return v === 'woman' || v === 'cis woman' || v === 'trans_woman'
+}
+
+function toDate(v: unknown): Date | null {
+  if (v instanceof Timestamp) return v.toDate()
+  if (typeof v === 'number' || typeof v === 'string') {
+    const d = new Date(v)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  return null
+}
+
+// Elite-level access, as the web app's getUserTier (subscription.ts) grants
+// it: the always-Elite identities, founders, an elite subscription, or a
+// trial that hasn't ended. Spark+ and free don't count.
+function hasEliteAccess(user: DocumentData | undefined): boolean {
+  if (!user) return false
+  const g: unknown = Array.isArray(user.genderIdentity) ? user.genderIdentity[0] : user.genderIdentity
+  if (isWoman(g) || (typeof g === 'string' && ALWAYS_ELITE_IDENTITIES.includes(g))) return true
+  if (user.isFounder === true || user.subscriptionTier === 'elite') return true
+  const endsAt = toDate(user.trialEndsAt)
+  return user.trialExpired !== true && endsAt !== null && endsAt > new Date()
+}
+
+// Did otherUid reveal the score in this mode? Reveals since the web started
+// recording the mode carry {otherUid}_revealed_{mode}. Older ones don't, so
+// for those `null` is returned and the caller checks the visitor has a
+// profile in that mode instead.
+function revealedInMode(pair: DocumentData, otherUid: string, mode: 'spark' | 'play'): boolean | null {
+  if (pair[`${otherUid}_revealed_${mode}`] === true) return true
+  const other = mode === 'play' ? 'spark' : 'play'
+  return pair[`${otherUid}_revealed_${other}`] === true ? false : null
 }
 
 // When the other person in a pair (not `uid`) revealed the score.
@@ -1646,13 +1717,18 @@ function revealedAt(pair: DocumentData, uid: string): number {
 // tap "Reveal your score" or open a view that shows the full report (the
 // background prefetch doesn't count). Excludes anyone you've liked or linked with, and anyone who liked you
 // (they're in Sparks, where an unmatched liker's name stays hidden — showing
-// them here would unmask them). Women and Elite get the list; everyone else
-// gets only the count, enforced here so the list can't be fetched directly.
+// them here would unmask them). Elite-level access (hasEliteAccess) gets the
+// list; everyone else gets only the count, enforced here so the list can't
+// be fetched directly. With { mode }, only visitors who looked in that mode,
+// shown as they are in it (Play name and photo in Play); without one (older
+// clients), every visitor with their root profile, as before.
 export const getCuriousVisitors = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ locked: boolean; count: number; visitors: CuriousVisitor[] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const uid = request.auth.uid
+    const rawMode = (request.data as Record<string, unknown> | null)?.mode
+    const mode = rawMode === 'play' || rawMode === 'spark' ? rawMode : null
     const db = getFirestore()
 
     const [me, asA, asB] = await Promise.all([
@@ -1660,7 +1736,7 @@ export const getCuriousVisitors = onCall(
       db.collection('pairs').where('userA', '==', uid).get(),
       db.collection('pairs').where('userB', '==', uid).get(),
     ])
-    const unlocked = isWoman(me.data()?.genderIdentity) || me.data()?.subscriptionTier === 'elite'
+    const unlocked = hasEliteAccess(me.data())
 
     const candidates = [...asA.docs, ...asB.docs]
       .map((d) => ({ id: d.id, pair: d.data() }))
@@ -1668,6 +1744,7 @@ export const getCuriousVisitors = onCall(
         const iAmA = pair.userA === uid
         const otherUid = iAmA ? pair.userB : pair.userA
         if (typeof otherUid !== 'string' || pair[`${otherUid}_revealed`] !== true) return false
+        if (mode && revealedInMode(pair, otherUid, mode) === false) return false
         if (pair.matched === true) return false
         // Neither side has liked: I haven't, and they haven't (Sparks covers that).
         return pair.userALiked !== true && pair.userBLiked !== true
@@ -1678,18 +1755,22 @@ export const getCuriousVisitors = onCall(
     for (const { id, pair } of candidates) {
       if (visitors.length >= CURIOUS_LIMIT) break
       const otherUid: string = pair.userA === uid ? pair.userB : pair.userA
-      const [matchSnap, userSnap] = await Promise.all([
+      const [matchSnap, userSnap, playSnap] = await Promise.all([
         db.collection('matches').doc(id).get(),
         db.collection('users').doc(otherUid).get(),
+        mode === 'play' ? db.doc(`users/${otherUid}/playProfile/data`).get().catch(() => null) : Promise.resolve(null),
       ])
       const user = userSnap.data()
       if (matchSnap.exists || !user || user.isSuspended === true) continue
-      const photos: unknown = user.photoURLs
+      // Play visitors need a Play profile; Spark visitors a Spark one (not
+      // Play-only). Covers older reveals that didn't record the mode.
+      const play = playSnap?.exists ? (playSnap.data() ?? {}) : null
+      if (mode === 'play' && !play) continue
+      if (mode === 'spark' && user.intent === 'play') continue
       visitors.push({
         uid: otherUid,
-        displayName: typeof user.displayName === 'string' && user.displayName ? user.displayName : 'Someone',
+        ...modeIdentity(user, mode === 'play' ? play : null),
         age: typeof user.age === 'number' && user.age > 0 ? user.age : null,
-        photoURL: Array.isArray(photos) && typeof photos[0] === 'string' ? photos[0] : null,
         locationLabel: typeof user.locationLabel === 'string' && user.locationLabel ? user.locationLabel : null,
         intent: typeof user.intent === 'string' ? user.intent : null,
         sparkScore: typeof pair.sparkScore === 'number' ? pair.sparkScore : null,

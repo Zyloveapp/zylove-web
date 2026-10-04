@@ -7,6 +7,7 @@ import { goDeeperAnswers } from './goDeeper'
 import TierBadge, { badgeTier, type BadgeTier } from '../TierBadge'
 import FounderBadge from '../FounderBadge'
 import DistanceLabel from '../DistanceLabel'
+import { useAuthStore } from '../../store/authStore'
 import {
   bodyTypeLabel,
   habitLabel,
@@ -183,6 +184,8 @@ export default function ProfileSections({
     p.relationshipStatus && p.relationshipStatus !== 'prefer_not_to_say' ? relationshipStatusLabel(p.relationshipStatus) : null
   const loveGive = list(p.loveLangGive).map(loveLanguageLabel)
   const loveReceive = list(p.loveLangReceive).map(loveLanguageLabel)
+  // The Go Deeper prompt is for the owner; others just see the answers.
+  const own = useAuthStore((s) => s.user?.uid) === p.uid
 
   return (
     <>
@@ -199,7 +202,7 @@ export default function ProfileSections({
         </section>
       )}
 
-      <HowIOperate answers={goDeeperAnswers(p)} />
+      <HowIOperate answers={goDeeperAnswers(p)} own={own} />
 
       {list(p.openTo).length > 0 && <Pills items={list(p.openTo).map(openToLabel)} tone="cobalt" />}
 

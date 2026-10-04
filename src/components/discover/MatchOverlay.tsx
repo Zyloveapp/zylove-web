@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import type { Mode } from '../../store/modeStore'
 import { fetchCompatibility, fetchMyProfile, fetchPlayArchetype, type ArchetypeMatch } from '../../services/discover'
+import { loadPlayProfile } from '../../services/playProfile'
 import SparkleIcon from '../icons/SparkleIcon'
 
 // First wave: 16 sparkles as the photos meet. Second wave, 300ms later:
@@ -46,35 +47,51 @@ function Avatar({ photo, name, className }: { photo: string | null; name: string
   )
 }
 
-function useMyPhoto(uid: string): string | null {
+// Your photo for this mode: Play uses your Play photo (never the Spark one).
+function useMyPhoto(uid: string, mode: Mode): string | null {
   const [myPhoto, setMyPhoto] = useState<string | null>(null)
   useEffect(() => {
     if (!uid) return
     let cancelled = false
-    fetchMyProfile(uid)
-      .then((me) => {
-        if (!cancelled) setMyPhoto(me?.photoURLs?.[0] ?? null)
+    const request =
+      mode === 'play'
+        ? loadPlayProfile(uid).then((play) => play?.photoURLs[0] ?? null)
+        : fetchMyProfile(uid).then((me) => me?.photoURLs?.[0] ?? null)
+    request
+      .then((photo) => {
+        if (!cancelled) setMyPhoto(photo)
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [uid])
+  }, [uid, mode])
   return myPhoto
+}
+
+interface MatchOverlayProps {
+  match: NewMatch
+  // "Chat later" / "Slow burn": dismiss and stay where you are. Without it,
+  // they go to the matches list.
+  onClose?: () => void
 }
 
 // Play mode gets its own overlay ("You're now entangled."); Spark keeps
 // "Sparks are flying".
-export default function MatchOverlay({ match }: { match: NewMatch }) {
-  return match.mode === 'play' ? <PlayMatchOverlay match={match} /> : <SparkMatchOverlay match={match} />
+export default function MatchOverlay({ match, onClose }: MatchOverlayProps) {
+  return match.mode === 'play' ? (
+    <PlayMatchOverlay match={match} onClose={onClose} />
+  ) : (
+    <SparkMatchOverlay match={match} onClose={onClose} />
+  )
 }
 
 // Full-screen "Sparks are flying" celebration (web version of mobile's
 // MatchAnimation). Stays up until the user picks "Chat now" or "Chat later".
-function SparkMatchOverlay({ match }: { match: NewMatch }) {
+function SparkMatchOverlay({ match, onClose }: MatchOverlayProps) {
   const navigate = useNavigate()
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
-  const myPhoto = useMyPhoto(uid)
+  const myPhoto = useMyPhoto(uid, 'spark')
   const [archetype, setArchetype] = useState<ArchetypeMatch | null>(null)
 
   // Cached from the compatibility block, so this is usually instant.
@@ -160,7 +177,7 @@ function SparkMatchOverlay({ match }: { match: NewMatch }) {
         </button>
         <button
           type="button"
-          onClick={() => navigate('/matches')}
+          onClick={() => (onClose ? onClose() : navigate('/matches'))}
           className="w-full rounded-xl border border-white/20 py-4 text-base text-white/70 transition-colors hover:bg-white/5 hover:text-white"
         >
           Chat later
@@ -174,7 +191,6 @@ function SparkMatchOverlay({ match }: { match: NewMatch }) {
 // ─── Play ────────────────────────────────────────────────────────────────────
 
 const PLAY_RED = '#E03131'
-const PLAY_TIMEOUT_MS = 8000
 // Rising flames below the photos: [left %, delay ms, size].
 const FLAMES: [number, number, string][] = [
   [8, 0, 'text-base'],
@@ -202,18 +218,13 @@ function PlayAvatar({ photo, name, className }: { photo: string | null; name: st
   )
 }
 
-// "🔥 You're now entangled." Flames rise instead of sparkles bursting; after
-// 8s (the red bar) it moves on to the matches list on its own.
-function PlayMatchOverlay({ match }: { match: NewMatch }) {
+// "🔥 You're now entangled." Flames rise instead of sparkles bursting. Like
+// Spark's, it stays up until the user picks (no auto-redirect).
+function PlayMatchOverlay({ match, onClose }: MatchOverlayProps) {
   const navigate = useNavigate()
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
-  const myPhoto = useMyPhoto(uid)
+  const myPhoto = useMyPhoto(uid, 'play')
   const [archetype, setArchetype] = useState<ArchetypeMatch | null>(null)
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => navigate('/matches'), PLAY_TIMEOUT_MS)
-    return () => window.clearTimeout(timer)
-  }, [navigate])
 
   useEffect(() => {
     if (!uid) return
@@ -276,15 +287,11 @@ function PlayMatchOverlay({ match }: { match: NewMatch }) {
         </button>
         <button
           type="button"
-          onClick={() => navigate('/matches')}
+          onClick={() => (onClose ? onClose() : navigate('/matches'))}
           className="w-full rounded-xl border border-white/20 py-4 text-base text-white/70 transition-colors hover:bg-white/5 hover:text-white"
         >
           Slow burn
         </button>
-      </div>
-
-      <div className="fixed inset-x-0 bottom-0 h-1 bg-white/5" aria-hidden>
-        <div className="zy-countdown h-full bg-[#E03131]" />
       </div>
     </div>
   )

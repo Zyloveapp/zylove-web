@@ -14,7 +14,7 @@ interface SparkProfileViewProps {
   matched: boolean
   onClose: () => void
   // Fired on tap, before likeBack returns, so the overlay can show instantly.
-  onMatchStart: (name: string) => void
+  onMatchStart: (name: string, photo: string | null) => void
   onMatched: (matchId: string) => void
   onMatchFailed: () => void
 }
@@ -51,26 +51,31 @@ export default function SparkProfileView({
       const snapshot = spark.profile as Record<string, unknown>
       const fallback = snapshot.playBio || snapshot.spiceLevel ? parsePlayProfile(snapshot) : null
       const playProfile = isFlame ? (play ?? fallback ?? undefined) : undefined
-      setLoaded({ likerUid: spark.likerUid, profile: { ...profile, playProfile } })
+      // Play shows the Play name everywhere the details read displayName.
+      const displayName = isFlame ? playNameOf(profile, playProfile) || profile.displayName : profile.displayName
+      setLoaded({ likerUid: spark.likerUid, profile: { ...profile, playProfile, displayName } })
     })
     return () => {
       cancelled = true
     }
   }, [spark])
 
-  const profile = loaded?.likerUid === spark.likerUid ? loaded.profile : spark.profile
+  const current = loaded?.likerUid === spark.likerUid ? loaded : null
+  const profile = current?.profile ?? spark.profile
   // A like sent in Play: red, Play copy, Play profile and report.
   const isFlame = spark.mode === 'play'
-  const photo = (profile.playProfile?.photoURLs.length ? profile.playProfile.photoURLs : profile.photoURLs)?.[0]
-  // Name from the like snapshot; only bots and matched people are named.
-  const snapshotName = isFlame ? playNameOf(spark.profile, spark.profile.playProfile) : spark.profile.displayName?.trim()
-  const headerName = ((spark.isBot || matched) && snapshotName) || 'Someone'
+  // Play: only a Play photo (none while it loads — the snapshot's is Spark's).
+  const photo = isFlame ? (current ? profile.playProfile?.photoURLs[0] : undefined) : profile.photoURLs?.[0]
+  // Unmatched likers stay anonymous (curated profiles too), like their card.
+  // (A Flame's name waits for the Play profile: the snapshot's is Spark's.)
+  const anonymous = (!matched && !linked) || (isFlame && !current)
+  const headerName = (!anonymous && profile.displayName?.trim()) || 'Someone'
 
   async function handleMatch() {
     if (busy) return
     setBusy(true)
     setError(null)
-    onMatchStart((isFlame ? playNameOf(profile, profile.playProfile) : profile.displayName) || 'someone')
+    onMatchStart(profile.displayName || 'someone', photo ?? null)
     try {
       const matchId = await likeBackSpark(uid, spark, profile)
       setLinked(true)
@@ -106,7 +111,7 @@ export default function SparkProfileView({
             ? '✦ Weekly Spark'
             : isFlame
               ? `🔥 ${headerName} wants to play. You in?`
-              : `${headerName} feels a Spark.. Do you?`}
+              : `${headerName} feels a Spark. Do you?`}
         </span>
       </div>
 
@@ -119,13 +124,16 @@ export default function SparkProfileView({
           >
             {photo && <img src={photo} alt="" className="h-full w-full object-cover" />}
           </div>
-          <ProfileDetails profile={profile} mode={spark.mode} autoRevealScore />
+          <ProfileDetails profile={profile} mode={spark.mode} autoRevealScore anonymous={anonymous} />
         </div>
       </div>
 
       {(matched || linked) && (
         <div className="shrink-0 border-t border-white/10 px-6 py-4 text-center">
-          <Link to={`/profile/${spark.likerUid}`} className="text-sm font-semibold text-[#7C9BFF] hover:text-white">
+          <Link
+            to={`/profile/${spark.likerUid}`}
+            className={`text-sm font-semibold hover:text-white ${isFlame ? 'text-[#E03131]' : 'text-[#7C9BFF]'}`}
+          >
             View their profile →
           </Link>
         </div>

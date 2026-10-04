@@ -35,6 +35,8 @@ export default function Links() {
   // new message shows the loader line until its preview arrives.
   const [previews, setPreviews] = useState<Map<string, ChatPreview | null>>(new Map())
   const navigate = useNavigate()
+  // Bumped by "Try again" to resubscribe after a failed load.
+  const [reload, setReload] = useState(0)
   const openProfile = (m: MatchEntry) => navigate(`/profile/${m.partnerUid}`)
 
   useEffect(() => {
@@ -45,7 +47,7 @@ export default function Links() {
       (matches) => setState({ key, matches, error: false }),
       () => setState({ key, matches: [], error: true }),
     )
-  }, [uid, mode, key])
+  }, [uid, mode, key, reload])
 
   useEffect(() => {
     if (!uid) return
@@ -120,7 +122,19 @@ export default function Links() {
           <span className={`text-3xl font-bold ${accent}`}>{ignited.length + conversations.length}</span>
         </header>
         {error ? (
-          <p className="px-4 text-sm text-white/50">Couldn't load your matches.</p>
+          <div className="flex flex-col items-start gap-3 px-4">
+            <p className="text-sm text-white/50">Couldn't load your matches.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setState(null)
+                setReload((n) => n + 1)
+              }}
+              className="text-sm text-white/40 underline hover:text-white/60"
+            >
+              Try again
+            </button>
+          </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
             {ignited.length > 0 && (
@@ -150,7 +164,7 @@ export default function Links() {
                 ))}
               </section>
             ) : (
-              <p className="px-4 pt-4 text-center text-sm text-white/50">Start a conversation ✦</p>
+              <p className="px-4 pt-4 text-center text-sm text-white/50">Start a conversation {isPlay ? '🔥' : '✦'}</p>
             )}
           </div>
         )}

@@ -120,10 +120,14 @@ async function writeOpener(bot: DocumentData, botPlay: DocumentData | undefined,
   return options[Math.floor(Math.random() * options.length)]
 }
 
-function snapshot(user: DocumentData) {
+// A Play match (`play` = their playProfile/data, {} if none) snapshots the
+// Play name and Play photo — never the Spark photo.
+function snapshot(user: DocumentData, play?: DocumentData) {
   return {
-    displayName: str(user.displayName) || 'Someone new',
-    photoURL: list(user.photoURLs)[0] ?? null,
+    displayName: play
+      ? str(user.playDisplayName) || str(play.playDisplayName) || str(play.displayName) || str(user.displayName) || 'Someone new'
+      : str(user.displayName) || 'Someone new',
+    photoURL: list((play ?? user).photoURLs)[0] ?? null,
     age: typeof user.age === 'number' ? user.age : null,
     isVerified: false,
     zyloveScoreTier: '',
@@ -142,6 +146,15 @@ async function likeBack(pendingRef: FirebaseFirestore.DocumentReference, pending
   const pairRef = db.collection('pairs').doc(matchId)
   const botRef = db.collection('users').doc(botUid)
   const likerRef = db.collection('users').doc(likerUid)
+
+  // Play data for the snapshots and the opener.
+  const [botPlay, likerPlay] =
+    mode === 'play'
+      ? await Promise.all([
+          botRef.collection('playProfile').doc('data').get().then((s) => s.data(), () => undefined),
+          likerRef.collection('playProfile').doc('data').get().then((s) => s.data(), () => undefined),
+        ])
+      : [undefined, undefined]
 
   const created = await db.runTransaction(async (tx) => {
     const [match, pair, bot, liker] = await Promise.all([tx.get(matchRef), tx.get(pairRef), tx.get(botRef), tx.get(likerRef)])
@@ -166,7 +179,10 @@ async function likeBack(pendingRef: FirebaseFirestore.DocumentReference, pending
       createdAt: now,
       matchGeneration: now.toMillis(),
       conversationId: matchId,
-      participantSnapshots: { [botUid]: snapshot(bot.data() ?? {}), [likerUid]: snapshot(liker.data() ?? {}) },
+      participantSnapshots: {
+        [botUid]: snapshot(bot.data() ?? {}, mode === 'play' ? (botPlay ?? {}) : undefined),
+        [likerUid]: snapshot(liker.data() ?? {}, mode === 'play' ? (likerPlay ?? {}) : undefined),
+      },
       hasUnread: false,
       isBlocked: false,
       isBot: true,
@@ -184,13 +200,6 @@ async function likeBack(pendingRef: FirebaseFirestore.DocumentReference, pending
   })
   if (!created) return
 
-  const [botPlay, likerPlay] =
-    mode === 'play'
-      ? await Promise.all([
-          botRef.collection('playProfile').doc('data').get().then((s) => s.data()),
-          likerRef.collection('playProfile').doc('data').get().then((s) => s.data()),
-        ])
-      : [undefined, undefined]
   const opener = await writeOpener(created.bot, botPlay, created.liker, likerPlay, mode)
   // Plaintext with a 'stub' nonce, like every bot message.
   await matchRef.collection('messages').add({

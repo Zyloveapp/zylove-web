@@ -23,10 +23,12 @@ export interface SparkEntry {
   mode: Mode
   // Snapshot of the liker taken at like time, shaped like a profile doc.
   profile: DiscoverProfile
+  // Score saved with the like. Null for bots: their seeded likes carry a
+  // random placeholder, so their real score comes from onTap instead.
   compatibilityScore: number | null
   expiresAt: number | null // epoch ms
   isWeeklySpark: boolean
-  // Bots (uid prefix 'zbot-') are shown unblurred, as normal profiles.
+  // Curated profiles (uid prefix 'zbot-'). Shown exactly like other likers.
   isBot: boolean
 }
 
@@ -38,16 +40,17 @@ function toSpark(id: string, data: DocumentData): SparkEntry {
     ? snap.photoURLs.filter((u): u is string => typeof u === 'string' && u !== '')
     : []
   if (photoURLs.length === 0 && typeof snap.photoURL === 'string' && snap.photoURL) photoURLs.push(snap.photoURL)
+  const isBot = likerUid.startsWith('zbot-')
   return {
     likerUid,
     likedAt: typeof data.likedAt === 'number' ? data.likedAt : 0,
     mode: data.mode === 'play' ? 'play' : 'spark',
     profile: { ...(snap as Partial<DiscoverProfile>), uid: likerUid, photoURLs },
     compatibilityScore:
-      typeof data.compatibilityScore === 'number' && data.compatibilityScore > 0 ? data.compatibilityScore : null,
+      !isBot && typeof data.compatibilityScore === 'number' && data.compatibilityScore > 0 ? data.compatibilityScore : null,
     expiresAt: typeof data.expiresAt === 'number' ? data.expiresAt : null,
     isWeeklySpark: data.isWeeklySpark === true,
-    isBot: likerUid.startsWith('zbot-'),
+    isBot,
   }
 }
 
@@ -242,12 +245,13 @@ interface CuriousRaw {
   tier1Spark: unknown
 }
 
-// People who opened your compatibility score first (getCuriousVisitors).
+// People who opened your compatibility score first (getCuriousVisitors), in
+// this mode — in Play with their Play name and photo.
 export async function fetchCurious(mode: Mode): Promise<CuriousResult> {
-  const { data } = await httpsCallable<void, { locked: boolean; count: number; visitors: CuriousRaw[] }>(
+  const { data } = await httpsCallable<{ mode: Mode }, { locked: boolean; count: number; visitors: CuriousRaw[] }>(
     functions,
     'getCuriousVisitors',
-  )()
+  )({ mode })
   return {
     locked: data.locked,
     count: data.count,

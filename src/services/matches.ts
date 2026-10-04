@@ -10,6 +10,9 @@ import {
 } from 'firebase/firestore'
 import { db } from './firebase'
 import type { Mode } from '../store/modeStore'
+import { fetchPublicUserDoc } from './publicUserDoc'
+import { loadPlayProfile } from './playProfile'
+import { playNameOf } from './displayNames'
 
 export interface MatchEntry {
   matchId: string
@@ -158,4 +161,29 @@ const NEW_MATCH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 // Matched in the last 7 days and nobody has written yet.
 export function isNewMatch(m: MatchEntry, now: number): boolean {
   return !m.ended && !hasMessages(m) && m.matchedAt > now - NEW_MATCH_WINDOW_MS
+}
+
+// ─── Play identity ───────────────────────────────────────────────────────────
+
+export interface PlayIdentity {
+  name: string // '' when they have none
+  photoURL: string | null
+}
+
+const playIdentities = new Map<string, Promise<PlayIdentity>>()
+
+// Someone's Play name and first Play photo, for Play lists built from
+// snapshots that may carry Spark data (older match snapshots, like-queue
+// entries). Never the Spark photo; the name falls back as playNameOf does.
+// Cached for the session.
+export function loadPlayIdentity(uid: string): Promise<PlayIdentity> {
+  let request = playIdentities.get(uid)
+  if (!request) {
+    request = Promise.all([fetchPublicUserDoc(uid), loadPlayProfile(uid)]).then(([root, play]) => ({
+      name: playNameOf(root, play),
+      photoURL: play?.photoURLs[0] ?? null,
+    }))
+    playIdentities.set(uid, request)
+  }
+  return request
 }

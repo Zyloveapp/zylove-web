@@ -15,13 +15,14 @@ import {
 } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
+import { friendlyError } from './errors'
 import { db, functions } from './firebase'
 import { getDistanceMiles } from './location'
 import { cityConfigPath, getNearestCity } from '../config/cities'
 import { genderToAttractedToCategory } from '../utils/genderUtils'
 import type { DatingProfile } from '../types/profile'
 import type { Mode } from '../store/modeStore'
-import { parsePlayProfile, type PlayProfileData } from './playProfile'
+import { loadPlayProfile, parsePlayProfile, type PlayProfileData } from './playProfile'
 import { playNameOf } from './displayNames'
 import { loadBlockedUids } from './safety'
 
@@ -77,6 +78,35 @@ export function markSwiped(uid: string, mode: Mode, targetUid: string): void {
   } catch {
     // Storage unavailable (private mode etc.) — the card still advances.
   }
+}
+
+// ─── Already acted on (server records) ──────────────────────────────────────
+
+const SWIPES_LIMIT = 500
+
+// People this user already liked, passed or linked with in this mode, from
+// the server, so a new device (empty localStorage) doesn't show them again.
+// swipes/{id} ({ swiperId, swipedId, action, mode }) is written by
+// recordSwipe; matches are readable by their participants. Either read may
+// be refused by the rules or fail — then it just contributes nothing.
+async function loadActedOn(uid: string, mode: Mode): Promise<Set<string>> {
+  const [swipes, matches] = await Promise.all([
+    getDocs(query(collection(db, 'swipes'), where('swiperId', '==', uid), limit(SWIPES_LIMIT))).catch(() => null),
+    getDocs(query(collection(db, 'matches'), where('users', 'array-contains', uid))).catch(() => null),
+  ])
+  const acted = new Set<string>()
+  for (const d of swipes?.docs ?? []) {
+    const s = d.data()
+    // Older swipes have no mode; they count for both.
+    if (typeof s.swipedId === 'string' && (s.mode === undefined || s.mode === mode)) acted.add(s.swipedId)
+  }
+  for (const d of matches?.docs ?? []) {
+    const m = d.data()
+    if ((m.mode === 'play' ? 'play' : 'spark') !== mode) continue
+    const users: unknown = m.users ?? m.participants
+    if (Array.isArray(users)) for (const u of users) if (typeof u === 'string' && u !== uid) acted.add(u)
+  }
+  return acted
 }
 
 // ─── Viewer profile ──────────────────────────────────────────────────────────
@@ -152,8 +182,8 @@ export async function fetchCandidates(uid: string, mode: Mode): Promise<Discover
   if (!meSnap.exists()) return []
   const me = { ...(meSnap.data() as DiscoverProfile), uid }
 
-  const [blocked, founding] = await Promise.all([loadBlockedUids(uid), inFoundingPeriod(me)])
-  const swiped = loadSwiped(uid, mode)
+  const [blocked, founding, actedOn] = await Promise.all([loadBlockedUids(uid), inFoundingPeriod(me), loadActedOn(uid, mode)])
+  const swiped = new Set([...loadSwiped(uid, mode), ...actedOn])
   const eligible = (p: DiscoverProfile) => isEligible(me, p, mode, swiped, blocked, founding)
 
   const users = collection(db, 'users')
@@ -287,7 +317,7 @@ async function withPlayProfiles(candidates: DiscoverProfile[]): Promise<Discover
 
 interface RecordSwipeRequest {
   targetUid: string
-  action: 'pass'
+  action: 'like' | 'pass'
   mode: Mode
 }
 
@@ -378,10 +408,13 @@ export function fetchCompatibility(targetUid: string): Promise<CompatibilityResu
 // report that opens revealed), as opposed to the background prefetch. Feeds
 // the other person's "Curious" tab. Only the viewer's own two fields are
 // touched; failures are ignored — it's a signal, not part of the reveal.
-export function recordReveal(uid: string, targetUid: string): void {
+// `${uid}_revealed_${mode}` records which mode it was seen in, so each mode's
+// Curious tab lists only its own visitors (getCuriousVisitors).
+export function recordReveal(uid: string, targetUid: string, mode?: Mode): void {
   updateDoc(doc(db, 'pairs', [uid, targetUid].sort().join('_')), {
     [`${uid}_revealed`]: true,
     [`${uid}_revealedAt`]: serverTimestamp(),
+    ...(mode ? { [`${uid}_revealed_${mode}`]: true } : {}),
   }).catch(() => {})
 }
 
@@ -409,24 +442,40 @@ export async function passProfile(uid: string, mode: Mode, targetUid: string): P
 }
 
 // Same snapshot shape the mobile app and botEngine write; the match lists on
-// both apps read name/photo/age from here.
-function participantSnapshot(p: DiscoverProfile): { displayName: string; age: number | null; photoURL: string | null } {
+// both apps read name/photo/age from here. A Play match gets the Play name
+// and Play photo (no Play photo → none, never the Spark one).
+function participantSnapshot(
+  p: DiscoverProfile,
+  play: PlayProfileData | null,
+): { displayName: string; age: number | null; photoURL: string | null } {
   return {
-    displayName: p.displayName || 'Someone',
+    displayName: (play ? playNameOf(p, play) : p.displayName) || 'Someone',
     age: displayAge(p),
-    photoURL: p.photoURLs?.[0] ?? null,
+    photoURL: (play ? play.photoURLs[0] : p.photoURLs?.[0]) ?? null,
   }
 }
 
 // onLike creates matches/{id} without participantSnapshots, so the liker's
 // client fills them in on a new match.
-async function writeParticipantSnapshots(matchId: string, uid: string, target: DiscoverProfile): Promise<void> {
-  const meSnap = await getDoc(doc(db, 'users', uid))
+async function writeParticipantSnapshots(matchId: string, uid: string, mode: Mode, target: DiscoverProfile): Promise<void> {
+  const isPlay = mode === 'play'
+  const [meSnap, myPlay, theirPlay] = await Promise.all([
+    getDoc(doc(db, 'users', uid)),
+    isPlay ? loadPlayProfile(uid) : Promise.resolve(null),
+    isPlay ? (target.playProfile ?? loadPlayProfile(target.uid)) : Promise.resolve(null),
+  ])
   if (!meSnap.exists()) return
   const me = { ...(meSnap.data() as DiscoverProfile), uid }
+  // An empty Play profile still keeps the snapshot on the Play side.
+  const empty = isPlay ? parsePlayProfile({}) : null
   await setDoc(
     doc(db, 'matches', matchId),
-    { participantSnapshots: { [uid]: participantSnapshot(me), [target.uid]: participantSnapshot(target) } },
+    {
+      participantSnapshots: {
+        [uid]: participantSnapshot(me, myPlay ?? empty),
+        [target.uid]: participantSnapshot(target, theirPlay ?? empty),
+      },
+    },
     { merge: true },
   )
 }
@@ -439,9 +488,16 @@ export async function likeProfile(uid: string, mode: Mode, target: DiscoverProfi
     mode,
   })
   markSwiped(uid, mode, target.uid)
+  // Server record of the like (as mobile does), so other devices skip them
+  // too. Best effort: the like itself is already saved.
+  httpsCallable<RecordSwipeRequest, { success: boolean }>(functions, 'recordSwipe')({
+    targetUid: target.uid,
+    action: 'like',
+    mode,
+  }).catch(() => {})
   if (data.matched && data.matchId) {
     // The match already exists; a failed snapshot write only degrades the list row.
-    await writeParticipantSnapshots(data.matchId, uid, target).catch((err: unknown) =>
+    await writeParticipantSnapshots(data.matchId, uid, mode, target).catch((err: unknown) =>
       console.warn('Failed to write participantSnapshots', err),
     )
   }
@@ -449,12 +505,8 @@ export async function likeProfile(uid: string, mode: Mode, target: DiscoverProfi
 }
 
 export function actionErrorMessage(err: unknown): string {
-  if (err instanceof FirebaseError) {
-    if (err.code === 'functions/permission-denied') return 'Your account can’t do that right now.'
-    if (err.code === 'functions/unauthenticated') return 'Your session expired — sign in again.'
-    return `Something went wrong (${err.code}). Try again.`
-  }
-  return 'Something went wrong. Check your connection and try again.'
+  if (err instanceof FirebaseError && err.code === 'functions/permission-denied') return 'Your account can’t do that right now.'
+  return friendlyError(err)
 }
 
 // ─── Displayed score ─────────────────────────────────────────────────────────

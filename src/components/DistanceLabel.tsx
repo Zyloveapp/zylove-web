@@ -8,6 +8,15 @@ import { fetchPublicUserDoc } from '../services/publicUserDoc'
 // Snapshot profiles (Sparks cards) often lack coordinates, so with a uid the
 // profile's own users/{uid} doc is read (cached, shared with the badges).
 // Renders nothing when there's neither. Your own profile shows its label.
+// Curated profiles (bots, uid prefix 'zbot-') are all seeded in one city, so
+// a real distance to them would mislead ("1,480 miles away"): they show only
+// their city label, and only to viewers within BOT_LOCAL_MILES of it.
+
+const BOT_LOCAL_MILES = 50
+
+function isBot(profile: { uid?: string; isBot?: unknown }): boolean {
+  return profile.isBot === true || !!profile.uid?.startsWith('zbot-')
+}
 
 function useCoords(uid: string | undefined, inline: LatLng | null): LatLng | null | undefined {
   const [fetched, setFetched] = useState<{ uid: string; coords: LatLng | null } | null>(null)
@@ -24,13 +33,17 @@ function useCoords(uid: string | undefined, inline: LatLng | null): LatLng | nul
   return fetched?.uid === uid ? fetched.coords : undefined // undefined = loading
 }
 
-export function useDistanceText(profile: { uid?: string; locationLabel?: string }): string | null {
+export function useDistanceText(profile: { uid?: string; locationLabel?: string; isBot?: unknown }): string | null {
   const viewerUid = useAuthStore((s) => s.user?.uid)
   const self = !!viewerUid && profile.uid === viewerUid
   const theirs = useCoords(self ? undefined : profile.uid, coordsOf(profile))
   const mine = useCoords(self ? undefined : viewerUid, null)
   const label = profile.locationLabel?.trim() || null
-  if (self || !theirs || !mine) return label
+  if (self) return label
+  if (isBot(profile)) {
+    return theirs && mine && getDistanceMiles(mine.lat, mine.lng, theirs.lat, theirs.lng) <= BOT_LOCAL_MILES ? label : null
+  }
+  if (!theirs || !mine) return label
   return distanceText(getDistanceMiles(mine.lat, mine.lng, theirs.lat, theirs.lng))
 }
 
@@ -39,7 +52,7 @@ export default function DistanceLabel({
   className,
   prefix = '📍 ',
 }: {
-  profile: { uid?: string; locationLabel?: string }
+  profile: { uid?: string; locationLabel?: string; isBot?: unknown }
   className?: string
   prefix?: string
 }) {

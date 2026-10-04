@@ -1,11 +1,13 @@
 import { Link } from 'react-router-dom'
 import { goDeeperAnswerRows, goDeeperComplete, type GoDeeperAnswers } from './goDeeper'
 
-// Own-profile Go Deeper section. While any answer is missing it shows the
-// prompt card; answered questions are listed either way.
-export default function HowIOperate({ answers }: { answers: GoDeeperAnswers }) {
+// Go Deeper section. On your own profile, while any answer is missing it
+// shows the prompt card; answered questions are listed either way. On
+// someone else's only their answers show (nothing when there are none).
+export default function HowIOperate({ answers, own }: { answers: GoDeeperAnswers; own: boolean }) {
   const rows = goDeeperAnswerRows(answers)
-  const complete = goDeeperComplete(answers)
+  const complete = !own || goDeeperComplete(answers)
+  if (!own && rows.length === 0) return null
   return (
     <section>
       <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-white/50">How I operate</h3>

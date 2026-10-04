@@ -257,7 +257,9 @@ export default function LocationGate({ children }: { children: ReactNode }) {
           type="button"
           onClick={() => void allow()}
           disabled={busy}
-          className="mt-8 w-full max-w-xs rounded-full bg-[#1B4FD8] px-6 py-3.5 font-semibold text-white transition-colors hover:bg-[#1640b0] disabled:opacity-60"
+          className={`mt-8 w-full max-w-xs rounded-full px-6 py-3.5 font-semibold text-white transition-colors disabled:opacity-60 ${
+            play ? 'bg-[#E03131] hover:bg-[#c42a2a]' : 'bg-[#1B4FD8] hover:bg-[#1640b0]'
+          }`}
         >
           {busy ? 'Waiting for location…' : 'Allow location →'}
         </button>

@@ -44,6 +44,15 @@ export default function Sparks() {
   const [scores, setScores] = useState<{ key: string; map: Map<string, number> }>({ key, map: new Map() })
   const [newMatch, setNewMatch] = useState<NewMatch | null>(null)
   const sparksAllowed = useCanAccess('sparks')
+  // Bumped by "Try again" to re-run a failed load.
+  const [reload, setReload] = useState(0)
+  function retry() {
+    // Back to the spinner while it reloads.
+    setQueue((q) => (q?.error ? null : q))
+    setCurious((c) => (c?.error ? null : c))
+    setSent((x) => (x?.error ? null : x))
+    setReload((n) => n + 1)
+  }
 
   useEffect(() => {
     if (!uid) return
@@ -53,7 +62,7 @@ export default function Sparks() {
       ({ live, viewed }) => setQueue({ key, live, viewed, error: false }),
       () => setQueue({ key, live: [], viewed: [], error: true }),
     )
-  }, [uid, mode, key])
+  }, [uid, mode, key, reload])
 
   useEffect(() => {
     if (!uid) return
@@ -76,7 +85,7 @@ export default function Sparks() {
     return () => {
       cancelled = true
     }
-  }, [tab, uid, mode, key])
+  }, [tab, uid, mode, key, reload])
 
   // Sent comes from a callable; fetched each time the tab is opened so new
   // likes from Explore show up.
@@ -89,7 +98,7 @@ export default function Sparks() {
     return () => {
       cancelled = true
     }
-  }, [tab, uid, mode, key])
+  }, [tab, uid, mode, key, reload])
 
   const matchedUids = useMemo(
     () => new Set(matches?.key === key ? matches.list.map((m) => m.partnerUid) : []),
@@ -99,8 +108,36 @@ export default function Sparks() {
   const loaded = queue?.key === key ? queue : null
   const liveCount = loaded?.live.length ?? 0
   const syncedScores = scores.key === key ? scores.map : undefined
-  // Best-matched incoming Sparks: the real score once a card has been opened,
-  // otherwise the score saved with the like. Unscored likes are left out.
+
+  // Bots' likes carry a random placeholder score (see toSpark), so each
+  // bot's real score is loaded up front (onTap, cached per session) for its
+  // card and the Top Picks ranking.
+  const botUids = (loaded?.live ?? []).filter((s) => s.isBot).map((s) => s.likerUid).join(',')
+  useEffect(() => {
+    if (!botUids) return
+    let cancelled = false
+    for (const likerUid of botUids.split(',')) {
+      fetchCompatibility(likerUid)
+        .then((result) => {
+          const score = displayScore(result, mode)
+          if (cancelled || !score) return
+          setScores((prev) => {
+            if (prev.key === key && prev.map.get(likerUid) === score.value) return prev
+            const map = new Map(prev.key === key ? prev.map : [])
+            map.set(likerUid, score.value)
+            return { key, map }
+          })
+        })
+        .catch(() => {})
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [botUids, mode, key])
+
+  // Best-matched incoming Sparks: the real score once a card has been opened
+  // (and for every bot), otherwise the score saved with the like. Unscored
+  // likes — including bots whose score hasn't arrived — are left out.
   const topPicks = useMemo(() => {
     const live = loaded?.live ?? []
     if (live.length < TOP_PICKS_MIN_SPARKS) return null
@@ -121,10 +158,11 @@ export default function Sparks() {
       : String(curiousState.result.count)
     : ''
 
+  const symbol = isPlay ? '🔥' : '✦'
   const TABS: { id: Tab; label: string }[] = [
     { id: 'sparks', label: `${isPlay ? '🔥 Flames' : '✦ Sparks'} ${liveCount}` },
-    { id: 'curious', label: `✦ Curious${curiousCount ? ` ${curiousCount}` : ''}` },
-    ...(topPicks ? [{ id: 'picks' as const, label: `✦ Top Picks ${topPicks.length}` }] : []),
+    { id: 'curious', label: `${symbol} Curious${curiousCount ? ` ${curiousCount}` : ''}` },
+    ...(topPicks ? [{ id: 'picks' as const, label: `${symbol} Top Picks ${topPicks.length}` }] : []),
     { id: 'sent', label: `→ Sent${sentList ? ` ${sentList.length}` : ''}` },
   ]
   const activeTab = isPlay ? 'border-[#E03131] text-white' : 'border-[#1B4FD8] text-white'
@@ -181,7 +219,7 @@ export default function Sparks() {
     <div className="min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] bg-gray-950 text-white">
       <div className="mx-auto max-w-2xl px-4">
         <header className="flex items-center justify-between py-5">
-          <h1 className="text-2xl font-extrabold">{isPlay ? '🔥 Flames ✦' : '✦ Sparks ✦'}</h1>
+          <h1 className="text-2xl font-extrabold">{isPlay ? '🔥 Flames 🔥' : '✦ Sparks ✦'}</h1>
           <span className={`text-3xl font-bold ${isPlay ? 'text-[#E03131]' : 'text-[#1B4FD8]'}`}>{liveCount}</span>
         </header>
 
@@ -207,7 +245,7 @@ export default function Sparks() {
             !curiousState ? (
               <Spinner />
             ) : curiousState.error || !curiousState.result ? (
-              <p className="py-10 text-center text-sm text-white/50">Couldn't load who's curious.</p>
+              <LoadError message="Couldn't load who's curious." onRetry={retry} />
             ) : (
               <CuriousList result={curiousState.result} mode={mode} onSelect={(id) => navigate(`/profile/${id}`)} />
             )
@@ -215,7 +253,7 @@ export default function Sparks() {
             sentList === null ? (
               <Spinner />
             ) : sent?.error ? (
-              <p className="py-10 text-center text-sm text-white/50">Couldn't load your sent {isPlay ? 'flames' : 'sparks'}.</p>
+              <LoadError message={`Couldn't load your sent ${isPlay ? 'flames' : 'sparks'}.`} onRetry={retry} />
             ) : (
               <SentList sent={sentList} mode={mode} />
             )
@@ -235,7 +273,7 @@ export default function Sparks() {
           ) : !loaded ? (
             <Spinner />
           ) : loaded.error ? (
-            <p className="py-10 text-center text-sm text-white/50">Couldn't load your {isPlay ? 'flames' : 'sparks'}.</p>
+            <LoadError message={`Couldn't load your ${isPlay ? 'flames' : 'sparks'}.`} onRetry={retry} />
           ) : (
             <SparksList
               sparks={loaded.live}
@@ -255,12 +293,12 @@ export default function Sparks() {
           spark={selected}
           matched={matchedUids.has(selected.likerUid)}
           onClose={() => setSelected(null)}
-          onMatchStart={(name) =>
+          onMatchStart={(name, photo) =>
             setNewMatch({
               matchId: null,
               theirUid: selected.likerUid,
               theirName: name,
-              theirPhoto: selected.profile.photoURLs?.[0] ?? null,
+              theirPhoto: photo,
               mode: selected.mode,
             })
           }
@@ -269,7 +307,19 @@ export default function Sparks() {
         />
       )}
 
-      {newMatch && <MatchOverlay match={newMatch} />}
+      {newMatch && <MatchOverlay match={newMatch} onClose={() => setNewMatch(null)} />}
+    </div>
+  )
+}
+
+// Same "Try again" pattern as Explore's load error.
+function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-3 py-10 text-center">
+      <p className="text-sm text-white/50">{message}</p>
+      <button type="button" onClick={onRetry} className="text-sm text-white/40 underline hover:text-white/60">
+        Try again
+      </button>
     </div>
   )
 }
