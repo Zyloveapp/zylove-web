@@ -271,7 +271,7 @@ body {
 .mt-drain-edges { animation: mt-edges-cobalt 1000ms ease-in-out 2500ms 2 both; }
 .mt-rise { opacity: 0; animation-name: mt-rise; animation-timing-function: ease-out; animation-fill-mode: both; }
 /* 0.2s pause, then a slow 0.8s fade so "Back to real." has room to land. */
-.mt-settle { animation: mt-settle 800ms ease-out 200ms both; }
+.mt-settle { animation: mt-settle 1200ms ease-out 200ms both; }
 
 /* Reduced motion: solid colour, text fades in, holds, fades out (1.5s). */
 .mt-reduced-in { animation: mt-appear 400ms ease-out both; }

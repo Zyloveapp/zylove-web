@@ -103,7 +103,6 @@ export default function Profile() {
               {flash}
             </p>
           )}
-          <h1 className="text-sm font-semibold uppercase tracking-widest text-red-400">🔴 Play Profile</h1>
           {playData ? (
             <PlayProfileSections profile={own.profile} play={playData} />
           ) : (

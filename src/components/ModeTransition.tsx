@@ -12,8 +12,9 @@ const COPY = {
 // timeline lives in index.css under "Mode transitions".
 const TIMING = {
   play: { exitAt: 3200, doneAt: 4000 },
-  // Settle starts at 3000 with a 200ms pause, so its 800ms fade ends at 4000.
-  spark: { exitAt: 3000, doneAt: 4000 },
+  // Settle starts at 3000 with a 200ms pause; its 1200ms fade ends at 4400,
+  // and onComplete waits a beat more so "Back to real." can breathe.
+  spark: { exitAt: 3000, doneAt: 4500 },
   reduced: { exitAt: 1100, doneAt: 1500 },
 } as const
 
