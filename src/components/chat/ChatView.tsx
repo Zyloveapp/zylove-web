@@ -320,6 +320,15 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     () => [...(messages ?? [])].reverse().find((m) => consentCode(m) === 'photo_consent_request')?.id ?? null,
     [messages],
   )
+  // The newest consent message is the request itself (nothing answered it
+  // yet). Read from the live messages, so the request can be answered the
+  // moment it arrives — not only once the match doc's status catches up.
+  const requestOpenInChat = useMemo(() => {
+    const last = [...(messages ?? [])].reverse().find((m) => consentCode(m) !== null)
+    return last !== undefined && consentCode(last) === 'photo_consent_request'
+  }, [messages])
+  const requestPending =
+    consent?.status === 'pending' || (requestOpenInChat && (consent === null || consent.status !== 'accepted'))
 
   async function runConsent(action: () => Promise<void>) {
     setConsentBusy(true)
@@ -453,7 +462,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
                     code={code}
                     isMine={m.senderId === uid}
                     partnerName={match.name}
-                    live={m.id === latestRequestId && consent?.status === 'pending'}
+                    live={m.id === latestRequestId && requestPending}
                     busy={consentBusy}
                     onRespond={(accept) => void runConsent(() => respondToPhotoConsent(matchId, uid, accept))}
                   />
