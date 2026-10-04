@@ -40,7 +40,7 @@ export default function PlayPinFlow({ uid, purpose, onDone, onCancel, entrySubti
   return (
     <PinEntry
       uid={uid}
-      title={purpose === 'change' ? 'Enter your current PIN' : '🔥 Enter your Play PIN'}
+      title={purpose === 'change' ? 'Enter your current PIN' : '🔥 Enter your PIN'}
       subtitle={entrySubtitle}
       onSuccess={purpose === 'change' ? () => setStep('setup') : onDone}
       onCancel={onCancel}

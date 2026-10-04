@@ -15,7 +15,7 @@ interface PinEntryProps {
 // Auto-submits on the fourth digit. Three misses lock entry for 30 seconds.
 export default function PinEntry({
   uid,
-  title = '🔥 Enter your Play PIN',
+  title = '🔥 Enter your PIN',
   subtitle,
   onSuccess,
   onCancel,
