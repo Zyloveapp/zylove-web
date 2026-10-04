@@ -1,5 +1,5 @@
 import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore'
-import { getBlob, ref } from 'firebase/storage'
+import { getDownloadURL, ref } from 'firebase/storage'
 import { db, storage } from './firebase'
 import type { Mode } from '../store/modeStore'
 
@@ -54,15 +54,15 @@ export async function loadReviews(uid: string, mode: Mode): Promise<SavedReview[
   })
 }
 
-// Fetched through the Storage SDK (owner-only rules), then saved locally.
-export async function downloadReviewPdf(path: string, filename: string): Promise<void> {
-  const blob = await getBlob(ref(storage, path))
-  const url = URL.createObjectURL(blob)
+// Owner-only rules are checked when the tokenized URL is issued. A plain link
+// needs no bucket CORS (getBlob did) and also works in iOS home-screen apps.
+export async function downloadReviewPdf(pdfPath: string, filename: string): Promise<void> {
+  const url = await getDownloadURL(ref(storage, pdfPath))
   const a = document.createElement('a')
   a.href = url
   a.download = filename
+  a.target = '_blank' // fallback for iOS which ignores download attribute
   document.body.appendChild(a)
   a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  document.body.removeChild(a)
 }

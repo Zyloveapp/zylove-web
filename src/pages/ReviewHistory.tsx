@@ -57,7 +57,8 @@ export default function ReviewHistory() {
     try {
       const date = new Date(r.createdAt).toISOString().slice(0, 10)
       await downloadReviewPdf(r.pdfPath, `zylove-${mode}-review-${date}.pdf`)
-    } catch {
+    } catch (err) {
+      console.error('PDF download failed:', err)
       setDownloadError(r.reviewId)
     } finally {
       setDownloading(null)
