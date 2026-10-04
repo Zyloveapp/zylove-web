@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
-import { markPlayActive, playSessionExpired, trackPlayActivity } from '../services/playSession'
+import { markPlayActive, onPlayLocked, playSessionExpired, trackPlayActivity } from '../services/playSession'
 import PlayPinFlow from './PlayPinFlow'
 
 // Covers Play with the PIN after 2 minutes without activity (on load, or on
@@ -12,6 +12,11 @@ export default function PlayLock() {
   const mode = useModeStore((s) => s.mode)
   const setMode = useModeStore((s) => s.setMode)
   const [locked, setLocked] = useState(() => mode === 'play' && playSessionExpired())
+
+  // Every way of locking (on load, on return, idle check) passes through here.
+  useEffect(() => {
+    if (locked) onPlayLocked()
+  }, [locked])
 
   // Activity only counts while unlocked — taps on the PIN pad mustn't refresh
   // the timestamp, or a reload would skip the PIN.

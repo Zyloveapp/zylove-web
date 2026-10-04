@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '../../services/firebase'
+import { BANNER_DISMISSED_KEY as DISMISSED_KEY, BANNER_RESET_EVENT } from '../../services/playSession'
 
-const DISMISSED_KEY = 'zylove_bot_banner_dismissed'
 const COMPLETE_SEEN_KEY = 'zylove_launch_complete_seen_at'
 const COMPLETE_SHOW_MS = 24 * 60 * 60 * 1000
 
@@ -34,6 +34,13 @@ export default function LaunchBanner() {
   // Page-load time and, once bots are off, when this browser first saw that.
   const [loadedAt] = useState(() => Date.now())
   const [completeSince, setCompleteSince] = useState<number | null>(null)
+
+  // A Play inactivity lock clears the dismissal; show the banner again.
+  useEffect(() => {
+    const reset = () => setDismissed(false)
+    window.addEventListener(BANNER_RESET_EVENT, reset)
+    return () => window.removeEventListener(BANNER_RESET_EVENT, reset)
+  }, [])
 
   useEffect(
     () =>

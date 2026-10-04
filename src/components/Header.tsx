@@ -126,6 +126,49 @@ function PlaySetupSheet({ onClose, onStart }: { onClose: () => void; onStart: ()
   )
 }
 
+// Shown to Play-only users (no Spark profile) who tap the pill to go to Spark:
+// they build a Spark profile first rather than landing in an empty Spark.
+function SparkSetupSheet({ onClose, onStart }: { onClose: () => void; onStart: () => void }) {
+  useEffect(() => {
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/60 backdrop-blur-sm lg:items-center lg:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="spark-setup-title"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="w-full rounded-t-2xl bg-gray-900 px-6 pt-6 text-white pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] lg:max-w-sm lg:rounded-2xl lg:pb-6">
+        <h2 id="spark-setup-title" className="text-xl font-bold">
+          ✦ Build your Spark profile
+        </h2>
+        <p className="mt-2 text-sm text-white/60">
+          Spark is Zylove's intentional dating side. Real compatibility. Intentional connections. Something worth keeping.
+        </p>
+        <button
+          type="button"
+          onClick={onStart}
+          autoFocus
+          className="mt-6 w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold text-white transition-opacity hover:opacity-90"
+        >
+          Get started →
+        </button>
+        <button type="button" onClick={onClose} className="mt-2 w-full py-2 text-sm text-white/50 hover:text-white">
+          Not now
+        </button>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 // Persistent top bar on every protected page: wordmark, mode pill, visibility
 // and settings. Going into Play asks for the Play PIN; either way the
 // "Play time." / "Back to real." transition plays before the mode changes.
@@ -143,6 +186,7 @@ export default function Header() {
   const [playSetup, setPlaySetup] = useState(false)
   const [checkingPlay, setCheckingPlay] = useState(false)
   const [playPaywall, setPlayPaywall] = useState(false)
+  const [sparkSetup, setSparkSetup] = useState(false)
   const tier = useSubscriptionStore((s) => (s.uid === uid ? s.tier : null))
   const trialDaysLeft = useSubscriptionStore((s) => (s.uid === uid ? s.daysLeft : null))
   // Last week of the trial: a quiet nudge under the header.
@@ -222,7 +266,14 @@ export default function Header() {
   // PIN. Back to Spark needs none of it.
   async function togglePill() {
     if (transition) return
-    if (isPlay) return setTransition('spark')
+    if (isPlay) {
+      if (checkingPlay) return
+      // Play-only: build a Spark profile first. A failed read just switches.
+      setCheckingPlay(true)
+      const playOnly = await isPlayOnlyUser(uid).catch(() => false)
+      setCheckingPlay(false)
+      return playOnly ? setSparkSetup(true) : setTransition('spark')
+    }
     if (checkingPlay) return
     if (tier !== null && !canAccess(tier, 'play_mode')) return setPlayPaywall(true)
     setCheckingPlay(true)
@@ -298,6 +349,16 @@ export default function Header() {
 
         {sheetOpen && current && <VisibilitySheet mode={mode} current={current} onPick={pick} onClose={() => setSheetOpen(false)} />}
       </div>
+
+      {sparkSetup && (
+        <SparkSetupSheet
+          onClose={() => setSparkSetup(false)}
+          onStart={() => {
+            setSparkSetup(false)
+            navigate('/onboarding?spark=setup')
+          }}
+        />
+      )}
 
       {playSetup && (
         <PlaySetupSheet

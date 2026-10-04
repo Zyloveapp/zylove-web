@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { FirebaseError } from 'firebase/app'
+import { doc, getDoc } from 'firebase/firestore'
 import { useAuthStore } from '../store/authStore'
+import { db } from '../services/firebase'
 import { useModeStore } from '../store/modeStore'
 import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
 import { loadRefreshDraft, recordLegalAcceptance, saveSparkOnboarding } from '../services/onboarding'
@@ -136,7 +138,18 @@ const PLAY_STEPS = [
   { id: 'playReview', title: 'Review' },
 ] as const
 
-type StepId = (typeof STEPS)[number]['id'] | (typeof PLAY_STEPS)[number]['id']
+// A Play-only user building their Spark profile (?spark=setup, from the mode
+// pill): a Spark welcome, then the full Spark flow without terms (accepted)
+// or the intention steps (they already chose Spark).
+const SPARK_SETUP_STEPS = [
+  { id: 'sparkWelcome', title: 'Welcome' },
+  ...STEPS.filter((s) => s.id !== 'terms' && s.id !== 'intention' && s.id !== 'recommendation'),
+] as const
+
+type StepId =
+  | (typeof STEPS)[number]['id']
+  | (typeof PLAY_STEPS)[number]['id']
+  | (typeof SPARK_SETUP_STEPS)[number]['id']
 type Step = { id: StepId; title: string }
 
 // Spark, Both and Unsure build the full Spark profile; Play builds only the
@@ -242,6 +255,8 @@ export default function Onboarding() {
   const [searchParams] = useSearchParams()
   // "Reimagine my profile": same flow, pre-filled from the saved profile.
   const refresh = searchParams.get('refresh') === 'true'
+  const sparkSetup = !refresh && searchParams.get('spark') === 'setup'
+  const [setupLoad, setSetupLoad] = useState<{ uid: string; locked: boolean } | 'error' | null>(null)
   const [refreshLoad, setRefreshLoad] = useState<
     { uid: string; locked: boolean; extraPrompts: PromptAnswer[] } | 'error' | null
   >(null)
@@ -294,6 +309,43 @@ export default function Onboarding() {
     }
   }, [refresh, userId])
 
+  // Spark setup: identity and who-you-see carry over from the account; every
+  // Spark answer — photos included — starts fresh, so Play photos never end
+  // up on the Spark profile.
+  useEffect(() => {
+    if (!sparkSetup || !userId) return
+    let cancelled = false
+    Promise.all([loadRefreshDraft(userId), getDoc(doc(db, 'users', userId))])
+      .then(([loaded, root]) => {
+        if (cancelled) return
+        if (!loaded) return setSetupLoad('error')
+        const d = loaded.draft
+        const answers: unknown = root.data()?.intentionAnswers
+        setDraft({
+          ...INITIAL_DRAFT,
+          termsAccepted: true,
+          displayName: d.displayName,
+          birthdayRaw: d.birthdayRaw,
+          genderIdentity: d.genderIdentity,
+          genderSelfDescribe: d.genderSelfDescribe,
+          matchableAs: d.matchableAs,
+          pronouns: d.pronouns,
+          attractedTo: d.attractedTo,
+          radiusMiles: d.radiusMiles,
+          ageMin: d.ageMin,
+          ageMax: d.ageMax,
+          intent: 'open',
+          onboardingPath: 'both',
+          intentionAnswers: Array.isArray(answers) ? answers.filter((a): a is string => typeof a === 'string') : [],
+        })
+        setSetupLoad({ uid: userId, locked: loaded.identityLocked })
+      })
+      .catch(() => !cancelled && setSetupLoad('error'))
+    return () => {
+      cancelled = true
+    }
+  }, [sparkSetup, userId])
+
   if (authLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-950">
@@ -324,10 +376,31 @@ export default function Onboarding() {
     )
   }
 
+  if (sparkSetup && setupLoad === 'error') {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-gray-950 px-4 text-center">
+        <p className="text-white/80">We couldn't load your account to start your Spark profile.</p>
+        <button type="button" onClick={() => navigate('/discover')} className="text-sm text-white/50 underline">
+          Back
+        </button>
+      </div>
+    )
+  }
+  if (sparkSetup && (setupLoad === null || setupLoad === 'error' || setupLoad.uid !== uid)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-950">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-white/15 border-t-white" />
+      </div>
+    )
+  }
+
   const refreshInfo = refresh && typeof refreshLoad === 'object' ? refreshLoad : null
-  const identityLocked = refreshInfo?.locked ?? false
+  const setupInfo = sparkSetup && typeof setupLoad === 'object' ? setupLoad : null
+  const identityLocked = refreshInfo?.locked ?? setupInfo?.locked ?? false
   const maxPhotos = refresh ? MAX_REFRESH_PHOTOS : MAX_PHOTOS
-  const steps = stepsFor(refresh, identityLocked, draft.onboardingPath)
+  const steps: readonly Step[] = sparkSetup
+    ? SPARK_SETUP_STEPS.filter((s) => !(identityLocked && s.id === 'gender'))
+    : stepsFor(refresh, identityLocked, draft.onboardingPath)
   const step = steps[stepIndex]
   const update = (patch: Partial<OnboardingDraft>) => setDraft((d) => ({ ...d, ...patch }))
   const updatePlay = (patch: Partial<PlayDraft>) => setPlay((p) => ({ ...p, ...patch }))
@@ -389,10 +462,15 @@ export default function Onboarding() {
     setSaving(true)
     setSaveError(null)
     try {
-      const photoNotices = await saveSparkOnboarding(uid, draft, { extraPrompts: refreshInfo?.extraPrompts })
+      const photoNotices = await saveSparkOnboarding(uid, draft, {
+        extraPrompts: refreshInfo?.extraPrompts,
+        newSparkProfile: sparkSetup,
+      })
       // A photo still under review (or slow) goes on the profile page, where
       // the notice shows; Discover needs a published photo anyway.
       await finishWithFounderCheck(() => {
+        // Both profiles now exist, so Spark is home.
+        if (sparkSetup) setMode('spark')
         if (photoNotices.length > 0) navigate('/profile', { replace: true, state: { flash: photoNotices.join(' ') } })
         else if (refresh) navigate('/profile', { replace: true, state: { flash: '✦ Profile refreshed.' } })
         else navigate('/discover', { replace: true })
@@ -459,6 +537,22 @@ export default function Onboarding() {
     const props = { draft, update }
     const playProps = { play, update: updatePlay }
     switch (step.id) {
+      case 'sparkWelcome':
+        return (
+          <div className="flex min-h-[60dvh] flex-col justify-center text-center">
+            <h1 className="text-3xl font-bold text-white">✦ Building your Spark profile</h1>
+            <p className="mt-4 text-lg text-white/70">Real compatibility. Intentional connections. Something worth keeping.</p>
+            <p className="mt-4 text-white/50">Your Play profile stays completely separate.</p>
+            <button
+              type="button"
+              onClick={next}
+              autoFocus
+              className="mt-10 w-full rounded-xl bg-[#1B4FD8] py-4 font-semibold text-white transition-opacity hover:opacity-90"
+            >
+              Let's go →
+            </button>
+          </div>
+        )
       case 'terms':
         return <TermsStep accepted={draft.termsAccepted} onAccept={acceptTerms} />
       case 'name':
@@ -625,7 +719,8 @@ export default function Onboarding() {
     step.id === 'goDeeper' ||
     step.id === 'review' ||
     step.id === 'playReview' ||
-    step.id === 'recommendation'
+    step.id === 'recommendation' ||
+    step.id === 'sparkWelcome'
   const canAdvance = isStepValid(step.id, draft, bioGenerating, identityLocked, maxPhotos, play, playBioBusy)
 
   return (

@@ -35,6 +35,21 @@ export function playSessionExpired(now = Date.now()): boolean {
   }
 }
 
+// Explore's transparency banner dismissal lasts one tab session
+// (sessionStorage). A Play inactivity lock resets it too, so the banner is
+// back after unlocking; the event tells a mounted banner to reappear.
+export const BANNER_DISMISSED_KEY = 'zylove_bot_banner_dismissed'
+export const BANNER_RESET_EVENT = 'zylove:launch-banner-reset'
+
+export function onPlayLocked(): void {
+  try {
+    sessionStorage.removeItem(BANNER_DISMISSED_KEY)
+  } catch {
+    // ignore
+  }
+  window.dispatchEvent(new Event(BANNER_RESET_EVENT))
+}
+
 export function clearPlaySession(): void {
   lastWrite = 0
   try {

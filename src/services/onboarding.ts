@@ -140,7 +140,9 @@ const NO_LIMIT_RADIUS_MILES = 500
 export async function saveSparkOnboarding(
   uid: string,
   d: OnboardingDraft,
-  { extraPrompts = [] }: { extraPrompts?: PromptAnswer[] } = {},
+  // newSparkProfile: a Play-only account building its first Spark profile —
+  // the 'hidden' Spark visibility it had while Play-only isn't a choice to keep.
+  { extraPrompts = [], newSparkProfile = false }: { extraPrompts?: PromptAnswer[]; newSparkProfile?: boolean } = {},
 ): Promise<string[]> {
   const rootRef = doc(db, 'users', uid)
   const existing = await getDoc(rootRef)
@@ -230,7 +232,7 @@ export async function saveSparkOnboarding(
     sparkVisibility:
       !hasPhotos
         ? 'hidden'
-        : prevVisibility === 'hidden' || prevVisibility === 'paused'
+        : !newSparkProfile && (prevVisibility === 'hidden' || prevVisibility === 'paused')
           ? prevVisibility
           : 'active',
     onboardingComplete: true,

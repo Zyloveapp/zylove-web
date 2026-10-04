@@ -16,6 +16,10 @@ function sameList(a: string[], b: string[]): boolean {
 // photoURLs, so while the account stays Play-only the approved list is mirrored
 // onto users/{uid}. Once a Spark profile exists, root photoURLs are the Spark
 // photos and this leaves them alone.
+//
+// Play photos must never land on a Spark profile, so it only writes when all
+// hold: onboardingPath is 'play', there's no sparkProfile/data, and the root
+// photoURLs are empty or nothing but Play photos (this or the previous list).
 export const mirrorPlayOnlyPhotos = onDocumentWritten('users/{uid}/playProfile/data', async (event) => {
   const after = event.data?.after.data()
   if (!after) return
@@ -26,7 +30,13 @@ export const mirrorPlayOnlyPhotos = onDocumentWritten('users/{uid}/playProfile/d
   const [user, spark] = await Promise.all([userRef.get(), userRef.collection('sparkProfile').doc('data').get()])
   const data = user.data()
   if (!data || data.onboardingPath !== 'play' || spark.exists) return
-  if (sameList(urls, strings(data.photoURLs))) return
+  const root = strings(data.photoURLs)
+  if (sameList(urls, root)) return
+  const playUrls = new Set([...urls, ...strings(event.data?.before.data()?.photoURLs)])
+  if (!root.every((u) => playUrls.has(u))) {
+    logger.warn('mirrorPlayOnlyPhotos: root photoURLs hold non-Play photos, not mirroring', { uid: event.params.uid })
+    return
+  }
 
   await userRef.update({ photoURLs: urls })
   logger.info('mirrorPlayOnlyPhotos: root photoURLs updated', {
