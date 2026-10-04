@@ -2,9 +2,15 @@ import { useCallback, useEffect, useState } from 'react'
 import { FirebaseError } from 'firebase/app'
 import ScoreRing from '../ScoreRing'
 import { fetchProfileReview, type ProfileScorecard } from '../../services/profile'
+import { getPhotoConsentChoice, setPhotoConsent } from '../../services/photoConsent'
+import { useAuthStore } from '../../store/authStore'
 
 type Mode = 'spark' | 'play'
 type State =
+  // Reading the saved photo-consent choice; nothing generated yet.
+  | { status: 'checking' }
+  // Never asked for this mode: the choice comes before any review call.
+  | { status: 'asking' }
   | { status: 'loading' }
   | { status: 'done'; review: ProfileScorecard }
   | { status: 'error'; message: string; limited: boolean }
@@ -51,9 +57,12 @@ function errorState(err: unknown): State {
 // "How's my profile?" for either mode: an AI scorecard — overall ring, four
 // scored sections with what's working and what to improve, and the one top
 // suggestion. Spark is cobalt, Play is red; Play reviews are 3 per week.
+// Photo analysis follows photoAnalysisConsent for the mode; if they've never
+// chosen, they're asked first, so no review is spent before the choice.
 export default function ProfileReviewSheet({ mode, onClose }: { mode: Mode; onClose: () => void }) {
   const theme = THEME[mode]
-  const [state, setState] = useState<State>({ status: 'loading' })
+  const uid = useAuthStore((s) => s.user?.uid) ?? ''
+  const [state, setState] = useState<State>({ status: 'checking' })
 
   const fetchReview = useCallback(() => {
     fetchProfileReview(mode)
@@ -62,11 +71,41 @@ export default function ProfileReviewSheet({ mode, onClose }: { mode: Mode; onCl
   }, [mode])
 
   useEffect(() => {
-    fetchReview()
-  }, [fetchReview])
+    if (!uid) return
+    let cancelled = false
+    getPhotoConsentChoice(uid, mode)
+      // Can't read the choice: ask rather than guess.
+      .catch(() => null)
+      .then((choice) => {
+        if (cancelled) return
+        if (choice === null) setState({ status: 'asking' })
+        else {
+          setState({ status: 'loading' })
+          fetchReview()
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [uid, mode, fetchReview])
 
   function regenerate() {
     setState({ status: 'loading' })
+    fetchReview()
+  }
+
+  // 'include' / 'never' are saved (include also counts as accepting the
+  // consent notice); 'skip' saves nothing, so they're asked again next time.
+  async function choosePhotos(choice: 'include' | 'skip' | 'never') {
+    setState({ status: 'loading' })
+    if (choice !== 'skip') {
+      try {
+        await setPhotoConsent(uid, mode, choice === 'include', { acknowledge: choice === 'include' })
+      } catch {
+        // Not saved: still review, without photos (the server only sends
+        // photos when consent is stored as true).
+      }
+    }
     fetchReview()
   }
 
@@ -88,7 +127,13 @@ export default function ProfileReviewSheet({ mode, onClose }: { mode: Mode; onCl
       <div className={`flex max-h-[90dvh] w-full flex-col rounded-t-2xl border text-white lg:max-w-lg lg:rounded-2xl ${theme.panel}`}>
         {/* Scrolls under a fixed footer; the bottom padding lets the last card clear it. */}
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-6 pb-8">
-          {state.status === 'loading' ? (
+          {state.status === 'checking' ? (
+            <div className="flex justify-center py-16">
+              <span className="h-7 w-7 animate-spin rounded-full border-2 border-white/20" style={{ borderTopColor: theme.accent }} />
+            </div>
+          ) : state.status === 'asking' ? (
+            <PhotoChoice accent={theme.accent} onChoose={(choice) => void choosePhotos(choice)} />
+          ) : state.status === 'loading' ? (
             <div className="flex flex-col items-center gap-3 py-16 text-sm text-white/50">
               <span
                 className="h-7 w-7 animate-spin rounded-full border-2 border-white/20"
@@ -104,11 +149,10 @@ export default function ProfileReviewSheet({ mode, onClose }: { mode: Mode; onCl
         </div>
 
         <div className={`shrink-0 border-t px-6 pt-2 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] ${theme.divider}`}>
-          {!(state.status === 'error' && state.limited) && (
+          {(state.status === 'done' || (state.status === 'error' && !state.limited)) && (
             <button
               type="button"
               onClick={regenerate}
-              disabled={state.status === 'loading'}
               className="mb-2 w-full py-2 text-sm text-white/50 hover:text-white disabled:opacity-40"
             >
               {theme.regenerate}
@@ -124,6 +168,49 @@ export default function ProfileReviewSheet({ mode, onClose }: { mode: Mode; onCl
             Got it
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function PhotoChoice({
+  accent,
+  onChoose,
+}: {
+  accent: string
+  onChoose: (choice: 'include' | 'skip' | 'never') => void
+}) {
+  return (
+    <div className="py-6 text-center">
+      <h2 id="profile-review-title" className="text-xl font-bold">
+        Include photo analysis?
+      </h2>
+      <p className="mt-3 text-sm leading-relaxed text-white/70">
+        Get feedback on your photos as part of your profile review. Photos are processed by our AI review partner.
+      </p>
+      <div className="mt-6 space-y-2">
+        <button
+          type="button"
+          onClick={() => onChoose('include')}
+          className="w-full rounded-xl py-3 font-semibold text-white transition-opacity hover:opacity-90"
+          style={{ backgroundColor: accent }}
+        >
+          Yes, include photos
+        </button>
+        <button
+          type="button"
+          onClick={() => onChoose('skip')}
+          className="w-full rounded-xl border border-white/15 py-3 text-sm font-medium text-white/80 hover:bg-white/5"
+        >
+          Skip photos this time
+        </button>
+        <button
+          type="button"
+          onClick={() => onChoose('never')}
+          className="w-full py-2 text-sm text-white/40 hover:text-white"
+        >
+          Never include photos
+        </button>
       </div>
     </div>
   )

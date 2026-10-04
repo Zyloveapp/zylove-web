@@ -1,4 +1,4 @@
-import { doc, onSnapshot, serverTimestamp, updateDoc, type Unsubscribe } from 'firebase/firestore'
+import { doc, getDoc, onSnapshot, serverTimestamp, updateDoc, type Unsubscribe } from 'firebase/firestore'
 import { db } from './firebase'
 
 // Opt-in AI photo coaching for the profile reviews, per mode, at
@@ -31,6 +31,13 @@ export function subscribePhotoConsent(
     },
     onError,
   )
+}
+
+// The saved choice for one mode: true / false, or null if they've never
+// been asked (the review sheet asks before generating).
+export async function getPhotoConsentChoice(uid: string, mode: PhotoConsentMode): Promise<boolean | null> {
+  const choice: unknown = (await getDoc(doc(db, 'users', uid))).data()?.photoAnalysisConsent?.[mode]
+  return typeof choice === 'boolean' ? choice : null
 }
 
 // acknowledge: record that the consent notice was accepted (with when).
