@@ -63,7 +63,9 @@ export default function AdminReports() {
           <span className="rounded-full bg-[#E03131] px-2 py-0.5 text-xs font-semibold">{urgentCount} urgent</span>
         )}
       </div>
-      <p className="mt-1 text-xs text-white/40">Admins only. Reporter identities are never shown.</p>
+      <p className="mt-1 text-xs text-white/40">
+        Admins only. Reporter identities are never shown. Reports never act on an account by themselves — every action here is manual.
+      </p>
 
       <div className="mt-5 flex gap-2">
         {(['reported', 'good'] as const).map((t) => (
@@ -279,7 +281,7 @@ const COPY: Record<ModerateAction, { title: (n: string) => string; body: string;
   },
   clear: {
     title: (n) => `Clear reports on ${n}`,
-    body: 'Dismisses their open reports as unfounded. Any automatic sign-in block or suspension those reports caused is lifted.',
+    body: 'Dismisses their open reports as unfounded. Nothing else changes — reports never affect an account on their own.',
     confirm: 'Clear reports',
     tone: 'bg-white/20',
   },

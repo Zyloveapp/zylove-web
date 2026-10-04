@@ -5,9 +5,12 @@
 //     match generation; reporting again merges in new categories and reopens
 //     it. Same collection mobile's reportUser writes ({…}_{timestamp} ids,
 //     single `category`, tier); server-only (rules deny clients).
-//   bannedPhones/{sha256(phone)}   distinct reporters of serious categories.
-//     onBeforeSignIn refuses the phone at 2; the account is suspended at 3.
-//     An admin ban sets banned: true and a reportCount no clear can lower.
+//   bannedPhones/{sha256(phone)}   written only by an admin ban: banned: true
+//     and a reportCount past onBeforeSignIn's threshold, so the number can
+//     never sign in or create an account again.
+//
+// Nothing is automatic: a report only queues. No thresholds, no blocks, no
+// suspensions — every action on an account is an admin's, from the dashboard.
 //
 // Admins work the queue from /admin/reports (adminGetReports, adminModerate).
 // Reporter identities never leave the server.
@@ -25,9 +28,7 @@ import { softDeleteAccount } from './adminActivity'
 
 const BOT_PREFIXES = ['zbot-', 'seed-']
 const URGENT = new Set(['felt_unsafe', 'aggressive'])
-const SERIOUS = new Set([...URGENT, 'pushed_boundaries', 'inappropriate'])
-const SUSPEND_AT = 3 // distinct reporters of serious categories → suspended
-// An admin ban: far past onBeforeSignIn's threshold, never recounted down.
+// An admin ban: far past onBeforeSignIn's threshold.
 const BANNED_REPORT_COUNT = 1000
 const SUSPEND_DAYS = [30, 60, 90] as const
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -69,8 +70,8 @@ async function phoneOf(uid: string): Promise<string | null> {
 
 // ─── Filing a report ─────────────────────────────────────────────────────────
 
-// Records (or merges into) the reporter's report for this match generation,
-// then the phone-level safety net for serious categories. Throws HttpsErrors
+// Records (or merges into) the reporter's report for this match generation.
+// Queue only — nothing happens to the reported account. Throws HttpsErrors
 // with messages meant for the reporter.
 async function recordReport(input: {
   reporterUid: string
@@ -135,41 +136,6 @@ async function recordReport(input: {
   })
   logger.info('recordReport', { source, categories, urgent: categories.some((c) => URGENT.has(c)) })
 
-  if (categories.some((c) => SERIOUS.has(c))) await flagPhone(reporterUid, reportedUid, reported, categories)
-}
-
-// Adds the reporter to the reported person's phone record. Distinct
-// reporters only, so one person reporting repeatedly can't get someone
-// banned on their own. Admin accounts are never auto-suspended.
-async function flagPhone(reporterUid: string, reportedUid: string, reported: DocumentData | undefined, categories: string[]) {
-  const phone = await phoneOf(reportedUid)
-  if (!phone) return void logger.warn('recordReport: reported user has no phone number')
-  const banRef = db().doc(`bannedPhones/${phoneHash(phone)}`)
-  const reporters = await db().runTransaction(async (tx) => {
-    const existing = (await tx.get(banRef)).data()
-    const reportedBy = Array.isArray(existing?.reportedBy) ? (existing.reportedBy as string[]) : []
-    const count = reportedBy.length + (reportedBy.includes(reporterUid) ? 0 : 1)
-    tx.set(
-      banRef,
-      {
-        phoneHash: banRef.id,
-        reportCount: existing?.banned === true ? BANNED_REPORT_COUNT : count,
-        reportedBy: FieldValue.arrayUnion(reporterUid),
-        uid: reportedUid,
-        categories: FieldValue.arrayUnion(...categories),
-        lastReportedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    )
-    return count
-  })
-  if (reporters >= SUSPEND_AT && reported && reported.isAdmin !== true && reported.isSuspended !== true) {
-    await db()
-      .doc(`users/${reportedUid}`)
-      .update({ isSuspended: true, suspendedAt: FieldValue.serverTimestamp(), suspendSource: 'reports' })
-      .catch(() => {})
-    logger.warn('recordReport: account auto-suspended', { reporters })
-  }
 }
 
 function parseCategories(data: unknown): string[] {
@@ -200,8 +166,8 @@ export const submitReport = onCall(
 )
 
 // Older web clients still call this from the review modal (serious review
-// flags). Now the same report path; their severity field is ignored — the
-// server decides priority from the categories. Positives in the list are
+// flags). Now the same queue-only report path; their severity field is
+// ignored — the server decides priority from the categories. Positives in the list are
 // dropped; a curated profile or anything else not reportable is a quiet no-op,
 // as before.
 export const reportAndBan = onCall(
@@ -463,24 +429,6 @@ export async function liftSuspension(uid: string): Promise<void> {
   await setAuthDisabled(uid, false)
 }
 
-// Clear: the phone record only counts reporters with a report that still
-// stands (pending or actioned); an admin ban is never undone here.
-async function recountPhone(uid: string): Promise<void> {
-  const phone = await phoneOf(uid)
-  if (!phone) return
-  const banRef = db().doc(`bannedPhones/${phoneHash(phone)}`)
-  const ban = (await banRef.get()).data()
-  if (!ban || ban.banned === true) return
-  const snap = await db().collection('reports').where('reportedUid', '==', uid).get()
-  const standing = new Set(
-    snap.docs
-      .map((d) => d.data())
-      .filter((r) => statusOf(r) !== 'cleared' && categoriesOf(r).some((c) => SERIOUS.has(c)))
-      .map((r) => String(r.reporterUid)),
-  )
-  await banRef.set({ reportedBy: [...standing], reportCount: standing.size }, { merge: true })
-}
-
 export const adminModerate = onCall(
   { timeoutSeconds: 120, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
   async (request): Promise<{ ok: true; resolved?: number; texted?: boolean; phoneBanned?: boolean }> => {
@@ -574,12 +522,8 @@ export const adminModerate = onCall(
         return { ok: true, resolved, phoneBanned: phone !== null }
       }
       case 'clear': {
+        // Dismisses only: reports never changed the account, so nothing to undo.
         const resolved = await resolveReports(uid, 'cleared', action, adminUid)
-        await recountPhone(uid)
-        // An automatic suspension came from these reports; an admin one stays.
-        if (user && user.isSuspended === true && user.isDeleted !== true && user.suspendSource === 'reports') {
-          await liftSuspension(uid)
-        }
         await log({ resolved })
         return { ok: true, resolved }
       }

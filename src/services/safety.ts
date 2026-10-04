@@ -37,7 +37,8 @@ export function isSeriousReport(categories: string[]): boolean {
 
 // Files (or adds to) a confidential report — separate from reviews, so an
 // earlier review or an empty chat never blocks it. Negative categories only;
-// the server decides priority and any phone-level action.
+// the server decides priority. Reports only queue for the team; nothing
+// happens to the reported account unless an admin acts.
 export async function submitReport(matchId: string, generation: number, reportedUid: string, categories: string[]): Promise<void> {
   await httpsCallable<
     { matchId: string; generation?: number; reportedUid: string; categories: string[] },
