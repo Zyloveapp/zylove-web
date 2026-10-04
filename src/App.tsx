@@ -16,6 +16,7 @@ import Header from './components/Header'
 import Nav from './components/Nav'
 import ReviewPrompter from './components/ReviewPrompter'
 import PlayLock from './components/PlayLock'
+import TrialExpiry from './components/TrialExpiry'
 import Login from './pages/Login'
 import Terms from './pages/public/Terms'
 import Privacy from './pages/public/Privacy'
@@ -112,6 +113,7 @@ function AppLayout() {
       </div>
       <ReviewPrompter />
       <PlayLock />
+      <TrialExpiry />
       {founderNumber !== null && <FounderCelebration number={founderNumber} />}
     </div>
   )

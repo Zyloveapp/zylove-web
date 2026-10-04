@@ -49,7 +49,8 @@ export async function lookupLineType(phoneNumber: string): Promise<string | null
   }
 }
 
-export type SmsPreference = 'newSpark' | 'newMessage' | 'newMatch' | 'quietNudge'
+// 'billing' (a failed payment) has no toggle of its own: on with the master switch.
+export type SmsPreference = 'newSpark' | 'newMessage' | 'newMatch' | 'quietNudge' | 'billing'
 export type SmsMode = 'spark' | 'play'
 
 // users/{uid}.smsNotificationsEnabled = { spark, play } — one master switch
@@ -69,6 +70,7 @@ export function smsEnabledFor(enabled: unknown, mode: SmsMode): boolean {
 // before the split were flat ({ newSpark, newMessage, newMatch, quietNudge });
 // a missing mode key falls back to the flat one.
 export function smsPreferenceOn(prefs: unknown, preference: SmsPreference, mode: SmsMode): boolean {
+  if (preference === 'billing') return true
   if (typeof prefs !== 'object' || prefs === null) return false
   const p = prefs as Record<string, unknown>
   if (preference === 'quietNudge') return p.quietNudge === true

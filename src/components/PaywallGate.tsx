@@ -1,7 +1,8 @@
-import { useEffect, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { useSubscriptionStore } from '../store/subscriptionStore'
 import { canAccess, type Feature } from '../services/subscription'
+import { billingErrorMessage, openBillingPortal, startCheckout, type PaidTier } from '../services/billing'
 
 export const PAYWALL_COPY: Partial<Record<Feature, { title: string; body: string; button: string }>> = {
   sparks: {
@@ -37,10 +38,50 @@ export function useCanAccess(feature: Feature): boolean | null {
   return tier === null ? null : canAccess(tier, feature)
 }
 
+// Stripe Checkout / Customer Portal redirects. `pending` names what's loading
+// and stays set while the browser leaves for Stripe.
+export function useBilling() {
+  const [pending, setPending] = useState<PaidTier | 'portal' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Back from Stripe via the back button restores this page from the bfcache
+  // with the spinner still on; clear it.
+  useEffect(() => {
+    function onShow(e: PageTransitionEvent) {
+      if (e.persisted) setPending(null)
+    }
+    window.addEventListener('pageshow', onShow)
+    return () => window.removeEventListener('pageshow', onShow)
+  }, [])
+
+  async function run(which: PaidTier | 'portal', go: () => Promise<void>) {
+    if (pending) return
+    setPending(which)
+    setError(null)
+    try {
+      await go()
+    } catch (err) {
+      setError(billingErrorMessage(err))
+      setPending(null)
+    }
+  }
+
+  return {
+    pending,
+    error,
+    checkout: (tier: PaidTier) => run(tier, () => startCheckout(tier)),
+    portal: () => run('portal', openBillingPortal),
+  }
+}
+
 export function PaywallCard({ feature, teaser, onClose }: { feature: Feature; teaser?: ReactNode; onClose?: () => void }) {
-  const navigate = useNavigate()
-  const copy = PAYWALL_COPY[feature] ?? { title: '✦ Upgrade', body: 'This is part of a Zylove plan.', button: 'See plans' }
+  const copy = PAYWALL_COPY[feature] ?? { title: '✦ Upgrade', body: 'This is part of a Zylove plan.', button: 'Upgrade to Spark+' }
   const red = feature === 'play_mode'
+  const plan: PaidTier = red ? 'elite' : 'spark_plus'
+  // Already paying (Spark+ reaching for Play): change plans in the portal
+  // rather than starting a second subscription.
+  const subscribed = useSubscriptionStore((s) => s.subscriptionStatus === 'active' || s.subscriptionStatus === 'past_due')
+  const { pending, error, checkout, portal } = useBilling()
   return (
     <div className="mx-auto w-full max-w-sm rounded-2xl border border-white/10 bg-gray-900 px-6 py-8 text-center text-white shadow-xl">
       {teaser && <div className="mb-6">{teaser}</div>}
@@ -48,13 +89,18 @@ export function PaywallCard({ feature, teaser, onClose }: { feature: Feature; te
       <p className="mt-2 text-sm text-white/60">{copy.body}</p>
       <button
         type="button"
-        onClick={() => navigate('/upgrade')}
-        className={`mt-6 w-full rounded-xl py-3 font-semibold text-white transition-opacity hover:opacity-90 ${
+        onClick={() => void (subscribed ? portal() : checkout(plan))}
+        disabled={pending !== null}
+        className={`mt-6 w-full rounded-xl py-3 font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60 ${
           red ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
         }`}
       >
-        {copy.button}
+        {pending ? 'Taking you to checkout…' : copy.button}
       </button>
+      {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+      <Link to="/upgrade" className="mt-3 block text-xs text-white/50 hover:text-white">
+        Compare plans
+      </Link>
       {onClose && (
         <button type="button" onClick={onClose} className="mt-2 w-full py-2 text-sm text-white/50 hover:text-white">
           Not now

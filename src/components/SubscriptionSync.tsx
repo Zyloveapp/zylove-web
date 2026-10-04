@@ -3,7 +3,16 @@ import { httpsCallable } from 'firebase/functions'
 import { functions } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { useSubscriptionStore } from '../store/subscriptionStore'
-import { getDaysLeftInTrial, getUserTier, isAlwaysElite, subscribeTierFields } from '../services/subscription'
+import {
+  getDaysLeftInTrial,
+  getSubscriptionStatus,
+  getUserTier,
+  hasTrialEnded,
+  isAlwaysElite,
+  subscribeTierFields,
+} from '../services/subscription'
+
+const EMPTY = { daysLeft: null, alwaysElite: false, subscriptionStatus: null, trialEnded: false } as const
 
 // Keeps useSubscriptionStore in step with the signed-in user's doc. If the
 // doc can't be read, access fails open rather than locking anyone out.
@@ -12,7 +21,7 @@ export default function SubscriptionSync() {
   const set = useSubscriptionStore((s) => s.set)
 
   useEffect(() => {
-    set({ uid, tier: null, daysLeft: null, alwaysElite: false })
+    set({ uid, tier: null, ...EMPTY })
     if (!uid) return
     let trialRequested = false
     return subscribeTierFields(
@@ -25,11 +34,18 @@ export default function SubscriptionSync() {
             trialRequested = true
             httpsCallable(functions, 'initUserDefaults')({}).catch(() => {})
           }
-          return set({ uid, tier: 'trial', daysLeft: null, alwaysElite: false })
+          return set({ uid, tier: 'trial', ...EMPTY })
         }
-        set({ uid, tier: getUserTier(fields), daysLeft: getDaysLeftInTrial(fields), alwaysElite: isAlwaysElite(fields) })
+        set({
+          uid,
+          tier: getUserTier(fields),
+          daysLeft: getDaysLeftInTrial(fields),
+          alwaysElite: isAlwaysElite(fields),
+          subscriptionStatus: getSubscriptionStatus(fields),
+          trialEnded: hasTrialEnded(fields),
+        })
       },
-      () => set({ uid, tier: 'elite', daysLeft: null, alwaysElite: false }),
+      () => set({ uid, tier: 'elite', ...EMPTY }),
     )
   }, [uid, set])
 

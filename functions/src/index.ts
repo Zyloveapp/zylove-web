@@ -1473,6 +1473,7 @@ export { botTypingStart, botTypingStop } from './botTyping'
 export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate } from './behavior'
 export { markChatPhotoViewed, sweepChatPhotos } from './photos'
 export { checkTrialStatus } from './trial'
+export { createCheckoutSession, createPortalSession, stripeWebhook } from './stripe'
 export { acceptPhotoConsent, getBlockedUsers, onBeforeSignIn, reportAndBan, unblockMember } from './trust'
 
 // ─── SMS notifications ───────────────────────────────────────────────────────

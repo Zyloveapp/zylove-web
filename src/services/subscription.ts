@@ -23,6 +23,8 @@ export interface TierFields {
   trialExpired?: unknown
   genderIdentity?: unknown
   isFounder?: unknown
+  // Stripe state, written by the stripeWebhook function.
+  subscriptionStatus?: unknown
 }
 
 // Stored as 'nonbinary'; 'non_binary' accepted too.
@@ -66,6 +68,22 @@ export function canAccess(tier: Tier, feature: Feature): boolean {
   return ACCESS[tier].includes(feature)
 }
 
+// 'active' | 'past_due' | 'canceled' | 'unpaid', or null for no subscription.
+export type SubscriptionStatus = 'active' | 'past_due' | 'canceled' | 'unpaid'
+
+export function getSubscriptionStatus(user: TierFields): SubscriptionStatus | null {
+  const s = user.subscriptionStatus
+  return s === 'active' || s === 'past_due' || s === 'canceled' || s === 'unpaid' ? s : null
+}
+
+// Free because the trial ran out (flagged nightly by checkTrialStatus, or
+// its end date has simply passed) — not just "no plan".
+export function hasTrialEnded(user: TierFields): boolean {
+  if (getUserTier(user) !== 'free') return false
+  const endsAt = toDate(user.trialEndsAt)
+  return user.trialExpired === true || (endsAt !== null && endsAt <= new Date())
+}
+
 export function getDaysLeftInTrial(user: TierFields): number | null {
   const endsAt = toDate(user.trialEndsAt)
   if (!endsAt) return null
@@ -85,6 +103,7 @@ export function subscribeTierFields(uid: string, onChange: (fields: TierFields) 
         trialExpired: d.trialExpired,
         genderIdentity: d.genderIdentity,
         isFounder: d.isFounder,
+        subscriptionStatus: d.subscriptionStatus,
       })
     },
     onError,

@@ -24,7 +24,7 @@ const COPY = {
   },
 } as const
 
-function ConfirmModal({
+export function ConfirmModal({
   title,
   body,
   confirm,
