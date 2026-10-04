@@ -1,7 +1,7 @@
 <div class="hero">
     <div class="hero-tag">✦ Legal</div>
     <h1>Privacy Policy</h1>
-    <p class="hero-meta">Effective date: April 12, 2026 · Last updated: October 4, 2026</p>
+    <p class="hero-meta">Effective date: April 12, 2026 · Last updated: October 5, 2026</p>
     <p class="hero-sub">
       Zylove is built on the belief that you deserve to know what happens to your data. This policy explains exactly what we collect, why we collect it, and how you can control it.
     </p>
@@ -14,10 +14,10 @@
           Zylove is a dating application operated by <strong>Zylove, LLC</strong>, a Delaware limited liability company. When this policy refers to "Zylove," "we," "us," or "our," it means Zylove, LLC.
         </p>
         <p>
-          Zylove currently operates in Austin, Texas. Our app is available on iOS and Android. By using Zylove, you agree to the collection and use of information as described in this policy.
+          Zylove is launching city by city in the United States and is available on the web at zylove.app. By using Zylove, you agree to the collection and use of information as described in this policy.
         </p>
         <div class="callout callout-blue">
-          <strong>Questions?</strong> Contact our founder directly at <a href="mailto:matthew@zylove.app">matthew@zylove.app</a>. We respond to all privacy inquiries personally.
+          <strong>Questions?</strong> Contact us at <a href="mailto:support@zylove.app">support@zylove.app</a>. We respond to all privacy inquiries personally.
         </div>
       </section>
       <!-- 2. What we collect -->
@@ -61,7 +61,7 @@
             </tr>
             <tr>
               <td><strong>Messages</strong></td>
-              <td>Chat content between matched users (end-to-end encrypted)</td>
+              <td>Chat content between matched users (end-to-end encrypted when both people use the web app — see Security)</td>
               <td>Mutual opt-in</td>
             </tr>
             <tr>
@@ -82,7 +82,7 @@
           <tbody>
             <tr>
               <td><strong>Location (approximate)</strong></td>
-              <td>Stored as a geohash to enable distance-based discovery. We do not store your precise GPS coordinates.</td>
+              <td>Stored as coordinates snapped to a grid of roughly 3 miles, plus a city label, to enable distance-based discovery. We do not store your precise GPS coordinates.</td>
             </tr>
             <tr>
               <td><strong>Device information</strong></td>
@@ -100,7 +100,7 @@
         </table>
         <h3>Biometric data</h3>
 <p>
-  Zylove uses your device's biometric authentication (Face ID or Touch ID) to verify your identity when switching between Spark and Play modes. <strong>We never store biometric data.</strong> Authentication is handled entirely by your device's operating system (Apple Secure Enclave / Android Keystore). Zylove receives only a pass/fail result.
+  On mobile, Zylove uses your device's biometric authentication (Face ID or Touch ID) to verify your identity when switching between Spark and Play modes. <strong>We never store biometric data.</strong> Authentication is handled entirely by your device's operating system (Apple Secure Enclave / Android Keystore). Zylove receives only a pass/fail result.
 </p>
 <h3>Selfie & liveness verification</h3>
 <p>
@@ -152,7 +152,7 @@
         </div>
         <h3>To process payments</h3>
         <p>
-          Subscription purchases (Spark+, Play Pass, Elite) are processed by RevenueCat and the Apple App Store or Google Play Store. Zylove does not store your payment card information.
+          Web subscriptions (Spark+ and Elite) are processed by Stripe. Your card details are entered on Stripe's secure checkout and go directly to Stripe — Zylove never receives or stores your card number. We receive your subscription status and a Stripe customer reference so we can apply your plan.
         </p>
         <h3>To communicate with you</h3>
         <ul>
@@ -182,7 +182,7 @@
             <tr>
               <td><strong>Firestore</strong></td>
               <td>Google</td>
-              <td>Profile data, match data, messages (encrypted)</td>
+              <td>Profile data, match data, messages (end-to-end encrypted where available; otherwise protected by access controls)</td>
             </tr>
             <tr>
               <td><strong>Firebase Storage</strong></td>
@@ -205,19 +205,14 @@
               <td>Phone number for SMS verification and number type validation; phone number for SMS notifications (with your consent)</td>
             </tr>
             <tr>
-              <td><strong>RevenueCat</strong></td>
-              <td>RevenueCat, Inc.</td>
-              <td>Subscription status and purchase history</td>
+              <td><strong>Stripe</strong></td>
+              <td>Stripe, Inc.</td>
+              <td>Payment details and billing information for web subscriptions (Spark+, Elite); Zylove does not store card numbers</td>
             </tr>
             <tr>
               <td><strong>Brevo</strong></td>
               <td>Brevo SAS</td>
               <td>Email address for transactional emails</td>
-            </tr>
-            <tr>
-              <td><strong>Apple / Google</strong></td>
-              <td>Platform stores</td>
-              <td>Payment processing for subscriptions</td>
             </tr>
           </tbody>
         </table>
@@ -247,9 +242,15 @@
       <!-- 6. Security -->
       <section id="security">
         <h2><span class="section-num">06</span> Security</h2>
-        <h3>End-to-end encrypted messages</h3>
+        <h3>Message encryption</h3>
         <p>
-          All messages between matched users are end-to-end encrypted using NaCl (TweetNaCl). Messages are encrypted on your device before transmission and can only be decrypted by the intended recipient. Zylove cannot read your messages.
+          Messages between people using the Zylove web app are end-to-end encrypted using NaCl (TweetNaCl). They are encrypted on your device before transmission and can only be decrypted by the intended recipient — Zylove cannot read them.
+        </p>
+        <p>
+          When someone in a conversation hasn't set up encryption (for example, some mobile accounts), messages in that conversation are stored protected by access controls — only the people in the conversation can access them — rather than end-to-end encrypted.
+        </p>
+        <p>
+          If you report a conversation or choose to share content with us, we may review what you share for safety purposes.
         </p>
         <h3>Screenshot protection</h3>
         <p>
@@ -264,7 +265,7 @@
           All data is stored in Google Firebase (SOC 2 Type II certified). Data in transit is encrypted via TLS 1.2+. Data at rest is encrypted by Google Cloud infrastructure.
         </p>
         <div class="callout callout-blue">
-          <strong>Security issue?</strong> Please report vulnerabilities responsibly to <a href="mailto:matthew@zylove.app">matthew@zylove.app</a>. We take all security reports seriously and respond within 48 hours.
+          <strong>Security issue?</strong> Please report vulnerabilities responsibly to <a href="mailto:support@zylove.app">support@zylove.app</a>. We take all security reports seriously and respond within 48 hours.
         </div>
       </section>
       <!-- 7. Retention -->
@@ -300,7 +301,7 @@
             <tr>
               <td><strong>Access</strong></td>
               <td>Request a copy of the data we hold about you</td>
-              <td>Email matthew@zylove.app</td>
+              <td>Email support@zylove.app</td>
             </tr>
             <tr>
               <td><strong>Correction</strong></td>
@@ -315,7 +316,7 @@
             <tr>
               <td><strong>Portability</strong></td>
               <td>Export your data in a machine-readable format</td>
-              <td>Email matthew@zylove.app</td>
+              <td>Email support@zylove.app</td>
             </tr>
             <tr>
               <td><strong>Opt-out</strong></td>
@@ -338,7 +339,7 @@
           Zylove is strictly for users aged <strong>18 and older</strong>. We do not knowingly collect personal information from anyone under 18. Age is verified during onboarding and enforced by our age consent screen.
         </p>
         <p>
-          If you believe a minor has created an account, please report it immediately via the in-app report function or by emailing <a href="mailto:matthew@zylove.app">matthew@zylove.app</a>. We will investigate and remove the account within 24 hours.
+          If you believe a minor has created an account, please report it immediately via the in-app report function or by emailing <a href="mailto:support@zylove.app">support@zylove.app</a>. We will investigate and remove the account within 24 hours.
         </p>
         <p>
           Reporting suspected minor content triggers an immediate Tier 3 response — the account is suspended pending review and may be referred to law enforcement.
@@ -357,7 +358,7 @@
           <li><strong>Right to non-discrimination</strong> — we will not discriminate against you for exercising your CCPA rights</li>
         </ul>
         <p>
-          To exercise your CCPA rights, contact us at <a href="mailto:matthew@zylove.app">matthew@zylove.app</a> with the subject line "CCPA Request."
+          To exercise your CCPA rights, contact us at <a href="mailto:support@zylove.app">support@zylove.app</a> with the subject line "CCPA Request."
         </p>
       </section>
       <!-- 11. Changes -->
@@ -379,12 +380,11 @@
       <section id="contact">
         <h2><span class="section-num">12</span> Contact us</h2>
         <p>
-          Privacy questions, data requests, and security reports go directly to the founder:
+          Privacy questions, data requests, and security reports go to:
         </p>
         <div class="callout callout-blue">
-          <strong>Matthew Gostnell</strong><br />
-          Founder, Zylove LLC<br />
-          <a href="mailto:matthew@zylove.app">matthew@zylove.app</a><br /><br />
+          <strong>Zylove Support</strong><br />
+          <a href="mailto:support@zylove.app">support@zylove.app</a><br /><br />
           Zylove, LLC<br />
           Austin, Texas<br />
           United States

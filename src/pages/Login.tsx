@@ -1,7 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { signInWithEmailAndPassword, type ConfirmationResult } from 'firebase/auth'
-import { FirebaseError } from 'firebase/app'
 import { checkPhoneNumber, clearRecaptcha, confirmOtp, initRecaptcha, sendOtp } from '../services/auth'
 import { auth } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
@@ -9,6 +8,9 @@ import PublicFooter from '../components/public/PublicFooter'
 import Wordmark from '../components/public/Wordmark'
 import FoundingCounter from '../components/public/FoundingCounter'
 import { afterLoginPath } from '../services/afterLogin'
+import { friendlyError } from '../services/errors'
+import { usePageTitle } from '../components/public/usePageTitle'
+import { FOUNDER_CAPACITY_PER_CITY, FOUNDER_TERMS_SHORT } from '../config/founderCopy'
 
 // US numbers only: the field shows a fixed +1 and holds just the 10 digits.
 // Pasting "+1 555…" or "1555…" drops the leading country code.
@@ -28,25 +30,11 @@ function toE164(digits: string): string | null {
   return /^\d{10}$/.test(digits) ? `+1${digits}` : null
 }
 
-const ERROR_MESSAGES: Record<string, string> = {
-  'auth/invalid-phone-number': 'That phone number isn\'t valid.',
-  'auth/missing-phone-number': 'Enter your phone number.',
-  'auth/too-many-requests': 'Too many attempts. Try again later.',
-  'auth/quota-exceeded': 'SMS limit reached. Try again later.',
-  'auth/captcha-check-failed': 'Verification check failed. Try again.',
-  'auth/invalid-verification-code': 'That code is incorrect.',
-  'auth/missing-verification-code': 'Enter the 6-digit code.',
-  'auth/code-expired': 'That code has expired. Request a new one.',
-  'auth/network-request-failed': 'Network error. Check your connection.',
-  'auth/user-disabled': 'This account is suspended. Email hello@zylove.app if you think this is a mistake.',
-}
-
+// Plain-English text for any sign-in error (services/errors); the raw code
+// stays in the console.
 function errorMessage(err: unknown): string {
-  if (err instanceof FirebaseError) {
-    return ERROR_MESSAGES[err.code] ?? `Something went wrong (${err.code}).`
-  }
-  if (err instanceof Error) return err.message
-  return 'Something went wrong. Try again.'
+  console.error('sign-in failed', err)
+  return friendlyError(err)
 }
 
 const FEATURES = [
@@ -63,13 +51,13 @@ const FEATURES = [
   },
 ]
 
-const FOUNDING_BENEFITS = ['Elite access — free', 'First in the queue', 'Founding badge', 'Direct line to the founder']
+// Short forms of FOUNDER_BENEFITS (config/founderCopy) for the chips.
+const FOUNDING_BENEFITS = ['Elite access, free', 'City Founder badge', 'Direct line to the founder', 'First in line for new features']
 
 const STATS = [
   { value: '2', label: 'modes' },
   { value: 'Free', label: 'to join' },
-  // Shown as a big "Live" over "Austin, TX".
-  { value: 'Live', label: 'Austin, TX' },
+  { value: String(FOUNDER_CAPACITY_PER_CITY), label: 'founders per city' },
 ]
 
 // Phone sign-in (OTP). Signing in and signing up are the same flow: a new
@@ -264,6 +252,7 @@ function SignInCard() {
 export default function Login() {
   const user = useAuthStore((s) => s.user)
   const loading = useAuthStore((s) => s.loading)
+  usePageTitle('Zylove · Match your energy.')
 
   // Blank (same background) while auth resolves, so signed-in users never
   // see the landing page flash before the redirect.
@@ -290,7 +279,7 @@ export default function Login() {
             <SignInCard />
           </div>
 
-          <p className="mt-5 text-sm text-[#7C9BFF]">First 100 founding members in Austin</p>
+          <p className="mt-5 text-sm text-[#7C9BFF]">Launching city by city · {FOUNDER_CAPACITY_PER_CITY} founding members per city</p>
           <a href="#features" className="mt-3 text-sm text-white/40 transition-colors hover:text-white/70">
             Learn more ↓
           </a>
@@ -335,11 +324,13 @@ export default function Login() {
       <section className="px-4 py-16">
         <div className="mx-auto max-w-2xl rounded-2xl border border-white/10 bg-[radial-gradient(ellipse_at_top,rgba(27,79,216,0.18),transparent_70%)] p-8 text-center">
           <h2 className="text-3xl font-bold">
-            <span className="text-[#1B4FD8]">✦</span> Austin Founding Circle
+            <span className="text-[#1B4FD8]">✦</span> Founding Circles
           </h2>
-          <p className="mt-3 text-lg text-white/70">First 100 founding members in Austin. Elite access, free. The reason it works.</p>
+          <p className="mt-3 text-lg text-white/70">
+            The first {FOUNDER_CAPACITY_PER_CITY} founding members in each launch city. Elite access, free. The reason it works.
+          </p>
           <p className="mt-2 text-sm text-white/50">
-            Sign up and accept your invitation to join the Austin Founding Circle.
+            Sign up in a launch city and accept your invitation to join its founding circle. {FOUNDER_TERMS_SHORT}
           </p>
           <ul className="mt-6 flex flex-wrap justify-center gap-2">
             {FOUNDING_BENEFITS.map((b) => (

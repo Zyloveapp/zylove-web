@@ -5,7 +5,7 @@ import communityHtml from './content/community.html?raw'
 // Verbatim from zylove-website/community.html (founding links point at /join).
 export default function Community() {
   return (
-    <PublicLayout>
+    <PublicLayout title="Community Guidelines · Zylove">
       <LegalContent html={communityHtml} />
     </PublicLayout>
   )

@@ -2,9 +2,12 @@ import { useEffect, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import PublicFooter from './PublicFooter'
 import Wordmark from './Wordmark'
+import { usePageTitle } from './usePageTitle'
 
 // Shell for the signed-out pages (terms, privacy, community, join, contact).
-export default function PublicLayout({ children }: { children: ReactNode }) {
+// title: the browser tab title for the page.
+export default function PublicLayout({ title, children }: { title: string; children: ReactNode }) {
+  usePageTitle(title)
   useEffect(() => {
     window.scrollTo(0, 0)
   }, [])

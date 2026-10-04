@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import PublicLayout from '../../components/public/PublicLayout'
 import { MAX_LONG, MAX_SHORT, normalizeEmail, sendContactMessage } from '../../services/publicForms'
+import { SUPPORT_EMAIL } from '../../services/errors'
 
 const TOPICS = ['Founding circle', 'Press or media', 'Partnership', 'Feedback or ideas', 'Just saying hello']
 
@@ -26,11 +27,11 @@ export default function Contact() {
     const result = await sendContactMessage({ name, email: normalized, topic, message })
     setBusy(false)
     if (result === 'ok') setDone(true)
-    else setError("Couldn't send right now. Try again, or email hello@zylove.app.")
+    else setError(`Couldn't send right now. Try again, or email ${SUPPORT_EMAIL}.`)
   }
 
   return (
-    <PublicLayout>
+    <PublicLayout title="Contact · Zylove">
       <section className="text-center">
         <p className="text-sm font-semibold uppercase tracking-widest text-[#7C9BFF]">Get in touch</p>
         <h1 className="mt-3 text-4xl font-black leading-tight sm:text-5xl">
@@ -57,25 +58,14 @@ export default function Contact() {
 
       <section className="mt-8">
         <h2 className="text-xs font-semibold uppercase tracking-widest text-white/40">Reach out directly</h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <p className="text-xs uppercase tracking-widest text-[#7C9BFF]">Founding circle</p>
-            <p className="mt-1 font-semibold">Questions about founding?</p>
-            <p className="mt-1 text-sm text-white/60">
-              Curious about what it means to be a founding member, how it works, or whether it's right for you.
-            </p>
-            <a href="mailto:founders@zylove.app" className="mt-3 inline-block text-sm font-medium text-[#7C9BFF] hover:text-white">
-              founders@zylove.app →
-            </a>
-          </div>
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <p className="text-xs uppercase tracking-widest text-[#7C9BFF]">General</p>
-            <p className="mt-1 font-semibold">Everything else</p>
-            <p className="mt-1 text-sm text-white/60">Press, partnerships, ideas, feedback, or just want to say hello. We read everything.</p>
-            <a href="mailto:hello@zylove.app" className="mt-3 inline-block text-sm font-medium text-[#7C9BFF] hover:text-white">
-              hello@zylove.app →
-            </a>
-          </div>
+        <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-5">
+          <p className="font-semibold">One inbox for everything</p>
+          <p className="mt-1 text-sm text-white/60">
+            Founding circle questions, support, privacy, press, partnerships, ideas, or just saying hello. We read everything.
+          </p>
+          <a href={`mailto:${SUPPORT_EMAIL}`} className="mt-3 inline-block text-sm font-medium text-[#7C9BFF] hover:text-white">
+            {SUPPORT_EMAIL} →
+          </a>
         </div>
       </section>
 

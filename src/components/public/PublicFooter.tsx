@@ -20,7 +20,7 @@ export default function PublicFooter() {
         ))}
       </nav>
       <p className="mt-6 text-sm text-white/40">
-        <span className="text-[#1B4FD8]">✦</span> Zylove · Austin, TX · 2026
+        <span className="text-[#1B4FD8]">✦</span> Zylove · Launching city by city · 2026
       </p>
       <p className="mt-1 text-xs text-white/30">ZYLOVE™ trademark filed April 7, 2026</p>
     </footer>

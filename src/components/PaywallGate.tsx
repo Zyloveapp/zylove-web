@@ -4,9 +4,13 @@ import { useSubscriptionStore } from '../store/subscriptionStore'
 import { canAccess, type Feature } from '../services/subscription'
 import { billingErrorMessage, openBillingPortal, startCheckout, type PaidTier } from '../services/billing'
 
+// Plan named on each card must match ACCESS in services/subscription: Play
+// mode and Zylove Score are Elite-only; the rest come with Spark+.
+const ELITE_ONLY: readonly Feature[] = ['play_mode', 'zylove_score']
+
 export const PAYWALL_COPY: Partial<Record<Feature, { title: string; body: string; button: string }>> = {
   sparks: {
-    title: '✦ See who likes you',
+    title: '✦ See who sent you a Spark',
     body: "Upgrade to Spark+ to unlock your Sparks and see who's interested.",
     button: 'Upgrade to Spark+',
   },
@@ -27,8 +31,8 @@ export const PAYWALL_COPY: Partial<Record<Feature, { title: string; body: string
   },
   zylove_score: {
     title: '🛡 Your Zylove Score',
-    body: 'See how matches experience you. Available with Spark+.',
-    button: 'Upgrade to Spark+',
+    body: 'See how matches experience you. Available with Elite.',
+    button: 'Upgrade to Elite',
   },
 }
 
@@ -77,7 +81,7 @@ export function useBilling() {
 export function PaywallCard({ feature, teaser, onClose }: { feature: Feature; teaser?: ReactNode; onClose?: () => void }) {
   const copy = PAYWALL_COPY[feature] ?? { title: '✦ Upgrade', body: 'This is part of a Zylove plan.', button: 'Upgrade to Spark+' }
   const red = feature === 'play_mode'
-  const plan: PaidTier = red ? 'elite' : 'spark_plus'
+  const plan: PaidTier = ELITE_ONLY.includes(feature) ? 'elite' : 'spark_plus'
   // Already paying (Spark+ reaching for Play): change plans in the portal
   // rather than starting a second subscription.
   const subscribed = useSubscriptionStore((s) => s.subscriptionStatus === 'active' || s.subscriptionStatus === 'past_due')

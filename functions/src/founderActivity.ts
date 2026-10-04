@@ -181,7 +181,7 @@ async function textOpenSpot(cityId: string, bucket: Bucket, spots: number, skip:
   }
 
   const limit = Math.min(spots * TEXTS_PER_SPOT, MAX_TEXTS_PER_OPENING)
-  const body = `✦ A ${city.name} founder spot just opened. You're invited — Elite access forever, free. First to claim it wins: ${APP_URL}/claim-founder?city=${city.id}&gender=${bucket}`
+  const body = `✦ A ${city.name} founder spot just opened. You're invited — free Elite while you're a founder. First to claim it wins: ${APP_URL}/claim-founder?city=${city.id}&gender=${bucket}`
   let sent = 0
   for (const d of candidates) {
     if (sent >= limit) break

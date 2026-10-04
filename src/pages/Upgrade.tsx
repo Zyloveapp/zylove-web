@@ -6,8 +6,9 @@ import { useSubscriptionStore } from '../store/subscriptionStore'
 import { TRIAL_DAYS } from '../services/subscription'
 import { PLAN_NAMES, type PaidTier } from '../services/billing'
 import { useBilling } from '../components/PaywallGate'
+import { usePageTitle } from '../components/public/usePageTitle'
 
-const SPARK_PLUS = ['See who liked you', 'Full compatibility reports', 'Encrypted photo sharing', 'Conversation starters', 'Vibe checks']
+const SPARK_PLUS = ['See who sent you a Spark', 'Full compatibility reports', 'Encrypted photo sharing', 'Conversation starters', 'Vibe checks']
 const ELITE_EXTRAS = ['Play mode', 'Zylove Score', 'Top Picks']
 
 function Plan({
@@ -83,6 +84,7 @@ function ManageButton({ busy, onClick }: { busy: boolean; onClick: () => void })
 // their trial, subscription or lifetime access. Stripe Checkout sends people
 // back here with ?success=true or ?canceled=true.
 export default function Upgrade() {
+  usePageTitle('Plans · Zylove')
   const backLinkClass = useBackLinkClass()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -102,6 +104,15 @@ export default function Upgrade() {
   const subscribed = subscriptionStatus === 'active' || subscriptionStatus === 'past_due'
   const paidTier: PaidTier | null = tier === 'spark_plus' || tier === 'elite' ? tier : null
 
+  // Back from a canceled checkout: say what actually happens next, which
+  // depends on where they stand (a trial still running, or not).
+  const canceledNote =
+    canceled && tier !== null && !subscribed && !alwaysElite
+      ? tier === 'trial'
+        ? `No worries — your trial continues${daysLeft !== null ? ` (${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} left)` : ''}.`
+        : "Checkout canceled — you weren't charged."
+      : null
+
   function choose(plan: PaidTier) {
     if (!signedIn) return navigate('/login')
     void (subscribed ? portal() : checkout(plan))
@@ -115,9 +126,10 @@ export default function Upgrade() {
   return (
     <div className="min-h-[100dvh] bg-gray-950 px-4 py-8 text-white">
       <div className="mx-auto max-w-xl space-y-6">
-        <button type="button" onClick={() => navigate(-1)} className={`text-sm font-medium ${backLinkClass} hover:text-white`}>
+        {/* A fixed route, not history: back could leave the site or land on Stripe. */}
+        <Link to={signedIn ? '/settings' : '/'} className={`text-sm font-medium ${backLinkClass} hover:text-white`}>
           ← Back
-        </button>
+        </Link>
         <h1 className="text-3xl font-bold">Zylove plans</h1>
 
         {succeeded && (
@@ -128,7 +140,7 @@ export default function Upgrade() {
               : '✦ Payment received — activating your subscription…'}
           </section>
         )}
-        {canceled && !subscribed && <p className="text-center text-sm text-white/50">No worries — your trial continues.</p>}
+        {canceledNote && <p className="text-center text-sm text-white/50">{canceledNote}</p>}
 
         {alwaysElite ? (
           <section className="rounded-2xl border border-[#E8B931]/40 bg-[#E8B931]/10 p-6 text-center">

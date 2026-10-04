@@ -2,10 +2,15 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { doc, onSnapshot, type DocumentData } from 'firebase/firestore'
 import { db } from '../services/firebase'
-import { getDaysLeftInTrial, getSubscriptionStatus, hasEliteIdentity, hasTrialEnded } from '../services/subscription'
+import { getDaysLeftInTrial, getSubscriptionStatus, getUserTier, hasEliteIdentity, hasTrialEnded } from '../services/subscription'
+import { useModeStore, type Mode } from '../store/modeStore'
 import { useBilling } from './PaywallGate'
 
-const SUBLABEL_TOP = "You've got the best of Zylove. Nothing more to unlock. 😈"
+// The 😈 is Play's voice; Spark gets its own symbol.
+const SUBLABEL_TOP: Record<Mode, string> = {
+  spark: "You've got the best of Zylove. Nothing more to unlock. ✦",
+  play: "You've got the best of Zylove. Nothing more to unlock. 😈",
+}
 
 const BORDER = {
   cobalt: 'border-[#1B4FD8]',
@@ -23,19 +28,20 @@ interface Row {
 }
 
 // First match wins: founder, complimentary (gender), paid Elite, paid Spark+,
-// failed payment, trial, trial over.
-function membershipRow(user: DocumentData): Row {
+// failed payment, lapsed subscription, trial over, trial.
+function membershipRow(user: DocumentData, mode: Mode): Row {
   const status = getSubscriptionStatus(user)
+  const top = SUBLABEL_TOP[mode]
   if (user.isFounder === true) {
-    const badge = typeof user.founderBadge === 'string' && user.founderBadge ? user.founderBadge : 'Austin Founder'
+    const badge = typeof user.founderBadge === 'string' && user.founderBadge ? user.founderBadge : 'Founder'
     const hasCustomer = typeof user.stripeCustomerId === 'string' && user.stripeCustomerId !== ''
-    return { label: `✦ ${badge} · Elite`, sublabel: SUBLABEL_TOP, border: 'cobalt', action: hasCustomer ? 'portal' : null }
+    return { label: `✦ ${badge} · Elite`, sublabel: top, border: 'cobalt', action: hasCustomer ? 'portal' : null }
   }
   if (hasEliteIdentity(user)) {
     return { label: '✦ Elite · Complimentary', sublabel: "You've got the best of Zylove. Nothing more to unlock.", border: 'cobalt', action: null }
   }
   if (user.subscriptionTier === 'elite' && status === 'active') {
-    return { label: '✦ Elite', sublabel: SUBLABEL_TOP, border: 'cobalt', shimmer: true, action: 'portal' }
+    return { label: '✦ Elite', sublabel: top, border: 'cobalt', shimmer: true, action: 'portal' }
   }
   if (user.subscriptionTier === 'spark_plus' && status === 'active') {
     return { label: '✦ Spark+', sublabel: 'Upgrade to Elite for Play access →', border: 'cobalt', action: 'upgrade-elite' }
@@ -44,9 +50,19 @@ function membershipRow(user: DocumentData): Row {
     return { label: '⚠ Payment failed', sublabel: 'Update your payment method →', border: 'amber', action: 'portal' }
   }
   // A plan granted outside Stripe (no subscriptionStatus): show it, nothing to manage.
-  if (user.subscriptionTier === 'elite') return { label: '✦ Elite', sublabel: SUBLABEL_TOP, border: 'cobalt', shimmer: true, action: null }
+  if (user.subscriptionTier === 'elite') return { label: '✦ Elite', sublabel: top, border: 'cobalt', shimmer: true, action: null }
   if (user.subscriptionTier === 'spark_plus') {
     return { label: '✦ Spark+', sublabel: 'Upgrade to Elite for Play access →', border: 'cobalt', action: 'upgrade-elite' }
+  }
+  // Stripe ended a paid plan (stripeWebhook sets tier 'free' with status
+  // canceled / unpaid): not a trial that ran out.
+  if ((status === 'canceled' || status === 'unpaid') && getUserTier(user) === 'free') {
+    return {
+      label: '✦ Free · Subscription ended',
+      sublabel: status === 'unpaid' ? "Your last payment didn't go through. Resubscribe →" : 'Resubscribe to unlock everything →',
+      border: 'red',
+      action: 'upgrade',
+    }
   }
   if (hasTrialEnded(user)) {
     return { label: '✦ Free · Trial ended', sublabel: 'Subscribe to continue →', border: 'red', action: 'upgrade' }
@@ -64,6 +80,7 @@ function membershipRow(user: DocumentData): Row {
 // (upgrade, fix a payment, or manage in Stripe's Customer Portal).
 export default function MembershipSection({ uid }: { uid: string }) {
   const navigate = useNavigate()
+  const mode = useModeStore((s) => s.mode)
   const { pending, error, portal } = useBilling()
   const [user, setUser] = useState<{ uid: string; data: DocumentData } | null>(null)
 
@@ -77,7 +94,7 @@ export default function MembershipSection({ uid }: { uid: string }) {
   }, [uid])
 
   if (user?.uid !== uid) return null
-  const row = membershipRow(user.data)
+  const row = membershipRow(user.data, mode)
 
   function tap() {
     if (row.action === 'upgrade') navigate('/upgrade')

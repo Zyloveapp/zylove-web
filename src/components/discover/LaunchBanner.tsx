@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '../../services/firebase'
 import { useAuthStore } from '../../store/authStore'
+import { MODE_ACCENT, useModeStore } from '../../store/modeStore'
 import { BANNER_DISMISSED_KEY as DISMISSED_KEY, BANNER_RESET_EVENT } from '../../services/playSession'
 import { FOUNDER_CAPACITY, cityConfigPath, cityStatsPath, getNearestCity, type ZyloveCity } from '../../config/cities'
 
@@ -206,7 +207,11 @@ function EarlyBanner({ nearby }: { nearby: ZyloveCity | null }) {
 }
 
 // goal: the nearby city's line; null means "100 more people" for their area.
+// Accent and symbol follow the current mode (✦ cobalt Spark, 🔥 red Play).
 function EarlyModal({ goal, onClose }: { goal: string | null; onClose: () => void }) {
+  const mode = useModeStore((s) => s.mode)
+  const accent = MODE_ACCENT[mode]
+  const symbol = mode === 'play' ? '🔥' : '✦'
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose()
@@ -223,10 +228,10 @@ function EarlyModal({ goal, onClose }: { goal: string | null; onClose: () => voi
       className="fixed inset-0 z-[70] flex flex-col items-center justify-center overflow-y-auto bg-gray-950 px-6 py-10 text-center text-white"
     >
       <h2 id="early-title" className="text-4xl font-black tracking-tight">
-        <span className="text-[#1B4FD8]">✦</span> You're early.
+        <span className={mode === 'play' ? undefined : 'text-[#1B4FD8]'}>{symbol}</span> You're early.
       </h2>
       <div className="mt-6 max-w-sm space-y-3 text-white/70">
-        <p>Zylove is launching city by city, starting in Austin.</p>
+        <p>Zylove is launching city by city.</p>
         <p>You've just become one of the first people in your area to discover us.</p>
         <p className="font-semibold text-white">{goal ?? `${FOUNDER_CAPACITY} more people and your city goes live.`}</p>
         <p>In the meantime, explore our curated profiles to see what Zylove is all about.</p>
@@ -234,11 +239,13 @@ function EarlyModal({ goal, onClose }: { goal: string | null; onClose: () => voi
       <button
         type="button"
         onClick={onClose}
-        className="mt-8 w-full max-w-xs rounded-full bg-[#1B4FD8] px-6 py-3.5 font-semibold text-white transition-colors hover:bg-[#1640b0]"
+        className={`mt-8 w-full max-w-xs rounded-full ${accent.bg} px-6 py-3.5 font-semibold text-white transition-opacity hover:opacity-90`}
       >
         Start exploring →
       </button>
-      <p className="mt-4 text-sm text-white/40">Tell your friends — 100 people unlock your city 🔥</p>
+      <p className="mt-4 text-sm text-white/40">
+        Tell your friends — {FOUNDER_CAPACITY} people unlock your city {symbol}
+      </p>
     </div>,
     document.body,
   )

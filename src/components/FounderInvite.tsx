@@ -1,8 +1,9 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { FOUNDER_BENEFITS, FOUNDER_TERMS_SHORT } from '../config/founderCopy'
 
 // What a founder gets, and what's asked in return. Shared by the invitation
-// (onboarding, profile) and /claim-founder.
+// (onboarding, profile) and /claim-founder; the wording is config/founderCopy.
 export function FounderBenefits({ cityName }: { cityName: string }) {
   return (
     <div className="space-y-4 text-left text-white/70">
@@ -10,12 +11,7 @@ export function FounderBenefits({ cityName }: { cityName: string }) {
       <div>
         <p className="font-semibold text-white">Founding members get:</p>
         <ul className="mt-2 space-y-1.5">
-          {[
-            'Elite access — forever, free',
-            `A permanent ${cityName} Founder badge`,
-            'Direct line to the founder',
-            'First in the queue when we go live',
-          ].map((b) => (
+          {FOUNDER_BENEFITS(cityName).map((b) => (
             <li key={b} className="flex gap-2">
               <span className="text-[#6B8FFF]" aria-hidden>
                 ·
@@ -25,10 +21,7 @@ export function FounderBenefits({ cityName }: { cityName: string }) {
           ))}
         </ul>
       </div>
-      <p className="text-sm text-white/50">
-        In return — show up. Be part of the community while we grow. Founders who go inactive during launch may lose their
-        spot to someone who wants it.
-      </p>
+      <p className="text-sm text-white/50">In return — show up. {FOUNDER_TERMS_SHORT}</p>
     </div>
   )
 }
