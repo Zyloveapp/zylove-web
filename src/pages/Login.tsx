@@ -63,12 +63,13 @@ const FEATURES = [
   },
 ]
 
-const FOUNDING_BENEFITS = ['Founding member for life', 'First in the queue', 'Founding badge', 'Direct line to Matthew']
+const FOUNDING_BENEFITS = ['Elite access — free', 'First in the queue', 'Founding badge', 'Direct line to the founder']
 
 const STATS = [
   { value: '2', label: 'modes' },
   { value: 'Free', label: 'to join' },
-  { value: '2026', label: 'Austin launch' },
+  // Shown as a big "Live" over "Austin, TX".
+  { value: 'Live', label: 'Austin, TX' },
 ]
 
 // Phone sign-in (OTP). Signing in and signing up are the same flow: a new
@@ -337,7 +338,7 @@ export default function Login() {
           </h2>
           <p className="mt-3 text-lg text-white/70">First 100 founding members in Austin. Lifetime free access. The reason it works.</p>
           <p className="mt-2 text-sm text-white/50">
-            Sign up now — founding badges are assigned automatically to the first 100 Austin members.
+            Sign up and accept your invitation to join the Austin Founding Circle.
           </p>
           <ul className="mt-6 flex flex-wrap justify-center gap-2">
             {FOUNDING_BENEFITS.map((b) => (
