@@ -200,6 +200,8 @@ export async function sendEncryptedPhoto(
 
 // ─── Viewing ─────────────────────────────────────────────────────────────────
 
+const DOWNLOAD_TIMEOUT_MS = 30_000
+
 // Downloads and decrypts in memory; returns an object URL the caller must
 // revoke. Null when it can't be opened (keys changed, file gone, tampered).
 export async function openPhoto(
@@ -215,7 +217,12 @@ export async function openPhoto(
   const senderPublicKey = isMine ? publicKeyFor(privateKey) : partnerPublicKey
   if (!senderPublicKey) return null
   try {
-    const encrypted = new Uint8Array(await getBytes(ref(storage, photo.storageRef)))
+    // The SDK retries a failed download for up to 2 minutes (e.g. a bucket
+    // without CORS — see storage-cors.json), which looks like an endless
+    // spinner; give up sooner and say it couldn't be displayed.
+    const download = getBytes(ref(storage, photo.storageRef))
+    const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('photo_download_timeout')), DOWNLOAD_TIMEOUT_MS))
+    const encrypted = new Uint8Array(await Promise.race([download, timeout]))
     const bytes = decryptPhoto(
       encrypted,
       photo.photoNonce,
@@ -225,7 +232,8 @@ export async function openPhoto(
       senderPublicKey,
     )
     return bytes ? URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/jpeg' })) : null
-  } catch {
+  } catch (err) {
+    console.error('Chat photo download failed:', err)
     return null
   }
 }
