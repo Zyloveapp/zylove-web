@@ -3,7 +3,7 @@ import { BrowserRouter, Outlet, Routes, Route, useNavigate } from 'react-router-
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from './services/firebase'
 import { useAuthStore } from './store/authStore'
-import { refreshLocationIfStale } from './services/location'
+import { refreshLocationSilently } from './services/location'
 import { founderHeartbeat } from './services/founders'
 import { loadPin } from './services/playPin'
 import { isAdmin } from './services/adminPhotos'
@@ -114,15 +114,16 @@ function AppLayout() {
       cancelled = true
     }
   }, [uid, navigate])
-  // Signed in and onboarded: refresh a missing or week-old location in the
-  // background, and let the server know an active founder is around (keeps
-  // their spot; see founderActivity.ts). Never blocks or errors.
+  // Signed in and onboarded: refresh the location in the background when
+  // it's already granted (no prompt), and let the server know an active
+  // founder is around (keeps their spot; see founderActivity.ts). Never
+  // blocks or errors.
   useEffect(() => {
     if (!uid || locationChecked.has(uid)) return
     locationChecked.add(uid)
     // Pull the Play PIN into this browser's cache (Settings reads it sync).
     void loadPin(uid)
-    void refreshLocationIfStale(uid)
+    void refreshLocationSilently(uid)
     void founderHeartbeat(uid)
   }, [uid])
 

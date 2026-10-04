@@ -10,7 +10,6 @@ export interface LatLng {
 // snapped to a coarse grid (~3 miles) rather than as raw GPS. Plenty for
 // "~X mi away" and the Austin sort; not enough to place someone's home.
 const GRID_DEG = 0.05
-const STALE_MS = 7 * 24 * 60 * 60 * 1000
 
 function snap(v: number): number {
   return Math.round(Math.round(v / GRID_DEG) * GRID_DEG * 1000) / 1000
@@ -71,21 +70,34 @@ export async function saveUserLocation(uid: string, location: LatLng): Promise<v
   })
 }
 
-// Background refresh: when there's no saved location or it's over 7 days old,
-// asks the browser and saves. Fire and forget; never throws.
-export async function refreshLocationIfStale(uid: string): Promise<void> {
+// Whether the browser has already granted geolocation, without asking.
+// False when it hasn't, or when the Permissions API isn't there to say.
+async function locationGranted(): Promise<boolean> {
   try {
-    const data = (await getDoc(doc(db, 'users', uid))).data()
-    if (!data) return
-    const updated: unknown = data.locationUpdatedAt
-    const updatedMs =
-      typeof updated === 'object' && updated !== null && 'toMillis' in updated && typeof updated.toMillis === 'function'
-        ? (updated.toMillis() as number)
-        : null
-    const fresh = typeof data.locationLat === 'number' && updatedMs !== null && Date.now() - updatedMs < STALE_MS
-    if (fresh) return
+    if (!navigator.permissions?.query) return false
+    return (await navigator.permissions.query({ name: 'geolocation' })).state === 'granted'
+  } catch {
+    return false
+  }
+}
+
+// Every app load: if location is already granted, quietly take the current
+// position and save it — never a prompt (LocationGate does the asking).
+// When the snapped position hasn't moved, only locationUpdatedAt is touched,
+// so there's no reverse-geocode call or label rewrite on a normal visit.
+// Fire and forget; never throws.
+export async function refreshLocationSilently(uid: string): Promise<void> {
+  try {
+    if (!(await locationGranted())) return
     const location = await requestLocation()
-    if (location) await saveUserLocation(uid, location)
+    if (!location) return
+    const ref = doc(db, 'users', uid)
+    const data = (await getDoc(ref)).data()
+    if (!data) return
+    const unmoved =
+      data.locationLat === snap(location.lat) && data.locationLng === snap(location.lng) && typeof data.locationLabel === 'string'
+    if (unmoved) await updateDoc(ref, { locationUpdatedAt: serverTimestamp() })
+    else await saveUserLocation(uid, location)
   } catch {
     // Location is a nice-to-have; never surface failures.
   }
