@@ -54,15 +54,23 @@ export async function loadReviews(uid: string, mode: Mode): Promise<SavedReview[
   })
 }
 
-// Owner-only rules are checked when the tokenized URL is issued. A plain link
-// needs no bucket CORS (getBlob did) and also works in iOS home-screen apps.
-export async function downloadReviewPdf(pdfPath: string, filename: string): Promise<void> {
-  const url = await getDownloadURL(ref(storage, pdfPath))
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.target = '_blank' // fallback for iOS which ignores download attribute
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
+// Owner-only rules are checked when the tokenized URL is issued. Opened as a
+// link (no bucket CORS needed); the browser's PDF viewer handles saving.
+export async function downloadReviewPdf(pdfPath: string): Promise<void> {
+  // Open tab immediately during user gesture — Safari requires this
+  const newTab = window.open('', '_blank')
+  if (!newTab) {
+    // Popup blocked — fallback: try direct link
+    const url = await getDownloadURL(ref(storage, pdfPath))
+    window.location.href = url
+    return
+  }
+  try {
+    const url = await getDownloadURL(ref(storage, pdfPath))
+    newTab.location.href = url
+  } catch (err) {
+    console.error('PDF download failed:', err)
+    newTab.close()
+    throw err
+  }
 }
