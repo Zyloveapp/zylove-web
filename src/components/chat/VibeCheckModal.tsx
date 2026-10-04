@@ -8,6 +8,8 @@ interface VibeCheckModalProps {
   onClose: () => void
   // Tapping an opener drops it into the message input (never auto-sends).
   onUseOpener: (text: string) => void
+  // Play's accent is red, Spark's cobalt.
+  mode: 'spark' | 'play'
 }
 
 type Phase = 'prompt' | 'loving_it' | 'alright' | 'meh'
@@ -27,7 +29,9 @@ const REDIRECT_COPY = {
 
 // Web version of mobile's VibeCheckPrompt. Same bottom-sheet shell as
 // FirstChatModal, sliding up on open. Copy matches mobile exactly.
-export default function VibeCheckModal({ matchId, partnerUid, name, onClose, onUseOpener }: VibeCheckModalProps) {
+export default function VibeCheckModal({ matchId, partnerUid, name, onClose, onUseOpener, mode }: VibeCheckModalProps) {
+  const accentBg = mode === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
+  const accentText = mode === 'play' ? 'text-[#E03131]' : 'text-[#1B4FD8]'
   const [phase, setPhase] = useState<Phase>('prompt')
   const [openers, setOpeners] = useState<string[] | null>(null)
   const [shown, setShown] = useState(false)
@@ -75,7 +79,7 @@ export default function VibeCheckModal({ matchId, partnerUid, name, onClose, onU
             </h2>
             <p className="mt-1 text-center text-sm text-white/60">Just between us.</p>
             <div className="mt-6 space-y-2">
-              <button type="button" onClick={() => rate('loving_it')} className={`${optionBase} bg-[#1B4FD8]`}>
+              <button type="button" onClick={() => rate('loving_it')} className={`${optionBase} ${accentBg}`}>
                 <span aria-hidden>🔥</span> Loving it
               </button>
               <button type="button" onClick={() => rate('alright')} className={`${optionBase} bg-white/10`}>
@@ -97,7 +101,7 @@ export default function VibeCheckModal({ matchId, partnerUid, name, onClose, onU
 
         {phase === 'loving_it' && (
           <>
-            <p className="text-center text-5xl text-[#1B4FD8]" aria-hidden>
+            <p className={`text-center text-5xl ${accentText}`} aria-hidden>
               ✦
             </p>
             <h2 id="vibe-check-title" className="mt-2 text-center text-xl font-bold">
@@ -106,7 +110,7 @@ export default function VibeCheckModal({ matchId, partnerUid, name, onClose, onU
             <p className="mt-1 text-center text-sm text-white/60">
               {name} doesn't know you rated — but the vibes are speaking for themselves.
             </p>
-            <button type="button" onClick={onClose} autoFocus className={`${optionBase} mt-6 bg-[#1B4FD8]`}>
+            <button type="button" onClick={onClose} autoFocus className={`${optionBase} mt-6 ${accentBg}`}>
               Back to the conversation
             </button>
           </>

@@ -595,6 +595,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           name={match.name}
           onClose={() => setShowVibeCheck(false)}
           onUseOpener={setText}
+          mode={match.mode === 'play' ? 'play' : 'spark'}
         />
       )}
 
