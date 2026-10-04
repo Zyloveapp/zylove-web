@@ -233,7 +233,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
       cancelled = true
     }
   }, [uid, deviceKeyStatus])
-  const deviceLocked = deviceKeyStatus === 'needs_restore' || deviceKeyStatus === 'locked'
+  const deviceLocked = deviceKeyStatus === 'needs_restore' || deviceKeyStatus === 'locked' || deviceKeyStatus === 'check_failed'
 
   const partnerKey = partnerKeyState?.partnerUid === partnerUid ? partnerKeyState : null
   const myPrivateKey = myKeyState?.uid === uid ? myKeyState.key : undefined

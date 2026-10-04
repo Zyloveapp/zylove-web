@@ -40,7 +40,7 @@ function snooze(uid: string): void {
   }
 }
 
-type View = null | 'set' | 'unlock' | 'locked' | 'reset' | 'done'
+type View = null | 'set' | 'unlock' | 'locked' | 'reset' | 'done' | 'retry'
 
 export default function KeyBackupGate() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
@@ -64,6 +64,7 @@ export default function KeyBackupGate() {
     if (!uid || !state || view !== null || dismissed) return
     if (state.status === 'needs_restore') setView('unlock')
     else if (state.status === 'locked') setView('locked')
+    else if (state.status === 'check_failed') setView('retry')
     else if (state.status === 'ready' && state.backedUp === false && !snoozed(uid)) {
       const t = setTimeout(() => setView('set'), 2500)
       return () => clearTimeout(t)
@@ -74,7 +75,9 @@ export default function KeyBackupGate() {
     function open(e: Event) {
       const want = (e as CustomEvent<'set' | 'unlock'>).detail
       const status = state?.status
-      if (want === 'unlock' || status === 'needs_restore' || status === 'locked') {
+      if (status === 'check_failed') {
+        setView('retry')
+      } else if (want === 'unlock' || status === 'needs_restore' || status === 'locked') {
         setView(status === 'locked' ? 'locked' : 'unlock')
       } else {
         setView('set')
@@ -112,6 +115,15 @@ export default function KeyBackupGate() {
         )}
         {view === 'unlock' && <Unlock uid={uid} onUnlocked={() => setView(null)} onForgot={() => setView('reset')} onCancel={close} />}
         {view === 'locked' && <Locked onReset={() => setView('reset')} onCancel={close} />}
+        {view === 'retry' && (
+          <Retry
+            onRetry={async () => {
+              const next = await checkKeyState(uid)
+              setView(next.status === 'check_failed' ? 'retry' : null)
+            }}
+            onCancel={close}
+          />
+        )}
         {view === 'reset' && (
           <ResetConfirm
             onConfirm={async () => {
@@ -327,6 +339,37 @@ function ResetConfirm({ onConfirm, onCancel }: { onConfirm: () => Promise<void>;
       </button>
       <button type="button" onClick={onCancel} disabled={busy} className="mt-2 w-full py-2 text-sm text-white/50 hover:text-white">
         Go back
+      </button>
+    </>
+  )
+}
+
+// The backup lookup failed (offline, server hiccup): never guess "no backup"
+// here — that's how a good backup gets overwritten.
+function Retry({ onRetry, onCancel }: { onRetry: () => Promise<void>; onCancel: () => void }) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <>
+      <h2 id="key-backup-title" className="text-xl font-bold">
+        Couldn't check your chat backup
+      </h2>
+      <p className="mt-2 text-sm text-white/60">
+        We need to check for your chat PIN backup before your messages can open on this device. Check your connection and try
+        again.
+      </p>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true)
+          onRetry().finally(() => setBusy(false))
+        }}
+        className="mt-6 w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold disabled:opacity-50"
+      >
+        {busy ? 'Checking…' : 'Try again'}
+      </button>
+      <button type="button" onClick={onCancel} disabled={busy} className="mt-2 w-full py-2 text-sm text-white/50 hover:text-white">
+        Not now
       </button>
     </>
   )

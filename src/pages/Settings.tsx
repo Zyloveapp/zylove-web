@@ -381,7 +381,7 @@ function AdminSection({ uid }: { uid: string }) {
 function ChatPinRow({ uid }: { uid: string }) {
   const [state, setState] = useState<KeyState | null>(null)
   useEffect(() => (uid ? subscribeKeyState(uid, setState) : undefined), [uid])
-  const locked = state?.status === 'needs_restore' || state?.status === 'locked'
+  const locked = state?.status === 'needs_restore' || state?.status === 'locked' || state?.status === 'check_failed'
   return (
     <button
       type="button"
