@@ -7,14 +7,20 @@ import { auth } from './services/firebase'
 import { initKeysForUser } from './services/keys'
 import { useAuthStore } from './store/authStore'
 import { useModeStore } from './store/modeStore'
-import { clearPlaySession } from './services/playSession'
+import { BANNER_DISMISSED_KEY, clearPlaySession } from './services/playSession'
 
 onAuthStateChanged(auth, (user) => {
   const { setUser, loading, setLoading } = useAuthStore.getState()
-  // Signed out: the next person at this browser starts in Spark, locked.
+  // Signed out: the next person at this browser starts in Spark, locked,
+  // and sees Explore's transparency banner again.
   if (!user) {
     useModeStore.getState().setMode('spark')
     clearPlaySession()
+    try {
+      sessionStorage.removeItem(BANNER_DISMISSED_KEY)
+    } catch {
+      // Storage unavailable — nothing to clear.
+    }
   }
   setUser(user)
   if (loading) setLoading(false)
