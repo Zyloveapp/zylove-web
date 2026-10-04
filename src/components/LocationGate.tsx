@@ -33,6 +33,8 @@ export default function LocationGate({ children }: { children: ReactNode }) {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const [state, setState] = useState<GateState>(() => (grantedThisSession() ? 'granted' : 'checking'))
   const [busy, setBusy] = useState(false)
+  // "Try again" from the blocked view didn't get a location either.
+  const [stillBlocked, setStillBlocked] = useState(false)
   // Admins (users/{uid}.isAdmin) get a small link to preview the gate.
   const [isAdmin, setIsAdmin] = useState(false)
 
@@ -54,15 +56,28 @@ export default function LocationGate({ children }: { children: ReactNode }) {
     }
     navigator.permissions
       .query({ name: 'geolocation' })
-      .then((s) => !cancelled && setState(s.state))
+      .then((status) => {
+        if (cancelled) return
+        setState(status.state)
+        // Allowed later from the browser's or phone's settings: let them in.
+        status.onchange = () => {
+          if (status.state === 'granted') setState('granted')
+        }
+      })
       .catch(() => !cancelled && setState('prompt'))
     return () => {
       cancelled = true
     }
   }, [state])
 
+  // Asks for a position directly (getCurrentPosition), which brings up the
+  // browser's own prompt wherever it's still allowed to ask. A browser that
+  // has permanently blocked the site fails at once — the instructions are the
+  // only way back then.
   async function allow() {
+    const retry = state === 'denied'
     setBusy(true)
+    setStillBlocked(false)
     const location = await requestLocation()
     if (location) {
       if (uid) await saveUserLocation(uid, location).catch(() => {})
@@ -70,6 +85,7 @@ export default function LocationGate({ children }: { children: ReactNode }) {
       setState('granted')
     } else {
       setState('denied')
+      setStillBlocked(retry)
     }
     setBusy(false)
   }
@@ -107,8 +123,9 @@ export default function LocationGate({ children }: { children: ReactNode }) {
       </span>
       <h1 className="mt-5 text-2xl font-bold text-white">We need your location</h1>
       <p className="mt-3 max-w-xs text-white/60">
-        Sorry, we need your location to show you the right people nearby. Zylove uses your location to curate your feed — we
-        never share your exact location with anyone.
+        {denied
+          ? "Location access was blocked. Here's how to enable it:"
+          : 'Zylove uses your location to show you real people nearby. We never share your exact location.'}
       </p>
 
       {!denied && (
@@ -125,7 +142,10 @@ export default function LocationGate({ children }: { children: ReactNode }) {
       {isAdmin && (
         <button
           type="button"
-          onClick={() => setState(denied ? 'prompt' : 'denied')}
+          onClick={() => {
+            setStillBlocked(false)
+            setState(denied ? 'prompt' : 'denied')
+          }}
           className="mt-6 text-xs text-white/30 underline hover:text-white/60"
         >
           Admin: preview {denied ? 'first-ask' : 'blocked'} view
@@ -134,16 +154,19 @@ export default function LocationGate({ children }: { children: ReactNode }) {
 
       {denied && (
         <div className="mt-8 w-full max-w-xs space-y-3 text-left text-sm text-white/50">
-          <p className="text-white/70">Location access was blocked. To enable:</p>
+          {stillBlocked && (
+            <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-200">
+              Still blocked — your browser didn't share your location. Follow the steps below, then try again.
+            </p>
+          )}
           <p>
-            <span className="font-semibold text-white/70">iPhone/Safari:</span> Tap AA in your browser bar → Website Settings →
-            Location → Allow
+            <span className="font-semibold text-white/70">iPhone/Safari:</span> Open your iPhone Settings → scroll to Safari →
+            tap Location → select Allow
           </p>
           <p>
             <span className="font-semibold text-white/70">Android/Chrome:</span> Tap the lock icon in your address bar →
             Permissions → Location → Allow
           </p>
-          <p className="text-xs text-white/40">Or open your phone's Settings → Safari/Chrome → Location</p>
           <button
             type="button"
             onClick={() => void allow()}
