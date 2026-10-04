@@ -641,7 +641,13 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
       {photoPaywall && <PaywallModal feature="photo_sharing" onClose={() => setPhotoPaywall(false)} />}
 
       {showPhotoPicker && (
-        <PhotoPicker matchId={matchId} uid={uid} partnerUid={partnerUid} onClose={() => setShowPhotoPicker(false)} />
+        <PhotoPicker
+          matchId={matchId}
+          uid={uid}
+          partnerUid={partnerUid}
+          mode={match.mode === 'play' ? 'play' : 'spark'}
+          onClose={() => setShowPhotoPicker(false)}
+        />
       )}
 
       {showReport && (

@@ -6,12 +6,16 @@ interface PhotoPickerProps {
   matchId: string
   uid: string
   partnerUid: string
+  // The chat's mode: Play's accents are red, Spark's cobalt.
+  mode: 'spark' | 'play'
   onClose: () => void
 }
 
 // Pick, preview, choose a timer, send. Timers are open to every web user
 // for now (no paywall yet).
-export default function PhotoPicker({ matchId, uid, partnerUid, onClose }: PhotoPickerProps) {
+export default function PhotoPicker({ matchId, uid, partnerUid, mode, onClose }: PhotoPickerProps) {
+  const play = mode === 'play'
+  const accent = play ? 'border-[#E03131] bg-[#E03131]' : 'border-[#1B4FD8] bg-[#1B4FD8]'
   const inputRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
@@ -80,7 +84,11 @@ export default function PhotoPicker({ matchId, uid, partnerUid, onClose }: Photo
           </h2>
           <span className="w-12" />
         </div>
-        <p className="mt-4 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-center text-xs text-white/60">
+        <p
+          className={`mt-4 rounded-xl border px-3 py-2 text-center text-xs ${
+            play ? 'border-[#E03131]/30 bg-[#E03131]/10 text-red-200' : 'border-white/10 bg-white/5 text-white/60'
+          }`}
+        >
           🔒 End-to-end encrypted · Consent granted
         </p>
 
@@ -123,7 +131,7 @@ export default function PhotoPicker({ matchId, uid, partnerUid, onClose }: Photo
               onClick={() => setTimer(t)}
               disabled={sending}
               className={`rounded-full border py-2 text-xs font-semibold transition-colors ${
-                timer === t ? 'border-[#1B4FD8] bg-[#1B4FD8] text-white' : 'border-white/15 text-white/60 hover:bg-white/5'
+                timer === t ? `${accent} text-white` : 'border-white/15 text-white/60 hover:bg-white/5'
               }`}
             >
               {t === 0 ? 'No timer' : `${t}s`}
@@ -136,7 +144,9 @@ export default function PhotoPicker({ matchId, uid, partnerUid, onClose }: Photo
           type="button"
           onClick={send}
           disabled={!file || sending}
-          className="mt-6 w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+          className={`mt-6 w-full rounded-xl py-3 font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40 ${
+            play ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
+          }`}
         >
           {sending ? 'Encrypting & sending…' : timer > 0 ? `Send · disappears in ${timer}s` : 'Send photo'}
         </button>

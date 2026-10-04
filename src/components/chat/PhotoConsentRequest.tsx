@@ -1,4 +1,5 @@
 import type { ConsentCode } from '../../services/chat'
+import { useModeStore } from '../../store/modeStore'
 
 interface PhotoConsentRequestProps {
   code: ConsentCode
@@ -12,7 +13,11 @@ interface PhotoConsentRequestProps {
 
 // System card for a photo-consent message.
 export default function PhotoConsentRequest({ code, isMine, partnerName, live, busy, onRespond }: PhotoConsentRequestProps) {
-  const card = 'mx-auto w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-center'
+  // Play: red accent and consent button; Spark keeps cobalt.
+  const play = useModeStore((s) => s.mode) === 'play'
+  const card = `mx-auto w-full max-w-sm rounded-2xl border px-4 py-3 text-center ${
+    play ? 'border-[#E03131]/30 bg-[#E03131]/[0.06]' : 'border-white/10 bg-white/5'
+  }`
 
   if (code === 'photo_consent_accepted') {
     return (
@@ -65,7 +70,9 @@ export default function PhotoConsentRequest({ code, isMine, partnerName, live, b
             type="button"
             onClick={() => onRespond(true)}
             disabled={busy}
-            className="flex-1 rounded-full bg-[#1B4FD8] py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+            className={`flex-1 rounded-full py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 ${
+              play ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
+            }`}
           >
             Yes, I consent
           </button>

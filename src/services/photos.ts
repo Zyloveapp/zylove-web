@@ -20,7 +20,30 @@ export interface PhotoConsent {
 
 const STATUSES: readonly PhotoConsentStatus[] = ['pending', 'accepted', 'declined', 'paused']
 
+// Live, and re-subscribes after an error (a dropped listener would otherwise
+// leave a new request unanswerable until a reload).
 export function subscribePhotoConsent(matchId: string, onChange: (consent: PhotoConsent | null) => void): Unsubscribe {
+  let unsub: Unsubscribe = () => {}
+  let retry: ReturnType<typeof setTimeout> | undefined
+  let stopped = false
+  const listen = () => {
+    unsub = listenPhotoConsent(matchId, onChange, () => {
+      if (!stopped) retry = setTimeout(listen, 3000)
+    })
+  }
+  listen()
+  return () => {
+    stopped = true
+    clearTimeout(retry)
+    unsub()
+  }
+}
+
+function listenPhotoConsent(
+  matchId: string,
+  onChange: (consent: PhotoConsent | null) => void,
+  onError: () => void,
+): Unsubscribe {
   return onSnapshot(
     doc(db, 'matches', matchId),
     (snap) => {
@@ -37,7 +60,7 @@ export function subscribePhotoConsent(matchId: string, onChange: (consent: Photo
           : null,
       )
     },
-    () => onChange(null),
+    onError,
   )
 }
 
