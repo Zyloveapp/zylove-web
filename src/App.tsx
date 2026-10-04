@@ -46,6 +46,8 @@ import FounderMessages from './pages/FounderMessages'
 import AdminMessages from './pages/admin/AdminMessages'
 import AdminDeletions from './pages/admin/AdminDeletions'
 import AdminCities from './pages/admin/AdminCities'
+import AdminActivity from './pages/admin/AdminActivity'
+import { touchLastActive } from './services/adminActivity'
 
 // Protected pages share the nav. Leaves room for the mobile bottom bar.
 // Location (and the founder check) run once per user per page load.
@@ -124,6 +126,7 @@ function AppLayout() {
     // Pull the Play PIN into this browser's cache (Settings reads it sync).
     void loadPin(uid)
     void refreshLocationSilently(uid)
+    void touchLastActive(uid)
     void founderHeartbeat(uid)
   }, [uid])
 
@@ -182,6 +185,7 @@ export default function App() {
                 <Route path="/admin/messages" element={<AdminMessages />} />
                 <Route path="/admin/deletions" element={<AdminDeletions />} />
                 <Route path="/admin/cities" element={<AdminCities />} />
+                <Route path="/admin/activity" element={<AdminActivity />} />
               </Route>
             </Route>
           </Route>

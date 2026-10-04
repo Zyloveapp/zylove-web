@@ -335,6 +335,16 @@ function AdminSection({ uid }: { uid: string }) {
           →
         </span>
       </button>
+      <button
+        type="button"
+        onClick={() => navigate('/admin/activity')}
+        className="flex w-full items-center justify-between border-t border-white/5 px-5 py-4 text-left hover:bg-white/[0.03]"
+      >
+        <span className="font-medium">📊 Activity dashboard</span>
+        <span className="text-white/30" aria-hidden>
+          →
+        </span>
+      </button>
     </Section>
   )
 }
