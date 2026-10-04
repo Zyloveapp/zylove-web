@@ -83,7 +83,7 @@ const UNDECRYPTABLE = 'Unable to decrypt message'
 // from before this browser's private key was lost (site data cleared). The
 // key lives only in IndexedDB, so those messages can't be recovered.
 const KEY_RESET_NOTICE =
-  "Messages can't be decrypted on this device — your encryption key was reset. New messages will work normally."
+  "Earlier messages can't be decrypted on this device — an encryption key was reset. New messages will work normally."
 // Own typing: write at most every 2s, clear after 3s idle. Partner's counts
 // as typing while their typingAt is under 5s old.
 const TYPING_WRITE_MS = 2000
