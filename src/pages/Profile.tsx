@@ -7,8 +7,7 @@ import { loadPlayProfile, type PlayProfileData } from '../services/playProfile'
 import PlayProfileSections from '../components/profile/PlayProfileSections'
 import VisibilityControl from '../components/profile/VisibilityControl'
 import JustForYouCard from '../components/profile/JustForYouCard'
-import ProfileReviewModal from '../components/profile/ProfileReviewModal'
-import PlayReviewModal from '../components/profile/PlayReviewModal'
+import ProfileReviewSheet from '../components/profile/ProfileReviewSheet'
 import ProfileSections, { Pills, SectionHeading } from '../components/profile/ProfileSections'
 import { dealbreakerLabel, seekingTraitLabel } from '../components/discover/labels'
 
@@ -150,7 +149,7 @@ export default function Profile() {
           </div>
         </div>
 
-        {showPlayReview && <PlayReviewModal onClose={() => setShowPlayReview(false)} />}
+        {showPlayReview && <ProfileReviewSheet mode="play" onClose={() => setShowPlayReview(false)} />}
       </div>
     )
   }
@@ -234,7 +233,7 @@ export default function Profile() {
         </div>
       </div>
 
-      {showReview && <ProfileReviewModal onClose={() => setShowReview(false)} />}
+      {showReview && <ProfileReviewSheet mode="spark" onClose={() => setShowReview(false)} />}
     </div>
   )
 }

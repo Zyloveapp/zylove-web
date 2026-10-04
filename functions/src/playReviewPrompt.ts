@@ -5,6 +5,7 @@
 import { PLAY_NON_NEGOTIABLE_LABELS, PLAY_PROMPT_BANK, PLAY_TAG_LABELS, SPICE_META, type PlayInterestTag } from './shared/dualProfile'
 import { parsePlayBioRequest } from './playBioPrompt'
 import { aboutLine, qaBlocks } from './playGoDeeperPrompt'
+import { PLAY_REVIEW_SECTIONS, scorecardInstructions } from './profileScorecard'
 
 const MAX_BIO = 500
 
@@ -48,21 +49,20 @@ Go Deeper:
 ${qaBlocks(r.goDeeper) || none}
 
 ── REVIEW GUIDELINES ──
-Give feedback in these areas:
+Score and review these four sections:
 
-1. CLARITY — Are they clear about what they want? Will the right person know if they're a match?
-2. CONSISTENCY — Do their selections and written answers align? (e.g. says Dom but writes passive prompts)
-3. TONE — Does their bio/prompts match their spice level and vibe selections?
-4. APPEAL — Will this attract the right person? What's working well?
-5. ONE THING TO IMPROVE — The single most impactful change they could make
+- Clarity — Are they clear about what they want? Will the right person know if they're a match?
+- Consistency — Do their selections and written answers align? (e.g. says Dom but writes passive prompts)
+- Tone — Does their bio/prompts match their spice level and vibe selections?
+- Appeal — Will this attract the right person? What's working well?
+
+Then give the single most impactful change they could make as the top suggestion.
 
 ── RULES ──
-- Be honest, not flattering
+- Be honest, not flattering — scores should be earned
 - Be specific — reference their actual selections and answers
-- Keep it under 300 words total
-- Use short sections with clear headers
 - Adult but professional tone — this is coaching, not commentary
 - Never be judgmental about their choices — only help them present those choices better
-- End with one specific actionable suggestion
-- Return ONLY the review, nothing else`
+
+${scorecardInstructions(PLAY_REVIEW_SECTIONS)}`
 }

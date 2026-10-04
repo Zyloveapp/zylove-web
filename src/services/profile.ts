@@ -289,13 +289,37 @@ export async function saveDynamicPrompt(
 
 // ─── AI: profile review ──────────────────────────────────────────────────────
 
-export interface ProfileReview {
-  strengths: string[]
-  improvements: string[]
-  headline: string
+export interface ScorecardSection {
+  name: string
+  score: number
+  working: string
+  improve: string
 }
 
-export async function fetchProfileReview(): Promise<ProfileReview> {
-  const { data } = await httpsCallable<void, ProfileReview>(functions, 'reviewProfile', { timeout: 60_000 })()
-  return data
+export interface ProfileScorecard {
+  overallScore: number
+  sections: ScorecardSection[]
+  topSuggestion: string
+}
+
+function isScorecard(v: unknown): v is ProfileScorecard {
+  const r = v as ProfileScorecard | null
+  return (
+    typeof r?.overallScore === 'number' &&
+    typeof r.topSuggestion === 'string' &&
+    Array.isArray(r.sections) &&
+    r.sections.length > 0 &&
+    r.sections.every(
+      (s) => typeof s?.name === 'string' && typeof s.score === 'number' && typeof s.working === 'string' && typeof s.improve === 'string',
+    )
+  )
+}
+
+// Spark: reviewProfile. Play: reviewPlayProfile, 3 per rolling week. Both
+// return { review: scorecard }; anything else is treated as a failed review.
+export async function fetchProfileReview(mode: 'spark' | 'play'): Promise<ProfileScorecard> {
+  const name = mode === 'play' ? 'reviewPlayProfile' : 'reviewProfile'
+  const { data } = await httpsCallable<void, { review?: unknown }>(functions, name, { timeout: 120_000 })()
+  if (!isScorecard(data.review)) throw new Error('Invalid review')
+  return data.review
 }

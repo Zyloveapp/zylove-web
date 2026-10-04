@@ -5,6 +5,7 @@ import { DEFAULT_SCORE, subscribeScore, type ScoreDetail } from '../services/zyl
 import { SPARK_PERKS, TIER_META, getUnlockedPerks, type ZyloveScoreTier } from '../types/zyloveScore'
 import { REVIEW_CATEGORY_DEFS } from '../types/reviewCategories'
 import { PaywallCard, useCanAccess } from '../components/PaywallGate'
+import ScoreRing from '../components/ScoreRing'
 
 // Web palette for the ring and tier label.
 const TIER_COLOR: Record<ZyloveScoreTier, string> = {
@@ -23,36 +24,6 @@ const TIPS: { emoji: string; tip: string }[] = [
   { emoji: '✍️', tip: 'Complete your profile — more detail = better matches' },
   { emoji: '✦', tip: 'Rate your conversations — participation points add up' },
 ]
-
-const RING_RADIUS = 64
-const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
-
-function ScoreRing({ score, color }: { score: number; color: string }) {
-  const filled = (Math.max(0, Math.min(100, score)) / 100) * RING_CIRCUMFERENCE
-  return (
-    <div className="relative h-40 w-40 shrink-0">
-      <svg viewBox="0 0 150 150" className="h-full w-full -rotate-90" aria-hidden>
-        <circle cx="75" cy="75" r={RING_RADIUS} fill="none" stroke="currentColor" strokeWidth="12" className="text-white/10" />
-        <circle
-          cx="75"
-          cy="75"
-          r={RING_RADIUS}
-          fill="none"
-          stroke={color}
-          strokeWidth="12"
-          strokeLinecap="round"
-          strokeDasharray={`${filled} ${RING_CIRCUMFERENCE}`}
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-4xl font-bold" style={{ color }}>
-          {score}
-        </span>
-        <span className="text-xs text-white/40">/100</span>
-      </div>
-    </div>
-  )
-}
 
 function StatChip({ label, value, tone }: { label: string; value: number; tone: 'neutral' | 'good' | 'bad' }) {
   const color =

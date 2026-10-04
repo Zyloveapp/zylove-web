@@ -16,6 +16,13 @@ import { buildBioPrompt, parseBioRequest } from './bioPrompt'
 import { buildPlayBioPrompt, parsePlayBioRequest } from './playBioPrompt'
 import { buildPlayReviewPrompt } from './playReviewPrompt'
 import {
+  PLAY_REVIEW_SECTIONS,
+  SPARK_REVIEW_SECTIONS,
+  parseScorecard,
+  scorecardInstructions,
+  type ProfileScorecard,
+} from './profileScorecard'
+import {
   GO_DEEPER_FOCUS,
   buildPlayGoDeeperPrompt,
   cleanGoDeeperQuestion,
@@ -1079,18 +1086,6 @@ Return only the question text, nothing else.`
 
 // ─── reviewProfile ───────────────────────────────────────────────────────────
 
-interface ProfileReview {
-  strengths: string[]
-  improvements: string[]
-  headline: string
-}
-
-const FALLBACK_REVIEW: ProfileReview = {
-  strengths: ['Your bio shows personality'],
-  improvements: ['Add more specific details'],
-  headline: 'A profile with potential',
-}
-
 // The fields a match actually sees — never birthday, contact or location data.
 function profileForReview(root: DocumentData, spark: DocumentData): string {
   const photoCount = strings(root.photoURLs).length
@@ -1118,52 +1113,46 @@ function profileForReview(root: DocumentData, spark: DocumentData): string {
     .join('\n')
 }
 
-// Reads the STRENGTHS / IMPROVE / HEADLINE sections, tolerating bullets,
-// numbering and items on the header line itself.
-function parseReview(text: string): ProfileReview | null {
-  const sections: Record<string, string[]> = { STRENGTHS: [], IMPROVE: [], HEADLINE: [] }
-  let current: string | null = null
-  for (const rawLine of text.split('\n')) {
-    const line = rawLine.replace(/\*\*/g, '').trim()
-    const header = /^(STRENGTHS|IMPROVE|HEADLINE)\s*:?\s*(.*)$/i.exec(line)
-    if (header) {
-      current = header[1].toUpperCase()
-      if (header[2].trim()) sections[current].push(header[2].trim())
-      continue
-    }
-    const item = line.replace(/^([-•*]|\d+[.)])\s*/, '').trim()
-    if (current && item) sections[current].push(item)
-  }
-  const strengths = sections.STRENGTHS.slice(0, 3)
-  const improvements = sections.IMPROVE.slice(0, 3)
-  const headline = sections.HEADLINE[0]?.replace(/^["“]|["”]$/g, '') ?? ''
-  return strengths.length > 0 && improvements.length > 0 && headline ? { strengths, improvements, headline } : null
-}
+// Scorecard JSON runs past the old prose limit; leave headroom so a long
+// reply isn't cut mid-object (which would fail the parse).
+const REVIEW_MAX_TOKENS = 1000
 
-// "How's my profile?" — honest AI feedback on the caller's own Spark profile.
-// Never throws after the auth check: failures return FALLBACK_REVIEW.
+// "How's my profile?" — honest AI scorecard for the caller's own Spark
+// profile. A reply that isn't the expected JSON is an error the client
+// shows with a Regenerate button.
 export const reviewProfile = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
-  async (request): Promise<ProfileReview> => {
+  async (request): Promise<{ review: ProfileScorecard }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    let review: ProfileScorecard | null = null
     try {
       const { root, spark } = await loadOwnProfileDocs(request.auth.uid)
-      const prompt = `Review this dating profile and give honest, constructive feedback. Be direct but kind. Focus on what's working and what could be stronger.
+      const prompt = `Review this dating profile on Zylove Spark — serious dating, real compatibility. Give honest, constructive feedback. Be direct but kind.
 
 Profile:
 ${profileForReview(root, spark)}
 
-Give feedback in exactly this format:
-STRENGTHS: 2-3 things working well (1 sentence each)
-IMPROVE: 2-3 specific suggestions (1 sentence each)
-HEADLINE: One line summary of their profile's overall vibe
+── REVIEW GUIDELINES ──
+Score and review these four sections:
 
-Keep the whole response under 200 words. Be specific to their actual profile, not generic advice.`
-      return parseReview(await askClaude('reviewProfile', prompt, 500)) ?? FALLBACK_REVIEW
+- Clarity — Is it clear who they are and what they're looking for?
+- Authenticity — Does it sound like a real, specific person rather than a template?
+- Depth — Do the prompts and answers reveal values, character and how they love?
+- Appeal — Will this draw in the kind of person they want? What's working well?
+
+Then give the single most impactful change they could make as the top suggestion.
+
+── RULES ──
+- Be honest, not flattering — scores should be earned
+- Be specific to their actual profile, not generic advice
+
+${scorecardInstructions(SPARK_REVIEW_SECTIONS)}`
+      review = parseScorecard(await askClaude('reviewProfile', prompt, REVIEW_MAX_TOKENS), SPARK_REVIEW_SECTIONS)
     } catch (err) {
       logger.error('reviewProfile failed', { message: err instanceof Error ? err.message : String(err) })
-      return FALLBACK_REVIEW
     }
+    if (!review) throw new HttpsError('unavailable', "Couldn't generate review. Try again.")
+    return { review }
   },
 )
 
@@ -1177,11 +1166,11 @@ function recentPlayReviews(data: DocumentData | undefined, now: number): number[
   return Array.isArray(raw) ? raw.filter((t): t is number => typeof t === 'number' && now - t < WEEK_MS) : []
 }
 
-// "How's my Play profile? 🔥" — reviews the caller's saved Play profile.
-// 3 per rolling week; only successful reviews count.
+// "How's my Play profile? 🔥" — a scorecard for the caller's saved Play
+// profile. 3 per rolling week; only successful reviews count.
 export const reviewPlayProfile = onCall(
   { timeoutSeconds: 120, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
-  async (request): Promise<{ review: string }> => {
+  async (request): Promise<{ review: ProfileScorecard }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const db = getFirestore()
     const userRef = db.doc(`users/${request.auth.uid}`)
@@ -1191,8 +1180,13 @@ export const reviewPlayProfile = onCall(
     }
     if (!playSnap.exists) throw new HttpsError('failed-precondition', 'Set up your Play profile first.')
 
-    const review = (await askClaude('reviewPlayProfile', buildPlayReviewPrompt(playSnap.data() ?? {}), 700)).trim()
-    if (!review) throw new HttpsError('unavailable', "Couldn't review your profile right now.")
+    const reply = await askClaude('reviewPlayProfile', buildPlayReviewPrompt(playSnap.data() ?? {}), REVIEW_MAX_TOKENS)
+    const review = parseScorecard(reply, PLAY_REVIEW_SECTIONS)
+    // Unparseable replies don't count toward the weekly limit.
+    if (!review) {
+      logger.error('reviewPlayProfile: reply was not a valid scorecard', { length: reply.length })
+      throw new HttpsError('unavailable', "Couldn't generate review. Try again.")
+    }
     await db.runTransaction(async (tx) => {
       const now = Date.now()
       const recent = recentPlayReviews((await tx.get(userRef)).data(), now)
