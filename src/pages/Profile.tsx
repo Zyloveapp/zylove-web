@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import { loadOwnProfile, profileCompleteness, type OwnProfile } from '../services/profile'
 import { loadPlayProfile, type PlayProfileData } from '../services/playProfile'
+import { isPlayOnlyUser } from '../services/playOnboarding'
 import PlayProfileSections from '../components/profile/PlayProfileSections'
 import VisibilityControl from '../components/profile/VisibilityControl'
 import JustForYouCard from '../components/profile/JustForYouCard'
@@ -69,6 +70,19 @@ export default function Profile() {
       .then((data) => {
         if (!cancelled) setLoaded({ uid, data })
       })
+    return () => {
+      cancelled = true
+    }
+  }, [uid])
+
+  // Play-only accounts have no Spark profile to reimagine; null until known.
+  const [playOnly, setPlayOnly] = useState<{ uid: string; value: boolean } | null>(null)
+  useEffect(() => {
+    if (!uid) return
+    let cancelled = false
+    isPlayOnlyUser(uid)
+      .then((value) => !cancelled && setPlayOnly({ uid, value }))
+      .catch(() => !cancelled && setPlayOnly({ uid, value: false }))
     return () => {
       cancelled = true
     }
@@ -226,6 +240,22 @@ export default function Profile() {
         />
 
         <Completeness percent={profileCompleteness(own)} />
+        {/* Same place and style as Play's "Reset the vibe 🔥": the full
+            guided redo, next to the section-by-section editor below. */}
+        {playOnly?.uid === uid && !playOnly.value && (
+          <div>
+            <button
+              type="button"
+              onClick={() => navigate('/onboarding?refresh=true')}
+              className="w-full rounded-xl border border-white/15 py-3 font-semibold text-white/70 transition-colors hover:bg-white/5 hover:text-white"
+            >
+              ✦ Reimagine my profile
+            </button>
+            <p className="mt-2 text-center text-xs text-white/40">
+              Go through a guided refresh — your answers will be pre-filled.
+            </p>
+          </div>
+        )}
         <VisibilityControl />
       </div>
 

@@ -14,7 +14,6 @@ import {
   saveSparkEdits,
 } from '../services/profile'
 import { MODERATION_MESSAGES, uploadModeratedPhoto } from '../services/moderatedPhotos'
-import { isPlayOnlyUser } from '../services/playOnboarding'
 import { changeDisplayName, formatNameChangeDate, nextNameChange } from '../services/displayNames'
 import type { DiscoverProfile } from '../services/discover'
 import { SPARK_PROMPT_BANK, type PromptAnswer } from '../types/dualProfile'
@@ -115,20 +114,6 @@ export default function EditProfile() {
   const [saveState, setSaveState] = useState<'saved' | 'error' | null>(null)
   const [nameError, setNameError] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
-  // Play-only accounts have no Spark profile to reimagine; null until known.
-  const [playOnly, setPlayOnly] = useState<{ uid: string; value: boolean } | null>(null)
-
-  useEffect(() => {
-    if (!uid) return
-    let cancelled = false
-    isPlayOnlyUser(uid)
-      .then((value) => !cancelled && setPlayOnly({ uid, value }))
-      .catch(() => !cancelled && setPlayOnly({ uid, value: false }))
-    return () => {
-      cancelled = true
-    }
-  }, [uid])
-
   useEffect(() => {
     if (!uid) return
     let cancelled = false
@@ -432,20 +417,6 @@ export default function EditProfile() {
           )}
         </Section>
 
-        {playOnly?.uid === uid && !playOnly.value && (
-          <div>
-            <button
-              type="button"
-              onClick={() => navigate('/onboarding?refresh=true')}
-              className="w-full rounded-xl border border-white/15 py-3 font-semibold text-white/70 transition-colors hover:bg-white/5 hover:text-white"
-            >
-              ↺ Reimagine my profile
-            </button>
-            <p className="mt-2 text-center text-xs text-white/40">
-              Go through a guided refresh — your answers will be pre-filled.
-            </p>
-          </div>
-        )}
       </div>
 
       {/* Sits above the mobile bottom nav (h-16); flush on desktop. */}
