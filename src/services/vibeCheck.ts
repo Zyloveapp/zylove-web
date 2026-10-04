@@ -164,26 +164,68 @@ export async function resetVibeCheckForTesting(matchId: string, uid: string): Pr
 
 // ─── Mutual vibe ─────────────────────────────────────────────────────────────
 // recordVibeRating stamps matches/{id}.mutualVibeAt when both people's
-// latest rating is "Loving it". Each stamp is celebrated once per browser.
+// latest rating is "Loving it". The live listener also reads both ratings
+// directly, so the partner sees it the moment the second rating lands even
+// if the stamp is late or missing. Each moment is celebrated once per user
+// per browser.
 
-export function subscribeMutualVibe(matchId: string, onChange: (at: number | null) => void): Unsubscribe {
-  return onSnapshot(
-    doc(db, 'matches', matchId),
-    (snap) => {
-      const at: unknown = snap.data()?.mutualVibeAt
-      onChange(at instanceof Timestamp ? at.toMillis() : null)
-    },
-    () => onChange(null),
-  )
+const MUTUAL_VIBE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+
+function millisOf(v: unknown): number | null {
+  return v instanceof Timestamp ? v.toMillis() : null
 }
 
-export function mutualVibeCelebrated(matchId: string, at: number): boolean {
-  const seen = readNumber(`zylove_vibe_celebrated_${matchId}`)
+// When the vibe became mutual: the server stamp, else both latest ratings
+// "Loving it" within a week of each other (the later one's time).
+function mutualAt(m: Record<string, unknown>, uid: string, partnerUid: string): number | null {
+  const stamped = millisOf(m.mutualVibeAt)
+  if (stamped !== null) return stamped
+  const mine = millisOf(m[`lastVibeRatedAt_${uid}`])
+  const theirs = millisOf(m[`lastVibeRatedAt_${partnerUid}`])
+  if (m[`lastVibeRating_${uid}`] !== 'loving_it' || m[`lastVibeRating_${partnerUid}`] !== 'loving_it') return null
+  if (mine === null || theirs === null || Math.abs(mine - theirs) > MUTUAL_VIBE_WINDOW_MS) return null
+  return Math.max(mine, theirs)
+}
+
+// Live; re-subscribes after an error so a dropped listener can't miss it.
+export function subscribeMutualVibe(
+  matchId: string,
+  uid: string,
+  partnerUid: string,
+  onChange: (at: number | null) => void,
+): Unsubscribe {
+  let unsub: Unsubscribe = () => {}
+  let retry: ReturnType<typeof setTimeout> | undefined
+  let stopped = false
+  const listen = () => {
+    unsub = onSnapshot(
+      doc(db, 'matches', matchId),
+      (snap) => onChange(mutualAt(snap.data() ?? {}, uid, partnerUid)),
+      () => {
+        if (!stopped) retry = setTimeout(listen, 3000)
+      },
+    )
+  }
+  listen()
+  return () => {
+    stopped = true
+    clearTimeout(retry)
+    unsub()
+  }
+}
+
+// Per user, so two accounts tested in one browser each get their own moment.
+const celebratedKey = (matchId: string, uid: string) => `zylove_vibe_celebrated_${uid}_${matchId}`
+
+export function mutualVibeCelebrated(matchId: string, uid: string, at: number): boolean {
+  const seen = readNumber(celebratedKey(matchId, uid))
   return seen !== null && seen >= at
 }
 
-export function markMutualVibeCelebrated(matchId: string, at: number): void {
-  writeNumber(`zylove_vibe_celebrated_${matchId}`, at)
+// Marked with the later of the moment and now, so the server stamp landing
+// just after the ratings-based detection doesn't celebrate a second time.
+export function markMutualVibeCelebrated(matchId: string, uid: string, at: number): void {
+  writeNumber(celebratedKey(matchId, uid), Math.max(at, Date.now()))
 }
 
 // ─── Openers ─────────────────────────────────────────────────────────────────

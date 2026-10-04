@@ -426,14 +426,14 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   // opening the chat later — then leave a system line where it happened.
   const [mutualVibeAt, setMutualVibeAt] = useState<number | null>(null)
   const [celebrating, setCelebrating] = useState(false)
-  useEffect(() => subscribeMutualVibe(matchId, setMutualVibeAt), [matchId])
+  useEffect(() => subscribeMutualVibe(matchId, uid, partnerUid, setMutualVibeAt), [matchId, uid, partnerUid])
   useEffect(() => {
-    if (mutualVibeAt === null || mutualVibeCelebrated(matchId, mutualVibeAt)) return
-    markMutualVibeCelebrated(matchId, mutualVibeAt)
+    if (mutualVibeAt === null || mutualVibeCelebrated(matchId, uid, mutualVibeAt)) return
+    markMutualVibeCelebrated(matchId, uid, mutualVibeAt)
     setCelebrating(true)
     const done = setTimeout(() => setCelebrating(false), CELEBRATION_MS)
     return () => clearTimeout(done)
-  }, [matchId, mutualVibeAt])
+  }, [matchId, uid, mutualVibeAt])
 
   const vibeLine =
     mutualVibeAt !== null && !celebrating ? (
@@ -612,7 +612,8 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
               disabled={consentBusy}
               aria-label="Share a photo"
               className={`rounded-xl p-2 hover:bg-white/10 disabled:opacity-40 ${
-                match.mode === 'play' ? 'text-[#E03131]' : 'text-[#7C9BFF]'
+                // Play: red. Spark: neutral grey.
+                match.mode === 'play' ? 'text-[#E03131]' : 'text-white/50 hover:text-white/80'
               }`}
             >
               <CameraIcon className="h-6 w-6" />
