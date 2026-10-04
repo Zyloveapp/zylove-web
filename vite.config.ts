@@ -39,4 +39,6 @@ const BUILD_ID = buildId()
 export default defineConfig({
   plugins: [react(), stampServiceWorker(BUILD_ID)],
   define: { 'import.meta.env.VITE_BUILD_ID': JSON.stringify(BUILD_ID) },
+  // No source maps in production: they'd publish the original source.
+  build: { sourcemap: false },
 })
