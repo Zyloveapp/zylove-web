@@ -479,6 +479,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
                       isMine={own}
                       uid={uid}
                       partnerPublicKey={partnerKey?.key ?? ''}
+                      mode={match.mode === 'play' ? 'play' : 'spark'}
                     />
                     <span className="mt-1 text-xs text-white/30">{messageTime(m.sentAt)}</span>
                   </div>

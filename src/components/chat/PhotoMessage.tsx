@@ -9,6 +9,8 @@ interface PhotoMessageProps {
   isMine: boolean
   uid: string
   partnerPublicKey: string
+  // Play gets its own icons on the tap-to-view card and destructed notice.
+  mode: 'spark' | 'play'
 }
 
 type Decrypted = { key: string; url: string | null }
@@ -47,7 +49,8 @@ function useDecryptedPhoto(enabled: boolean, props: PhotoMessageProps): string |
 const bubble = 'max-w-[75%] rounded-2xl px-4 py-2.5 text-sm'
 
 export default function PhotoMessage(props: PhotoMessageProps) {
-  const { matchId, messageId, photo, isMine } = props
+  const { matchId, messageId, photo, isMine, mode } = props
+  const play = mode === 'play'
   const [now, setNow] = useState(() => Date.now())
   const [viewing, setViewing] = useState(false)
   const [viewError, setViewError] = useState(false)
@@ -69,7 +72,7 @@ export default function PhotoMessage(props: PhotoMessageProps) {
   const showsImage = !expired && (!timed || (!isMine && photo.firstViewedAt !== null))
   const url = useDecryptedPhoto(showsImage, props)
 
-  if (expired) return <div className={`${bubble} bg-white/5 text-white/40`}>📸 Photo destructed</div>
+  if (expired) return <div className={`${bubble} bg-white/5 text-white/40`}>{play ? '🔥' : '📸'} Photo destructed</div>
 
   if (timed && isMine) {
     return (
@@ -104,7 +107,7 @@ export default function PhotoMessage(props: PhotoMessageProps) {
           <span className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white" />
         ) : (
           <span className="text-2xl" aria-hidden>
-            📷
+            {play ? '😈' : '📷'}
           </span>
         )}
         <span className="text-sm font-semibold">{viewError ? "Couldn't open it. Tap to retry." : 'Tap to view photo'}</span>
