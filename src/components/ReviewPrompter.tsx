@@ -12,13 +12,18 @@ import {
 } from '../services/zyloveScore'
 import ReviewModal from './chat/ReviewModal'
 
-type Pending = KnownMatch & { matchId: string }
+type Pending = KnownMatch & { matchId: string; generation: number }
+
+// Device memory of matches is keyed by match and generation, so a re-match
+// (same id, new generation) leaves the earlier one to be offered for review.
+const knownKey = (matchId: string, generation: number) => `${matchId}_${generation}`
 
 // "Match ended" review trigger. A match ends when it's blocked or unmatched,
-// or when its doc disappears — mobile's unmatch deletes it. Vanished matches
-// are spotted by comparing against the matches this device saw last time.
-// Each ended match is offered once (zylove_reviewed_{matchId}), and only
-// with a real conversation behind it.
+// when its doc disappears (mobile's unmatch deletes it), or when a re-match
+// replaces it under the same id. Ended-and-gone matches are spotted by
+// comparing against the matches this device saw last time. Each ended match
+// generation is offered once (zylove_reviewed_{matchId}_{generation}), and
+// only with a real conversation behind it.
 export default function ReviewPrompter() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const { pathname } = useLocation()
@@ -29,25 +34,57 @@ export default function ReviewPrompter() {
     return subscribeAllMatches(
       uid,
       (matches) => {
-        const known = loadKnownMatches(uid)
-        const present = new Set(matches.map((m) => m.matchId))
-        const eligible = (matchId: string, k: KnownMatch) => k.hadMessages && !isBotUid(k.partnerUid) && !reviewed(matchId)
+        // Entries saved before generations are keyed by bare matchId: the
+        // key is the id and the generation is unknown (0).
+        const known: Pending[] = Object.entries(loadKnownMatches(uid)).map(([key, k]) => ({
+          ...k,
+          matchId: k.matchId ?? key,
+          generation: k.generation ?? 0,
+        }))
+        const present = new Set(matches.map((m) => knownKey(m.matchId, m.startedAt)))
+        const presentIds = new Set(matches.map((m) => m.matchId))
+        const eligible = (p: Pending) => p.hadMessages && !isBotUid(p.partnerUid) && !reviewed(p.matchId, p.generation)
+        // Gone: its generation isn't live any more. An unknown-generation
+        // entry is gone only when its match id is.
+        const gone = (p: Pending) =>
+          p.generation > 0 ? !present.has(knownKey(p.matchId, p.generation)) : !presentIds.has(p.matchId)
 
-        const vanished: Pending[] = Object.entries(known)
-          .filter(([matchId, k]) => !present.has(matchId) && eligible(matchId, k))
-          .map(([matchId, k]) => ({ ...k, matchId }))
+        const vanished = known.filter((p) => gone(p) && eligible(p))
         const blocked: Pending[] = matches
           .filter((m) => m.ended)
-          .map((m) => ({ matchId: m.matchId, partnerUid: m.partnerUid, name: m.name, hadMessages: m.lastMessageAt > 0 }))
-          .filter((p) => eligible(p.matchId, p))
+          .map((m) => ({
+            matchId: m.matchId,
+            generation: m.startedAt,
+            partnerUid: m.partnerUid,
+            name: m.name,
+            hadMessages: m.lastMessageAt > 0,
+          }))
+          .filter(eligible)
 
         // Remember live matches, plus vanished ones not yet offered, so a
         // closed tab doesn't lose them.
         const next: Record<string, KnownMatch> = {}
-        for (const m of matches) {
-          if (!m.ended) next[m.matchId] = { partnerUid: m.partnerUid, name: m.name, hadMessages: m.lastMessageAt > 0 }
+        const remember = (p: Pending) => {
+          next[knownKey(p.matchId, p.generation)] = {
+            matchId: p.matchId,
+            generation: p.generation,
+            partnerUid: p.partnerUid,
+            name: p.name,
+            hadMessages: p.hadMessages,
+          }
         }
-        for (const p of vanished) next[p.matchId] = { partnerUid: p.partnerUid, name: p.name, hadMessages: p.hadMessages }
+        for (const m of matches) {
+          if (!m.ended) {
+            remember({
+              matchId: m.matchId,
+              generation: m.startedAt,
+              partnerUid: m.partnerUid,
+              name: m.name,
+              hadMessages: m.lastMessageAt > 0,
+            })
+          }
+        }
+        for (const p of vanished) remember(p)
         saveKnownMatches(uid, next)
 
         setQueue({ uid, items: [...vanished, ...blocked] })
@@ -63,9 +100,18 @@ export default function ReviewPrompter() {
 
   function close() {
     if (!current) return
-    markReviewed(current.matchId)
-    setQueue((q) => ({ ...q, items: q.items.filter((p) => p.matchId !== current.matchId) }))
+    markReviewed(current.matchId, current.generation)
+    setQueue((q) => ({ ...q, items: q.items.filter((p) => p !== current) }))
   }
 
-  return <ReviewModal key={current.matchId} matchId={current.matchId} partnerUid={current.partnerUid} name={current.name} onClose={close} />
+  return (
+    <ReviewModal
+      key={knownKey(current.matchId, current.generation)}
+      matchId={current.matchId}
+      generation={current.generation}
+      partnerUid={current.partnerUid}
+      name={current.name}
+      onClose={close}
+    />
+  )
 }

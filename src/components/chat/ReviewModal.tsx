@@ -6,6 +6,8 @@ import { REVIEW_CATEGORY_DEFS, type ReviewCategoryDef, type ReviewTone } from '.
 
 interface ReviewModalProps {
   matchId: string
+  // Which match between these two (MatchEntry.startedAt); 0 if unknown.
+  generation: number
   partnerUid: string
   name: string
   onClose: () => void
@@ -37,6 +39,7 @@ const SECTIONS: { tone: ReviewTone; title: string; note?: string }[] = [
 // Score. Only offered once a match has ended or gone cold, never mid-chat.
 export default function ReviewModal({
   matchId,
+  generation,
   partnerUid,
   name,
   onClose,
@@ -68,14 +71,14 @@ export default function ReviewModal({
     const flagPhone = () =>
       isSeriousReport(selected) ? reportAndBan(partnerUid, matchId, selected).catch(() => {}) : Promise.resolve()
     try {
-      await submitReview(matchId, partnerUid, selected)
+      await submitReview(matchId, generation, partnerUid, selected)
       await flagPhone()
-      markReviewed(matchId)
+      markReviewed(matchId, generation)
       setDone(true)
     } catch (err) {
       if (err instanceof FirebaseError && err.code === 'functions/already-exists') {
         await flagPhone()
-        markReviewed(matchId)
+        markReviewed(matchId, generation)
         setDone(true)
       } else {
         setError("Couldn't send your review. Try again.")

@@ -251,11 +251,11 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     if (reviewChecked.current || messages === null || showFirstChat) return
     reviewChecked.current = true
     // Never stack on a vibe check fired by this open.
-    if (vibeCheckFired.current || isBotUid(partnerUid) || reviewed(matchId) || coldReviewShown(matchId)) return
+    if (vibeCheckFired.current || isBotUid(partnerUid) || reviewed(matchId, match.startedAt) || coldReviewShown(matchId, match.startedAt)) return
     if (!conversationCold(conversation[conversation.length - 1]?.sentAt ?? null, conversation.length)) return
-    markColdReviewShown(matchId)
+    markColdReviewShown(matchId, match.startedAt)
     setShowReview(true)
-  }, [messages, showFirstChat, conversation, partnerUid, matchId])
+  }, [messages, showFirstChat, conversation, partnerUid, matchId, match.startedAt])
 
   // Leaving the chat (or switching matches) clears our typing status.
   useEffect(
@@ -416,7 +416,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     setShowActions(false)
     // Same rules as the app-wide prompt: a real person, a real conversation,
     // not already reviewed.
-    if (!isBotUid(partnerUid) && conversation.length > 0 && !reviewed(matchId)) setExitReview(true)
+    if (!isBotUid(partnerUid) && conversation.length > 0 && !reviewed(matchId, match.startedAt)) setExitReview(true)
     else leave()
   }
 
@@ -736,23 +736,24 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
       )}
 
       {showReport && (
-        <ReviewModal matchId={matchId} partnerUid={partnerUid} name={match.name} onClose={() => setShowReport(false)} />
+        <ReviewModal matchId={matchId} generation={match.startedAt} partnerUid={partnerUid} name={match.name} onClose={() => setShowReport(false)} />
       )}
 
       {exitReview && (
         <ReviewModal
           matchId={matchId}
+          generation={match.startedAt}
           partnerUid={partnerUid}
           name={match.name}
           onClose={() => {
-            markReviewed(matchId)
+            markReviewed(matchId, match.startedAt)
             leave()
           }}
         />
       )}
 
       {showReview && (
-        <ReviewModal matchId={matchId} partnerUid={partnerUid} name={match.name} onClose={() => setShowReview(false)} />
+        <ReviewModal matchId={matchId} generation={match.startedAt} partnerUid={partnerUid} name={match.name} onClose={() => setShowReview(false)} />
       )}
     </div>
   )

@@ -30,15 +30,20 @@ export function phoneHash(phone: string): string {
   return createHash('sha256').update(phone.trim()).digest('hex')
 }
 
-// Both people were in this match: a live match doc, or the 90-day record
-// behavior.ts keeps once mobile's unmatch deletes it.
+// Both people were in this match: a live match doc, or one of the 90-day
+// records behavior.ts keeps when a match ends — pastConnections/
+// {matchId}_{generation}, or {matchId} for records from before generations.
 async function wereMatched(matchId: string, a: string, b: string): Promise<boolean> {
   const db = getFirestore()
-  for (const ref of [db.collection('matches').doc(matchId), db.collection('pastConnections').doc(matchId)]) {
-    const users = participants((await ref.get()).data())
-    if (users.includes(a) && users.includes(b)) return true
+  const both = (data: DocumentData | undefined) => {
+    const users = participants(data)
+    return users.includes(a) && users.includes(b)
   }
-  return false
+  for (const ref of [db.collection('matches').doc(matchId), db.collection('pastConnections').doc(matchId)]) {
+    if (both((await ref.get()).data())) return true
+  }
+  const past = await db.collection('pastConnections').where('matchId', '==', matchId).get()
+  return past.docs.some((d) => both(d.data()))
 }
 
 // ─── Phone-level ban ─────────────────────────────────────────────────────────

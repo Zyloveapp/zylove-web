@@ -59,11 +59,18 @@ export function subscribeScore(
   )
 }
 
-export async function submitReview(matchId: string, reviewedUid: string, categories: string[]): Promise<void> {
-  await httpsCallable<{ matchId: string; reviewedUid: string; categories: string[] }, { success: true }>(
-    functions,
-    'submitReview',
-  )({ matchId, reviewedUid, categories })
+// generation: which match between these two (MatchEntry.startedAt); 0 when
+// unknown, and the server picks the latest.
+export async function submitReview(
+  matchId: string,
+  generation: number,
+  reviewedUid: string,
+  categories: string[],
+): Promise<void> {
+  await httpsCallable<
+    { matchId: string; generation?: number; reviewedUid: string; categories: string[] },
+    { success: true }
+  >(functions, 'submitReview')({ matchId, ...(generation > 0 ? { generation } : {}), reviewedUid, categories })
 }
 
 // ─── Review prompts ──────────────────────────────────────────────────────────
@@ -96,11 +103,17 @@ function writeFlag(key: string): void {
   }
 }
 
-// Set on submit and on dismissing the ended-match prompt: it asks once.
-export const reviewed = (matchId: string) => readFlag(`zylove_reviewed_${matchId}`)
-export const markReviewed = (matchId: string) => writeFlag(`zylove_reviewed_${matchId}`)
-export const coldReviewShown = (matchId: string) => readFlag(`zylove_cold_review_${matchId}`)
-export const markColdReviewShown = (matchId: string) => writeFlag(`zylove_cold_review_${matchId}`)
+// Set on submit and on dismissing the ended-match prompt: it asks once per
+// match generation. Flags from before generations (no suffix) still count.
+const genKey = (matchId: string, generation: number) => (generation > 0 ? `${matchId}_${generation}` : matchId)
+export const reviewed = (matchId: string, generation: number) =>
+  readFlag(`zylove_reviewed_${genKey(matchId, generation)}`) || readFlag(`zylove_reviewed_${matchId}`)
+export const markReviewed = (matchId: string, generation: number) =>
+  writeFlag(`zylove_reviewed_${genKey(matchId, generation)}`)
+export const coldReviewShown = (matchId: string, generation: number) =>
+  readFlag(`zylove_cold_review_${genKey(matchId, generation)}`) || readFlag(`zylove_cold_review_${matchId}`)
+export const markColdReviewShown = (matchId: string, generation: number) =>
+  writeFlag(`zylove_cold_review_${genKey(matchId, generation)}`)
 
 export function conversationCold(lastMessageAt: number | null, messageCount: number): boolean {
   return messageCount >= COLD_MIN_MESSAGES && lastMessageAt !== null && Date.now() - lastMessageAt >= COLD_AFTER_MS
@@ -109,6 +122,9 @@ export function conversationCold(lastMessageAt: number | null, messageCount: num
 // Matches seen on this device, so ones that vanish (mobile's unmatch deletes
 // the doc) can still be offered for review on the next visit.
 export interface KnownMatch {
+  // Absent on entries saved before generations (keyed by matchId then).
+  matchId?: string
+  generation?: number
   partnerUid: string
   name: string
   hadMessages: boolean

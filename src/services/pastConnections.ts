@@ -6,6 +6,8 @@ import { functions } from './firebase'
 // ended matches live in a server-only collection.
 export interface PastConnection {
   matchId: string
+  // Which match between these two; 0 for records from before generations.
+  generation: number
   otherUid: string
   name: string
   matchedAt: number

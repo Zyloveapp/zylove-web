@@ -20,10 +20,12 @@ export interface MatchEntry {
   lastMessagePreview: string | null
   lastMessageAt: number // ms, 0 if no messages yet
   matchedAt: number // ms
-  // When this match began (earliest of matchedAt/createdAt; 0 if unknown).
-  // Match ids are the sorted uid pair, so a re-match reuses the id — and the
-  // old match's messages subcollection, which deleting the doc leaves behind.
-  // Anything sent before this belongs to an earlier match.
+  // This match's generation: when it began (matchGeneration, else the
+  // earliest of matchedAt/createdAt; 0 if unknown) — the same value the
+  // server derives (functions/src/matchGeneration.ts). Match ids are the
+  // sorted uid pair, so a re-match reuses the id; anything in the messages
+  // subcollection sent before this belongs to an earlier match, and reviews
+  // are per generation.
   startedAt: number // ms
   lastSenderId: string | null
   mode: Mode
@@ -67,7 +69,10 @@ export function toEntry(matchId: string, data: DocumentData, uid: string): Match
     lastMessagePreview: str(data.lastMessagePreview),
     lastMessageAt: toMillis(data.lastMessageAt),
     matchedAt: toMillis(data.matchedAt) || toMillis(data.createdAt),
-    startedAt: earliest(toMillis(data.matchedAt), toMillis(data.createdAt)),
+    startedAt:
+      typeof data.matchGeneration === 'number' && data.matchGeneration > 0
+        ? data.matchGeneration
+        : earliest(toMillis(data.matchedAt), toMillis(data.createdAt)),
     lastSenderId: str(data.lastSenderId),
     mode: data.mode === 'play' ? 'play' : 'spark',
     ended: data.isBlocked === true || (data.unmatchedAt !== undefined && data.unmatchedAt !== null),

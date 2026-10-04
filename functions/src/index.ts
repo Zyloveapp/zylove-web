@@ -47,6 +47,7 @@ export { updateDisplayName } from './displayName'
 export { processBotLikeBacks, queueBotLikeBack } from './botLikeBack'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
+import { countMessages, generationOf, participants, pastConnectionId } from './matchGeneration'
 import {
   FLAG_CATEGORY_IDS,
   MAX_NEGATIVE_DELTA,
@@ -465,11 +466,15 @@ export const likeBack = onCall(
         tx.get(db.collection('users').doc(likerUid)),
       ])
       if (!likerSnap.exists) throw new HttpsError('not-found', 'That profile no longer exists')
+      // matchGeneration = matchedAt (see matchGeneration.ts).
+      const now = Timestamp.now()
       tx.create(matchRef, {
         matchId,
         users: [callerId, likerUid].sort(),
         mode,
-        matchedAt: FieldValue.serverTimestamp(),
+        matchedAt: now,
+        createdAt: now,
+        matchGeneration: now.toMillis(),
         lastMessagePreview: null,
         hasUnread: false,
         isBlocked: false,
@@ -573,7 +578,9 @@ export const recordVibeRating = onCall(
     const cooldownMs = match.mode === 'play' || match.mode === 'entanglement' ? VIBE_COOLDOWN_MS.play : VIBE_COOLDOWN_MS.spark
 
     const db = getFirestore()
-    const vibeRef = db.collection('vibeChecks').doc(`${matchId}_${callerId}`)
+    // One per rater per match generation, so a re-match starts fresh.
+    const generation = generationOf(match)
+    const vibeRef = db.collection('vibeChecks').doc(`${matchId}_${generation}_${callerId}`)
     // The client cooldown lives in localStorage, so enforce it here too —
     // otherwise repeated calls could farm points for a friend. Admins skip it
     // for testing, but a repeat inside the window moves no scores: the
@@ -589,7 +596,7 @@ export const recordVibeRating = onCall(
     // update() rather than set(merge) on users/* so a deleted profile fails
     // the batch instead of being recreated as a stub doc.
     const batch = db.batch()
-    batch.set(vibeRef, { matchId, raterUid: callerId, rating: vibe, createdAt: FieldValue.serverTimestamp() })
+    batch.set(vibeRef, { matchId, generation, raterUid: callerId, rating: vibe, createdAt: FieldValue.serverTimestamp() })
     batch.update(db.collection('matches').doc(matchId), {
       [`lastVibeRating_${callerId}`]: vibe,
       [`lastVibeRatedAt_${callerId}`]: FieldValue.serverTimestamp(),
@@ -842,25 +849,63 @@ function parseCategories(data: unknown): string[] {
   return categories
 }
 
-// Like requireMatchPair, but also accepts matches mobile's unmatch has
-// deleted. Their messages survive the delete, and messages can only be
-// written by participants while the match exists, so the caller's message
-// count check (≥ 1) proves the match was real.
-async function requireReviewablePair(matchId: string, callerId: string, otherUid: string): Promise<{ ended: boolean }> {
+interface ReviewTarget {
+  ended: boolean
+  generation: number
+  // Messages in that generation — the "had a conversation" check.
+  messageCount: number
+}
+
+// Which match generation a review is for, and whether both people were in
+// it. The live match doc when its generation is the one asked about (or
+// none was asked); otherwise the pastConnections record behavior.ts writes
+// when a match ends, which keeps the message count after the messages are
+// purged. requested: the generation the client is reviewing, if it sent one
+// (older clients and pre-generation matches don't).
+async function resolveReviewTarget(
+  matchId: string,
+  callerId: string,
+  otherUid: string,
+  requested: number | null,
+): Promise<ReviewTarget> {
   if (otherUid === callerId) throw new HttpsError('invalid-argument', 'reviewedUid must be your match')
-  const snap = await getFirestore().collection('matches').doc(matchId).get()
-  const data = snap.data()
-  if (data) {
-    const users: unknown = data.users ?? data.participants
-    if (!Array.isArray(users) || !users.includes(callerId) || !users.includes(otherUid)) {
-      throw new HttpsError('permission-denied', 'Not a participant in this match')
+  const db = getFirestore()
+  const notParticipant = () => new HttpsError('permission-denied', 'Not a participant in this match')
+  const requireBoth = (data: DocumentData | undefined) => {
+    const users = participants(data)
+    if (!users.includes(callerId) || !users.includes(otherUid)) throw notParticipant()
+  }
+
+  const live = (await db.collection('matches').doc(matchId).get()).data()
+  if (live) {
+    requireBoth(live)
+    const generation = generationOf(live)
+    if (requested === null || requested === generation) {
+      return { ended: matchEnded(live), generation, messageCount: (await countMessages(matchId, generation)).total }
     }
-    return { ended: matchEnded(data) }
   }
-  if (matchId !== [callerId, otherUid].sort().join('_')) {
-    throw new HttpsError('permission-denied', 'Not a participant in this match')
+
+  // An ended generation: its record, by the generation asked for, else the
+  // newest one for this match, else a record from before generations.
+  const past = db.collection('pastConnections')
+  let record: DocumentData | undefined
+  if (requested !== null) record = (await past.doc(pastConnectionId(matchId, requested)).get()).data()
+  else {
+    const all = (await past.where('matchId', '==', matchId).get()).docs.map((d) => d.data())
+    record = all.sort((a, b) => num(b.generation, 0) - num(a.generation, 0))[0] ?? (await past.doc(matchId).get()).data()
   }
-  return { ended: true }
+  if (record) {
+    requireBoth(record)
+    const generation = num(record.generation, 0)
+    const messageCount =
+      typeof record.messageCount === 'number' ? record.messageCount : (await countMessages(matchId, generation)).total
+    return { ended: true, generation, messageCount }
+  }
+
+  // Ended before past connections were kept: only the id vouches for the
+  // pair, and messages (which only participants can write) for the match.
+  if (live || matchId !== [callerId, otherUid].sort().join('_')) throw notParticipant()
+  return { ended: true, generation: 0, messageCount: (await countMessages(matchId, 0)).total }
 }
 
 // Queues the reviewed user for the safety team once a category crosses its
@@ -900,7 +945,7 @@ async function checkModeration(reviewedUid: string, reviewerUid: string, matchId
   }
 }
 
-// One anonymous review per reviewer per match.
+// One anonymous review per reviewer per match generation.
 export const submitReview = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true; newScore: number; newTier: ZyloveScoreTier }> => {
@@ -910,10 +955,15 @@ export const submitReview = onCall(
     const reviewedUid = requireString(request.data, 'reviewedUid')
     const categories = parseCategories(request.data)
     if (BOT_PREFIXES.some((p) => reviewedUid.startsWith(p))) throw new HttpsError('invalid-argument', 'Bots cannot be reviewed')
-    const { ended } = await requireReviewablePair(matchId, callerId, reviewedUid)
+    const requested: unknown = (request.data as Record<string, unknown> | null)?.generation
+    const { ended, generation, messageCount } = await resolveReviewTarget(
+      matchId,
+      callerId,
+      reviewedUid,
+      typeof requested === 'number' && Number.isFinite(requested) && requested > 0 ? requested : null,
+    )
 
     const db = getFirestore()
-    const messageCount = (await db.collection(`matches/${matchId}/messages`).count().get()).data().count
     if (messageCount < 1) throw new HttpsError('failed-precondition', 'Have a conversation before leaving a review')
 
     const positive = categories.filter((c) => REVIEW_TONE.get(c) === 'positive')
@@ -924,13 +974,24 @@ export const submitReview = onCall(
     // (not even counted) until the match ends.
     const countedNow = negative.length === 0 || ended || positive.length > 0
 
-    const reviewRef = db.collection('reviews').doc(`${matchId}_${callerId}`)
+    // One per reviewer per match generation. Reviews written before
+    // generations were keyed {matchId}_{uid}; one of those made during this
+    // generation still counts as this generation's review.
+    const reviewRef = db.collection('reviews').doc(`${matchId}_${generation}_${callerId}`)
+    const legacyReviewRef = db.collection('reviews').doc(`${matchId}_${callerId}`)
     const userRef = db.collection('users').doc(reviewedUid)
     const scoreRef = userRef.collection('zyloveScore').doc('current')
 
     const result = await db.runTransaction(async (tx) => {
-      const [existing, scoreSnap, userSnap] = await Promise.all([tx.get(reviewRef), tx.get(scoreRef), tx.get(userRef)])
-      if (existing.exists) throw new HttpsError('already-exists', 'You already reviewed this connection')
+      const [existing, legacy, scoreSnap, userSnap] = await Promise.all([
+        tx.get(reviewRef),
+        tx.get(legacyReviewRef),
+        tx.get(scoreRef),
+        tx.get(userRef),
+      ])
+      const legacyAt: unknown = legacy.data()?.createdAt
+      const legacyThisGeneration = legacy.exists && (!(legacyAt instanceof Timestamp) || legacyAt.toMillis() >= generation)
+      if (existing.exists || legacyThisGeneration) throw new HttpsError('already-exists', 'You already reviewed this connection')
       if (!userSnap.exists) throw new HttpsError('not-found', 'That profile no longer exists')
 
       const current = scoreSnap.data() ?? {}
@@ -947,6 +1008,7 @@ export const submitReview = onCall(
         reviewerUid: callerId,
         reviewedUid,
         matchId,
+        generation,
         categories,
         positiveCategories: positive,
         neutralCategories: neutral,
@@ -1059,13 +1121,20 @@ export const processMatchEnd = onDocumentWritten(
     const before = event.data?.before.data()
     const after = event.data?.after.data()
     if (!before) return
-    // Deletion always counts; applyPendingNegative skips anything already applied.
-    const endedNow = after === undefined || (matchEnded(after) && !matchEnded(before))
+    // Deletion always counts, and so does a re-match overwriting the doc
+    // (a new generation); applyPendingNegative skips anything already applied.
+    const generation = generationOf(before)
+    const replaced = after !== undefined && generationOf(after) !== generation
+    const endedNow = after === undefined || replaced || (matchEnded(after) && !matchEnded(before))
     if (!endedNow) return
 
     const { matchId } = event.params
     const reviews = await getFirestore().collection('reviews').where('matchId', '==', matchId).get()
-    const pending = reviews.docs.filter((d) => d.data().negativePending === true)
+    // The ended generation's reviews (pre-generation ones carry none).
+    const pending = reviews.docs.filter((d) => {
+      const r = d.data()
+      return r.negativePending === true && (typeof r.generation !== 'number' || r.generation === generation)
+    })
     for (const d of pending) await applyPendingNegative(d.ref)
     if (pending.length > 0) logger.info('processMatchEnd: applied held negative reviews', { matchId, count: pending.length })
   },

@@ -3,6 +3,8 @@ import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
+import { countMessages, generationOf, participants, pastConnectionId } from './matchGeneration'
+import { purgeMatchContent } from './matchCleanup'
 
 // Behavioral safety signals feeding behaviorRiskScore.
 //
@@ -11,10 +13,11 @@ import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase
 // counts there would be public and self-resettable. Flags go to reviewQueue,
 // never onto the user doc. Bot chats (zbot-/seed-, or isBot) are ignored.
 //
-// pastConnections/{matchId} keeps names and dates (no messages) of matches
-// that ended, for 90 days, so "Report a past connection" still works after
-// mobile's unmatch deletes the match doc. Server-only; read via
-// getPastConnections.
+// pastConnections/{matchId}_{generation} keeps names, dates and message
+// counts (never messages) of matches that ended, for 90 days, so "Report a
+// past connection" and reviews still work after the match doc and its
+// messages are gone. Older records are keyed {matchId} alone. Server-only;
+// read via getPastConnections.
 
 const SIGNALS = 'behaviorSignals'
 const PAST = 'pastConnections'
@@ -34,11 +37,6 @@ function toMillis(v: unknown): number {
 
 function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0
-}
-
-function participants(match: DocumentData): string[] {
-  const users: unknown = match.users ?? match.participants
-  return Array.isArray(users) ? users.filter((u): u is string => typeof u === 'string') : []
 }
 
 const isBotUid = (uid: string) => uid.startsWith('zbot-') || uid.startsWith('seed-')
@@ -63,28 +61,94 @@ async function bump(uid: string, field: string): Promise<void> {
     .set({ [field]: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
 }
 
-// Did each participant send at least one message? Messages outlive mobile's
-// match delete, so this works for ended matches too.
-async function sentCounts(matchId: string, users: string[]): Promise<number[]> {
-  const messages = getFirestore().collection(`matches/${matchId}/messages`)
-  return Promise.all(users.map(async (u) => (await messages.where('senderId', '==', u).count().get()).data().count))
-}
-
 // ─── onMatchBehaviorUpdate ───────────────────────────────────────────────────
 
-// Match velocity on create, block rate on isBlocked, fast unmatches when a
-// match ends (deleted by mobile's unmatch, or unmatchedAt set).
+// One match's life, keyed by generation (see matchGeneration.ts):
+//   created → match velocity for both people (and stamp matchGeneration if
+//             the writer didn't, e.g. mobile's onLike)
+//   blocked → block counts
+//   ended   → pastConnections record (with message counts, since the
+//             messages are about to go), fast-unmatch signal
+//   deleted → purge its messages and chat photos (matchCleanup.ts)
+// A match ends when unmatchedAt is set, the doc is deleted (mobile's
+// unmatch), or a re-match overwrites it in place (mobile's onLike set()).
+// An overwritten generation's content isn't purged here — clients already
+// hide it (messages before the generation), and it goes with the doc's
+// eventual delete, which purges everything older than any live generation.
 export const onMatchBehaviorUpdate = onDocumentWritten(
-  { document: 'matches/{matchId}', timeoutSeconds: 60, memory: '256MiB' },
+  { document: 'matches/{matchId}', timeoutSeconds: 300, memory: '512MiB' },
   async (event) => {
     const before = event.data?.before.data()
     const after = event.data?.after.data()
     const { matchId } = event.params
     const db = getFirestore()
+    const beforeGen = generationOf(before)
+    const afterGen = generationOf(after)
+    // Same id, new match: the old generation ended without a delete.
+    const replaced = Boolean(before && after && beforeGen && afterGen && beforeGen !== afterGen)
 
-    // Created: count it for both people.
-    if (!before && after) {
-      if (isBotMatch(after)) return
+    if (after && typeof after.matchGeneration !== 'number' && afterGen > 0) {
+      await event.data?.after.ref.update({ matchGeneration: afterGen }).catch((err: unknown) =>
+        logger.warn('onMatchBehaviorUpdate: matchGeneration stamp failed', {
+          matchId,
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      )
+    }
+
+    if (before && !isBotMatch(before)) {
+      const users = participants(before)
+
+      // Blocked: one more block received / initiated.
+      if (after && !replaced && after.isBlocked === true && before.isBlocked !== true) {
+        const blocker: unknown = after.blockedBy
+        const blocked = users.find((u) => u !== blocker)
+        if (typeof blocker === 'string' && users.includes(blocker) && blocked) {
+          await Promise.all([bump(blocked, 'receivedBlockCount'), bump(blocker, 'initiatedBlockCount')])
+        }
+      }
+
+      const unmatchedNow = after === undefined || (!replaced && Boolean(after.unmatchedAt) && !before.unmatchedAt)
+      if (unmatchedNow || replaced) {
+        const matchedAt = matchedAtOf(before)
+        const endedAt = after && !replaced ? toMillis(after.unmatchedAt) || Date.now() : Date.now()
+        const counts = await countMessages(matchId, beforeGen, replaced ? afterGen : null)
+
+        // Names, dates and message counts for "Report a past connection" and
+        // for reviewing an ended match (90 days). Never message content.
+        await db
+          .collection(PAST)
+          .doc(pastConnectionId(matchId, beforeGen))
+          .set({
+            matchId,
+            generation: beforeGen,
+            users,
+            names: Object.fromEntries(users.map((u) => [u, displayName(before, u)])),
+            matchedAt,
+            endedAt,
+            mode: before.mode === 'play' ? 'play' : 'spark',
+            messageCount: counts.total,
+            sentCounts: Object.fromEntries(users.map((u) => [u, counts.bySender[u] ?? 0])),
+          })
+
+        // Matched, talked, gone within a day — attributed to whoever ended it.
+        if (unmatchedNow && matchedAt && endedAt - matchedAt < FAST_UNMATCH_MS && users.every((u) => (counts.bySender[u] ?? 0) > 0)) {
+          let unmatcher: unknown = after?.unmatchedBy
+          if (typeof unmatcher !== 'string') {
+            const reason = await db.collection('unmatchReasons').where('matchId', '==', matchId).limit(1).get()
+            unmatcher = reason.docs[0]?.data().reporterUid
+          }
+          if (typeof unmatcher === 'string' && users.includes(unmatcher)) await bump(unmatcher, 'fastUnmatchCount')
+        }
+      }
+    }
+
+    // Deleted: its messages and photos go, bot matches too. After the
+    // record above, which counts them first.
+    if (before && after === undefined) await purgeMatchContent(matchId, null)
+
+    // Created (or re-created in place): count it for both people.
+    if (after && (!before || replaced) && !isBotMatch(after)) {
       const now = Date.now()
       await Promise.all(
         participants(after).map((uid) =>
@@ -105,48 +169,6 @@ export const onMatchBehaviorUpdate = onDocumentWritten(
           }),
         ),
       )
-      return
-    }
-    if (!before || isBotMatch(before)) return
-    const users = participants(before)
-
-    // Blocked: one more block received / initiated.
-    if (after && after.isBlocked === true && before.isBlocked !== true) {
-      const blocker: unknown = after.blockedBy
-      const blocked = users.find((u) => u !== blocker)
-      if (typeof blocker === 'string' && users.includes(blocker) && blocked) {
-        await Promise.all([bump(blocked, 'receivedBlockCount'), bump(blocker, 'initiatedBlockCount')])
-      }
-    }
-
-    const endedNow = after === undefined || (Boolean(after.unmatchedAt) && !before.unmatchedAt)
-    if (!endedNow) return
-    const matchedAt = matchedAtOf(before)
-    const endedAt = after ? toMillis(after.unmatchedAt) || Date.now() : Date.now()
-
-    // Keep names and dates for "Report a past connection" (90 days).
-    await db
-      .collection(PAST)
-      .doc(matchId)
-      .set({
-        users,
-        names: Object.fromEntries(users.map((u) => [u, displayName(before, u)])),
-        matchedAt,
-        endedAt,
-        mode: before.mode === 'play' ? 'play' : 'spark',
-      })
-
-    // Matched, talked, gone within a day — attributed to whoever ended it.
-    if (matchedAt && endedAt - matchedAt < FAST_UNMATCH_MS) {
-      const counts = await sentCounts(matchId, users)
-      if (counts.every((c) => c > 0)) {
-        let unmatcher: unknown = after?.unmatchedBy
-        if (typeof unmatcher !== 'string') {
-          const reason = await db.collection('unmatchReasons').where('matchId', '==', matchId).limit(1).get()
-          unmatcher = reason.docs[0]?.data().reporterUid
-        }
-        if (typeof unmatcher === 'string' && users.includes(unmatcher)) await bump(unmatcher, 'fastUnmatchCount')
-      }
     }
   },
 )
@@ -236,7 +258,8 @@ export async function recomputeBehaviorRisk(uid: string): Promise<number> {
 // ─── Daily job ───────────────────────────────────────────────────────────────
 
 // Matches 48h–14d old where one side wrote and the other never answered:
-// one noResponse for the silent side, once per match (behaviorChecks).
+// one noResponse for the silent side, once per match generation
+// (behaviorChecks/{matchId}_{generation}; this generation's messages only).
 async function sweepNoResponse(): Promise<number> {
   const db = getFirestore()
   const now = Date.now()
@@ -246,13 +269,14 @@ async function sweepNoResponse(): Promise<number> {
     const match = m.data()
     const age = now - matchedAtOf(match)
     if (isBotMatch(match) || match.isBlocked === true || age < NO_RESPONSE_AFTER_MS || age > NO_RESPONSE_WINDOW_MS) continue
-    const checkRef = db.collection('behaviorChecks').doc(m.id)
+    const generation = generationOf(match)
+    const checkRef = db.collection('behaviorChecks').doc(`${m.id}_${generation}`)
     if ((await checkRef.get()).exists) continue
     const users = participants(match)
     if (users.length !== 2) continue
-    const counts = await sentCounts(m.id, users)
-    if (counts.every((c) => c === 0)) continue // nobody's written yet; look again tomorrow
-    const silent = users.filter((_, i) => counts[i] === 0)
+    const { bySender } = await countMessages(m.id, generation)
+    if (users.every((u) => !bySender[u])) continue // nobody's written yet; look again tomorrow
+    const silent = users.filter((u) => !bySender[u])
     for (const uid of silent) await bump(uid, 'noResponseCount')
     counted += silent.length
     await checkRef.set({ checkedAt: FieldValue.serverTimestamp(), noResponse: silent })
@@ -287,6 +311,9 @@ export const computeBehaviorScore = onSchedule(
 
 interface PastConnection {
   matchId: string
+  // Which match between these two (see matchGeneration.ts); 0 for records
+  // kept before generations existed.
+  generation: number
   otherUid: string
   name: string
   matchedAt: number
@@ -320,6 +347,8 @@ export const getPastConnections = onCall(
       db.collection(PAST).where('users', 'array-contains', uid).get(),
     ])
 
+    // Keyed by match and generation: a pair that matched twice is listed
+    // twice. A live match replaces its own ended-record twin.
     const byId = new Map<string, PastConnection>()
     for (const d of past.docs) {
       const p = d.data()
@@ -328,8 +357,11 @@ export const getPastConnections = onCall(
       if (!otherUid || isBotUid(otherUid) || toMillis(p.matchedAt) < since) continue
       if (mode && connectionMode(p) !== mode) continue
       const name: unknown = p.names?.[otherUid]
-      byId.set(d.id, {
-        matchId: d.id,
+      const matchId = typeof p.matchId === 'string' ? p.matchId : d.id
+      const generation = num(p.generation)
+      byId.set(pastConnectionId(matchId, generation), {
+        matchId,
+        generation,
         otherUid,
         name: typeof name === 'string' ? name : 'Someone',
         matchedAt: toMillis(p.matchedAt),
@@ -341,14 +373,19 @@ export const getPastConnections = onCall(
       const otherUid = participants(m).find((u) => u !== uid)
       if (!otherUid || isBotMatch(m) || matchedAtOf(m) < since) continue
       if (mode && connectionMode(m) !== mode) continue
-      byId.set(d.id, {
+      const generation = generationOf(m)
+      byId.set(pastConnectionId(d.id, generation), {
         matchId: d.id,
+        generation,
         otherUid,
         name: displayName(m, otherUid),
         matchedAt: matchedAtOf(m),
         ended: m.isBlocked === true,
       })
     }
-    return { connections: [...byId.values()].sort((a, b) => b.matchedAt - a.matchedAt) }
+    // A pre-generation record (0) duplicates any other entry for its match.
+    const all = [...byId.values()]
+    const connections = all.filter((c) => c.generation !== 0 || !all.some((o) => o.matchId === c.matchId && o.generation !== 0))
+    return { connections: connections.sort((a, b) => b.matchedAt - a.matchedAt) }
   },
 )

@@ -161,8 +161,10 @@ async function likeBack(pendingRef: FirebaseFirestore.DocumentReference, pending
       participants: [userA, userB],
       mode,
       pairId: matchId,
-      matchedAt: FieldValue.serverTimestamp(),
+      // matchGeneration = matchedAt (see matchGeneration.ts).
+      matchedAt: now,
       createdAt: now,
+      matchGeneration: now.toMillis(),
       conversationId: matchId,
       participantSnapshots: { [botUid]: snapshot(bot.data() ?? {}), [likerUid]: snapshot(liker.data() ?? {}) },
       hasUnread: false,

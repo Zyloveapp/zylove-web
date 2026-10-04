@@ -57,7 +57,7 @@ export default function ReportPastConnection() {
           ) : (
             <ul className="divide-y divide-white/5">
               {connections.map((c) => (
-                <li key={c.matchId} className="flex items-center justify-between gap-4 px-5 py-4">
+                <li key={`${c.matchId}_${c.generation}`} className="flex items-center justify-between gap-4 px-5 py-4">
                   <span className="min-w-0">
                     <span className="block truncate font-medium">{c.name}</span>
                     <span className="block text-sm text-white/40">Matched {relativeTime(c.matchedAt)}</span>
@@ -79,6 +79,7 @@ export default function ReportPastConnection() {
       {reporting && (
         <ReviewModal
           matchId={reporting.matchId}
+          generation={reporting.generation ?? 0}
           partnerUid={reporting.otherUid}
           name={reporting.name}
           doneText={DONE_TEXT}
