@@ -33,6 +33,16 @@ function useCoords(uid: string | undefined, inline: LatLng | null): LatLng | nul
   return fetched?.uid === uid ? fetched.coords : undefined // undefined = loading
 }
 
+// Miles between the viewer and a profile, or null while loading or when
+// either side has no location.
+export function useDistanceMiles(uid: string): number | null {
+  const viewerUid = useAuthStore((s) => s.user?.uid)
+  const theirs = useCoords(uid, null)
+  const mine = useCoords(viewerUid, null)
+  if (!theirs || !mine) return null
+  return getDistanceMiles(mine.lat, mine.lng, theirs.lat, theirs.lng)
+}
+
 export function useDistanceText(profile: { uid?: string; locationLabel?: string; isBot?: unknown }): string | null {
   const viewerUid = useAuthStore((s) => s.user?.uid)
   const self = !!viewerUid && profile.uid === viewerUid
