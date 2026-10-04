@@ -76,6 +76,18 @@ export function markVibeCheckRated(matchId: string): void {
   writeNumber(`zylove_vibecheck_rated_${matchId}`, Date.now())
 }
 
+// Testing only (admin console: window.__resetVibeCheck): forgets that this
+// browser fired or rated a vibe check for the match, so the next one shows
+// on reopening the chat. The server's 24h rating cooldown still applies.
+export function resetVibeCheckForTesting(matchId: string): void {
+  try {
+    localStorage.removeItem(`zylove_vibecheck_${matchId}`)
+    localStorage.removeItem(`zylove_vibecheck_rated_${matchId}`)
+  } catch {
+    // Storage unavailable: nothing to clear.
+  }
+}
+
 // ─── Mutual vibe ─────────────────────────────────────────────────────────────
 // recordVibeRating stamps matches/{id}.mutualVibeAt when both people's
 // latest rating is "Loving it". Each stamp is celebrated once per browser.

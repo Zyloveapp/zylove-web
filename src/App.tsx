@@ -6,6 +6,8 @@ import { useAuthStore } from './store/authStore'
 import { refreshLocationIfStale } from './services/location'
 import { founderHeartbeat } from './services/founders'
 import { loadPin } from './services/playPin'
+import { isAdmin } from './services/adminPhotos'
+import { resetVibeCheckForTesting } from './services/vibeCheck'
 import AuthGuard from './components/AuthGuard'
 import AdminGuard from './components/AdminGuard'
 import AdminPhotos from './pages/AdminPhotos'
@@ -65,9 +67,35 @@ async function needsPlaySetup(uid: string): Promise<boolean> {
   return play !== null && !play.exists()
 }
 
+declare global {
+  interface Window {
+    // Admin-only console helper for testing vibe checks.
+    __resetVibeCheck?: (matchId: string) => void
+  }
+}
+
 function AppLayout() {
   const uid = useAuthStore((s) => s.user?.uid)
   const navigate = useNavigate()
+
+  // Admins: window.__resetVibeCheck('matchId') in DevTools.
+  useEffect(() => {
+    if (!uid) return
+    let cancelled = false
+    isAdmin(uid)
+      .then((admin) => {
+        if (cancelled || !admin) return
+        window.__resetVibeCheck = (matchId: string) => {
+          resetVibeCheckForTesting(matchId)
+          console.info(`Vibe check reset for ${matchId} — reopen the chat.`)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+      delete window.__resetVibeCheck
+    }
+  }, [uid])
 
   useEffect(() => {
     if (!uid) return
