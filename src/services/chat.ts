@@ -89,9 +89,13 @@ function toMillis(v: unknown): number | null {
   return typeof v === 'number' ? v : null
 }
 
+// Messages since `since` (ms; see MatchEntry.startedAt) — earlier ones are
+// left over from a previous match between the same two people. Unsent local
+// writes (sentAt still null) are kept.
 export function subscribeMessages(
   matchId: string,
   uid: string,
+  since: number,
   onChange: (messages: ChatMessage[]) => void,
   onError: (err: Error) => void,
 ): Unsubscribe {
@@ -105,6 +109,8 @@ export function subscribeMessages(
         const data = d.data()
         const deletedFor: unknown = data.deletedFor
         if (Array.isArray(deletedFor) && deletedFor.includes(uid)) continue
+        const sentAt = toMillis(data.sentAt)
+        if (sentAt !== null && sentAt < since) continue
         const ciphertext = typeof data.ciphertext === 'string' ? data.ciphertext : ''
         const messageType = typeof data.messageType === 'string' ? data.messageType : 'text'
         const photo = parsePhoto(data)
@@ -113,7 +119,7 @@ export function subscribeMessages(
           senderId: typeof data.senderId === 'string' ? data.senderId : '',
           ciphertext,
           nonce: typeof data.nonce === 'string' ? data.nonce : '',
-          sentAt: toMillis(data.sentAt),
+          sentAt,
           status: typeof data.status === 'string' ? data.status : 'sent',
           messageType,
           ...(photo ? { photo } : {}),

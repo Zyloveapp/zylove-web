@@ -79,6 +79,11 @@ type Loaded = { matchId: string; messages: ChatMessage[]; error: boolean }
 type PartnerKey = { partnerUid: string; key: string; error: boolean }
 
 const UNDECRYPTABLE = 'Unable to decrypt message'
+// Shown once in place of every bubble that won't open — typically history
+// from before this browser's private key was lost (site data cleared). The
+// key lives only in IndexedDB, so those messages can't be recovered.
+const KEY_RESET_NOTICE =
+  "Messages can't be decrypted on this device — your encryption key was reset. New messages will work normally."
 // Own typing: write at most every 2s, clear after 3s idle. Partner's counts
 // as typing while their typingAt is under 5s old.
 const TYPING_WRITE_MS = 2000
@@ -129,6 +134,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     return subscribeMessages(
       matchId,
       uid,
+      match.startedAt,
       (messages) => {
         setLoaded({ matchId, messages, error: false })
         const unreadFromPartner = messages.filter((m) => m.senderId !== uid && m.status !== 'read').map((m) => m.id)
@@ -139,7 +145,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
       },
       () => setLoaded({ matchId, messages: [], error: true }),
     )
-  }, [matchId, uid])
+  }, [matchId, uid, match.startedAt])
 
   useEffect(
     () => subscribePhotoConsent(matchId, (consent) => setConsentState({ matchId, consent })),
@@ -202,10 +208,10 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   // shared secret is the same in either direction.
   const messages = useMemo(() => {
     if (rawMessages === null || !keysLoaded) return null
-    return rawMessages.map((m) => ({
-      ...m,
-      text: decryptMessage(m.ciphertext, m.nonce, partnerKey.key, myPrivateKey ?? '') ?? UNDECRYPTABLE,
-    }))
+    return rawMessages.map((m) => {
+      const text = decryptMessage(m.ciphertext, m.nonce, partnerKey.key, myPrivateKey ?? '')
+      return { ...m, text: text ?? UNDECRYPTABLE, undecryptable: text === null && m.messageType === 'text' }
+    })
   }, [rawMessages, keysLoaded, partnerKey, myPrivateKey])
 
   useEffect(() => {
@@ -445,7 +451,17 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const vibeLineIndex =
     mutualVibeAt === null || !messages ? -1 : messages.findIndex((m) => m.sentAt !== null && m.sentAt > mutualVibeAt)
 
-  function renderMessage(m: ChatMessage & { text: string }) {
+  // Undecryptable messages collapse into one notice, at the first of them.
+  const firstUndecryptableId = messages?.find((m) => m.undecryptable)?.id ?? null
+
+  function renderMessage(m: ChatMessage & { text: string; undecryptable: boolean }) {
+              if (m.undecryptable) {
+                return m.id === firstUndecryptableId ? (
+                  <p key={m.id} className="mx-auto max-w-xs text-center text-xs italic text-white/40">
+                    🔒 {KEY_RESET_NOTICE}
+                  </p>
+                ) : null
+              }
               const code = consentCode(m)
               if (code) {
                 return (

@@ -1,4 +1,4 @@
-import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore'
+import { collection, getDocs, limit, orderBy, query, Timestamp } from 'firebase/firestore'
 import { db } from './firebase'
 import { decryptMessage } from './encryption'
 import { getPrivateKey, keysReady } from './keys'
@@ -64,6 +64,9 @@ async function fetchPreview(match: MatchEntry, uid: string): Promise<ChatPreview
   )
   const data = snap.docs[0]?.data()
   if (!data) return null
+  // Left over from an earlier match between the same two people.
+  const sentAt: unknown = data.sentAt
+  if (sentAt instanceof Timestamp && sentAt.toMillis() < match.startedAt) return null
   const fromMe = data.senderId === uid
   const messageType = typeof data.messageType === 'string' ? data.messageType : 'text'
   const ciphertext = typeof data.ciphertext === 'string' ? data.ciphertext : ''

@@ -20,6 +20,11 @@ export interface MatchEntry {
   lastMessagePreview: string | null
   lastMessageAt: number // ms, 0 if no messages yet
   matchedAt: number // ms
+  // When this match began (earliest of matchedAt/createdAt; 0 if unknown).
+  // Match ids are the sorted uid pair, so a re-match reuses the id — and the
+  // old match's messages subcollection, which deleting the doc leaves behind.
+  // Anything sent before this belongs to an earlier match.
+  startedAt: number // ms
   lastSenderId: string | null
   mode: Mode
   // Blocked or unmatched; mobile's unmatch deletes the doc instead.
@@ -34,6 +39,12 @@ function toMillis(v: unknown): number {
     return typeof ms === 'number' ? ms : 0
   }
   return 0
+}
+
+// Earliest non-zero time, or 0 when there's none.
+function earliest(...times: number[]): number {
+  const known = times.filter((ms) => ms > 0)
+  return known.length ? Math.min(...known) : 0
 }
 
 function str(v: unknown): string | null {
@@ -56,6 +67,7 @@ export function toEntry(matchId: string, data: DocumentData, uid: string): Match
     lastMessagePreview: str(data.lastMessagePreview),
     lastMessageAt: toMillis(data.lastMessageAt),
     matchedAt: toMillis(data.matchedAt) || toMillis(data.createdAt),
+    startedAt: earliest(toMillis(data.matchedAt), toMillis(data.createdAt)),
     lastSenderId: str(data.lastSenderId),
     mode: data.mode === 'play' ? 'play' : 'spark',
     ended: data.isBlocked === true || (data.unmatchedAt !== undefined && data.unmatchedAt !== null),
