@@ -48,7 +48,6 @@ import {
   parseBirthday,
   releasePhotoPreview,
   type OnboardingDraft,
-  type OnboardingPath,
 } from '../components/onboarding/types'
 
 // Founder badge check after the final save, and how long the celebration shows.
@@ -58,10 +57,10 @@ const FOUNDER_CELEBRATION_MS = 1500
 const STEPS = [
   { id: 'terms', title: 'Terms' },
   { id: 'name', title: 'Name' },
+  { id: 'photos', title: 'Photos' },
   { id: 'gender', title: 'Gender' },
   { id: 'intention', title: 'What you want' },
   { id: 'recommendation', title: 'Your path' },
-  { id: 'photos', title: 'Photos' },
   { id: 'attractedTo', title: 'Attraction' },
   { id: 'relationship', title: 'Status' },
   { id: 'bodyType', title: 'Body type' },
@@ -89,22 +88,14 @@ const STEPS = [
 
 type StepId = (typeof STEPS)[number]['id']
 
-// The Play path is just the basics plus what matching needs (who they're
-// into, who they see), saved from the last step, then straight to Play setup.
-// Every path shares the steps up to the recommendation, so switching path
-// there keeps the step index valid.
-const PLAY_PATH_STEPS: StepId[] = [
-  'terms', 'name', 'gender', 'intention', 'recommendation', 'photos', 'attractedTo', 'discovery',
-]
-
-// A refresh skips terms (already accepted), the intention steps (first run
-// only) and, once identity is locked, gender (it can't change).
-function stepsFor(refresh: boolean, identityLocked: boolean, path: OnboardingPath | null) {
+// Every path builds the full Spark profile; the Play path just ends in Play
+// setup instead of Explore. A refresh skips terms (already accepted), the
+// intention steps (first run only) and, once identity is locked, gender.
+function stepsFor(refresh: boolean, identityLocked: boolean) {
   return STEPS.filter(
     (s) =>
       !(refresh && (s.id === 'terms' || s.id === 'intention' || s.id === 'recommendation')) &&
-      !(identityLocked && s.id === 'gender') &&
-      (refresh || path !== 'play' || PLAY_PATH_STEPS.includes(s.id)),
+      !(identityLocked && s.id === 'gender'),
   )
 }
 
@@ -263,7 +254,7 @@ export default function Onboarding() {
   const refreshInfo = refresh && typeof refreshLoad === 'object' ? refreshLoad : null
   const identityLocked = refreshInfo?.locked ?? false
   const maxPhotos = refresh ? MAX_REFRESH_PHOTOS : MAX_PHOTOS
-  const steps = stepsFor(refresh, identityLocked, draft.onboardingPath)
+  const steps = stepsFor(refresh, identityLocked)
   const step = steps[stepIndex]
   const update = (patch: Partial<OnboardingDraft>) => setDraft((d) => ({ ...d, ...patch }))
 
@@ -359,7 +350,6 @@ export default function Onboarding() {
             path={draft.onboardingPath}
             onContinue={next}
             onChoose={(path, advance) => {
-              // Every path shares the steps up to here, so the index stays valid.
               update({ onboardingPath: path, intent: intentForPath(path) })
               if (advance) setStepIndex((i) => i + 1)
             }}
@@ -463,8 +453,6 @@ export default function Onboarding() {
     step.id === 'goDeeper' ||
     step.id === 'review' ||
     step.id === 'recommendation'
-  // Play path: the last step saves and goes to Play onboarding.
-  const playPathFinish = !refresh && draft.onboardingPath === 'play' && stepIndex === steps.length - 1
   const canAdvance = isStepValid(step.id, draft, bioGenerating, identityLocked, maxPhotos)
 
   return (
@@ -488,7 +476,6 @@ export default function Onboarding() {
         </div>
 
         <main>{renderStep()}</main>
-        {playPathFinish && saveError && <p className="mt-4 text-center text-sm text-red-400">{saveError}</p>}
       </div>
 
       <nav className="fixed inset-x-0 bottom-0 border-t border-white/10 bg-gray-950/95 backdrop-blur">
@@ -501,16 +488,7 @@ export default function Onboarding() {
           >
             Back
           </button>
-          {playPathFinish ? (
-            <button
-              type="button"
-              onClick={createProfile}
-              disabled={!canAdvance || saving}
-              className="flex-1 rounded-lg bg-[#E03131] px-4 py-3 font-medium text-white disabled:opacity-40"
-            >
-              {saving ? 'Saving…' : 'Enter Play →'}
-            </button>
-          ) : !ownsPrimary && (
+          {!ownsPrimary && (
             <button
               type="button"
               onClick={next}

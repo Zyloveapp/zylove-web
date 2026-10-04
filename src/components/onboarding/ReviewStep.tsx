@@ -4,7 +4,6 @@ import {
   CONFLICT_STYLE_LABELS,
   STRESS_RESPONSE_LABELS,
   TOGETHERNESS_STYLE_LABELS,
-  includesPlay,
   parseBirthday,
   type OnboardingDraft,
 } from './types'
@@ -17,6 +16,8 @@ interface ReviewStepProps {
 }
 
 export default function ReviewStep({ draft, saving, error, onCreate }: ReviewStepProps) {
+  // Play path: the same full profile, then straight on to Play setup.
+  const playPath = draft.onboardingPath === 'play'
   const age = parseBirthday(draft.birthdayRaw)?.age
   const intent = draft.intent ? INTENT_LABELS[draft.intent] : null
   const answers = draft.selectedPromptIds
@@ -92,9 +93,9 @@ export default function ReviewStep({ draft, saving, error, onCreate }: ReviewSte
         </section>
       )}
 
-      {includesPlay(draft.intent) && (
-        <p className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-200">
-          Play profile setup comes after your Spark profile is created.
+      {playPath && (
+        <p className="rounded-lg bg-[#E03131]/10 p-3 text-sm text-red-200">
+          🔥 Next up: your Play profile. It's set up right after this.
         </p>
       )}
 
@@ -104,9 +105,11 @@ export default function ReviewStep({ draft, saving, error, onCreate }: ReviewSte
         type="button"
         onClick={onCreate}
         disabled={saving}
-        className="w-full rounded-lg bg-[#1B4FD8] px-4 py-3 font-medium text-white disabled:opacity-50"
+        className={`w-full rounded-lg px-4 py-3 font-medium text-white disabled:opacity-50 ${
+          playPath ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
+        }`}
       >
-        {saving ? 'Creating your profile…' : 'Create my profile'}
+        {saving ? 'Creating your profile…' : playPath ? 'Enter Play →' : 'Create my profile'}
       </button>
     </div>
   )

@@ -152,11 +152,7 @@ export async function saveSparkOnboarding(
   const age = birthday?.age ?? (identityLocked && typeof existingAge === 'number' ? existingAge : null)
   if (age === null) throw new Error('Onboarding incomplete: birthday')
   const genderIdentity = required(d.genderIdentity, 'genderIdentity')
-  // The Play path skips the status step.
-  const relationshipStatus =
-    d.onboardingPath === 'play' && d.relationshipStatus === null
-      ? 'prefer_not_to_say'
-      : required(d.relationshipStatus, 'relationshipStatus')
+  const relationshipStatus = required(d.relationshipStatus, 'relationshipStatus')
   const intent = required(d.intent, 'intent')
 
   const promptAnswers: PromptAnswer[] = [
