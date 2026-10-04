@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { doc, getDoc } from 'firebase/firestore'
-import { db } from '../services/firebase'
+import { fetchPublicUserDoc } from '../services/publicUserDoc'
 
 // Public Zylove Score outcome: users/{uid}.zyloveScoreTier, written by
 // submitReview. Only Trusted and Elite are ever shown to anyone.
@@ -24,18 +23,8 @@ export default function TierBadge({ tier }: { tier: unknown }) {
   )
 }
 
-// One read per uid per session, shared by every row that shows the badge.
-const tierCache = new Map<string, Promise<BadgeTier | null>>()
-
 function fetchTier(uid: string): Promise<BadgeTier | null> {
-  let request = tierCache.get(uid)
-  if (!request) {
-    request = getDoc(doc(db, 'users', uid))
-      .then((snap) => badgeTier(snap.data()?.zyloveScoreTier))
-      .catch(() => null)
-    tierCache.set(uid, request)
-  }
-  return request
+  return fetchPublicUserDoc(uid).then((d) => badgeTier(d?.zyloveScoreTier))
 }
 
 // For lists built from snapshots (matches, sparks) that don't carry the tier.

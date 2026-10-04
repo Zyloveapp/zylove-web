@@ -81,15 +81,18 @@ export const assignFounderBadge = onCall(
       // normally makes them first).
       const config = citySnap.data() ?? {}
       const target = num(config.founderTarget, DEFAULT_FOUNDER_TARGET)
-      const women = num(config.womenCount, 0)
-      const men = num(config.menCount, 0)
+      // Austin founder codes (mobile) only count in config/launch, so Austin
+      // goes by whichever count is higher; the city doc catches up on write.
+      const launch = launchSnap?.data() ?? {}
+      const women = Math.max(num(config.womenCount, 0), isAustin ? num(launch.womenCount, 0) : 0)
+      const men = Math.max(num(config.menCount, 0), isAustin ? num(launch.menCount, 0) : 0)
 
       const bucket = bucketFor(user.genderIdentity)
       if ((bucket === 'women' ? women : men) >= target) return { eligible: false, reason: 'cohort_full' }
 
       const nextWomen = bucket === 'women' ? women + 1 : women
       const nextMen = bucket === 'men' ? men + 1 : men
-      const cohortNumber = nextWomen + nextMen
+      const cohortNumber = Math.max(nextWomen + nextMen, isAustin ? num(launch.founderCount, 0) + 1 : 0)
       const capacity = target * 2
 
       tx.set(
@@ -120,8 +123,10 @@ export const assignFounderBadge = onCall(
       )
       tx.update(userRef, {
         isFounder: true,
-        founderCohort: city.id,
+        // Display name, as the mobile app shows it ("Founding Member — Austin").
+        founderCohort: city.name,
         founderCity: city.name,
+        founderCityId: city.id,
         founderBadge: `${city.badgeName ?? city.name} Founder`,
         founderNumber: cohortNumber,
         founderBadgeAssignedAt: FieldValue.serverTimestamp(),
@@ -131,13 +136,12 @@ export const assignFounderBadge = onCall(
 
       // Austin's legacy counters (founder codes count here too).
       if (isAustin) {
-        const launch = launchSnap?.data() ?? {}
-        const founderCount = num(launch.founderCount, 0) + 1
+        const founderCount = cohortNumber
         tx.set(
           launchRef,
           {
             founderCount,
-            [`${bucket}Count`]: num(launch[`${bucket}Count`], 0) + 1,
+            [`${bucket}Count`]: bucket === 'women' ? nextWomen : nextMen,
             [bucket === 'women' ? 'austinWomenCount' : 'austinMenCount']:
               num(launch[bucket === 'women' ? 'austinWomenCount' : 'austinMenCount'], 0) + 1,
           },

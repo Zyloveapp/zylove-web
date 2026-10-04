@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { requestLocation, saveUserLocation } from '../services/location'
+import { fetchPublicUserDoc } from '../services/publicUserDoc'
 
 type GateState = 'checking' | 'granted' | 'prompt' | 'denied'
 
@@ -32,6 +33,17 @@ export default function LocationGate({ children }: { children: ReactNode }) {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const [state, setState] = useState<GateState>(() => (grantedThisSession() ? 'granted' : 'checking'))
   const [busy, setBusy] = useState(false)
+  // Admins (users/{uid}.isAdmin) get a small link to preview the gate.
+  const [isAdmin, setIsAdmin] = useState(false)
+
+  useEffect(() => {
+    if (!uid) return
+    let cancelled = false
+    fetchPublicUserDoc(uid).then((d) => !cancelled && setIsAdmin(d?.isAdmin === true))
+    return () => {
+      cancelled = true
+    }
+  }, [uid])
 
   useEffect(() => {
     if (state !== 'checking') return
@@ -62,7 +74,23 @@ export default function LocationGate({ children }: { children: ReactNode }) {
     setBusy(false)
   }
 
-  if (state === 'granted') return <>{children}</>
+  if (state === 'granted') {
+    return (
+      <>
+        {children}
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setState('prompt')}
+            title="Preview the location gate (admin)"
+            className="fixed bottom-20 left-3 z-40 rounded-full border border-white/15 bg-gray-900/80 px-2 py-1 text-xs text-white/40 hover:text-white"
+          >
+            📍?
+          </button>
+        )}
+      </>
+    )
+  }
   if (state === 'checking') {
     return (
       <div className="flex min-h-[calc(100dvh-7rem)] items-center justify-center bg-gray-950 lg:min-h-[calc(100dvh-7.5rem)]">
@@ -91,6 +119,16 @@ export default function LocationGate({ children }: { children: ReactNode }) {
           className="mt-8 w-full max-w-xs rounded-full bg-[#1B4FD8] px-6 py-3.5 font-semibold text-white transition-colors hover:bg-[#1640b0] disabled:opacity-60"
         >
           {busy ? 'Waiting for location…' : 'Allow location →'}
+        </button>
+      )}
+
+      {isAdmin && (
+        <button
+          type="button"
+          onClick={() => setState(denied ? 'prompt' : 'denied')}
+          className="mt-6 text-xs text-white/30 underline hover:text-white/60"
+        >
+          Admin: preview {denied ? 'first-ask' : 'blocked'} view
         </button>
       )}
 

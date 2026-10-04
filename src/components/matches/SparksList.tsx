@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { CURIOUS_MAX, type CuriousResult, type SentSpark, type SparkEntry } from '../../services/sparks'
 import { displayAge, type DiscoverProfile } from '../../services/discover'
 import { UserTierBadge } from '../TierBadge'
+import { UserFounderBadge } from '../FounderBadge'
 import { relativeTime } from '../../services/matches'
 import type { Mode } from '../../store/modeStore'
 import { playNameOf } from '../../services/displayNames'
@@ -114,6 +115,7 @@ export default function SparksList({ sparks, mode, matchedUids, onSelect, scores
             {revealed && s.profile.locationLabel && (
               <span className="mt-0.5 block truncate text-sm text-white/50">📍 {s.profile.locationLabel}</span>
             )}
+            {revealed && <UserFounderBadge uid={s.likerUid} />}
             {matched && <span className="mt-2 block text-[11px] text-emerald-300">You're linked</span>}
             <span className="mt-1 block text-xs text-white/35">
               {s.likedAt > 0 && relativeTime(s.likedAt)}

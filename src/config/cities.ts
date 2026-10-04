@@ -54,12 +54,13 @@ export const ZYLOVE_CITIES: ZyloveCity[] = [
 
 const AUSTIN = ZYLOVE_CITIES[0]
 
-// Closest launch city whose radius covers the point, or null.
-export function getNearestCity(lat: number, lng: number): ZyloveCity | null {
+// Closest launch city whose radius covers the point, or null. withinMiles
+// widens every city's radius (display only, e.g. "Austin needs 97 more").
+export function getNearestCity(lat: number, lng: number, withinMiles?: number): ZyloveCity | null {
   let best: { city: ZyloveCity; miles: number } | null = null
   for (const city of ZYLOVE_CITIES) {
     const miles = getDistanceMiles(lat, lng, city.lat, city.lng)
-    if (miles <= city.radiusMiles && (!best || miles < best.miles)) best = { city, miles }
+    if (miles <= (withinMiles ?? city.radiusMiles) && (!best || miles < best.miles)) best = { city, miles }
   }
   return best?.city ?? null
 }

@@ -17,7 +17,7 @@ import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from './firebase'
 import { getDistanceMiles } from './location'
-import { cityConfigPath, getNearestCity, isAustinArea } from '../config/cities'
+import { cityConfigPath, getNearestCity } from '../config/cities'
 import { genderToAttractedToCategory } from '../utils/genderUtils'
 import type { DatingProfile } from '../types/profile'
 import type { Mode } from '../store/modeStore'
@@ -176,7 +176,7 @@ export async function fetchCandidates(uid: string, mode: Mode): Promise<Discover
 
   // Everyone left has photos, so "photos first" is already satisfied.
   const located = withDistance(me, [...found.values()])
-  return austinFirst(mode === 'play' ? await withPlayProfiles(located) : located)
+  return localFirst(me, mode === 'play' ? await withPlayProfiles(located) : located)
 }
 
 function isEligible(
@@ -208,11 +208,6 @@ function withinRadius(me: DiscoverProfile, p: DiscoverProfile): boolean {
   return getDistanceMiles(me.locationLat, me.locationLng, p.locationLat, p.locationLng) <= radius
 }
 
-function cityOf(label: string | undefined): string | null {
-  const city = label?.split(',')[0]?.trim().toLowerCase()
-  return city || null
-}
-
 // Bots (all Austin-seeded) are the preview of Zylove, so every viewer sees
 // them, wherever they are, until the viewer's own launch city fills its
 // founding circle (config/city_{id}.botsActive false). No location, no
@@ -236,17 +231,31 @@ function withDistance(me: DiscoverProfile, candidates: DiscoverProfile[]): Disco
   )
 }
 
-// Austin launch: a soft sort, never a filter. Austin-area profiles come
-// first, everyone else after; each group is shuffled. Without coordinates
-// (bots, most older profiles) an "Austin" location label counts.
-function inAustin(p: DiscoverProfile): boolean {
-  return hasLocation(p) ? isAustinArea(p.locationLat, p.locationLng) : cityOf(p.locationLabel) === 'austin'
+// A soft sort, never a filter, each group shuffled:
+//   1. real people local to the viewer — same launch city, or within
+//      LOCAL_MILES when the viewer isn't in one
+//   2. bots (Austin-seeded, shown to everyone) as filler
+//   3. everyone else
+// Without coordinates, a location label naming the viewer's city counts.
+const LOCAL_MILES = 50
+
+function isLocal(me: DiscoverProfile, p: DiscoverProfile): boolean {
+  if (!hasLocation(me)) return false
+  const myCity = getNearestCity(me.locationLat, me.locationLng)
+  if (hasLocation(p)) {
+    return myCity
+      ? getNearestCity(p.locationLat, p.locationLng)?.id === myCity.id
+      : getDistanceMiles(me.locationLat, me.locationLng, p.locationLat, p.locationLng) <= LOCAL_MILES
+  }
+  return !!myCity && p.locationLabel?.split(',')[0]?.trim().toLowerCase() === myCity.name.toLowerCase()
 }
 
-function austinFirst(candidates: DiscoverProfile[]): DiscoverProfile[] {
-  const austin = candidates.filter(inAustin)
-  const rest = candidates.filter((p) => !austin.includes(p))
-  return [...shuffle(austin), ...shuffle(rest)]
+function localFirst(me: DiscoverProfile, candidates: DiscoverProfile[]): DiscoverProfile[] {
+  const bots = candidates.filter((p) => p.uid.startsWith(BOT_PREFIX))
+  const real = candidates.filter((p) => !p.uid.startsWith(BOT_PREFIX))
+  const local = real.filter((p) => isLocal(me, p))
+  const rest = real.filter((p) => !local.includes(p))
+  return [...shuffle(local), ...shuffle(bots), ...shuffle(rest)]
 }
 
 // Play Explore only shows people with a Play profile, and shows them with it:

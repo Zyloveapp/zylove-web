@@ -1,3 +1,6 @@
+import { useEffect, useState } from 'react'
+import { fetchPublicUserDoc } from '../services/publicUserDoc'
+
 // "✦ Austin Founder", "✦ NYC Founder": the founderBadge set by
 // assignFounderBadge. Founders from before city circles, and founder-code
 // ones, have no founderBadge; they're all Austin.
@@ -15,4 +18,25 @@ export default function FounderBadge({ profile }: { profile: object }) {
       ✦ {label}
     </span>
   )
+}
+
+// For lists built from snapshots (sparks) that don't carry founder fields.
+export function UserFounderBadge({ uid }: { uid: string }) {
+  const [loaded, setLoaded] = useState<{ uid: string; profile: object | null } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchPublicUserDoc(uid).then((profile) => {
+      if (!cancelled) setLoaded({ uid, profile })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [uid])
+
+  return loaded?.uid === uid && loaded.profile ? (
+    <span className="mt-1 block">
+      <FounderBadge profile={loaded.profile} />
+    </span>
+  ) : null
 }

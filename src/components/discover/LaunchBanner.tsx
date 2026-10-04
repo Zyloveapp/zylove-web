@@ -9,6 +9,8 @@ import { FOUNDER_CAPACITY, cityConfigPath, cityStatsPath, getNearestCity, type Z
 const COMPLETE_SEEN_KEY = 'zylove_launch_complete_seen_at'
 const COMPLETE_SHOW_MS = 24 * 60 * 60 * 1000
 const EARLY_SEEN_KEY = 'zylove_early_modal_seen'
+// How far outside coverage the "you're early" counter looks for a city.
+const NEARBY_CITY_MILES = 150
 
 function storage(kind: 'session' | 'local'): Storage | null {
   try {
@@ -46,7 +48,7 @@ function useDismissed(): [boolean, () => void] {
   ]
 }
 
-type Area = { city: ZyloveCity | null; placeName: string | null }
+type Area = { city: ZyloveCity | null; nearby: ZyloveCity | null }
 
 // Explore transparency note, by where the viewer is: inside a launch city,
 // that city's founding circle; anywhere else, "you're early".
@@ -62,18 +64,19 @@ export default function LaunchBanner() {
         const d = snap.data()
         const lat = d?.locationLat
         const lng = d?.locationLng
-        const label = typeof d?.locationLabel === 'string' ? d.locationLabel : ''
-        const city = typeof lat === 'number' && typeof lng === 'number' ? getNearestCity(lat, lng) : null
-        if (!cancelled) setArea({ city, placeName: label.split(',')[0]?.trim() || null })
+        const located = typeof lat === 'number' && typeof lng === 'number'
+        const city = located ? getNearestCity(lat, lng) : null
+        const nearby = located && !city ? getNearestCity(lat, lng, NEARBY_CITY_MILES) : null
+        if (!cancelled) setArea({ city, nearby })
       })
-      .catch(() => !cancelled && setArea({ city: null, placeName: null }))
+      .catch(() => !cancelled && setArea({ city: null, nearby: null }))
     return () => {
       cancelled = true
     }
   }, [uid])
 
   if (!area) return null
-  return area.city ? <CityBanner city={area.city} /> : <EarlyBanner placeName={area.placeName} />
+  return area.city ? <CityBanner city={area.city} /> : <EarlyBanner nearby={area.nearby} />
 }
 
 // Live from config/city_{id}.botsActive: while bots are on, say so (with the
@@ -146,20 +149,41 @@ function CityBanner({ city }: { city: ZyloveCity }) {
   )
 }
 
+// Live member count for a city (publicStats/city_{id}); 0 until loaded.
+function useCityMembers(city: ZyloveCity | null): number {
+  const [members, setMembers] = useState(0)
+  useEffect(() => {
+    if (!city) return
+    return onSnapshot(
+      doc(db, cityStatsPath(city.id)),
+      (snap) => {
+        const m = snap.data()?.members
+        setMembers(typeof m === 'number' ? m : 0)
+      },
+      () => setMembers(0),
+    )
+  }, [city])
+  return members
+}
+
 // Outside every launch city: a one-time-per-session "you're early" screen,
-// then a dismissible banner. placeName is the viewer's own town, when known.
-// Nothing counts people outside launch cities yet, so the numbers are the
-// full 100.
-function EarlyBanner({ placeName }: { placeName: string | null }) {
+// then a dismissible banner. nearby is the closest launch city within
+// NEARBY_CITY_MILES, whose count stands in for theirs; with none, the
+// numbers are the full 100.
+function EarlyBanner({ nearby }: { nearby: ZyloveCity | null }) {
   const [modalOpen, setModalOpen] = useState(() => storage('session')?.getItem(EARLY_SEEN_KEY) !== '1')
   const [dismissed, dismiss] = useDismissed()
+  const remaining = Math.max(0, FOUNDER_CAPACITY - useCityMembers(nearby))
+  const goal = nearby
+    ? `${nearby.name} needs ${remaining} more founders to go live`
+    : `Your area needs ${FOUNDER_CAPACITY} founders to go live`
 
   function closeModal() {
     storage('session')?.setItem(EARLY_SEEN_KEY, '1')
     setModalOpen(false)
   }
 
-  if (modalOpen) return <EarlyModal onClose={closeModal} />
+  if (modalOpen) return <EarlyModal goal={nearby ? `${goal}.` : null} onClose={closeModal} />
   if (dismissed) return null
   return (
     <button
@@ -169,18 +193,13 @@ function EarlyBanner({ placeName }: { placeName: string | null }) {
       className="mx-4 mb-4 block w-[calc(100%-2rem)] rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm text-white/80"
     >
       <span className="block">✦ Zylove is coming to your area. You're early — invite friends to unlock your city.</span>
-      <span className="mt-1 block text-xs text-white/40">
-        ✦{' '}
-        {placeName
-          ? `${placeName} needs ${FOUNDER_CAPACITY} founders to go live`
-          : `Your area needs ${FOUNDER_CAPACITY} people to go live`}{' '}
-        · tap to dismiss
-      </span>
+      <span className="mt-1 block text-xs text-white/40">✦ {goal} · tap to dismiss</span>
     </button>
   )
 }
 
-function EarlyModal({ onClose }: { onClose: () => void }) {
+// goal: the nearby city's line; null means "100 more people" for their area.
+function EarlyModal({ goal, onClose }: { goal: string | null; onClose: () => void }) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose()
@@ -202,7 +221,7 @@ function EarlyModal({ onClose }: { onClose: () => void }) {
       <div className="mt-6 max-w-sm space-y-3 text-white/70">
         <p>Zylove is launching city by city, starting in Austin.</p>
         <p>You've just become one of the first people in your area to discover us.</p>
-        <p className="font-semibold text-white">{FOUNDER_CAPACITY} more people and your city goes live.</p>
+        <p className="font-semibold text-white">{goal ?? `${FOUNDER_CAPACITY} more people and your city goes live.`}</p>
         <p>In the meantime, explore our curated profiles to see what Zylove is all about.</p>
       </div>
       <button
