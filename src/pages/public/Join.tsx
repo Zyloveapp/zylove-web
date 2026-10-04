@@ -8,7 +8,7 @@ const BENEFITS = [
     body: "No trials, no billing — free for as long as your city's founding circle is active.",
   },
   { title: 'First in the queue', body: "You'll be among the first profiles seen when we go live in Austin." },
-  { title: 'Founding member badge', body: 'A mark on your profile that stays as long as you're a founder. You were here at the very beginning.' },
+  { title: 'Founding member badge', body: "A mark on your profile that stays as long as you're a founder. You were here at the very beginning." },
   { title: 'Direct line to the founder', body: 'A real voice. A real conversation. Your feedback shapes the product.' },
 ]
 
