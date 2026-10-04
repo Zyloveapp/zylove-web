@@ -553,7 +553,11 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
       </div>
 
       {showFirstChat && (
-        <FirstChatModal matchId={matchId} onClose={() => setShowFirstChat(false)} />
+        <FirstChatModal
+          matchId={matchId}
+          mode={match.mode === 'play' ? 'play' : 'spark'}
+          onClose={() => setShowFirstChat(false)}
+        />
       )}
 
       {showVibeCheck && (
