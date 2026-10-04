@@ -15,6 +15,28 @@ function snap(v: number): number {
   return Math.round(Math.round(v / GRID_DEG) * GRID_DEG * 1000) / 1000
 }
 
+// Set in this browser whenever a position comes back, cleared when it's
+// refused. Safari's Permissions API reports 'prompt' for geolocation even
+// when the site is set to Allow, so it can't be trusted to say "granted".
+const ALLOWED_KEY = 'zylove_location_allowed'
+
+export function locationRemembered(): boolean {
+  try {
+    return localStorage.getItem(ALLOWED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function rememberLocation(allowed: boolean): void {
+  try {
+    if (allowed) localStorage.setItem(ALLOWED_KEY, '1')
+    else localStorage.removeItem(ALLOWED_KEY)
+  } catch {
+    // Storage unavailable: we just won't remember.
+  }
+}
+
 let pending: Promise<LatLng | null> | null = null
 
 // Browser position, or null if unsupported, denied or timed out. Never throws.
@@ -23,8 +45,15 @@ export function requestLocation(): Promise<LatLng | null> {
   if (typeof navigator === 'undefined' || !navigator.geolocation) return Promise.resolve(null)
   pending ??= new Promise<LatLng | null>((resolve) => {
     navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => resolve(null),
+      (pos) => {
+        rememberLocation(true)
+        resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+      },
+      (err) => {
+        console.warn('[location] getCurrentPosition failed', err.code, err.message)
+        if (err.code === err.PERMISSION_DENIED) rememberLocation(false)
+        resolve(null)
+      },
       { timeout: 10000, maximumAge: 300000 },
     )
   }).finally(() => {
@@ -70,14 +99,16 @@ export async function saveUserLocation(uid: string, location: LatLng): Promise<v
   })
 }
 
-// Whether the browser has already granted geolocation, without asking.
-// False when it hasn't, or when the Permissions API isn't there to say.
-async function locationGranted(): Promise<boolean> {
+// Whether geolocation is already allowed, without asking: 'granted' from the
+// Permissions API, or — where it says 'prompt' or isn't there (Safari) — a
+// position this browser has handed over before.
+async function locationAllowed(): Promise<boolean> {
   try {
-    if (!navigator.permissions?.query) return false
-    return (await navigator.permissions.query({ name: 'geolocation' })).state === 'granted'
+    if (!navigator.permissions?.query) return locationRemembered()
+    const { state } = await navigator.permissions.query({ name: 'geolocation' })
+    return state === 'granted' || (state === 'prompt' && locationRemembered())
   } catch {
-    return false
+    return locationRemembered()
   }
 }
 
@@ -88,7 +119,7 @@ async function locationGranted(): Promise<boolean> {
 // Fire and forget; never throws.
 export async function refreshLocationSilently(uid: string): Promise<void> {
   try {
-    if (!(await locationGranted())) return
+    if (!(await locationAllowed())) return
     const location = await requestLocation()
     if (!location) return
     const ref = doc(db, 'users', uid)
@@ -98,8 +129,9 @@ export async function refreshLocationSilently(uid: string): Promise<void> {
       data.locationLat === snap(location.lat) && data.locationLng === snap(location.lng) && typeof data.locationLabel === 'string'
     if (unmoved) await updateDoc(ref, { locationUpdatedAt: serverTimestamp() })
     else await saveUserLocation(uid, location)
-  } catch {
-    // Location is a nice-to-have; never surface failures.
+  } catch (err) {
+    // Location is a nice-to-have; never surface failures to the user.
+    console.warn('[location] silent refresh failed', err)
   }
 }
 
