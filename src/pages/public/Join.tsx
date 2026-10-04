@@ -4,8 +4,8 @@ import FoundingCounter from '../../components/public/FoundingCounter'
 
 const BENEFITS = [
   {
-    title: 'Founding member for life',
-    body: 'Lifetime free access and a permanent founding badge. No trials, no billing, no catch — ever.',
+    title: 'Elite access, free',
+    body: "No trials, no billing — free for as long as your city's founding circle is active.",
   },
   { title: 'First in the queue', body: "You'll be among the first profiles seen when we go live in Austin." },
   { title: 'Founding member badge', body: 'A permanent mark on your profile. You were here at the very beginning.' },
@@ -15,7 +15,7 @@ const BENEFITS = [
 const STATS = [
   { value: '100', label: 'Founding spots — Austin only' },
   { value: '0', label: 'Unsolicited photos — impossible by design' },
-  { value: '$0', label: 'Cost to founding members — ever' },
+  { value: '$0', label: 'Cost to founding members during the founding period' },
 ]
 
 // The Austin founding circle (was zylove-website/founding.html). Membership

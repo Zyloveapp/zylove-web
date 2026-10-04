@@ -336,7 +336,7 @@ export default function Login() {
           <h2 className="text-3xl font-bold">
             <span className="text-[#1B4FD8]">✦</span> Austin Founding Circle
           </h2>
-          <p className="mt-3 text-lg text-white/70">First 100 founding members in Austin. Lifetime free access. The reason it works.</p>
+          <p className="mt-3 text-lg text-white/70">First 100 founding members in Austin. Elite access, free. The reason it works.</p>
           <p className="mt-2 text-sm text-white/50">
             Sign up and accept your invitation to join the Austin Founding Circle.
           </p>
