@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { doc, getDoc, onSnapshot } from 'firebase/firestore'
+import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '../../services/firebase'
 import { useAuthStore } from '../../store/authStore'
 import { BANNER_DISMISSED_KEY as DISMISSED_KEY, BANNER_RESET_EVENT } from '../../services/playSession'
@@ -51,32 +51,39 @@ function useDismissed(): [boolean, () => void] {
 type Area = { city: ZyloveCity | null; nearby: ZyloveCity | null }
 
 // Explore transparency note, by where the viewer is: inside a launch city,
-// that city's founding circle; anywhere else, "you're early".
+// that city's founding circle; anywhere else, "you're early". Nothing shows
+// until the user doc has a location — it's saved only after the browser
+// grants it, often after Explore has loaded, and an unknown location must
+// never read as "outside every city". Live, so it appears once saved.
 export default function LaunchBanner() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
-  const [area, setArea] = useState<Area | null>(null)
+  const [area, setArea] = useState<{ uid: string; area: Area } | null>(null)
 
   useEffect(() => {
     if (!uid) return
-    let cancelled = false
-    getDoc(doc(db, 'users', uid))
-      .then((snap) => {
+    return onSnapshot(
+      doc(db, 'users', uid),
+      (snap) => {
         const d = snap.data()
         const lat = d?.locationLat
         const lng = d?.locationLng
-        const located = typeof lat === 'number' && typeof lng === 'number'
-        const city = located ? getNearestCity(lat, lng) : null
-        const nearby = located && !city ? getNearestCity(lat, lng, NEARBY_CITY_MILES) : null
-        if (!cancelled) setArea({ city, nearby })
-      })
-      .catch(() => !cancelled && setArea({ city: null, nearby: null }))
-    return () => {
-      cancelled = true
-    }
+        if (typeof lat !== 'number' || typeof lng !== 'number') return setArea(null)
+        const city = getNearestCity(lat, lng)
+        const nearby = city ? null : getNearestCity(lat, lng, NEARBY_CITY_MILES)
+        // Same answer as before: keep the state so the banner doesn't remount
+        // on every unrelated write to the user doc.
+        setArea((prev) =>
+          prev?.uid === uid && prev.area.city?.id === city?.id && prev.area.nearby?.id === nearby?.id
+            ? prev
+            : { uid, area: { city, nearby } },
+        )
+      },
+      () => setArea(null),
+    )
   }, [uid])
 
-  if (!area) return null
-  return area.city ? <CityBanner city={area.city} /> : <EarlyBanner nearby={area.nearby} />
+  if (area?.uid !== uid) return null
+  return area.area.city ? <CityBanner city={area.area.city} /> : <EarlyBanner nearby={area.area.nearby} />
 }
 
 // Live from config/city_{id}.botsActive: while bots are on, say so (with the
