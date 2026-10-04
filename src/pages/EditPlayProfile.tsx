@@ -329,7 +329,7 @@ export default function EditPlayProfile() {
           open={open === 'prompts'}
           onToggle={() => toggle('prompts')}
         >
-          <PlayPromptsStep {...props} />
+          <PlayPromptsStep {...props} inspirationStyle="pills" />
         </Section>
       </div>
 

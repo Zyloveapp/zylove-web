@@ -18,6 +18,7 @@ import { isPlayOnlyUser } from '../services/playOnboarding'
 import { formatNameChangeDate, nextNameChange } from '../services/displayNames'
 import type { DiscoverProfile } from '../services/discover'
 import { SPARK_PROMPT_BANK, type PromptAnswer } from '../types/dualProfile'
+import { InspirationPills } from '../components/onboarding/Inspirations'
 import { profileGenderLabel, promptQuestion } from '../components/discover/labels'
 import { goDeeperAnswerRows, goDeeperAnswers, goDeeperComplete } from '../components/profile/goDeeper'
 
@@ -359,6 +360,12 @@ export default function EditProfile() {
                   ↻ Swap prompt
                 </button>
               </div>
+              <InspirationPills
+                mode="spark"
+                inspirations={SPARK_PROMPT_BANK.find((b) => b.id === p.promptId)?.inspirations}
+                answer={p.answer}
+                onPick={(ins) => setPrompts((ps) => ps.map((q, j) => (j === i ? { ...q, answer: ins } : q)))}
+              />
               <textarea
                 value={p.answer}
                 onChange={(e) =>

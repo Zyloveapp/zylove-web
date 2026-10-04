@@ -487,6 +487,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
         <ConversationNudge
           matchId={matchId}
           partnerUid={partnerUid}
+          mode={match.mode === 'play' ? 'play' : 'spark'}
           messages={conversation}
           suppressed={showFirstChat || showVibeCheck || showReview || showReport || exitReview || showPhotoPicker || showPhotoBanner}
           onPick={setText}

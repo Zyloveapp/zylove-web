@@ -31,6 +31,7 @@ import {
   type PlayTagCategory,
 } from '../../services/playOnboarding'
 import { HeightPicker } from './ui'
+import { InspirationPills, InspirationToggle } from './Inspirations'
 import { MAX_PLAY_NAME, formatNameChangeDate } from '../../services/displayNames'
 
 // The Play steps, shared by the Play-only path in /onboarding and by
@@ -46,6 +47,9 @@ interface PlayStepProps {
   play: PlayDraft
   update: (patch: Partial<PlayDraft>) => void
 }
+
+// 'toggle' behind "Need a spark?" (onboarding); 'pills' shown while empty (Edit Play profile).
+type InspirationStyle = 'toggle' | 'pills'
 
 const SCENE_SECTIONS: { category: PlayTagCategory; title: string }[] = [
   { category: 'acts', title: "What I'm into" },
@@ -462,7 +466,7 @@ type GoDeeperStatus = 'idle' | 'loading' | 'failed' | 'limit'
 
 // Standard prompts plus two AI-written Go Deeper questions. Any three answers
 // across both sections unlock Next (see playAnswerCount).
-export function PlayPromptsStep({ play, update }: PlayStepProps) {
+export function PlayPromptsStep({ play, update, inspirationStyle = 'toggle' }: PlayStepProps & { inspirationStyle?: InspirationStyle }) {
   // The prompt slot whose question is being replaced (or added) from the picker.
   const [pickerSlot, setPickerSlot] = useState<number | null>(null)
   const [status, setStatus] = useState<GoDeeperStatus>(() => (play.goDeeper.length === 0 ? 'loading' : 'idle'))
@@ -535,6 +539,8 @@ export function PlayPromptsStep({ play, update }: PlayStepProps) {
       <div className="space-y-4">
         {play.promptIds.map((id, i) => {
           const prompt = PLAY_PROMPT_BANK.find((p) => p.id === id)
+          const answer = play.answers[id] ?? ''
+          const setAnswer = (a: string) => update({ answers: { ...play.answers, [id]: a } })
           return (
             <div key={id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-start justify-between gap-3">
@@ -558,11 +564,13 @@ export function PlayPromptsStep({ play, update }: PlayStepProps) {
                   )}
                 </div>
               </div>
-              <AnswerBox
-                value={play.answers[id] ?? ''}
-                onChange={(answer) => update({ answers: { ...play.answers, [id]: answer } })}
-                placeholder={prompt?.placeholder ?? 'Your answer…'}
-              />
+              {inspirationStyle === 'pills' && (
+                <InspirationPills mode="play" inspirations={prompt?.inspirations} answer={answer} onPick={setAnswer} />
+              )}
+              <AnswerBox value={answer} onChange={setAnswer} placeholder={prompt?.placeholder ?? 'Your answer…'} />
+              {inspirationStyle === 'toggle' && (
+                <InspirationToggle mode="play" inspirations={prompt?.inspirations} onPick={setAnswer} />
+              )}
             </div>
           )
         })}

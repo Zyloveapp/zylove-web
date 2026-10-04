@@ -2,12 +2,12 @@ import { useState } from 'react'
 import { SPARK_PROMPT_BANK, type AppPrompt } from '../../types/dualProfile'
 import { MIN_PROMPT_ANSWERS, PROMPT_COUNT, PROMPT_MAX_LENGTH, answeredPromptCount, type StepProps } from './types'
 import { StepHeader } from './ui'
+import { InspirationToggle } from './Inspirations'
 
 const PROMPTS_BY_ID = new Map<string, AppPrompt>(SPARK_PROMPT_BANK.map((p) => [p.id, p]))
 
 export default function PromptsStep({ draft, update }: StepProps) {
   const [swapping, setSwapping] = useState<string | null>(null)
-  const [inspiring, setInspiring] = useState<string | null>(null)
 
   const selected = draft.selectedPromptIds
   const available = SPARK_PROMPT_BANK.filter((p) => !selected.includes(p.id))
@@ -55,15 +55,6 @@ export default function PromptsStep({ draft, update }: StepProps) {
                 className="w-full resize-none rounded-lg border border-white/15 px-3 py-2 focus:border-[#1B4FD8] focus:outline-none"
               />
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                {prompt.inspirations && prompt.inspirations.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setInspiring(inspiring === id ? null : id)}
-                    className="rounded-full border border-white/15 px-3 py-1 text-white/60"
-                  >
-                    ✦ Need a spark?
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() => setSwapping(swapping === id ? null : id)}
@@ -76,23 +67,7 @@ export default function PromptsStep({ draft, update }: StepProps) {
                 </span>
               </div>
 
-              {inspiring === id && prompt.inspirations && (
-                <div className="mt-3 space-y-1.5">
-                  {prompt.inspirations.map((ins) => (
-                    <button
-                      key={ins}
-                      type="button"
-                      onClick={() => {
-                        setAnswer(id, ins)
-                        setInspiring(null)
-                      }}
-                      className="block w-full rounded-lg bg-white/5 px-3 py-2 text-left text-sm text-white/80 hover:bg-white/10"
-                    >
-                      "{ins}"
-                    </button>
-                  ))}
-                </div>
-              )}
+              <InspirationToggle mode="spark" inspirations={prompt.inspirations} onPick={(ins) => setAnswer(id, ins)} />
 
               {swapping === id && (
                 <div className="mt-3 border-t border-white/5 pt-3">

@@ -25,6 +25,7 @@ function isStalling(messages: NudgeMessage[], now: number): boolean {
 interface ConversationNudgeProps {
   matchId: string
   partnerUid: string
+  mode: 'spark' | 'play'
   messages: NudgeMessage[]
   // Suppressed while another chat modal is up.
   suppressed: boolean
@@ -34,8 +35,9 @@ interface ConversationNudgeProps {
 
 type Sheet = { starters: string[] | null }
 
-// "✦ Need a spark?" banner above the chat input when a conversation stalls.
-export default function ConversationNudge({ matchId, partnerUid, messages, suppressed, onPick }: ConversationNudgeProps) {
+// "✦ Need a spark?" (Play: "Need inspiration? 🔥") banner above the chat input when a conversation stalls.
+export default function ConversationNudge({ matchId, partnerUid, mode, messages, suppressed, onPick }: ConversationNudgeProps) {
+  const play = mode === 'play'
   const [now, setNow] = useState(() => Date.now())
   const [sheet, setSheet] = useState<Sheet | null>(null)
   // Message count when the user said "I'm good"; the banner returns once the chat moves on.
@@ -79,10 +81,20 @@ export default function ConversationNudge({ matchId, partnerUid, messages, suppr
           <button
             type="button"
             onClick={open}
-            className="flex items-center gap-1.5 rounded-full border border-[#1B4FD8]/40 bg-[#1B4FD8]/10 px-3 py-1 text-xs font-semibold text-[#7C9BFF] transition-colors hover:bg-[#1B4FD8]/20"
+            className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+              play
+                ? 'border-[#E03131]/40 bg-[#E03131]/10 text-red-300 hover:bg-[#E03131]/20'
+                : 'border-[#1B4FD8]/40 bg-[#1B4FD8]/10 text-[#7C9BFF] hover:bg-[#1B4FD8]/20'
+            }`}
           >
-            <SparkleIcon className="h-3.5 w-3.5" />
-            Need a spark?
+            {play ? (
+              'Need inspiration? 🔥'
+            ) : (
+              <>
+                <SparkleIcon className="h-3.5 w-3.5" />
+                Need a spark?
+              </>
+            )}
           </button>
         </div>
       )}
@@ -97,10 +109,16 @@ export default function ConversationNudge({ matchId, partnerUid, messages, suppr
         >
           <div className="w-full rounded-t-2xl bg-gray-900 px-6 pt-6 text-white pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] lg:max-w-sm lg:rounded-2xl lg:pb-6">
             <h2 id="nudge-title" className="flex items-center justify-center gap-2 text-xl font-bold">
-              <span className="text-[#7C9BFF]" aria-hidden>
-                ✦
-              </span>
-              Need a spark?
+              {play ? (
+                'Need inspiration? 🔥'
+              ) : (
+                <>
+                  <span className="text-[#7C9BFF]" aria-hidden>
+                    ✦
+                  </span>
+                  Need a spark?
+                </>
+              )}
             </h2>
             <div className="mt-5 space-y-2">
               {sheet.starters === null ? (
