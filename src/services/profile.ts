@@ -296,10 +296,30 @@ export interface ScorecardSection {
   improve: string
 }
 
+export interface PhotoFeedback {
+  score: number
+  working: string
+  improve: string
+  suggestions: string[]
+}
+
 export interface ProfileScorecard {
   overallScore: number
   sections: ScorecardSection[]
   topSuggestion: string
+  // Only with photo-coaching consent for that mode.
+  photos?: PhotoFeedback
+}
+
+function isPhotoFeedback(v: unknown): v is PhotoFeedback {
+  const p = v as PhotoFeedback | null
+  return (
+    typeof p?.score === 'number' &&
+    typeof p.working === 'string' &&
+    typeof p.improve === 'string' &&
+    Array.isArray(p.suggestions) &&
+    p.suggestions.every((x) => typeof x === 'string')
+  )
 }
 
 function isScorecard(v: unknown): v is ProfileScorecard {
@@ -321,5 +341,7 @@ export async function fetchProfileReview(mode: 'spark' | 'play'): Promise<Profil
   const name = mode === 'play' ? 'reviewPlayProfile' : 'reviewProfile'
   const { data } = await httpsCallable<void, { review?: unknown }>(functions, name, { timeout: 120_000 })()
   if (!isScorecard(data.review)) throw new Error('Invalid review')
-  return data.review
+  const { photos, ...review } = data.review
+  // A malformed photos block is dropped rather than failing the review.
+  return isPhotoFeedback(photos) ? { ...review, photos } : review
 }

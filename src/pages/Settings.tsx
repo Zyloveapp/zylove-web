@@ -23,6 +23,7 @@ import DiscoverySettings from '../components/DiscoverySettings'
 import InstallAppSection from '../components/InstallAppSection'
 import BlockedUsersLink from '../components/BlockedUsersLink'
 import { isAdmin } from '../services/adminPhotos'
+import { setPhotoConsent, subscribePhotoConsent, type PhotoConsent, type PhotoConsentMode } from '../services/photoConsent'
 
 // On colour: cobalt by default (settings that cover both modes), red for Play.
 const SWITCH_ON = { spark: 'bg-[#1B4FD8]', play: 'bg-[#E03131]' } as const
@@ -112,6 +113,124 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <h2 className="px-5 pt-4 text-xs font-semibold uppercase tracking-widest text-white/40">{title}</h2>
       {children}
     </section>
+  )
+}
+
+const PHOTO_COACHING: { mode: PhotoConsentMode; label: string; description: string }[] = [
+  { mode: 'spark', label: 'Analyze my Spark photos', description: 'Allows AI coaching to review your Spark profile photos.' },
+  { mode: 'play', label: 'Analyze my Play photos', description: 'Allows AI coaching to review your Play profile photos.' },
+]
+
+function PhotoConsentModal({ onAccept, onCancel, busy }: { onAccept: () => void; onCancel: () => void; busy: boolean }) {
+  useEffect(() => {
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key === 'Escape') onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/60 backdrop-blur-sm lg:items-center lg:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="photo-consent-title"
+    >
+      <div className="w-full rounded-t-2xl bg-gray-900 px-6 pt-6 text-white pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] lg:max-w-sm lg:rounded-2xl lg:pb-6">
+        <h2 id="photo-consent-title" className="text-xl font-bold">
+          Photo analysis consent
+        </h2>
+        <p className="mt-3 text-sm leading-relaxed text-white/70">
+          Zylove uses AI-powered photo analysis for profile coaching. Your photos are processed securely to generate
+          feedback and are not stored by our review partner. Standard Zylove privacy protections apply.
+        </p>
+        <button
+          type="button"
+          onClick={onAccept}
+          disabled={busy}
+          autoFocus
+          className="mt-6 w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
+          I understand, enable
+        </button>
+        <button type="button" onClick={onCancel} className="mt-2 w-full py-2 text-sm text-white/50 hover:text-white">
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Privacy → per-mode opt-in for AI photo coaching in the profile reviews.
+// Turning one on asks for consent the first time; off is immediate.
+function PrivacySection({ uid }: { uid: string }) {
+  const [loaded, setLoaded] = useState<{ uid: string; consent: PhotoConsent } | null>(null)
+  const [pending, setPending] = useState<PhotoConsentMode | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!uid) return
+    return subscribePhotoConsent(
+      uid,
+      (consent) => setLoaded({ uid, consent }),
+      () => setError("Couldn't load your privacy settings."),
+    )
+  }, [uid])
+
+  const consent = loaded?.uid === uid ? loaded.consent : null
+
+  async function save(mode: PhotoConsentMode, enabled: boolean, acknowledge = false) {
+    setBusy(true)
+    setError(null)
+    try {
+      await setPhotoConsent(uid, mode, enabled, { acknowledge })
+    } catch {
+      setError("Couldn't save that. Try again.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function toggle(mode: PhotoConsentMode, next: boolean) {
+    if (next && !consent?.acknowledged) return setPending(mode)
+    void save(mode, next)
+  }
+
+  async function accept() {
+    if (!pending) return
+    await save(pending, true, true)
+    setPending(null)
+  }
+
+  return (
+    <Section title="Privacy">
+      <p className="px-5 pt-3 font-medium">Profile photo coaching</p>
+      <ul className="pb-1">
+        {PHOTO_COACHING.map(({ mode, label, description }) => (
+          <li key={mode} className="flex items-center justify-between gap-4 px-5 py-3">
+            <span>
+              <span className="block text-sm font-medium">{label}</span>
+              <span className="block text-xs text-white/40">{description}</span>
+            </span>
+            <Switch
+              checked={consent?.[mode] ?? false}
+              disabled={consent === null || busy}
+              label={label}
+              tone={mode}
+              onChange={(next) => toggle(mode, next)}
+            />
+          </li>
+        ))}
+      </ul>
+      {error && <p className="px-5 pb-2 text-sm text-red-400">{error}</p>}
+      <p className="border-t border-white/5 px-5 py-3 text-xs text-white/40">
+        Zylove uses a third-party AI review service to analyze photos. Photos are processed securely and not retained.
+        By enabling, you consent to this analysis.
+      </p>
+      {pending && <PhotoConsentModal busy={busy} onAccept={() => void accept()} onCancel={() => setPending(null)} />}
+    </Section>
   )
 }
 
@@ -395,6 +514,8 @@ export default function Settings() {
             Standard message rates apply. You can turn off SMS notifications anytime.
           </p>
         </Section>
+
+        <PrivacySection uid={uid} />
 
         <Section title="Safety">
           <button

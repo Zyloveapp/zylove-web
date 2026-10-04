@@ -17,11 +17,14 @@ import { buildPlayBioPrompt, parsePlayBioRequest } from './playBioPrompt'
 import { buildPlayReviewPrompt } from './playReviewPrompt'
 import {
   PLAY_REVIEW_SECTIONS,
+  SECOND_PERSON_RULE,
   SPARK_REVIEW_SECTIONS,
   parseScorecard,
+  photoReviewSection,
   scorecardInstructions,
   type ProfileScorecard,
 } from './profileScorecard'
+import { loadReviewPhotos, photoConsent, type ImageBlock } from './reviewPhotos'
 import {
   GO_DEEPER_FOCUS,
   buildPlayGoDeeperPrompt,
@@ -990,6 +993,28 @@ async function askClaude(label: string, prompt: string, maxTokens: number): Prom
   return extractText(await response.json())
 }
 
+// A profile review: the photos (if any) first, then the prompt.
+async function askClaudeWithPhotos(label: string, prompt: string, photos: ImageBlock[], maxTokens: number): Promise<string> {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': anthropicKey.value(),
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: maxTokens,
+      messages: [{ role: 'user', content: [...photos, { type: 'text', text: prompt }] }],
+    }),
+  })
+  if (!response.ok) {
+    logger.error(`${label}: Anthropic API error`, { status: response.status })
+    return ''
+  }
+  return extractText(await response.json())
+}
+
 function humanizeKey(key: string): string {
   return key.replace(/_/g, ' ')
 }
@@ -1116,17 +1141,21 @@ function profileForReview(root: DocumentData, spark: DocumentData): string {
 // Scorecard JSON runs past the old prose limit; leave headroom so a long
 // reply isn't cut mid-object (which would fail the parse).
 const REVIEW_MAX_TOKENS = 1000
+// Room for the photos block on top of the scorecard.
+const REVIEW_WITH_PHOTOS_MAX_TOKENS = 1400
 
 // "How's my profile?" — honest AI scorecard for the caller's own Spark
-// profile. A reply that isn't the expected JSON is an error the client
-// shows with a Regenerate button.
+// profile, with photo coaching when they opted in
+// (photoAnalysisConsent.spark). A reply that isn't the expected JSON is an
+// error the client shows with a Regenerate button.
 export const reviewProfile = onCall(
-  { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
+  { timeoutSeconds: 120, memory: '512MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ review: ProfileScorecard }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     let review: ProfileScorecard | null = null
     try {
       const { root, spark } = await loadOwnProfileDocs(request.auth.uid)
+      const photos = photoConsent(root, 'spark') ? await loadReviewPhotos(request.auth.uid, root.photoURLs) : []
       const prompt = `Review this dating profile on Zylove Spark — serious dating, real compatibility. Give honest, constructive feedback. Be direct but kind.
 
 Profile:
@@ -1141,13 +1170,17 @@ Score and review these four sections:
 - Appeal — Will this draw in the kind of person they want? What's working well?
 
 Then give the single most impactful change they could make as the top suggestion.
-
+${photos.length > 0 ? `\n${photoReviewSection('spark', photos.length)}\n` : ''}
 ── RULES ──
 - Be honest, not flattering — scores should be earned
 - Be specific to their actual profile, not generic advice
 
-${scorecardInstructions(SPARK_REVIEW_SECTIONS)}`
-      review = parseScorecard(await askClaude('reviewProfile', prompt, REVIEW_MAX_TOKENS), SPARK_REVIEW_SECTIONS)
+${SECOND_PERSON_RULE}
+
+${scorecardInstructions(SPARK_REVIEW_SECTIONS, { photos: photos.length > 0 })}`
+      const maxTokens = photos.length > 0 ? REVIEW_WITH_PHOTOS_MAX_TOKENS : REVIEW_MAX_TOKENS
+      const reply = await askClaudeWithPhotos('reviewProfile', prompt, photos, maxTokens)
+      review = parseScorecard(reply, SPARK_REVIEW_SECTIONS, { photos: photos.length > 0 })
     } catch (err) {
       logger.error('reviewProfile failed', { message: err instanceof Error ? err.message : String(err) })
     }
@@ -1167,9 +1200,10 @@ function recentPlayReviews(data: DocumentData | undefined, now: number): number[
 }
 
 // "How's my Play profile? 🔥" — a scorecard for the caller's saved Play
-// profile. 3 per rolling week; only successful reviews count.
+// profile, with photo coaching when they opted in (photoAnalysisConsent.play).
+// 3 per rolling week; only successful reviews count.
 export const reviewPlayProfile = onCall(
-  { timeoutSeconds: 120, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
+  { timeoutSeconds: 120, memory: '512MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ review: ProfileScorecard }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const db = getFirestore()
@@ -1180,8 +1214,15 @@ export const reviewPlayProfile = onCall(
     }
     if (!playSnap.exists) throw new HttpsError('failed-precondition', 'Set up your Play profile first.')
 
-    const reply = await askClaude('reviewPlayProfile', buildPlayReviewPrompt(playSnap.data() ?? {}), REVIEW_MAX_TOKENS)
-    const review = parseScorecard(reply, PLAY_REVIEW_SECTIONS)
+    const play = playSnap.data() ?? {}
+    const photos = photoConsent(userSnap.data(), 'play') ? await loadReviewPhotos(request.auth.uid, play.photoURLs) : []
+    const reply = await askClaudeWithPhotos(
+      'reviewPlayProfile',
+      buildPlayReviewPrompt(play, photos.length),
+      photos,
+      photos.length > 0 ? REVIEW_WITH_PHOTOS_MAX_TOKENS : REVIEW_MAX_TOKENS,
+    )
+    const review = parseScorecard(reply, PLAY_REVIEW_SECTIONS, { photos: photos.length > 0 })
     // Unparseable replies don't count toward the weekly limit.
     if (!review) {
       logger.error('reviewPlayProfile: reply was not a valid scorecard', { length: reply.length })

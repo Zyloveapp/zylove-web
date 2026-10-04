@@ -4,6 +4,7 @@ import { getAuth } from 'firebase-admin/auth'
 import { getStorage } from 'firebase-admin/storage'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { SMS_SECRETS, sendSMS } from './sms'
+import { storagePath } from './storagePath'
 
 // Admin photo review (/admin/photos). onPhotoUpload (mobile codebase) parks
 // flagged photos in pendingPhotoURLs — on users/{uid} for Spark, on
@@ -53,23 +54,6 @@ function modeOf(entry: PendingEntry): Mode {
 
 function millis(v: unknown): number | null {
   return v instanceof Timestamp ? v.toMillis() : typeof v === 'number' ? v : null
-}
-
-// Bucket and object path from either URL shape: onPhotoUpload's signed URLs
-// (storage.googleapis.com/{bucket}/{path}) or Firebase download URLs
-// (firebasestorage.googleapis.com/v0/b/{bucket}/o/{path}).
-function storagePath(url: string): { bucket: string; path: string } | null {
-  try {
-    const u = new URL(url)
-    if (u.hostname === 'storage.googleapis.com') {
-      const [bucket, ...rest] = u.pathname.slice(1).split('/')
-      return bucket && rest.length ? { bucket, path: decodeURIComponent(rest.join('/')) } : null
-    }
-    const m = /^\/v0\/b\/([^/]+)\/o\/(.+)$/.exec(u.pathname)
-    return m ? { bucket: m[1], path: decodeURIComponent(m[2]) } : null
-  } catch {
-    return null
-  }
 }
 
 // Moderation notices are transactional, but still only go to people who

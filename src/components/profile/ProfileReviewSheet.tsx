@@ -86,7 +86,8 @@ export default function ProfileReviewSheet({ mode, onClose }: { mode: Mode; onCl
       aria-labelledby="profile-review-title"
     >
       <div className={`flex max-h-[90dvh] w-full flex-col rounded-t-2xl border text-white lg:max-w-lg lg:rounded-2xl ${theme.panel}`}>
-        <div className="flex-1 overflow-y-auto px-6 pt-6 pb-5">
+        {/* Scrolls under a fixed footer; the bottom padding lets the last card clear it. */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-6 pb-8">
           {state.status === 'loading' ? (
             <div className="flex flex-col items-center gap-3 py-16 text-sm text-white/50">
               <span
@@ -102,7 +103,17 @@ export default function ProfileReviewSheet({ mode, onClose }: { mode: Mode; onCl
           )}
         </div>
 
-        <div className={`border-t px-6 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] ${theme.divider}`}>
+        <div className={`shrink-0 border-t px-6 pt-2 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] ${theme.divider}`}>
+          {!(state.status === 'error' && state.limited) && (
+            <button
+              type="button"
+              onClick={regenerate}
+              disabled={state.status === 'loading'}
+              className="mb-2 w-full py-2 text-sm text-white/50 hover:text-white disabled:opacity-40"
+            >
+              {theme.regenerate}
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -112,18 +123,16 @@ export default function ProfileReviewSheet({ mode, onClose }: { mode: Mode; onCl
           >
             Got it
           </button>
-          {!(state.status === 'error' && state.limited) && (
-            <button
-              type="button"
-              onClick={regenerate}
-              disabled={state.status === 'loading'}
-              className="mt-2 w-full py-2 text-sm text-white/50 hover:text-white disabled:opacity-40"
-            >
-              {theme.regenerate}
-            </button>
-          )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function ScoreBar({ score }: { score: number }) {
+  return (
+    <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
+      <div className="h-full rounded-full" style={{ width: `${score}%`, backgroundColor: scoreColor(score) }} />
     </div>
   )
 }
@@ -133,7 +142,12 @@ function Scorecard({ review, mode }: { review: ProfileScorecard; mode: Mode }) {
   return (
     <>
       <div className="flex flex-col items-center text-center">
-        <ScoreRing score={review.overallScore} color={theme.ring ?? scoreColor(review.overallScore)} />
+        <ScoreRing
+          score={review.overallScore}
+          color={theme.ring ?? scoreColor(review.overallScore)}
+          trackClassName="text-white/20"
+          numberClassName="text-white"
+        />
         <h2 id="profile-review-title" className="mt-3 text-lg font-bold">
           {theme.title}
         </h2>
@@ -147,14 +161,30 @@ function Scorecard({ review, mode }: { review: ProfileScorecard; mode: Mode }) {
                 {s.name} · <span style={{ color: scoreColor(s.score) }}>{s.score}</span>
               </h3>
             </div>
-            <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
-              <div className="h-full rounded-full" style={{ width: `${s.score}%`, backgroundColor: scoreColor(s.score) }} />
-            </div>
+            <ScoreBar score={s.score} />
             <p className="mt-3 text-sm leading-snug text-green-400">✓ {s.working}</p>
             <p className="mt-2 text-sm leading-snug text-amber-400">↑ {s.improve}</p>
           </section>
         ))}
       </div>
+
+      {review.photos && (
+        <section className={`mt-3 rounded-2xl border p-4 ${theme.card}`}>
+          <h3 className="font-semibold">
+            Photos · <span style={{ color: scoreColor(review.photos.score) }}>{review.photos.score}</span>
+          </h3>
+          <ScoreBar score={review.photos.score} />
+          <p className="mt-3 text-sm leading-snug text-green-400">✓ {review.photos.working}</p>
+          <p className="mt-2 text-sm leading-snug text-amber-400">↑ {review.photos.improve}</p>
+          {review.photos.suggestions.length > 0 && (
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-snug text-white/75">
+              {review.photos.suggestions.map((s) => (
+                <li key={s}>{s}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       <section className={`mt-5 rounded-2xl border p-4 ${theme.card}`}>
         <h3 className={`text-xs font-semibold uppercase tracking-widest ${theme.accentText}`}>💡 Top suggestion</h3>
