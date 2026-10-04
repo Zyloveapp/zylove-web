@@ -3,24 +3,22 @@ import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
-import { coordsOf, locationRemembered, rememberLocation, requestLocation, saveUserLocation } from '../services/location'
+import { coordsOf, requestLocation, saveUserLocation } from '../services/location'
 
 type Permission = 'checking' | 'granted' | 'prompt' | 'denied'
 // What's shown: the feed, a spinner, or the ask.
 type GateState = 'checking' | 'granted' | 'prompt' | 'denied'
 
 // Set once this tab gets a position, so browsers that report 'prompt' on
-// every visit (Safari, even with the site set to Allow) don't gate again.
-// A position from an earlier visit in this browser counts too.
+// every visit (Safari's "Ask") don't gate again until the next session.
 const GRANTED_KEY = 'zylove_location_granted'
 
 function grantedThisSession(): boolean {
   try {
-    if (sessionStorage.getItem(GRANTED_KEY) === '1') return true
+    return sessionStorage.getItem(GRANTED_KEY) === '1'
   } catch {
-    // fall through
+    return false
   }
-  return locationRemembered()
 }
 
 function markGranted(): void {
@@ -32,7 +30,6 @@ function markGranted(): void {
 }
 
 function forgetGranted(): void {
-  rememberLocation(false)
   try {
     sessionStorage.removeItem(GRANTED_KEY)
   } catch {

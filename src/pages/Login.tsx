@@ -8,7 +8,6 @@ import { useAuthStore } from '../store/authStore'
 import PublicFooter from '../components/public/PublicFooter'
 import Wordmark from '../components/public/Wordmark'
 import FoundingCounter from '../components/public/FoundingCounter'
-import { requestLocation, saveUserLocation } from '../services/location'
 import { afterLoginPath } from '../services/afterLogin'
 
 // US numbers only: the field shows a fixed +1 and holds just the 10 digits.
@@ -155,9 +154,10 @@ function SignInCard() {
 
     setSubmitting(true)
     try {
-      const { user } = await confirmOtp(confirmation, code)
-      // Fire and forget: location never blocks sign-in, and a denial is silent.
-      void requestLocation().then((loc) => (loc ? saveUserLocation(user.uid, loc) : undefined)).catch(() => {})
+      await confirmOtp(confirmation, code)
+      // No location request here: it would fire without a click on the
+      // gate, and Safari can record that as a denial without prompting.
+      // Explore's LocationGate asks.
       navigate(afterLoginPath('/discover'), { replace: true })
     } catch (err) {
       setError(errorMessage(err))
