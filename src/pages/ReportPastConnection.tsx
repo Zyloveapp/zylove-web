@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useBackLinkClass } from '../store/modeStore'
 import { useNavigate } from 'react-router-dom'
 import ReviewModal from '../components/chat/ReviewModal'
 import { relativeTime } from '../services/matches'
@@ -9,6 +10,7 @@ const DONE_TEXT = 'Report submitted. Thank you for helping keep Zylove safe.'
 // Report someone from the last 90 days, including matches that have ended.
 // Names and dates only — no photos, no conversation.
 export default function ReportPastConnection() {
+  const backLinkClass = useBackLinkClass()
   const navigate = useNavigate()
   const [connections, setConnections] = useState<PastConnection[] | null>(null)
   const [error, setError] = useState(false)
@@ -31,7 +33,7 @@ export default function ReportPastConnection() {
           <button
             type="button"
             onClick={() => navigate(-1)}
-            className="text-sm font-medium text-[#7C9BFF] hover:text-white"
+            className={`text-sm font-medium ${backLinkClass} hover:text-white`}
           >
             ← Back
           </button>

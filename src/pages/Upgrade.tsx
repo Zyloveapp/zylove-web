@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom'
+import { useBackLinkClass } from '../store/modeStore'
 import { useAuthStore } from '../store/authStore'
 import { useSubscriptionStore } from '../store/subscriptionStore'
 import { TRIAL_DAYS } from '../services/subscription'
@@ -58,6 +59,7 @@ function Plan({
 // Plans. Public: signed-out visitors see the plans, signed-in users also see
 // their trial or lifetime access. Payments aren't live yet.
 export default function Upgrade() {
+  const backLinkClass = useBackLinkClass()
   const navigate = useNavigate()
   const signedIn = useAuthStore((s) => s.user !== null)
   const { tier, daysLeft, alwaysElite } = useSubscriptionStore()
@@ -66,7 +68,7 @@ export default function Upgrade() {
   return (
     <div className="min-h-[100dvh] bg-gray-950 px-4 py-8 text-white">
       <div className="mx-auto max-w-xl space-y-6">
-        <button type="button" onClick={() => navigate(-1)} className="text-sm font-medium text-[#7C9BFF] hover:text-white">
+        <button type="button" onClick={() => navigate(-1)} className={`text-sm font-medium ${backLinkClass} hover:text-white`}>
           ← Back
         </button>
         <h1 className="text-3xl font-bold">Zylove plans</h1>

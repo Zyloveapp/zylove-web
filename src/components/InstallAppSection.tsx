@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import InstallGuide from './InstallGuide'
+import { MODE_ACCENT, useModeStore } from '../store/modeStore'
 
 // Already launched from the home screen? display-mode covers Android and
 // current iOS; navigator.standalone covers older iOS Safari.
@@ -12,6 +13,7 @@ function runningAsApp(): boolean {
 // Settings → Install app: how to add Zylove to the home screen, or a note
 // that this already is the installed app.
 export default function InstallAppSection() {
+  const accentText = MODE_ACCENT[useModeStore((s) => s.mode)].text
   const [installed] = useState(runningAsApp)
   const [open, setOpen] = useState(false)
 
@@ -31,7 +33,7 @@ export default function InstallAppSection() {
             Get the full app experience — launches fullscreen, works like a native app.
           </span>
         </span>
-        <span className="shrink-0 text-sm font-semibold text-[#7C9BFF]">How to install →</span>
+        <span className={`shrink-0 text-sm font-semibold ${accentText}`}>How to install →</span>
       </button>
       {open && <InstallGuide onClose={() => setOpen(false)} />}
     </section>

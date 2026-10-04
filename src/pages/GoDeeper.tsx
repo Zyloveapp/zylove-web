@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useBackLinkClass } from '../store/modeStore'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { loadOwnProfile, saveGoDeeper } from '../services/profile'
@@ -8,6 +9,7 @@ type Loaded = { uid: string; answers: GoDeeperAnswers } | 'error'
 
 // The three Go Deeper questions from onboarding, answerable from the profile.
 export default function GoDeeper() {
+  const backLinkClass = useBackLinkClass()
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const navigate = useNavigate()
   const [loaded, setLoaded] = useState<Loaded | null>(null)
@@ -73,7 +75,7 @@ export default function GoDeeper() {
   return (
     <div className={page}>
       <header className="mx-auto flex max-w-xl items-center justify-between px-4 pt-5">
-        <Link to="/profile" className="text-sm font-medium text-[#7C9BFF] hover:text-white">
+        <Link to="/profile" className={`text-sm font-medium ${backLinkClass} hover:text-white`}>
           ← Back
         </Link>
         <h1 className="font-semibold">✦ How I operate</h1>

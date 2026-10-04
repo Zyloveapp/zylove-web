@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
+import { useBackLinkClass } from '../store/modeStore'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import {
@@ -93,6 +94,7 @@ function PromptPicker({ used, onPick, onClose }: { used: string[]; onPick: (id: 
 type Picker = { swapIndex: number | null } // null = adding a new prompt
 
 export default function EditProfile() {
+  const backLinkClass = useBackLinkClass()
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const navigate = useNavigate()
   const [profile, setProfile] = useState<DiscoverProfile | null>(null)
@@ -233,7 +235,7 @@ export default function EditProfile() {
   return (
     <div className={page}>
       <header className="mx-auto flex max-w-xl items-center justify-between px-4 pt-5">
-        <Link to="/profile" className="text-sm font-medium text-[#7C9BFF] hover:text-white">
+        <Link to="/profile" className={`text-sm font-medium ${backLinkClass} hover:text-white`}>
           ← Back
         </Link>
         <h1 className="font-semibold">✦ Spark Profile</h1>

@@ -1,9 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { signOut } from 'firebase/auth'
 import { auth } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
-import { useModeStore } from '../store/modeStore'
+import { MODE_ACCENT, useBackLinkClass, useModeStore } from '../store/modeStore'
 import { hasPin } from '../services/playPin'
 import {
   SMS_SECTIONS,
@@ -173,6 +173,8 @@ function PhotoConsentModal({
 // Privacy → per-mode opt-in for AI photo coaching in the profile reviews.
 // Turning one on asks for consent the first time; off is immediate.
 function PrivacySection({ uid }: { uid: string }) {
+  // Only the current mode's photo consent.
+  const currentMode = useModeStore((st) => st.mode)
   const [loaded, setLoaded] = useState<{ uid: string; consent: PhotoConsent } | null>(null)
   const [pending, setPending] = useState<PhotoConsentMode | null>(null)
   const [busy, setBusy] = useState(false)
@@ -216,7 +218,7 @@ function PrivacySection({ uid }: { uid: string }) {
     <Section title="Privacy">
       <p className="px-5 pt-3 font-medium">Profile photo coaching</p>
       <ul className="pb-1">
-        {PHOTO_COACHING.map(({ mode, label, description }) => (
+        {PHOTO_COACHING.filter((p) => p.mode === currentMode).map(({ mode, label, description }) => (
           <li key={mode} className="flex items-center justify-between gap-4 px-5 py-3">
             <span>
               <span className="block text-sm font-medium">{label}</span>
@@ -329,6 +331,7 @@ function ConsentModal({ onAccept, onDecline, busy }: { onAccept: () => void; onD
 type Loaded = { uid: string; settings: SmsSettings } | 'error'
 
 export default function Settings() {
+  const backLinkClass = useBackLinkClass()
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const phone = useAuthStore((s) => s.user?.phoneNumber) ?? null
   // Only the current mode's notification section is shown.
@@ -392,13 +395,16 @@ export default function Settings() {
   }
 
   return (
-    <div className="min-h-[calc(100dvh-7rem)] bg-gray-950 px-4 py-6 text-white">
+    <div
+      className="min-h-[calc(100dvh-7rem)] bg-gray-950 px-4 py-6 text-white"
+      style={{ '--zy-accent': MODE_ACCENT[mode].cssVar } as CSSProperties}
+    >
       <div className="mx-auto max-w-xl space-y-6">
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={() => navigate(-1)}
-            className="text-sm font-medium text-[#7C9BFF] hover:text-white"
+            className={`text-sm font-medium ${backLinkClass} hover:text-white`}
           >
             ← Back
           </button>
@@ -482,6 +488,7 @@ export default function Settings() {
               checked={sms?.preferences.quietNudge ?? false}
               disabled={!enabled || busy}
               label="Quiet chat nudge"
+              tone={mode}
               onChange={(next) => void run(() => setQuietNudge(uid, next))}
             />
           </div>
@@ -494,6 +501,7 @@ export default function Settings() {
                 checked={sms?.quietHours.enabled ?? true}
                 disabled={!enabled || busy}
                 label="Pause notifications overnight"
+              tone={mode}
                 onChange={(next) => saveQuietHours({ enabled: next })}
               />
             </div>

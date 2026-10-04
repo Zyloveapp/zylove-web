@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { MODE_ACCENT, useModeStore } from '../store/modeStore'
 import { createPortal } from 'react-dom'
 
 type Platform = 'iphone' | 'android'
@@ -27,6 +28,7 @@ function guessPlatform(): Platform {
 
 // "Add to Home Screen" steps for iPhone (Safari) and Android (Chrome).
 export default function InstallGuide({ onClose }: { onClose: () => void }) {
+  const accent = MODE_ACCENT[useModeStore((st) => st.mode)]
   const [tab, setTab] = useState<Platform>(guessPlatform)
 
   useEffect(() => {
@@ -59,7 +61,7 @@ export default function InstallGuide({ onClose }: { onClose: () => void }) {
               aria-selected={tab === p}
               onClick={() => setTab(p)}
               className={`rounded-lg py-2 text-sm font-semibold transition-colors ${
-                tab === p ? 'bg-[#1B4FD8] text-white' : 'text-white/60 hover:text-white'
+                tab === p ? `${accent.bg} text-white` : 'text-white/60 hover:text-white'
               }`}
             >
               {p === 'iphone' ? 'iPhone' : 'Android'}
@@ -70,7 +72,7 @@ export default function InstallGuide({ onClose }: { onClose: () => void }) {
         <ol className="mt-5 space-y-3" role="tabpanel">
           {STEPS[tab].map((step, i) => (
             <li key={step} className="flex gap-3">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#1B4FD8]/20 text-xs font-semibold text-[#7C9BFF]">
+              <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${accent.softBg} text-xs font-semibold ${accent.text}`}>
                 {i + 1}
               </span>
               <span className="text-sm text-white/80">{step}</span>
@@ -84,7 +86,7 @@ export default function InstallGuide({ onClose }: { onClose: () => void }) {
           type="button"
           onClick={onClose}
           autoFocus
-          className="mt-4 w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold text-white transition-opacity hover:opacity-90"
+          className={`mt-4 w-full rounded-xl ${accent.bg} py-3 font-semibold text-white transition-opacity hover:opacity-90`}
         >
           Got it
         </button>

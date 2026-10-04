@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
-import { useModeStore } from '../store/modeStore'
+import { useModeStore, useBackLinkClass } from '../store/modeStore'
 import { downloadReviewPdf, loadReviews, type SavedReview } from '../services/reviewHistory'
 
 function formatDate(ms: number): string {
@@ -28,6 +28,7 @@ function Bar({ name, score, accent }: { name: string; score: number; accent: str
 
 // Saved profile reviews for the current mode only, newest first.
 export default function ReviewHistory() {
+  const backLinkClass = useBackLinkClass()
   const navigate = useNavigate()
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const mode = useModeStore((s) => s.mode)
@@ -69,7 +70,7 @@ export default function ReviewHistory() {
     <div className="min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] bg-gray-950 px-4 py-6 text-white">
       <div className="mx-auto max-w-xl space-y-6">
         <div className="flex items-center gap-3">
-          <button type="button" onClick={() => navigate(-1)} className="text-sm font-medium text-[#7C9BFF] hover:text-white">
+          <button type="button" onClick={() => navigate(-1)} className={`text-sm font-medium ${backLinkClass} hover:text-white`}>
             ← Back
           </button>
           <h1 className="text-2xl font-bold">Profile reviews</h1>
@@ -108,7 +109,7 @@ export default function ReviewHistory() {
                           type="button"
                           onClick={() => void download(r)}
                           disabled={downloading === r.reviewId}
-                          className="shrink-0 text-sm font-medium text-[#7C9BFF] hover:text-white disabled:opacity-50"
+                          className={`shrink-0 text-sm font-medium ${backLinkClass} hover:text-white disabled:opacity-50`}
                         >
                           {downloading === r.reviewId ? 'Downloading…' : 'Download PDF →'}
                         </button>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useBackLinkClass } from '../../store/modeStore'
 import { Link } from 'react-router-dom'
 import ProfileDetails from '../discover/ProfileDetails'
 import SparkleIcon from '../icons/SparkleIcon'
@@ -28,6 +29,7 @@ export default function SparkProfileView({
   onMatched,
   onMatchFailed,
 }: SparkProfileViewProps) {
+  const backLinkClass = useBackLinkClass()
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [busy, setBusy] = useState(false)
   // Linked during this view (the parent's `matched` updates via its listener).
@@ -94,7 +96,7 @@ export default function SparkProfileView({
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-gray-950 text-white">
       <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-3 lg:px-6">
-        <button type="button" onClick={onClose} className="text-sm text-white/60 hover:text-white">
+        <button type="button" onClick={onClose} className={`text-sm font-medium ${backLinkClass} hover:text-white`}>
           ← Back
         </button>
         <span className={`text-sm ${spark.isWeeklySpark ? 'text-[#F59E0B]' : 'text-white/40'}`}>

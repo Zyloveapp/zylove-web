@@ -31,3 +31,15 @@ export const useModeStore = create<ModeState>((set) => ({
     set({ mode })
   },
 }))
+
+// Accent classes per mode — cobalt for Spark, red for Play. Literal strings so
+// Tailwind sees them.
+export const MODE_ACCENT = {
+  spark: { text: 'text-[#7C9BFF]', bg: 'bg-[#1B4FD8]', softBg: 'bg-[#1B4FD8]/20', cssVar: '#1B4FD8' },
+  play: { text: 'text-[#E03131]', bg: 'bg-[#E03131]', softBg: 'bg-[#E03131]/20', cssVar: '#E03131' },
+} as const
+
+// "← Back" links: cobalt in Spark, red in Play.
+export function useBackLinkClass(): string {
+  return MODE_ACCENT[useModeStore((s) => s.mode)].text
+}

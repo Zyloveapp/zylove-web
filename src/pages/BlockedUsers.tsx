@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useBackLinkClass } from '../store/modeStore'
 import { useNavigate } from 'react-router-dom'
 import { fetchBlockedUsers, unblockMember, type BlockedUser } from '../services/safety'
 
@@ -9,6 +10,7 @@ function blockedDate(ms: number): string {
 // People you've blocked. Unblocking only lifts the block: the match stays
 // ended and the block still counts in behavior signals.
 export default function BlockedUsers() {
+  const backLinkClass = useBackLinkClass()
   const navigate = useNavigate()
   const [blocked, setBlocked] = useState<BlockedUser[] | null>(null)
   const [loadError, setLoadError] = useState(false)
@@ -44,7 +46,7 @@ export default function BlockedUsers() {
     <div className="min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] bg-gray-950 px-4 py-6 text-white">
       <div className="mx-auto max-w-xl space-y-6">
         <div className="flex items-center gap-3">
-          <button type="button" onClick={() => navigate(-1)} className="text-sm font-medium text-[#7C9BFF] hover:text-white">
+          <button type="button" onClick={() => navigate(-1)} className={`text-sm font-medium ${backLinkClass} hover:text-white`}>
             ← Back
           </button>
           <h1 className="text-2xl font-bold">Blocked users</h1>

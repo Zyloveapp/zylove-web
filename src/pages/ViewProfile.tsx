@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
-import { useModeStore } from '../store/modeStore'
+import { useModeStore, useBackLinkClass } from '../store/modeStore'
 import { loadOwnProfile, type OwnProfile } from '../services/profile'
 import { loadPlayProfile, type PlayProfileData } from '../services/playProfile'
 import { subscribeAllMatches, type MatchEntry } from '../services/matches'
@@ -25,6 +25,7 @@ export default function ViewProfile() {
 }
 
 function ViewProfileFor({ targetUid }: { targetUid: string }) {
+  const backLinkClass = useBackLinkClass()
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const mode = useModeStore((s) => s.mode)
   const navigate = useNavigate()
@@ -132,7 +133,7 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
   return (
     <div className={page}>
       <div className="mx-auto max-w-xl space-y-8 px-4 pt-4 pb-8">
-        <button type="button" onClick={goBack} className="text-sm text-white/60 hover:text-white">
+        <button type="button" onClick={goBack} className={`text-sm font-medium ${backLinkClass} hover:text-white`}>
           ← Back
         </button>
         {viewMode === 'play' && play ? (
