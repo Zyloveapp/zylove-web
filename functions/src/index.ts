@@ -423,9 +423,9 @@ function nonEmpty(v: unknown): string | null {
 
 // The name and photo someone shows in a mode. Spark: the root displayName
 // and photoURLs[0]. Play (`play` = their playProfile/data, possibly empty):
-// root playDisplayName, else the Play profile's own name, else displayName;
-// the Play photo only — never the Spark one (mode sealing). Mirrors
-// playNameOf in the web app's displayNames.ts.
+// root playDisplayName, else the Play profile's own name, else 'Someone';
+// never the Spark displayName or photo (mode sealing). Mirrors playNameOf in
+// the web app's displayNames.ts.
 function modeIdentity(
   user: DocumentData | undefined,
   play: DocumentData | null,
@@ -436,7 +436,6 @@ function modeIdentity(
         nonEmpty(user?.playDisplayName) ??
         nonEmpty(play.playDisplayName) ??
         nonEmpty(play.displayName) ??
-        nonEmpty(user?.displayName) ??
         'Someone',
       photoURL: firstString(play.photoURLs),
     }
@@ -1883,7 +1882,7 @@ export const smsOnMessage = onDocumentCreated(
     })
     if (!claimed) return
 
-    const senderName = await nameFor(senderId, match.participantSnapshots)
+    const senderName = await nameFor(senderId, match.participantSnapshots, match.mode)
     await sendSMS(target.phone, `💬 ${senderName} sent you a message on Zylove. zylove.app/matches`)
   },
 )
@@ -1905,7 +1904,7 @@ export const smsOnMatch = onDocumentCreated(
         const otherUid = users.find((u) => u !== uid) ?? ''
         const body = play
           ? "🔥 You're now entangled on Zylove Play. zylove.app/matches"
-          : `✦ Sparks are flying. You and ${await nameFor(otherUid, match.participantSnapshots)} connected on Zylove. zylove.app/matches`
+          : `✦ Sparks are flying. You and ${await nameFor(otherUid, match.participantSnapshots, match.mode)} connected on Zylove. zylove.app/matches`
         await sendSMS(target.phone, body)
       }),
     )
@@ -1940,7 +1939,7 @@ export const nudgeQuietChats = onSchedule(
         // The chat's own mode decides which master switch applies.
         const target = await smsTarget(uid, 'quietNudge', match.mode === 'play' ? 'play' : 'spark')
         if (!target) continue
-        const otherName = await nameFor(users.find((u) => u !== uid) ?? '', match.participantSnapshots)
+        const otherName = await nameFor(users.find((u) => u !== uid) ?? '', match.participantSnapshots, match.mode)
         if (await sendSMS(target.phone, `☕ Your conversation with ${otherName} has been quiet. Need a spark? zylove.app/matches`)) {
           nudged = true
           sent++

@@ -6,6 +6,7 @@ import TierBadge from '../TierBadge'
 import FounderBadge from '../FounderBadge'
 import DistanceLabel from '../DistanceLabel'
 import { PlayDetailsBody } from '../profile/PlayProfileSections'
+import { parsePlayProfile } from '../../services/playProfile'
 import {
   goDeeperRows,
   identityLine,
@@ -39,6 +40,8 @@ function Pills({ items, icon }: { items: string[]; icon?: string }) {
   )
 }
 
+const EMPTY_PLAY = parsePlayProfile({})
+
 export default function ProfileDetails({
   profile,
   mode,
@@ -56,8 +59,9 @@ export default function ProfileDetails({
   anonymous?: boolean
 }) {
   const age = displayAge(profile)
-  // Set only by Play Explore, which loads each candidate's playProfile/data.
-  const play = mode === 'play' ? (profile.playProfile ?? null) : null
+  // Play always renders the Play body — an empty one when no playProfile
+  // was loaded — never the Spark sections.
+  const play = mode === 'play' ? (profile.playProfile ?? EMPTY_PLAY) : null
   const bio = profile.bio?.trim()
   const prompts = (profile.promptAnswers ?? []).filter((p) => p.answer?.trim())
   const deeper = goDeeperRows(profile)
@@ -100,7 +104,7 @@ export default function ProfileDetails({
       {/* Play Explore: the Play profile only (bio, spice, interests,
           non-negotiables, Play prompts) — no Spark sections. */}
       {play ? (
-        <PlayDetailsBody bio={play.playBio || profile.bio?.trim() || ''} play={play} />
+        <PlayDetailsBody bio={play.playBio} play={play} />
       ) : (
         <>
 

@@ -295,8 +295,9 @@ function localFirst(me: DiscoverProfile, candidates: DiscoverProfile[]): Discove
 
 // Play Explore only shows people with a Play profile, and shows them with it:
 // everyone left after the filters gets their playProfile/data read in
-// parallel (bot or not, whatever their intent). No Play profile, or an
-// unreadable one, means they're left out — never Spark data in Play.
+// parallel (bot or not, whatever their intent). No Play profile, no Play
+// photos, or an unreadable one, means they're left out — never Spark data in
+// Play.
 async function withPlayProfiles(candidates: DiscoverProfile[]): Promise<DiscoverProfile[]> {
   const play = await Promise.all(
     candidates.map((p) =>
@@ -309,8 +310,43 @@ async function withPlayProfiles(candidates: DiscoverProfile[]): Promise<Discover
     const playProfile = play[i]
     // Play Explore shows the Play name everywhere the card, details or match
     // overlay read displayName.
-    return playProfile ? [{ ...p, playProfile, displayName: playNameOf(p, playProfile) || p.displayName }] : []
+    return playProfile?.photoURLs.length ? [{ ...p, playProfile, displayName: playNameOf(p, playProfile) || 'Someone' }] : []
   })
+}
+
+// ─── Explore deck across mode switches ───────────────────────────────────────
+
+// The card on screen in each mode's Explore. Someone open to both modes can
+// be in both decks — and with few local people, head both — so a deck never
+// opens on the person just on screen in the other mode.
+const onScreen: Partial<Record<Mode, string>> = {}
+
+export function noteOnScreen(mode: Mode, uid: string): void {
+  onScreen[mode] = uid
+}
+
+// A deck built while the mode transition plays, so Explore opens the new
+// mode on an already-reshuffled deck. Used once, and only while fresh.
+const PREPARED_TTL_MS = 60_000
+const prepared = new Map<string, { at: number; deck: Promise<DiscoverProfile[]> }>()
+
+export function prepareDeck(uid: string, mode: Mode): void {
+  const deck = fetchCandidates(uid, mode)
+  deck.catch(() => {}) // takeDeck reports failures; an unused deck stays quiet
+  prepared.set(`${uid}:${mode}`, { at: Date.now(), deck })
+}
+
+// Explore's deck for the mode: the prepared one, else a fresh fetch (each
+// is its own shuffle), with whoever was just on screen in the other mode
+// moved to the back.
+export async function takeDeck(uid: string, mode: Mode): Promise<DiscoverProfile[]> {
+  const key = `${uid}:${mode}`
+  const ready = prepared.get(key)
+  prepared.delete(key)
+  const profiles = await (ready && Date.now() - ready.at < PREPARED_TTL_MS ? ready.deck : fetchCandidates(uid, mode))
+  const justSeen = onScreen[mode === 'play' ? 'spark' : 'play']
+  if (!justSeen) return profiles
+  return [...profiles.filter((p) => p.uid !== justSeen), ...profiles.filter((p) => p.uid === justSeen)]
 }
 
 // ─── Actions (deployed Callables) ────────────────────────────────────────────

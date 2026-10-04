@@ -42,7 +42,8 @@ export default function MatchRow({ match, unread, preview, active, onSelect, onO
   const play = match.mode === 'play'
   // Play rows show the Play name and photo (older snapshots carry Spark's).
   const identity = usePlayIdentity(match.partnerUid, play)
-  const name = identity?.name || match.name
+  // No Play name → 'Someone'; blank while it loads — never the snapshot's.
+  const name = identity === null ? match.name : identity?.name || (identity ? 'Someone' : '')
   const photoURL = identity === null ? match.photoURL : (identity?.photoURL ?? null)
   return (
     <div className={`relative flex w-full items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03] ${active ? 'bg-white/5' : ''}`}>

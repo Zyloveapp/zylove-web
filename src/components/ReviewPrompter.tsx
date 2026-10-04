@@ -12,6 +12,7 @@ import {
 } from '../services/zyloveScore'
 import ReviewModal from './chat/ReviewModal'
 import { useExitReviewStore } from '../store/exitReviewStore'
+import { usePlayIdentity } from './matches/usePlayIdentity'
 
 type Pending = KnownMatch & { matchId: string; generation: number }
 
@@ -62,6 +63,7 @@ export default function ReviewPrompter() {
             partnerUid: m.partnerUid,
             name: m.name,
             hadMessages: m.lastMessageAt > 0,
+            mode: m.mode,
           }))
           .filter(eligible)
 
@@ -75,6 +77,7 @@ export default function ReviewPrompter() {
             partnerUid: p.partnerUid,
             name: p.name,
             hadMessages: p.hadMessages,
+            mode: p.mode,
           }
         }
         for (const m of matches) {
@@ -85,6 +88,7 @@ export default function ReviewPrompter() {
               partnerUid: m.partnerUid,
               name: m.name,
               hadMessages: m.lastMessageAt > 0,
+              mode: m.mode,
             })
           }
         }
@@ -105,6 +109,7 @@ export default function ReviewPrompter() {
         generation={exitReview.generation}
         partnerUid={exitReview.partnerUid}
         name={exitReview.name}
+        mode={exitReview.mode}
         onClose={() => {
           markReviewed(exitReview.matchId, exitReview.generation)
           clearExitReview()
@@ -125,14 +130,22 @@ export default function ReviewPrompter() {
     setQueue((q) => ({ ...q, items: q.items.filter((p) => p !== current) }))
   }
 
+  return <QueuedReview key={knownKey(current.matchId, current.generation)} review={current} onClose={close} />
+}
+
+// A Play connection is named by their Play name — the snapshot's may be
+// Spark's (older matches) — and nothing shows until it's loaded.
+function QueuedReview({ review, onClose }: { review: Pending; onClose: () => void }) {
+  const identity = usePlayIdentity(review.partnerUid, review.mode === 'play')
+  if (identity === undefined) return null
   return (
     <ReviewModal
-      key={knownKey(current.matchId, current.generation)}
-      matchId={current.matchId}
-      generation={current.generation}
-      partnerUid={current.partnerUid}
-      name={current.name}
-      onClose={close}
+      matchId={review.matchId}
+      generation={review.generation}
+      partnerUid={review.partnerUid}
+      name={identity === null ? review.name : identity.name || 'Someone'}
+      mode={review.mode}
+      onClose={onClose}
     />
   )
 }

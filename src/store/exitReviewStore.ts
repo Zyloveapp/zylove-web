@@ -8,6 +8,7 @@ export interface ExitReview {
   generation: number
   partnerUid: string
   name: string
+  mode: 'spark' | 'play'
 }
 
 interface ExitReviewState {

@@ -3,8 +3,7 @@ import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { functions } from './firebase'
 
-// Two public names: displayName (Spark, and Play's fallback) and
-// playDisplayName (Play). Each can change once every 30 days, tracked by
+// Two public names: displayName (Spark) and playDisplayName (Play). Each can change once every 30 days, tracked by
 // displayNameUpdatedAt / playDisplayNameUpdatedAt. The private legalName is
 // never shown.
 
@@ -27,15 +26,14 @@ export function formatNameChangeDate(d: Date): string {
   return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
 }
 
-// The name a Play profile shows: its Play name, else the display name. Pass
-// the root user doc first — its playDisplayName is the enforced one (the
-// playProfile copy is a client-writable mirror).
-export function playNameOf(...sources: ({ playDisplayName?: unknown; displayName?: unknown } | null | undefined)[]): string {
+// The name a Play profile shows: its Play name, or '' when it has none —
+// never the Spark displayName (the modes stay sealed; callers show
+// 'Someone'). Pass the root user doc first — its playDisplayName is the
+// enforced one (the playProfile copy is a client-writable mirror).
+export function playNameOf(...sources: (object | null | undefined)[]): string {
   for (const s of sources) {
-    if (typeof s?.playDisplayName === 'string' && s.playDisplayName.trim()) return s.playDisplayName.trim()
-  }
-  for (const s of sources) {
-    if (typeof s?.displayName === 'string' && s.displayName.trim()) return s.displayName.trim()
+    const name = (s as { playDisplayName?: unknown } | null | undefined)?.playDisplayName
+    if (typeof name === 'string' && name.trim()) return name.trim()
   }
   return ''
 }

@@ -3,6 +3,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { beforeUserSignedIn } from 'firebase-functions/v2/identity'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
+import { loadPlayName } from './playName'
 import { connectionMode } from './behavior'
 
 // Trust & safety: phone-level bans, the caller's blocked list, and
@@ -113,6 +114,8 @@ export const getBlockedUsers = onCall(
     const db = getFirestore()
     const rows = await Promise.all(
       [...blocked].map(async ([uid, blockedAt]) => {
+        // Play's list names them by their Play name, never the Spark one.
+        if (mode === 'play') return { uid, name: await loadPlayName(uid), blockedAt }
         const name: unknown = (await db.collection('users').doc(uid).get()).data()?.displayName
         return { uid, name: typeof name === 'string' && name ? name : 'Someone', blockedAt }
       }),

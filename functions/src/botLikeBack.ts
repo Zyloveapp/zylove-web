@@ -53,8 +53,8 @@ function botPersona(bot: DocumentData, play: DocumentData | undefined, mode: Mod
     : []) as { answer?: unknown }[]
   const answers = prompts.map((p) => str(p?.answer)).filter(Boolean).slice(0, 3)
   const lines = [
-    `Name: ${str(bot.displayName) || 'Someone'}${typeof bot.age === 'number' ? `, ${bot.age}` : ''}`,
-    `Bio: ${str(mode === 'play' ? play?.playBio : bot.bio) || str(bot.bio) || 'none'}`,
+    `Name: ${(mode === 'play' ? str(bot.playDisplayName) || str(play?.playDisplayName) || str(play?.displayName) : str(bot.displayName)) || 'Someone'}${typeof bot.age === 'number' ? `, ${bot.age}` : ''}`,
+    `Bio: ${str(mode === 'play' ? play?.playBio : bot.bio) || 'none'}`,
   ]
   if (mode === 'play') {
     const spice = SPICE_META[str(play?.spiceLevel) as SpiceLevel]
@@ -71,9 +71,11 @@ function botPersona(bot: DocumentData, play: DocumentData | undefined, mode: Mod
   return lines.join('\n')
 }
 
+// In Play only their Play name and bio — never the Spark ones.
 function theirDetails(user: DocumentData, play: DocumentData | undefined, mode: Mode): string {
-  const bio = str(mode === 'play' ? play?.playBio : user.bio) || str(user.bio)
-  const name = (mode === 'play' && str(user.playDisplayName)) || str(user.displayName) || 'them'
+  const bio = mode === 'play' ? str(play?.playBio) : str(user.bio)
+  const name =
+    (mode === 'play' ? str(user.playDisplayName) || str(play?.playDisplayName) : str(user.displayName)) || 'them'
   return [`Their name: ${name}`, bio ? `Their bio: ${bio.slice(0, 300)}` : ''].filter(Boolean).join('\n')
 }
 
@@ -125,7 +127,7 @@ async function writeOpener(bot: DocumentData, botPlay: DocumentData | undefined,
 function snapshot(user: DocumentData, play?: DocumentData) {
   return {
     displayName: play
-      ? str(user.playDisplayName) || str(play.playDisplayName) || str(play.displayName) || str(user.displayName) || 'Someone new'
+      ? str(user.playDisplayName) || str(play.playDisplayName) || str(play.displayName) || 'Someone new'
       : str(user.displayName) || 'Someone new',
     photoURL: list((play ?? user).photoURLs)[0] ?? null,
     age: typeof user.age === 'number' ? user.age : null,

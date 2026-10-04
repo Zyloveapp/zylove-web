@@ -5,7 +5,7 @@ import { fetchPublicUserDoc } from '../services/publicUserDoc'
 // assignFounderBadge. Founders from before city circles, and founder-code
 // ones, have no founderBadge; they get a plain "Founder" rather than a
 // guessed city.
-function founderBadgeLabel(profile: object): string | null {
+export function founderBadgeLabel(profile: object): string | null {
   const p = profile as Record<string, unknown>
   if (p.isFounder !== true) return null
   return typeof p.founderBadge === 'string' && p.founderBadge ? p.founderBadge : 'Founder'

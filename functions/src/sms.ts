@@ -4,6 +4,7 @@
 import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
+import { loadPlayName } from './playName'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 
 const twilioAccountSid = defineSecret('TWILIO_ACCOUNT_SID')
@@ -207,8 +208,15 @@ export async function claimSparkSmsSlot(uid: string): Promise<boolean> {
   }
 }
 
-// Display name for texts: the match's participant snapshot, then the user doc.
-export async function nameFor(uid: string, snapshots?: Record<string, { displayName?: unknown }>): Promise<string> {
+// Display name for texts: the match's participant snapshot, then the user
+// doc. A Play match always uses the Play name — its snapshot may be an older
+// one holding the Spark name.
+export async function nameFor(
+  uid: string,
+  snapshots?: Record<string, { displayName?: unknown }>,
+  mode?: unknown,
+): Promise<string> {
+  if (mode === 'play' || mode === 'entanglement') return loadPlayName(uid)
   const fromSnapshot = snapshots?.[uid]?.displayName
   if (typeof fromSnapshot === 'string' && fromSnapshot.trim()) return fromSnapshot.trim()
   const snap = await getFirestore().doc(`users/${uid}`).get().catch(() => null)

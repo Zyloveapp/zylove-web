@@ -4,6 +4,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { countMessages, generationOf, participants, pastConnectionId } from './matchGeneration'
+import { loadPlayName } from './playName'
 import { purgeMatchContent } from './matchCleanup'
 
 // Behavioral safety signals feeding behaviorRiskScore.
@@ -54,6 +55,12 @@ function displayName(match: DocumentData, uid: string): string {
   return typeof name === 'string' && name ? name : 'Someone'
 }
 
+// A Play connection's name is always the Play one — the snapshot may be an
+// older one holding the Spark name.
+function nameIn(match: DocumentData, uid: string): Promise<string> {
+  return connectionMode(match) === 'play' ? loadPlayName(uid) : Promise.resolve(displayName(match, uid))
+}
+
 async function bump(uid: string, field: string): Promise<void> {
   await getFirestore()
     .collection(SIGNALS)
@@ -84,7 +91,7 @@ async function recordPastConnection(
       matchId,
       generation,
       users,
-      names: Object.fromEntries(users.map((u) => [u, displayName(match, u)])),
+      names: Object.fromEntries(await Promise.all(users.map(async (u) => [u, await nameIn(match, u)]))),
       matchedAt: matchedAtOf(match),
       endedAt,
       mode: match.mode === 'play' ? 'play' : 'spark',
@@ -399,6 +406,7 @@ export const getPastConnections = onCall(
     // Keyed by match and generation: a pair that matched twice is listed
     // twice. A live match replaces its own ended-record twin.
     const byId = new Map<string, PastConnection>()
+    const play = new Set<string>()
     for (const d of past.docs) {
       const p = d.data()
       const users = participants(p)
@@ -408,6 +416,7 @@ export const getPastConnections = onCall(
       const name: unknown = p.names?.[otherUid]
       const matchId = typeof p.matchId === 'string' ? p.matchId : d.id
       const generation = num(p.generation)
+      if (connectionMode(p) === 'play') play.add(pastConnectionId(matchId, generation))
       byId.set(pastConnectionId(matchId, generation), {
         matchId,
         generation,
@@ -423,6 +432,8 @@ export const getPastConnections = onCall(
       if (!otherUid || isBotMatch(m) || matchedAtOf(m) < since) continue
       if (mode && connectionMode(m) !== mode) continue
       const generation = generationOf(m)
+      if (connectionMode(m) === 'play') play.add(pastConnectionId(d.id, generation))
+      else play.delete(pastConnectionId(d.id, generation))
       byId.set(pastConnectionId(d.id, generation), {
         matchId: d.id,
         generation,
@@ -432,6 +443,11 @@ export const getPastConnections = onCall(
         ended: m.isBlocked === true,
       })
     }
+    // Play connections are named by the Play name: stored names and older
+    // snapshots may hold the Spark one.
+    await Promise.all(
+      [...byId].filter(([id]) => play.has(id)).map(async ([, c]) => (c.name = await loadPlayName(c.otherUid))),
+    )
     // A pre-generation record (0) duplicates any other entry for its match.
     const all = [...byId.values()]
     const connections = all.filter((c) => c.generation !== 0 || !all.some((o) => o.matchId === c.matchId && o.generation !== 0))

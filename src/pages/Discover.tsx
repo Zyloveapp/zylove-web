@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuthStore } from '../store/authStore'
-import { useModeStore } from '../store/modeStore'
+import { useModeStore, type Mode } from '../store/modeStore'
 import PhotoGallery from '../components/discover/PhotoGallery'
 import ProfileDetails from '../components/discover/ProfileDetails'
 import DiscoverActions, { type DiscoverAction } from '../components/discover/DiscoverActions'
@@ -10,10 +10,11 @@ import LocationGate from '../components/LocationGate'
 import {
   actionErrorMessage,
   ensureUserDefaults,
-  fetchCandidates,
   likeProfile,
+  noteOnScreen,
   passProfile,
   prefetchCompatibility,
+  takeDeck,
   type DiscoverProfile,
 } from '../services/discover'
 
@@ -27,9 +28,9 @@ function Spinner() {
   return <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
 }
 
-// Play Explore shows Play photos (falling back to the main ones).
-function photosOf(p: DiscoverProfile): string[] {
-  return p.playProfile?.photoURLs.length ? p.playProfile.photoURLs : (p.photoURLs ?? [])
+// Play Explore shows Play photos only — never the Spark ones.
+function photosOf(p: DiscoverProfile, mode: Mode): string[] {
+  return mode === 'play' ? (p.playProfile?.photoURLs ?? []) : (p.photoURLs ?? [])
 }
 
 // Explore mounts (and fetches) only once location is granted, so a newly
@@ -60,7 +61,7 @@ function Explore() {
     if (!uid) return
     let cancelled = false
     ensureUserDefaults()
-    fetchCandidates(uid, mode)
+    takeDeck(uid, mode)
       .then((profiles) => {
         if (!cancelled) setQueue({ key, profiles, error: false })
       })
@@ -80,6 +81,11 @@ function Explore() {
   useEffect(() => {
     if (currentUid) prefetchCompatibility(currentUid)
   }, [currentUid])
+
+  // Remembered so the other mode's deck never opens on this person.
+  useEffect(() => {
+    if (currentUid) noteOnScreen(mode, currentUid)
+  }, [mode, currentUid])
 
   // Drops the current profile, or moves it to the back of the queue ("Maybe").
   // The next profile starts at the top: the page (mobile, and the details
@@ -110,7 +116,7 @@ function Explore() {
             matchId: result.matchId ?? [uid, current.uid].sort().join('_'),
             theirUid: current.uid,
             theirName: current.displayName ?? 'Someone',
-            theirPhoto: photosOf(current)[0] ?? null,
+            theirPhoto: photosOf(current, mode)[0] ?? null,
             mode,
           })
         }
@@ -177,7 +183,7 @@ function Explore() {
       </div>
       <div className="bg-gray-950 text-white lg:flex">
         <aside ref={asideRef} className="flex flex-col p-6 lg:sticky lg:top-14 lg:h-[calc(100dvh-7.5rem)] lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:py-10">
-          <PhotoGallery key={current.uid} photos={photosOf(current)} name={name} />
+          <PhotoGallery key={current.uid} photos={photosOf(current, mode)} name={name} />
           <div className="mt-8 hidden lg:block">
             <DiscoverActions mode={mode} busy={busy} error={actionError} onAction={handleAction} />
           </div>

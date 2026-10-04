@@ -57,6 +57,9 @@ import VibeCheckModal from './VibeCheckModal'
 import VibeCelebration, { CELEBRATION_MS } from './VibeCelebration'
 import { firstChatSeen, firstChatSeenRemotely } from './firstChatSeen'
 import { fetchPublicUserDoc } from '../../services/publicUserDoc'
+import { usePlayIdentity } from '../matches/usePlayIdentity'
+import { useDistanceText } from '../DistanceLabel'
+import { founderBadgeLabel } from '../FounderBadge'
 import { friendlyError } from '../../services/errors'
 
 function messageTime(ms: number | null): string {
@@ -105,8 +108,24 @@ function isOnline(): boolean {
   return typeof navigator === 'undefined' || navigator.onLine !== false
 }
 
-export default function ChatView({ uid, match, onBack }: ChatViewProps) {
-  const { matchId, partnerUid } = match
+export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
+  const { matchId, partnerUid } = entry
+  // A Play chat shows their Play name and photo — never the Spark ones an
+  // older snapshot may hold (blank while loading, 'Someone' with no name).
+  const playIdentity = usePlayIdentity(partnerUid, entry.mode === 'play')
+  const match: MatchEntry =
+    playIdentity === null
+      ? entry
+      : { ...entry, name: playIdentity?.name || (playIdentity ? 'Someone' : ''), photoURL: playIdentity?.photoURL ?? null }
+  // Their users/{uid} doc: location label and founder badge for the header.
+  const [partnerDoc, setPartnerDoc] = useState<{ uid: string; doc: Record<string, unknown> | null } | null>(null)
+  const partner = partnerDoc?.uid === partnerUid ? partnerDoc.doc : null
+  const distance = useDistanceText({
+    uid: partnerUid,
+    locationLabel: typeof partner?.locationLabel === 'string' ? partner.locationLabel : undefined,
+    isBot: partner?.isBot,
+  })
+  const founder = partner ? founderBadgeLabel(partner) : null
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
@@ -169,10 +188,11 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   )
 
   useEffect(() => {
-    if (isBotUid(partnerUid)) return
     let cancelled = false
     fetchPublicUserDoc(partnerUid).then((partner) => {
       if (cancelled) return
+      setPartnerDoc({ uid: partnerUid, doc: partner })
+      if (isBotUid(partnerUid)) return
       if (partner?.isBot === true) setShowFirstChat(false)
       else setHumanPartner(partnerUid)
     })
@@ -474,7 +494,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     // not already reviewed. Offered app-wide: unmatching deletes the match,
     // which closes this chat.
     if (!isBotUid(partnerUid) && conversation.length > 0 && !reviewed(matchId, match.startedAt)) {
-      offerExitReview({ matchId, generation: match.startedAt, partnerUid, name: match.name })
+      offerExitReview({ matchId, generation: match.startedAt, partnerUid, name: match.name, mode: match.mode })
     }
     leave()
   }
@@ -614,9 +634,12 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
               {match.name.charAt(0).toUpperCase()}
             </span>
           )}
+          {/* Name, Age · Distance · Founder — distance as on their Explore card. */}
           <span className="min-w-0 truncate font-semibold">
             {match.name}
             {match.age !== null && <span className="font-normal text-white/50">, {match.age}</span>}
+            {distance && <span className="font-normal text-white/50"> · {distance}</span>}
+            {founder && <span className="font-semibold text-[#6B8FFF]"> · ✦ {founder}</span>}
           </span>
         </button>
         <button

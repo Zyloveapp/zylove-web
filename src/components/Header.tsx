@@ -21,6 +21,7 @@ import { useSubscriptionStore } from '../store/subscriptionStore'
 import { canAccess } from '../services/subscription'
 import { isPlayOnlyUser } from '../services/playOnboarding'
 import { markPlayActive } from '../services/playSession'
+import { prepareDeck } from '../services/discover'
 
 // Play-only users start every app load in Play, once per user per page load.
 const playLaunchChecked = new Set<string>()
@@ -201,6 +202,12 @@ export default function Header() {
   const showTrialBanner = tier === 'trial' && trialDaysLeft !== null && trialDaysLeft <= 7
   // The mode being switched to while its transition plays.
   const [transition, setTransition] = useState<'spark' | 'play' | null>(null)
+
+  // The new mode's Explore deck is reshuffled while the transition plays, so
+  // Explore never opens on a stale card (or the person just seen).
+  useEffect(() => {
+    if (uid && transition) prepareDeck(uid, transition)
+  }, [uid, transition])
 
   useEffect(() => {
     if (!uid) return

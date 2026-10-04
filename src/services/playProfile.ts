@@ -46,7 +46,9 @@ function playPrompts(d: DocumentData): PromptAnswer[] {
 export function parsePlayProfile(d: DocumentData): PlayProfileData {
   return {
     photoURLs: strings(d.photoURLs),
-    playDisplayName: typeof d.playDisplayName === 'string' ? d.playDisplayName.trim() : '',
+    // Curated profiles (and older mobile ones) name their Play profile with
+    // its own displayName — this doc's, never the root (Spark) one.
+    playDisplayName: [d.playDisplayName, d.displayName].find((n): n is string => typeof n === 'string' && n.trim() !== '')?.trim() ?? '',
     playBio: typeof d.playBio === 'string' ? d.playBio.trim() : '',
     spiceLevel: typeof d.spiceLevel === 'string' && d.spiceLevel ? d.spiceLevel : null,
     playInterestTags: strings(d.playInterestTags),

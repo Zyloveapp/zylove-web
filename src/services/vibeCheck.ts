@@ -2,6 +2,7 @@ import { deleteField, doc, getDoc, onSnapshot, Timestamp, updateDoc, type Unsubs
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { PLAY_PROMPTS, SPARK_PROMPTS, UNIVERSAL_PROMPTS, type PromptAnswer } from '../types/profile'
+import { loadPlayProfile } from './playProfile'
 
 // Mirrors mobile's vibeCheck.ts. Ratings go through the recordVibeRating
 // callable; nothing about a rating is ever shown to the rated person except
@@ -243,13 +244,19 @@ function clip(text: string, max: number): string {
   return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t
 }
 
-// Three short openers built from the partner's prompt answers and bio,
-// topped up with generic ones. No AI call — the "Need a spark?" nudge does that.
-export async function loadOpeners(partnerUid: string): Promise<string[]> {
+// Three short openers built from the partner's prompt answers and bio in the
+// chat's mode — a Play chat never quotes their Spark profile — topped up with
+// generic ones. No AI call — the "Need a spark?" nudge does that.
+export async function loadOpeners(partnerUid: string, mode: 'spark' | 'play'): Promise<string[]> {
   const openers: string[] = []
   try {
-    const snap = await getDoc(doc(db, 'users', partnerUid))
-    const data = snap.data() ?? {}
+    let data: { promptAnswers?: unknown; bio?: unknown }
+    if (mode === 'play') {
+      const play = await loadPlayProfile(partnerUid)
+      data = { promptAnswers: play?.promptAnswers, bio: play?.playBio }
+    } else {
+      data = (await getDoc(doc(db, 'users', partnerUid))).data() ?? {}
+    }
     const answers: unknown = data.promptAnswers
     if (Array.isArray(answers)) {
       for (const a of answers as Partial<PromptAnswer>[]) {

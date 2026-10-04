@@ -54,7 +54,7 @@ export default function VibeCheckModal({ matchId, partnerUid, name, onClose, onU
     markVibeCheckRated(matchId)
     recordVibeRating(matchId, partnerUid, rating).catch(() => {})
     setPhase(rating)
-    if (rating !== 'loving_it') loadOpeners(partnerUid).then(setOpeners)
+    if (rating !== 'loving_it') loadOpeners(partnerUid, mode).then(setOpeners)
   }
 
   const optionBase = 'flex w-full items-center justify-center gap-2 rounded-xl py-3 font-semibold text-white transition-opacity hover:opacity-90'

@@ -50,7 +50,7 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
     }
   }, [targetUid, uid])
 
-  // Any mode: a link made in Play still counts here.
+  // Every link; only one in the current mode counts (filtered below).
   useEffect(() => {
     if (!uid) return
     return subscribeAllMatches(uid, setMatches, () => setMatches([]))
@@ -80,8 +80,10 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
 
   const { profile, bio, prompts, dynamicPrompt } = current.data
   const play = current.play
-  const link = matches.find((m) => m.partnerUid === targetUid && !m.ended) ?? null
-  const viewMode = link?.mode ?? mode
+  // The profile for the mode you're in — a link in the other mode never
+  // shows here (mode sealing).
+  const viewMode = mode
+  const link = matches.find((m) => m.partnerUid === targetUid && !m.ended && m.mode === mode) ?? null
   const accent = viewMode === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
 
   // Play never falls back to the Spark profile (mode sealing).

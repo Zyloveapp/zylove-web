@@ -35,7 +35,7 @@ export default function IgnitedRow({ title, matches, mode, activeId, onSelect }:
 function IgnitedItem({ match: m, ring, active, onSelect }: { match: MatchEntry; ring: string; active: boolean; onSelect: () => void }) {
   // Play shows the Play name and photo (older snapshots carry Spark's).
   const identity = usePlayIdentity(m.partnerUid, m.mode === 'play')
-  const name = identity?.name || m.name
+  const name = identity === null ? m.name : identity?.name || (identity ? 'Someone' : '')
   const photoURL = identity === null ? m.photoURL : (identity?.photoURL ?? null)
   return (
     <li className="shrink-0">

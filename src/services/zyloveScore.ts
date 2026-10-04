@@ -128,6 +128,8 @@ export interface KnownMatch {
   partnerUid: string
   name: string
   hadMessages: boolean
+  // The connection's mode; absent on entries saved before it was kept.
+  mode?: 'spark' | 'play'
 }
 
 function knownKey(uid: string): string {

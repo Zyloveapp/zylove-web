@@ -16,10 +16,6 @@ import { playNameOf } from '../../services/displayNames'
 import { PhotoHero, Pills, ProfileHeader, SectionHeading } from './ProfileSections'
 import { badgeTier } from '../TierBadge'
 
-function list(v: unknown): string[] {
-  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x !== '') : []
-}
-
 function has<K extends string>(record: Record<K, unknown>, key: string): key is K {
   return Object.prototype.hasOwnProperty.call(record, key)
 }
@@ -141,10 +137,12 @@ export default function PlayProfileSections({
   play: PlayProfileData
   afterHeader?: ReactNode
 }) {
-  // Play shows the Play name; the header reads it through displayName.
-  const named = { ...profile, displayName: playNameOf(profile, play) || profile.displayName }
-  const photos = play.photoURLs.length > 0 ? play.photoURLs : list(profile.photoURLs)
-  const bio = play.playBio || profile.bio?.trim() || ''
+  // Play shows only Play data — name, photos, bio — never the Spark ones;
+  // the header reads the name through displayName. Spark height and body
+  // type stay off it: Play's own show under "A little about me".
+  const named = { ...profile, displayName: playNameOf(profile, play) || 'Someone', heightCm: undefined, bodyType: undefined }
+  const photos = play.photoURLs
+  const bio = play.playBio
 
   return (
     <>
