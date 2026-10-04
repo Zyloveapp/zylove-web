@@ -1,11 +1,14 @@
 // Play inactivity lock. Last activity in Play lives in sessionStorage; after
 // 2 minutes without any (or with no record, e.g. a new tab), Play asks for
-// the PIN again. Checked on load and whenever the tab comes back into view.
+// the PIN again. Checked on load, whenever the tab comes back into view, and
+// every 30 seconds while it's visible — so an idle open screen locks within
+// 2:30 at most.
 
 export const INACTIVITY_TIMEOUT = 2 * 60 * 1000 // 2 minutes
 const KEY = 'zylove_play_last_active'
 // Activity is frequent (every scroll); one write per second is plenty.
 const WRITE_EVERY_MS = 1000
+const IDLE_CHECK_MS = 30 * 1000
 
 let lastWrite = 0
 
@@ -41,18 +44,23 @@ export function clearPlaySession(): void {
   }
 }
 
-// Listens for activity while in Play; onReturn runs when the tab is shown
-// again. Returns the cleanup.
-export function trackPlayActivity(onReturn: () => void): () => void {
+// Listens for activity while in Play (and unlocked); onCheck runs when the
+// tab is shown again and every 30 seconds while it's visible. The caller
+// starts this on entering Play and the cleanup stops it all on leaving.
+export function trackPlayActivity(onCheck: () => void): () => void {
   const onVisibility = () => {
-    if (document.visibilityState === 'visible') onReturn()
+    if (document.visibilityState === 'visible') onCheck()
   }
+  const idleCheck = setInterval(() => {
+    if (document.visibilityState === 'visible') onCheck()
+  }, IDLE_CHECK_MS)
   document.addEventListener('click', updateActivity)
   document.addEventListener('scroll', updateActivity, true)
   document.addEventListener('keydown', updateActivity)
   document.addEventListener('touchstart', updateActivity)
   document.addEventListener('visibilitychange', onVisibility)
   return () => {
+    clearInterval(idleCheck)
     document.removeEventListener('click', updateActivity)
     document.removeEventListener('scroll', updateActivity, true)
     document.removeEventListener('keydown', updateActivity)
