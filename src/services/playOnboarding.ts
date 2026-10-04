@@ -5,6 +5,8 @@ import { db, functions } from './firebase'
 import { uploadModeratedPhotos } from './moderatedPhotos'
 import { keysReady, resolveKeypair } from './keys'
 import { isAlwaysElite } from './subscription'
+import { changeDisplayName } from './displayNames'
+import { addLegalName } from './privateIdentity'
 import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
 import {
   PLAY_PROMPT_BANK,
@@ -200,17 +202,15 @@ export async function savePlayOnboarding(uid: string, d: PlayDraft, { keepIntent
   const newPhotos = d.photos.map((p) => p.file).filter((f): f is File => f !== null)
 
   const playRef = doc(db, `users/${uid}/playProfile/data`)
-  const existing = await getDoc(playRef)
+  const [existing, root] = await Promise.all([getDoc(playRef), getDoc(doc(db, 'users', uid))])
   const now = Date.now()
-  // A changed Play name (edits) starts its 30-day wait; the first one doesn't.
-  const previousName: unknown = existing.data()?.playDisplayName
+  // The first Play name is written directly; changing it afterwards goes
+  // through updateDisplayName (30-day limit — the rules refuse a direct
+  // change), after the rest is saved.
+  const priorName: unknown = root.data()?.playDisplayName
   const playName = d.playDisplayName.trim()
-  const nameFields = playName
-    ? {
-        playDisplayName: playName,
-        ...(typeof previousName === 'string' && previousName !== playName && { playDisplayNameUpdatedAt: now }),
-      }
-    : {}
+  const renaming = typeof priorName === 'string' && priorName !== '' && priorName !== playName
+  const nameFields = playName && !renaming ? { playDisplayName: playName } : {}
   const batch = writeBatch(db)
   batch.set(
     playRef,
@@ -251,7 +251,8 @@ export async function savePlayOnboarding(uid: string, d: PlayDraft, { keepIntent
   await batch.commit()
 
   const { notices } = await uploadModeratedPhotos(uid, 'play', newPhotos)
-  return notices
+  const nameError = renaming ? await changeDisplayName('play', playName) : null
+  return nameError ? [...notices, nameError] : notices
 }
 
 // Play-only onboarding (the Play path in /onboarding): no Spark profile. The
@@ -286,17 +287,24 @@ export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, pl
   await keysReady(uid)
   const keys = await resolveKeypair(uid, typeof data?.publicKey === 'string' ? data.publicKey : undefined)
 
+  // Names already set change only through updateDisplayName (see
+  // savePlayOnboarding); first ones are written here.
+  const sparkName = d.displayName.trim()
+  const priorSparkName: unknown = data?.displayName
+  const renamingSpark = typeof priorSparkName === 'string' && priorSparkName !== '' && priorSparkName !== sparkName
+  const playName = play.playDisplayName.trim()
+  const priorPlayName: unknown = data?.playDisplayName
+  const renamingPlay = typeof priorPlayName === 'string' && priorPlayName !== '' && priorPlayName !== playName
+
   const batch = writeBatch(db)
   batch.set(
     rootRef,
     {
       uid,
-      displayName: d.displayName.trim(),
+      ...(!renamingSpark && { displayName: sparkName }),
       age,
       ...(!identityLocked && birthday && { birthday: birthday.iso }),
       ...(!identityLocked && { genderIdentity }),
-      // Private; locked by the rules with the identity fields.
-      ...(!identityLocked && d.legalName.trim() && { legalName: d.legalName.trim() }),
       ...(!identityLocked && genderIdentity === 'self_describe' && selfDescribe && { genderSelfDescribe: selfDescribe }),
       ...(!identityLocked &&
         OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) &&
@@ -319,7 +327,7 @@ export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, pl
       openToCrossover: false,
       // Mirrors mobile's Play onboarding: mobile Discover and profile cards
       // read these Play fields from the root doc.
-      ...(play.playDisplayName.trim() && { playDisplayName: play.playDisplayName.trim() }),
+      ...(playName && !renamingPlay && { playDisplayName: playName }),
       spiceLevel: play.spiceLevel,
       playInterestTags: play.tags,
       playNonNegotiables: play.nonNegotiables,
@@ -338,7 +346,7 @@ export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, pl
     playRef,
     {
       uid,
-      ...(play.playDisplayName.trim() && { playDisplayName: play.playDisplayName.trim() }),
+      ...(playName && !renamingPlay && { playDisplayName: playName }),
       playBio: bio,
       spiceLevel: play.spiceLevel,
       playInterestTags: play.tags,
@@ -358,6 +366,8 @@ export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, pl
     },
     { merge: true },
   )
+  // Owner-only and set once (users/{uid}/private/identity).
+  await addLegalName(batch, uid, d.legalName)
   await batch.commit()
 
   // Server sets the trust/trial fields clients can't write (isSuspended,
@@ -372,7 +382,11 @@ export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, pl
 
   // playProfile/data exists now, so onPhotoUpload can publish to it.
   const { notices } = await uploadModeratedPhotos(uid, 'play', newPhotos)
-  return notices
+  const nameErrors = [
+    renamingSpark ? await changeDisplayName('spark', sparkName) : null,
+    renamingPlay ? await changeDisplayName('play', playName) : null,
+  ].filter((e): e is string => e !== null)
+  return [...notices, ...nameErrors]
 }
 
 // Gets Play on the 30-day trial rather than for free: not a founder, not an

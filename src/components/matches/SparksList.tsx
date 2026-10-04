@@ -53,7 +53,7 @@ function Card({
 
 function NameLine({ profile, uid, mode }: { profile: DiscoverProfile; uid: string; mode: Mode }) {
   const age = displayAge(profile)
-  const name = mode === 'play' ? playNameOf(profile.playProfile, profile) : profile.displayName
+  const name = mode === 'play' ? playNameOf(profile, profile.playProfile) : profile.displayName
   return (
     <span className="flex min-w-0 items-center gap-2">
       <span className="truncate text-lg font-semibold text-white">

@@ -142,7 +142,7 @@ export default function PlayProfileSections({
   afterHeader?: ReactNode
 }) {
   // Play shows the Play name; the header reads it through displayName.
-  const named = { ...profile, displayName: playNameOf(play, profile) || profile.displayName }
+  const named = { ...profile, displayName: playNameOf(profile, play) || profile.displayName }
   const photos = play.photoURLs.length > 0 ? play.photoURLs : list(profile.photoURLs)
   const bio = play.playBio || profile.bio?.trim() || ''
 

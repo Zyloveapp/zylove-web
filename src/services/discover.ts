@@ -258,7 +258,7 @@ async function withPlayProfiles(candidates: DiscoverProfile[]): Promise<Discover
     const playProfile = play[i]
     // Play Explore shows the Play name everywhere the card, details or match
     // overlay read displayName.
-    return playProfile ? [{ ...p, playProfile, displayName: playNameOf(playProfile, p) || p.displayName }] : []
+    return playProfile ? [{ ...p, playProfile, displayName: playNameOf(p, playProfile) || p.displayName }] : []
   })
 }
 

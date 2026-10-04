@@ -78,7 +78,7 @@ export default function NameStep({ legalName, displayName, birthdayRaw, birthday
         <input
           type="text"
           autoComplete="nickname"
-          maxLength={30}
+          maxLength={20}
           value={displayName}
           onChange={(e) => onChange({ displayName: e.target.value })}
           className={inputClass}

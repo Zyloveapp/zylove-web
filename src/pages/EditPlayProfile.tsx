@@ -8,7 +8,7 @@ import { playDescriptorLabels, typePreferenceLabels } from '../types/playDescrip
 import { MAX_PHOTOS } from '../components/onboarding/types'
 import { MODERATION_MESSAGES, uploadModeratedPhoto } from '../services/moderatedPhotos'
 import { photoError } from '../services/profile'
-import { nextNameChange } from '../services/displayNames'
+import { changeDisplayName, nextNameChange } from '../services/displayNames'
 import {
   MIN_PLAY_ANSWERS,
   generatePlayBio,
@@ -17,7 +17,7 @@ import {
   tagsIn,
   type PlayDraft,
 } from '../services/playOnboarding'
-import { hasPlayChanges, removePlayPhoto, savePlayEdits } from '../services/playProfileEdit'
+import { hasPlayChanges, playNameChanged, removePlayPhoto, savePlayEdits } from '../services/playProfileEdit'
 import {
   AboutYouStep,
   ArrangementStep,
@@ -109,10 +109,13 @@ export default function EditPlayProfile() {
         if (cancelled) return
         if (!saved) return setLoaded('none')
         const data = root.data()
-        setDraft(saved)
+        // The root doc's Play name is the real one (the profile copy is a mirror).
+        const rootName: unknown = data?.playDisplayName
+        const current = typeof rootName === 'string' && rootName ? { ...saved, playDisplayName: rootName } : saved
+        setDraft(current)
         setLoaded({
           uid,
-          original: saved,
+          original: current,
           identity: { genderIdentity: data?.genderIdentity, attractedTo: data?.attractedTo },
           displayName: typeof data?.displayName === 'string' ? data.displayName : '',
           nameLockedUntil: nextNameChange(data?.playDisplayNameUpdatedAt),
@@ -215,6 +218,16 @@ export default function EditPlayProfile() {
     setSaving(true)
     setSaveError(null)
     try {
+      // A new Play name goes through updateDisplayName (30-day limit,
+      // enforced server-side); nothing else is saved if it's refused.
+      if (playNameChanged(info.original, draft)) {
+        const refused = await changeDisplayName('play', draft.playDisplayName)
+        if (refused) {
+          setSaveError(refused)
+          setSaving(false)
+          return
+        }
+      }
       await savePlayEdits(uid, info.original, draft)
       navigate('/profile', { replace: true, state: { flash: '✦ Play profile updated.' } })
     } catch {

@@ -63,14 +63,14 @@ export default function SparkProfileView({
   const isFlame = spark.mode === 'play'
   const photo = (profile.playProfile?.photoURLs.length ? profile.playProfile.photoURLs : profile.photoURLs)?.[0]
   // Name from the like snapshot; only bots and matched people are named.
-  const snapshotName = isFlame ? playNameOf(spark.profile.playProfile, spark.profile) : spark.profile.displayName?.trim()
+  const snapshotName = isFlame ? playNameOf(spark.profile, spark.profile.playProfile) : spark.profile.displayName?.trim()
   const headerName = ((spark.isBot || matched) && snapshotName) || 'Someone'
 
   async function handleMatch() {
     if (busy) return
     setBusy(true)
     setError(null)
-    onMatchStart((isFlame ? playNameOf(profile.playProfile, profile) : profile.displayName) || 'someone')
+    onMatchStart((isFlame ? playNameOf(profile, profile.playProfile) : profile.displayName) || 'someone')
     try {
       const matchId = await likeBackSpark(uid, spark, profile)
       setLinked(true)

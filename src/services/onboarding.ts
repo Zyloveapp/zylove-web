@@ -32,6 +32,8 @@ import {
   type TogethernessStyle,
 } from '../components/onboarding/types'
 import { loadOwnProfile } from './profile'
+import { changeDisplayName } from './displayNames'
+import { addLegalName, loadLegalName } from './privateIdentity'
 
 // ─── Legal acceptance ────────────────────────────────────────────────────────
 
@@ -178,14 +180,19 @@ export async function saveSparkOnboarding(
   const existingKey: unknown = existing.data()?.publicKey
   const keys = await resolveKeypair(uid, typeof existingKey === 'string' ? existingKey : undefined)
 
+  // Once set, the display name changes only through updateDisplayName (the
+  // rules refuse a direct change); a refresh that renames saves the rest with
+  // the old name and asks the callable after.
+  const newName = d.displayName.trim()
+  const priorName: unknown = existing.data()?.displayName
+  const renaming = typeof priorName === 'string' && priorName !== '' && priorName !== newName
+
   const coreFields = {
     uid,
-    displayName: d.displayName.trim(),
+    displayName: renaming ? priorName : newName,
     age,
     ...(!identityLocked && birthday && { birthday: birthday.iso }),
     ...(!identityLocked && { genderIdentity }),
-    // Private; locked by the rules with the identity fields.
-    ...(!identityLocked && d.legalName.trim() && { legalName: d.legalName.trim() }),
     attractedTo: d.attractedTo,
     relationshipStatus,
     openTo: d.openTo,
@@ -339,6 +346,8 @@ export async function saveSparkOnboarding(
     _lastUpdated: now,
   }
   batch.set(doc(db, `users/${uid}/seekingPreferences/prefs`), seeking)
+  // Owner-only and set once (users/{uid}/private/identity).
+  await addLegalName(batch, uid, d.legalName)
 
   await batch.commit()
 
@@ -361,7 +370,8 @@ export async function saveSparkOnboarding(
   // Discover also requires a published photo, so the profile only shows up
   // once moderation passes one.
   const { notices } = await uploadModeratedPhotos(uid, 'spark', newPhotos)
-  return notices
+  const nameError = renaming ? await changeDisplayName('spark', newName) : null
+  return nameError ? [...notices, nameError] : notices
 }
 
 // ─── Profile refresh ─────────────────────────────────────────────────────────
@@ -401,9 +411,10 @@ export interface RefreshDraft {
 // Rebuilds an onboarding draft from the saved profile for "Reimagine my
 // profile". Terms count as accepted; photos are kept as their stored URLs.
 export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null> {
-  const [own, seekingSnap] = await Promise.all([
+  const [own, seekingSnap, legalName] = await Promise.all([
     loadOwnProfile(uid),
     getDoc(doc(db, `users/${uid}/seekingPreferences/prefs`)).catch(() => null),
+    loadLegalName(uid).catch(() => null),
   ])
   if (!own) return null
   const p = own.profile as Record<string, unknown>
@@ -417,7 +428,7 @@ export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null
   const draft: OnboardingDraft = {
     ...INITIAL_DRAFT,
     termsAccepted: true,
-    legalName: str(p.legalName) ?? '',
+    legalName: legalName ?? '',
     displayName: str(p.displayName) ?? '',
     birthdayRaw: isoToBirthdayRaw(p.birthday),
     photos: arr(p.photoURLs).map((url) => ({ id: crypto.randomUUID(), file: null, previewUrl: url })),

@@ -19,12 +19,7 @@ function changes(before: PlayDraft, after: PlayDraft) {
     root[key] = value
   }
 
-  const name = after.playDisplayName.trim()
-  if (name && name !== before.playDisplayName.trim()) {
-    both('playDisplayName', name)
-    // Starts the 30-day wait before the next change.
-    both('playDisplayNameUpdatedAt', Date.now())
-  }
+  // The Play name isn't here: it changes through updateDisplayName.
   if (after.bio.trim() !== before.bio.trim()) both('playBio', after.bio.trim())
   if (after.spiceLevel !== before.spiceLevel) both('spiceLevel', after.spiceLevel)
   if (!same(after.tags, before.tags)) both('playInterestTags', after.tags)
@@ -52,8 +47,13 @@ function changes(before: PlayDraft, after: PlayDraft) {
   return { playProfile, root }
 }
 
+export function playNameChanged(before: PlayDraft, after: PlayDraft): boolean {
+  const name = after.playDisplayName.trim()
+  return name !== '' && name !== before.playDisplayName.trim()
+}
+
 export function hasPlayChanges(before: PlayDraft, after: PlayDraft): boolean {
-  return Object.keys(changes(before, after).playProfile).length > 0
+  return playNameChanged(before, after) || Object.keys(changes(before, after).playProfile).length > 0
 }
 
 export async function savePlayEdits(uid: string, before: PlayDraft, after: PlayDraft): Promise<void> {

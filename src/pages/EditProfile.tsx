@@ -15,7 +15,7 @@ import {
 } from '../services/profile'
 import { MODERATION_MESSAGES, uploadModeratedPhoto } from '../services/moderatedPhotos'
 import { isPlayOnlyUser } from '../services/playOnboarding'
-import { formatNameChangeDate, nextNameChange } from '../services/displayNames'
+import { changeDisplayName, formatNameChangeDate, nextNameChange } from '../services/displayNames'
 import type { DiscoverProfile } from '../services/discover'
 import { SPARK_PROMPT_BANK, type PromptAnswer } from '../types/dualProfile'
 import { InspirationPills } from '../components/onboarding/Inspirations'
@@ -113,6 +113,7 @@ export default function EditProfile() {
   const [picker, setPicker] = useState<Picker | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveState, setSaveState] = useState<'saved' | 'error' | null>(null)
+  const [nameError, setNameError] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   // Play-only accounts have no Spark profile to reimagine; null until known.
   const [playOnly, setPlayOnly] = useState<{ uid: string; value: boolean } | null>(null)
@@ -200,8 +201,18 @@ export default function EditProfile() {
     if (!displayName.trim() || saving) return
     setSaving(true)
     setSaveState(null)
+    setNameError(null)
     try {
-      await saveSparkEdits(uid, { displayName, previousDisplayName: profile?.displayName ?? '', pronouns, bio, prompts })
+      // A new name goes through updateDisplayName (30-day limit, enforced
+      // server-side); nothing else is saved if it's refused.
+      if (displayName.trim() !== (profile?.displayName ?? '').trim()) {
+        const refused = await changeDisplayName('spark', displayName)
+        if (refused) {
+          setNameError(refused)
+          return
+        }
+      }
+      await saveSparkEdits(uid, { pronouns, bio, prompts })
       setSaveState('saved')
       setTimeout(() => navigate('/profile'), 1200)
     } catch {
@@ -253,7 +264,7 @@ export default function EditProfile() {
             <input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              maxLength={40}
+              maxLength={20}
               readOnly={nameLockedUntil !== null}
               className={`${inputClass} read-only:opacity-60`}
             />
@@ -444,6 +455,7 @@ export default function EditProfile() {
             <p className="mb-2 text-center text-sm text-emerald-400">Saved ✦ — Your Spark profile has been updated.</p>
           )}
           {saveState === 'error' && <p className="mb-2 text-center text-sm text-red-400">Couldn't save. Try again.</p>}
+          {nameError && <p className="mb-2 text-center text-sm text-red-400">{nameError}</p>}
           <button
             type="button"
             onClick={save}
