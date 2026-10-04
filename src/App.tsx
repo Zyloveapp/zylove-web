@@ -42,6 +42,8 @@ import Chat from './pages/Chat'
 import ClaimFounder from './pages/ClaimFounder'
 import FounderMessages from './pages/FounderMessages'
 import AdminMessages from './pages/admin/AdminMessages'
+import AdminDeletions from './pages/admin/AdminDeletions'
+import AdminCities from './pages/admin/AdminCities'
 
 // Protected pages share the nav. Leaves room for the mobile bottom bar.
 // Location (and the founder check) run once per user per page load.
@@ -148,6 +150,8 @@ export default function App() {
               <Route element={<AdminGuard />}>
                 <Route path="/admin/photos" element={<AdminPhotos />} />
                 <Route path="/admin/messages" element={<AdminMessages />} />
+                <Route path="/admin/deletions" element={<AdminDeletions />} />
+                <Route path="/admin/cities" element={<AdminCities />} />
               </Route>
             </Route>
           </Route>
