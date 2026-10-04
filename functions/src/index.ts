@@ -43,6 +43,7 @@ export { listPendingPhotos, reviewPendingPhoto } from './photoReview'
 export { adminCityStats, adminListDeletions, adminPurgeAccount } from './adminTools'
 export { deleteModePhotos } from './profilePhotos'
 export { updateDisplayName } from './displayName'
+export { processBotLikeBacks, queueBotLikeBack } from './botLikeBack'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
 import {
