@@ -48,6 +48,19 @@ ${prompts || none}
 Go Deeper:
 ${qaBlocks(r.goDeeper) || none}
 
+IMPORTANT CONTEXT FOR PLAY ARRANGEMENT TAGS:
+In Play mode, arrangement tags are not mutually exclusive and combinations are intentional. Common valid combinations:
+- Situationship + Open to more = casual but not closed off — intentional and clear, NOT ambiguous
+- FWB + Regular thing = ongoing arrangement preference — consistent
+- No strings + Discreet = clear and compatible
+- Multiple arrangement tags signal flexibility, not confusion
+
+Only flag arrangement combinations as unclear if they are genuinely contradictory:
+- One & done + Regular thing = actually contradicts
+- No emotional attachment + Open to more = actually contradicts
+
+Never flag flexibility as ambiguity in a Play context. Flexibility is a feature.
+
 ── REVIEW GUIDELINES ──
 Score and review these four sections:
 
