@@ -284,7 +284,7 @@ export const PARENTAL_INTENT_LABELS: Record<ParentalIntent, { label: string; des
   wants_more:       { label: 'Yes, I want more',                   description: 'Open to growing the family.' },
   open_to_more:     { label: 'Open to more, not actively seeking', description: 'Depends on the right person.' },
   doesnt_want_any:  { label: "I don't want them",                  description: "That's firm for me." },
-  doesnt_want_more: { label: 'No, my family feels complete',       description: "We're good where we are." },
+  doesnt_want_more: { label: "I don't want more children.",        description: 'Being real about it.' },
   undecided:        { label: "I'm open but unsure",                description: 'Depends on the partner.' },
 }
 
