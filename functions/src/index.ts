@@ -570,10 +570,14 @@ export const recordVibeRating = onCall(
     const db = getFirestore()
     const vibeRef = db.collection('vibeChecks').doc(`${matchId}_${callerId}`)
     // The client cooldown lives in localStorage, so enforce it here too —
-    // otherwise repeated calls could farm points for a friend.
-    const previous = await vibeRef.get()
+    // otherwise repeated calls could farm points for a friend. Admins skip it
+    // for testing, but a repeat inside the window moves no scores: the
+    // rating is recorded, the points and behaviour signal aren't.
+    const [previous, caller] = await Promise.all([vibeRef.get(), db.collection('users').doc(callerId).get()])
     const previousAt: unknown = previous.data()?.createdAt
-    if (previousAt instanceof Timestamp && Date.now() - previousAt.toMillis() < VIBE_COOLDOWN_MS) {
+    const inCooldown = previousAt instanceof Timestamp && Date.now() - previousAt.toMillis() < VIBE_COOLDOWN_MS
+    const adminRepeat = inCooldown && caller.data()?.isAdmin === true
+    if (inCooldown && !adminRepeat) {
       throw new HttpsError('resource-exhausted', 'Already rated this conversation in the last 24 hours')
     }
 
@@ -586,13 +590,16 @@ export const recordVibeRating = onCall(
       [`lastVibeRatedAt_${callerId}`]: FieldValue.serverTimestamp(),
       ...(vibe === 'loving_it' ? { warmSignal: true } : {}),
     })
-    const points = VIBE_POINTS[vibe]
+    const points = adminRepeat ? 0 : VIBE_POINTS[vibe]
     if (points !== 0) {
       batch.update(db.collection('users').doc(otherUid), { 'zylovScore.vibePoints': FieldValue.increment(points) })
     }
-    batch.update(db.collection('users').doc(callerId), { 'zylovScore.participationPoints': FieldValue.increment(1) })
+    if (!adminRepeat) {
+      batch.update(db.collection('users').doc(callerId), { 'zylovScore.participationPoints': FieldValue.increment(1) })
+    }
     await batch.commit()
-    if (!BOT_PREFIXES.some((p) => otherUid.startsWith(p))) {
+    if (adminRepeat) logger.info('recordVibeRating: admin test repeat, no score change', { matchId })
+    if (!adminRepeat && !BOT_PREFIXES.some((p) => otherUid.startsWith(p))) {
       await recordVibeSignal(otherUid, vibe === 'loving_it').catch((err: unknown) =>
         logger.error('recordVibeRating: vibe signal failed', { matchId, message: err instanceof Error ? err.message : String(err) }),
       )
