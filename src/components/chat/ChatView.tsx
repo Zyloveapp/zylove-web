@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ENCRYPTION_KEY_MISSING,
@@ -57,6 +57,7 @@ import VibeCheckModal from './VibeCheckModal'
 import VibeCelebration, { CELEBRATION_MS } from './VibeCelebration'
 import { firstChatSeen, firstChatSeenRemotely } from './firstChatSeen'
 import { fetchPublicUserDoc } from '../../services/publicUserDoc'
+import { friendlyError } from '../../services/errors'
 
 function messageTime(ms: number | null): string {
   if (ms === null) return 'Sending…'
@@ -91,6 +92,18 @@ const TYPING_WRITE_MS = 2000
 const TYPING_IDLE_MS = 3000
 const TYPING_FRESH_MS = 5000
 const VIBE_CHECK_DELAY_MS = 1500
+// The character count shows from here up to MAX_MESSAGE_LENGTH.
+const COUNTER_FROM = 1800
+
+// Touch keyboards: Enter adds a new line and the Send button sends.
+// Desktop: Enter sends, Shift+Enter adds a new line.
+function coarsePointer(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches === true
+}
+
+function isOnline(): boolean {
+  return typeof navigator === 'undefined' || navigator.onLine !== false
+}
 
 export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const { matchId, partnerUid } = match
@@ -98,6 +111,9 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const [online, setOnline] = useState(isOnline)
+  const [touchKeyboard] = useState(coarsePointer)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   // The first-chat card promises "You're talking to a real human", so it's
   // never shown for demonstration profiles — known by uid prefix right away,
   // or by isBot on their user doc (checked before the card appears).
@@ -257,6 +273,25 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     setShowReview(true)
   }, [messages, showFirstChat, conversation, partnerUid, matchId, match.startedAt])
 
+  useEffect(() => {
+    const update = () => setOnline(isOnline())
+    window.addEventListener('online', update)
+    window.addEventListener('offline', update)
+    return () => {
+      window.removeEventListener('online', update)
+      window.removeEventListener('offline', update)
+    }
+  }, [])
+
+  // The input grows with its text up to max-h-32 (then scrolls), and shrinks
+  // back once the text is sent.
+  useLayoutEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`
+  }, [text])
+
   // Leaving the chat (or switching matches) clears our typing status.
   useEffect(
     () => () => {
@@ -306,28 +341,40 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   }
 
   const trimmed = text.trim()
+  const tooLong = text.length > MAX_MESSAGE_LENGTH
   const ownBubble = match.mode === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
   // Never fall back to plaintext just because the partner's key failed to load.
   const canSend = partnerKey !== null && !partnerKey.error
 
   async function handleSend(e?: FormEvent) {
     e?.preventDefault()
-    if (!trimmed || sending || !canSend) return
+    if (!trimmed || tooLong || sending || !canSend) return
+    const sent = trimmed
     setSending(true)
     setSendError(null)
     stopTyping()
-    try {
-      await sendMessage(matchId, uid, trimmed, partnerKey.key)
-      setText('')
-    } catch (err) {
+    // Cleared at once — the message shows as "Sending…" until the server has
+    // it — so anything typed meanwhile is kept. If it doesn't go through, the
+    // text comes back (ahead of anything typed since) to try again.
+    setText('')
+    const restore = (err: unknown) => {
+      setText((cur) => (cur.trim() ? `${sent}\n${cur}` : sent))
       setSendError(
         err instanceof Error && err.message === ENCRYPTION_KEY_MISSING
           ? 'Unable to send — your encryption key is missing. Try signing out and back in.'
-          : "Couldn't send. Try again.",
+          : friendlyError(err, "Couldn't send. Try again."),
       )
+    }
+    let delivered: Promise<void>
+    try {
+      delivered = (await sendMessage(matchId, uid, sent, partnerKey.key)).delivered
+    } catch (err) {
+      restore(err)
+      return
     } finally {
       setSending(false)
     }
+    delivered.catch(restore)
   }
 
   // ── Photo sharing ──────────────────────────────────────────────────────────
@@ -382,7 +429,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
         text:
           partnerKey === null
             ? 'Loading encryption keys — try again in a moment.'
-            : `${match.name} needs to sign in to Zylove on the web before you can share encrypted photos.`,
+            : `${match.name} hasn't set up photo sharing yet.`,
         offerRequest: false,
       })
     }
@@ -398,6 +445,13 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           offerRequest: false,
         })
       case 'declined':
+        return setPhotoNotice({
+          text:
+            consent.requestedBy === uid
+              ? `${match.name} declined photo sharing. Send a new request?`
+              : 'You declined photo sharing. Send a request?',
+          offerRequest: true,
+        })
       case 'paused':
         return setPhotoNotice({ text: 'Photo sharing is paused. Send a new request?', offerRequest: true })
       default:
@@ -405,9 +459,11 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     }
   }
 
+  // onBack already leaves (closes the pane, or navigates); navigating as
+  // well would add a second history entry.
   function leave() {
-    onBack?.()
-    navigate('/matches')
+    if (onBack) onBack()
+    else navigate('/matches')
   }
 
   async function endConnection(action: Exclude<ChatAction, 'report'>) {
@@ -424,7 +480,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (e.key === 'Enter' && !e.shiftKey && !touchKeyboard && !e.nativeEvent.isComposing) {
       e.preventDefault()
       void handleSend()
     }
@@ -456,6 +512,15 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
 
   // Undecryptable messages collapse into one notice, at the first of them.
   const firstUndecryptableId = messages?.find((m) => m.undecryptable)?.id ?? null
+  // "Read" shows only under the newest of your messages they've read.
+  const lastReadOwnId = useMemo(
+    () =>
+      [...(messages ?? [])]
+        .reverse()
+        .find((m) => m.senderId === uid && m.status === 'read' && m.nonce !== 'system' && m.messageType === 'text')?.id ??
+      null,
+    [messages, uid],
+  )
 
   function renderMessage(m: ChatMessage & { text: string; undecryptable: boolean }) {
               if (m.undecryptable) {
@@ -470,6 +535,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
                 return (
                   <PhotoConsentRequest
                     key={m.id}
+                    mode={match.mode}
                     code={code}
                     isMine={m.senderId === uid}
                     partnerName={match.name}
@@ -505,7 +571,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
               }
               const own = m.senderId === uid
               const body =
-                m.messageType === 'photo' ? '📷 Photo — open the Zylove app to view' : m.text
+                m.messageType === 'photo' ? "📷 Photo — can't be shown here" : m.text
               return (
                 <div key={m.id} className={`flex flex-col ${own ? 'items-end' : 'items-start'}`}>
                   <div
@@ -517,7 +583,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
                   </div>
                   <span className="mt-1 text-xs text-white/30">
                     {messageTime(m.sentAt)}
-                    {own && m.status === 'read' && ' · Read'}
+                    {m.id === lastReadOwnId && ' · Read'}
                   </span>
                 </div>
               )
@@ -573,6 +639,17 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
             </div>
           ) : loaded?.error ? (
             <p className="py-10 text-center text-sm text-white/40">Couldn't load messages.</p>
+          ) : messages.length === 0 && !match.ended ? (
+            <div className="m-auto max-w-xs py-10 text-center">
+              <p className="text-lg font-semibold">
+                Say hi to {match.name} {match.mode === 'play' ? '🔥' : '✦'}
+              </p>
+              <p className="mt-1 text-sm text-white/50">
+                {match.mode === 'play'
+                  ? "You've matched — someone has to make the first move."
+                  : "You're linked. A simple hello is a great place to start."}
+              </p>
+            </div>
           ) : (
             messages.map((m, i) => {
               const el = renderMessage(m)
@@ -618,49 +695,69 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           </div>
         )}
         {sendError && <p className="mb-2 text-center text-sm text-red-400">{sendError}</p>}
+        {!online && !match.ended && (
+          <p className="mb-2 text-center text-sm text-amber-200/80" role="status">
+            You're offline. Messages you send will go out when you reconnect — keep this tab open.
+          </p>
+        )}
         {partnerKey?.error && (
           <p className="mb-2 text-center text-sm text-red-400">Couldn't load encryption keys. Reopen the chat to retry.</p>
         )}
         {match.ended ? (
           <p className="py-2 text-center text-sm text-white/40">This connection has ended.</p>
         ) : (
-          <form onSubmit={handleSend} className="flex items-end gap-2">
-            <button
-              type="button"
-              onClick={handlePhotoTap}
-              disabled={consentBusy}
-              aria-label="Share a photo"
-              className={`rounded-xl p-2 hover:bg-white/10 disabled:opacity-40 ${
-                // Play: red. Spark: neutral grey.
-                match.mode === 'play' ? 'text-[#E03131]' : 'text-white/50 hover:text-white/80'
-              }`}
-            >
-              <CameraIcon className="h-6 w-6" />
-            </button>
-            <textarea
-              rows={1}
-              value={text}
-              maxLength={MAX_MESSAGE_LENGTH}
-              onChange={(e) => handleTextChange(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={`Message ${match.name}…`}
-              className="max-h-32 flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-white placeholder:text-white/30 focus:border-white/30 focus:outline-none"
-            />
-            <button
-              type="submit"
-              disabled={!trimmed || sending || !canSend}
-              className={`rounded-xl px-5 py-2.5 font-medium text-white transition-opacity disabled:opacity-30 ${ownBubble}`}
-            >
-              Send
-            </button>
-          </form>
+          <>
+            {text.length >= COUNTER_FROM && (
+              <p id="chat-char-count" className={`mb-1 text-right text-xs ${tooLong ? 'text-red-400' : 'text-white/40'}`}>
+                {text.length}/{MAX_MESSAGE_LENGTH}
+              </p>
+            )}
+            <form onSubmit={handleSend} className="flex items-end gap-2">
+              <button
+                type="button"
+                onClick={handlePhotoTap}
+                disabled={consentBusy}
+                aria-label="Share a photo"
+                className={`rounded-xl p-2 hover:bg-white/10 disabled:opacity-40 ${
+                  // Play: red. Spark: neutral grey.
+                  match.mode === 'play' ? 'text-[#E03131]' : 'text-white/50 hover:text-white/80'
+                }`}
+              >
+                <CameraIcon className="h-6 w-6" />
+              </button>
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={text}
+                maxLength={MAX_MESSAGE_LENGTH}
+                onChange={(e) => handleTextChange(e.target.value)}
+                onKeyDown={handleKeyDown}
+                enterKeyHint={touchKeyboard ? 'enter' : 'send'}
+                placeholder={`Message ${match.name}…`}
+                aria-describedby={text.length >= COUNTER_FROM ? 'chat-char-count' : undefined}
+                className="max-h-32 min-w-0 flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-white placeholder:text-white/30 focus:border-white/30 focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={!trimmed || tooLong || sending || !canSend}
+                className={`rounded-xl px-5 py-2.5 font-medium text-white transition-opacity disabled:opacity-30 ${ownBubble}`}
+              >
+                Send
+              </button>
+            </form>
+          </>
         )}
       </div>
 
-      {showFirstChat && humanPartner === partnerUid && (
+      {/* Waits for the partner's key: the encryption promise depends on it. */}
+      {showFirstChat && humanPartner === partnerUid && partnerKey !== null && !partnerKey.error && (
         <FirstChatModal
           matchId={matchId}
           mode={match.mode === 'play' ? 'play' : 'spark'}
+          name={match.name}
+          // Same test sendMessage uses: with no real key on their side,
+          // messages go as plaintext (nonce 'stub').
+          encrypted={partnerKey.key !== ''}
           onClose={() => setShowFirstChat(false)}
         />
       )}
@@ -723,6 +820,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
 
       {showPhotoBanner && (
         <PhotoConsentBanner
+          mode={match.mode}
           onCancel={() => setShowPhotoBanner(false)}
           onProceed={() => {
             markPhotoBannerSeen(matchId)
@@ -745,11 +843,11 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
       )}
 
       {showReport && (
-        <ReportModal matchId={matchId} generation={match.startedAt} partnerUid={partnerUid} name={match.name} onClose={() => setShowReport(false)} />
+        <ReportModal mode={match.mode} matchId={matchId} generation={match.startedAt} partnerUid={partnerUid} name={match.name} onClose={() => setShowReport(false)} />
       )}
 
       {showReview && (
-        <ReviewModal matchId={matchId} generation={match.startedAt} partnerUid={partnerUid} name={match.name} onClose={() => setShowReview(false)} />
+        <ReviewModal mode={match.mode} matchId={matchId} generation={match.startedAt} partnerUid={partnerUid} name={match.name} onClose={() => setShowReview(false)} />
       )}
     </div>
   )

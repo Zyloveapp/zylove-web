@@ -9,7 +9,7 @@ const FEATURES: { icon: string; title: string; body: string }[] = [
   {
     icon: '✓',
     title: 'Verified profiles',
-    body: "Every person here passed phone verification. You're talking to a real human.",
+    body: 'Every member signs up with a verified phone number. This is a real member, not a curated profile.',
   },
   {
     icon: '🔒',
@@ -37,6 +37,14 @@ const FEATURES: { icon: string; title: string; body: string }[] = [
     body: 'Tap ••• at any point. Reports go to a real person. Serious safety issues are escalated immediately.',
   },
 ]
+
+// When the partner has no encryption key yet (e.g. an older app version),
+// messages in this chat are stored unencrypted — so no E2E promise.
+const NOT_ENCRYPTED = (name: string) => ({
+  icon: '🔒',
+  title: 'Private conversation',
+  body: `${name}'s account isn't set up for end-to-end encryption yet, so this chat isn't end-to-end encrypted. Messages still travel over a secure connection.`,
+})
 
 // Play keeps the same protections without Vibe Checks (Spark only), and
 // ends the report item on Play's privacy promise.
@@ -91,13 +99,18 @@ interface FirstChatModalProps {
   matchId: string
   // The chat's mode: Play gets its own branding and copy.
   mode: Mode
+  name: string
+  // Whether messages in this chat are end-to-end encrypted (the partner has
+  // a real public key) — the encryption item only promises it when true.
+  encrypted: boolean
   onClose: () => void
 }
 
 // Shown once per match (mobile's equivalent is FirstMessageSafetyCard).
 // Bottom sheet on mobile, centered card on desktop.
-export default function FirstChatModal({ matchId, mode, onClose }: FirstChatModalProps) {
+export default function FirstChatModal({ matchId, mode, name, encrypted, onClose }: FirstChatModalProps) {
   const copy = COPY[mode]
+  const features = encrypted ? copy.features : copy.features.map((f) => (f.title === 'End-to-end encrypted' ? NOT_ENCRYPTED(name) : f))
   function dismiss() {
     markFirstChatSeen(matchId)
     onClose()
@@ -128,7 +141,7 @@ export default function FirstChatModal({ matchId, mode, onClose }: FirstChatModa
         {copy.subtitle && <p className="mt-1 text-sm text-white/60">{copy.subtitle}</p>}
 
         <ul className="mt-5 divide-y divide-white/10">
-          {copy.features.map((f) => (
+          {features.map((f) => (
             <li key={f.title} className="flex gap-3 py-3 first:pt-0">
               <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${copy.iconClass}`}>
                 {f.icon}

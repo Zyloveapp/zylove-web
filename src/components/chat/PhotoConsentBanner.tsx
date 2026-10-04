@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useModeStore } from '../../store/modeStore'
+import type { Mode } from '../../store/modeStore'
 
 const POINTS: { icon: string; text: string; warn?: boolean }[] = [
   { icon: '✓', text: 'Both people must agree before photos can be shared' },
@@ -10,15 +10,17 @@ const POINTS: { icon: string; text: string; warn?: boolean }[] = [
 ]
 
 interface PhotoConsentBannerProps {
+  // The chat's mode (not the app's current one).
+  mode: Mode
   onProceed: () => void
   onCancel: () => void
 }
 
 // Shown the first time someone asks to share photos in a chat
 // (zylove_photo_consent_seen_{matchId}).
-export default function PhotoConsentBanner({ onProceed, onCancel }: PhotoConsentBannerProps) {
+export default function PhotoConsentBanner({ mode, onProceed, onCancel }: PhotoConsentBannerProps) {
   // Play: red checkmarks and button; Spark keeps green and cobalt.
-  const play = useModeStore((s) => s.mode) === 'play'
+  const play = mode === 'play'
   useEffect(() => {
     function onKey(e: globalThis.KeyboardEvent) {
       if (e.key === 'Escape') onCancel()

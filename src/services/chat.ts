@@ -1,11 +1,11 @@
 import {
-  addDoc,
   collection,
   doc,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   writeBatch,
   type Unsubscribe,
@@ -137,12 +137,18 @@ export const ENCRYPTION_KEY_MISSING = 'encryption_key_missing'
 // allowed when the recipient has no real key — bots and legacy mobile users.
 // If the recipient has a real key but we can't encrypt (own private key
 // missing or unreadable), the send is refused rather than leaking plaintext.
+//
+// Resolves once the message is written locally — it shows in the thread at
+// once, as "Sending…" — without waiting for the server, so a send while
+// offline doesn't hang. `delivered` settles when the server accepts or
+// rejects the message. Without offline persistence a queued write lives only
+// in this tab's memory: it goes out on reconnect if the tab stays open.
 export async function sendMessage(
   matchId: string,
   uid: string,
   text: string,
   recipientPublicKey: string,
-): Promise<void> {
+): Promise<{ delivered: Promise<void> }> {
   await keysReady(uid)
   const privateKey = await getPrivateKey(uid)
   const recipientHasKey = isRealPublicKey(recipientPublicKey)
@@ -151,7 +157,7 @@ export async function sendMessage(
     recipientHasKey && privateKey ? encryptMessage(text, recipientPublicKey, privateKey) : { ciphertext: text, nonce: 'stub' }
   // encryptMessage falls back to 'stub' if the stored private key is corrupt.
   if (recipientHasKey && nonce === 'stub') throw new Error(ENCRYPTION_KEY_MISSING)
-  await addDoc(collection(db, `matches/${matchId}/messages`), {
+  const delivered = setDoc(doc(collection(db, `matches/${matchId}/messages`)), {
     ciphertext,
     nonce,
     senderId: uid,
@@ -161,12 +167,19 @@ export async function sendMessage(
   })
   // Same fields the mobile chat updates; lastSenderId drives unread state.
   // The preview is generic so message content never sits unencrypted on the match doc.
-  await updateDoc(doc(db, 'matches', matchId), {
-    lastMessagePreview: 'New message',
-    lastMessageAt: serverTimestamp(),
-    lastSenderId: uid,
-    hasUnread: true,
-  })
+  // Only once the message is in: if this update fails the message still
+  // counts as sent (a retry would duplicate it), so it's logged, not thrown.
+  void delivered.then(
+    () =>
+      updateDoc(doc(db, 'matches', matchId), {
+        lastMessagePreview: 'New message',
+        lastMessageAt: serverTimestamp(),
+        lastSenderId: uid,
+        hasUnread: true,
+      }).catch((err: unknown) => console.warn('Message sent, but updating the match failed', err)),
+    () => {}, // A rejected message reaches the caller through `delivered`.
+  )
+  return { delivered }
 }
 
 // Read receipts: the mobile app marks received messages 'read' when the chat

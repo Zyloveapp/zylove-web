@@ -1,8 +1,10 @@
 import type { ConsentCode } from '../../services/chat'
-import { useModeStore } from '../../store/modeStore'
+import type { Mode } from '../../store/modeStore'
 
 interface PhotoConsentRequestProps {
   code: ConsentCode
+  // The chat's mode (not the app's current one).
+  mode: Mode
   isMine: boolean
   partnerName: string
   // Only the newest request, while still pending, can be answered.
@@ -12,9 +14,9 @@ interface PhotoConsentRequestProps {
 }
 
 // System card for a photo-consent message.
-export default function PhotoConsentRequest({ code, isMine, partnerName, live, busy, onRespond }: PhotoConsentRequestProps) {
+export default function PhotoConsentRequest({ code, mode, isMine, partnerName, live, busy, onRespond }: PhotoConsentRequestProps) {
   // Play: red accent and consent button; Spark keeps cobalt.
-  const play = useModeStore((s) => s.mode) === 'play'
+  const play = mode === 'play'
   const card = `mx-auto w-full max-w-sm rounded-2xl border px-4 py-3 text-center ${
     play ? 'border-[#E03131]/30 bg-[#E03131]/[0.06]' : 'border-white/10 bg-white/5'
   }`

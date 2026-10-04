@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useBackLinkClass } from '../store/modeStore'
-import { useNavigate } from 'react-router-dom'
 import ReportModal from '../components/chat/ReportModal'
 import { relativeTime } from '../services/matches'
 import { fetchPastConnections, type PastConnection } from '../services/pastConnections'
 import { useModeStore } from '../store/modeStore'
+import { useGoBack } from '../hooks/useGoBack'
 
 // Report someone from the last 90 days, including matches that have ended.
 // Names and dates only — no photos, no conversation.
 export default function ReportPastConnection() {
   const backLinkClass = useBackLinkClass()
-  const navigate = useNavigate()
+  const goBack = useGoBack('/settings')
   const mode = useModeStore((s) => s.mode)
   // Keyed by mode: only the current mode's connections are shown.
   const [loaded, setLoaded] = useState<{ mode: string; list: PastConnection[] } | null>(null)
@@ -34,7 +34,7 @@ export default function ReportPastConnection() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => navigate(-1)}
+            onClick={goBack}
             className={`text-sm font-medium ${backLinkClass} hover:text-white`}
           >
             ← Back
@@ -80,6 +80,7 @@ export default function ReportPastConnection() {
           generation={reporting.generation ?? 0}
           partnerUid={reporting.otherUid}
           name={reporting.name}
+          mode={mode}
           onClose={() => setReporting(null)}
         />
       )}

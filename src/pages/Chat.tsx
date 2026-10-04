@@ -5,6 +5,7 @@ import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { toEntry, type MatchEntry } from '../services/matches'
 import ChatView from '../components/chat/ChatView'
+import { useModeStore } from '../store/modeStore'
 
 type Loaded = { matchId: string; match: MatchEntry | null }
 
@@ -15,6 +16,7 @@ export default function Chat() {
   // AuthGuard guarantees a signed-in user on this route.
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const [loaded, setLoaded] = useState<Loaded | null>(null)
+  const mode = useModeStore((s) => s.mode)
 
   useEffect(() => {
     if (!uid || !matchId) return
@@ -40,7 +42,8 @@ export default function Chat() {
       <div className={`flex flex-col items-center justify-center gap-3 text-white ${container}`}>
         <p className="text-white/60">This conversation isn't available.</p>
         <Link to="/matches" className="text-sm text-white/40 underline hover:text-white/60">
-          Back to Links
+          {/* No match doc to take the mode from here, so the app's mode. */}
+          Back to {mode === 'play' ? 'Chats' : 'Links'}
         </Link>
       </div>
     )

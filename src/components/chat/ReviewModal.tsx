@@ -3,6 +3,7 @@ import { FirebaseError } from 'firebase/app'
 import { markReviewed, submitReview } from '../../services/zyloveScore'
 import { isSeriousReport, submitReport } from '../../services/safety'
 import { REVIEW_CATEGORY_DEFS, type ReviewCategoryDef, type ReviewTone } from '../../types/reviewCategories'
+import { useModeStore, type Mode } from '../../store/modeStore'
 
 interface ReviewModalProps {
   matchId: string
@@ -12,6 +13,8 @@ interface ReviewModalProps {
   name: string
   onClose: () => void
   doneText?: string
+  // The connection's mode (Play: red buttons); defaults to the current mode.
+  mode?: Mode
 }
 
 const PILL_TINT: Record<ReviewTone, { on: string; off: string }> = {
@@ -44,7 +47,10 @@ export default function ReviewModal({
   name,
   onClose,
   doneText = '✦ Thank you. Your honesty helps Zylove stay real.',
+  mode,
 }: ReviewModalProps) {
+  const currentMode = useModeStore((s) => s.mode)
+  const accentBg = (mode ?? currentMode) === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
   const [selected, setSelected] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
@@ -52,11 +58,11 @@ export default function ReviewModal({
 
   useEffect(() => {
     function onKey(e: globalThis.KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape' && !submitting) onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [submitting, onClose])
 
   function toggle(id: string) {
     setSelected((s) => (s.includes(id) ? s.filter((c) => c !== id) : [...s, id]))
@@ -121,7 +127,7 @@ export default function ReviewModal({
               type="button"
               onClick={onClose}
               autoFocus
-              className="mt-6 w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold text-white transition-opacity hover:opacity-90"
+              className={`mt-6 w-full rounded-xl py-3 font-semibold text-white transition-opacity hover:opacity-90 ${accentBg}`}
             >
               Done
             </button>
@@ -150,13 +156,14 @@ export default function ReviewModal({
               type="button"
               onClick={submit}
               disabled={selected.length === 0 || submitting}
-              className="mt-6 w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-30"
+              className={`mt-6 w-full rounded-xl py-3 font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-30 ${accentBg}`}
             >
               {submitting ? 'Sending…' : 'Submit'}
             </button>
             <button
               type="button"
               onClick={onClose}
+              disabled={submitting}
               className="mt-2 w-full py-2 text-sm text-white/40 underline hover:text-white/60"
             >
               Not now

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { FirebaseError } from 'firebase/app'
 import { submitReport } from '../../services/safety'
 import { REVIEW_CATEGORY_DEFS } from '../../types/reviewCategories'
+import { useModeStore, type Mode } from '../../store/modeStore'
 
 // Safety first, then the rest of the negative categories.
 const ORDER = ['felt_unsafe', 'aggressive', 'pushed_boundaries', 'inappropriate', 'pressured_me', 'disrespectful']
@@ -27,6 +28,7 @@ export default function ReportModal({
   partnerUid,
   name,
   onClose,
+  mode,
 }: {
   matchId: string
   // Which match between these two (MatchEntry.startedAt); 0 if unknown.
@@ -34,7 +36,11 @@ export default function ReportModal({
   partnerUid: string
   name: string
   onClose: () => void
+  // The connection's mode (Play: red Done button); defaults to the current mode.
+  mode?: Mode
 }) {
+  const currentMode = useModeStore((s) => s.mode)
+  const accentBg = (mode ?? currentMode) === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
   const [selected, setSelected] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
@@ -86,7 +92,7 @@ export default function ReportModal({
               type="button"
               onClick={onClose}
               autoFocus
-              className="mt-6 w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold text-white transition-opacity hover:opacity-90"
+              className={`mt-6 w-full rounded-xl py-3 font-semibold text-white transition-opacity hover:opacity-90 ${accentBg}`}
             >
               Done
             </button>

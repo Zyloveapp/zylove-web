@@ -102,7 +102,7 @@ export default function VibeCheckModal({ matchId, partnerUid, name, onClose, onU
         {phase === 'loving_it' && (
           <>
             <p className={`text-center text-5xl ${accentText}`} aria-hidden>
-              ✦
+              {mode === 'play' ? '🔥' : '✦'}
             </p>
             <h2 id="vibe-check-title" className="mt-2 text-center text-xl font-bold">
               Keep it going.
