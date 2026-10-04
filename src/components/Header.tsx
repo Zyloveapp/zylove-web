@@ -19,6 +19,7 @@ import { PaywallModal } from './PaywallGate'
 import { useSubscriptionStore } from '../store/subscriptionStore'
 import { canAccess } from '../services/subscription'
 import { isPlayOnlyUser } from '../services/playOnboarding'
+import { markPlayActive } from '../services/playSession'
 
 // Play-only users start every app load in Play, once per user per page load.
 const playLaunchChecked = new Set<string>()
@@ -136,7 +137,9 @@ export default function Header() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [visibility, setVisibilityState] = useState<VisibilityState | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
-  const [pinFlow, setPinFlow] = useState(false)
+  // How a Play PIN entry continues: 'transition' (pill tap) plays "Play time.";
+  // 'direct' (after Play onboarding, Play-only launch) goes straight in.
+  const [pinEntry, setPinEntry] = useState<'transition' | 'direct' | null>(null)
   const [playSetup, setPlaySetup] = useState(false)
   const [checkingPlay, setCheckingPlay] = useState(false)
   const [playPaywall, setPlayPaywall] = useState(false)
@@ -164,8 +167,9 @@ export default function Header() {
   }, [uid])
   const settingsDot = smsSetUp?.uid === uid && !smsSetUp.done
 
-  // Just finished Play onboarding: drop the param and run the normal way in —
-  // PIN (setup, since there's none yet), then the "Play time." transition.
+  // Just finished Play onboarding: drop the param and go in through the PIN
+  // (setup, since there's none yet). No transition — that's only for a tap
+  // on the mode pill.
   useEffect(() => {
     if (searchParams.get('play_setup_complete') !== 'true') return
     const next = new URLSearchParams(searchParams)
@@ -173,21 +177,26 @@ export default function Header() {
     setSearchParams(next, { replace: true })
     // This load is already headed into Play.
     if (uid) playLaunchChecked.add(uid)
-    setPinFlow(true)
+    setPinEntry('direct')
   }, [searchParams, setSearchParams, uid])
 
-  // Play-only (no Spark profile): go into Play on load through the same entry
-  // as the pill — Play access (Elite or trial), then the PIN, then the
-  // transition. Waits for the tier so the gate is never skipped.
+  // Play-only (no Spark profile): AuthGuard already put them in Play and the
+  // Play lock asks for the PIN. Here only the access check remains — without
+  // Play access (trial over) they drop back to Spark with the upgrade prompt.
+  // Waits for the tier so the gate is never skipped.
   useEffect(() => {
     if (!uid || tier === null || playLaunchChecked.has(uid)) return
     if (searchParams.get('play_setup_complete') === 'true') return
     playLaunchChecked.add(uid)
     isPlayOnlyUser(uid)
       .then((playOnly) => {
-        if (!playOnly || useModeStore.getState().mode === 'play') return
-        if (!canAccess(tier, 'play_mode')) setPlayPaywall(true)
-        else setPinFlow(true)
+        if (!playOnly) return
+        if (!canAccess(tier, 'play_mode')) {
+          setMode('spark')
+          setPlayPaywall(true)
+        } else if (useModeStore.getState().mode !== 'play') {
+          setPinEntry('direct')
+        }
       })
       .catch(() => {})
   }, [uid, tier, searchParams])
@@ -209,7 +218,7 @@ export default function Header() {
       .then((snap) => snap.exists())
       .catch(() => true)
     setCheckingPlay(false)
-    if (hasPlay) setPinFlow(true)
+    if (hasPlay) setPinEntry('transition')
     else setPlaySetup(true)
   }
 
@@ -308,15 +317,19 @@ export default function Header() {
 
       {playPaywall && <PaywallModal feature="play_mode" onClose={() => setPlayPaywall(false)} />}
 
-      {pinFlow && (
+      {pinEntry && (
         <PlayPinFlow
           uid={uid}
           purpose="unlock"
           onDone={() => {
-            setPinFlow(false)
-            setTransition('play')
+            const entry = pinEntry
+            setPinEntry(null)
+            markPlayActive()
+            // "Play time." only when they tapped the pill to come in.
+            if (entry === 'transition') setTransition('play')
+            else setMode('play')
           }}
-          onCancel={() => setPinFlow(false)}
+          onCancel={() => setPinEntry(null)}
         />
       )}
     </header>

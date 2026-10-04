@@ -14,6 +14,7 @@ import PauseGuard from './components/PauseGuard'
 import Header from './components/Header'
 import Nav from './components/Nav'
 import ReviewPrompter from './components/ReviewPrompter'
+import PlayLock from './components/PlayLock'
 import Login from './pages/Login'
 import Terms from './pages/public/Terms'
 import Privacy from './pages/public/Privacy'
@@ -108,6 +109,7 @@ function AppLayout() {
         <Outlet />
       </div>
       <ReviewPrompter />
+      <PlayLock />
       {founderNumber !== null && <FounderCelebration number={founderNumber} />}
     </div>
   )

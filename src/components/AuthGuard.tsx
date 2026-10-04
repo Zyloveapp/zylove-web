@@ -3,6 +3,8 @@ import { Navigate, Outlet } from 'react-router-dom'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
+import { useModeStore } from '../store/modeStore'
+import { isPlayOnlyUser } from '../services/playOnboarding'
 
 type ProfileStatus = 'complete' | 'incomplete' | 'error'
 
@@ -30,8 +32,13 @@ export default function AuthGuard() {
     if (!uid) return
     let cancelled = false
     getDoc(doc(db, 'users', uid))
-      .then((snap) => {
+      .then(async (snap) => {
         const complete = snap.exists() && snap.data().onboardingComplete === true
+        // Play-only (Play path, no Spark profile): into Play before the app
+        // renders, so Spark never flashes. The Play lock asks for the PIN.
+        if (complete && snap.data()?.onboardingPath === 'play' && (await isPlayOnlyUser(uid).catch(() => false))) {
+          if (!cancelled) useModeStore.getState().setMode('play')
+        }
         if (!cancelled) setResult({ uid, status: complete ? 'complete' : 'incomplete' })
       })
       .catch(() => {
