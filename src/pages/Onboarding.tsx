@@ -44,6 +44,7 @@ import {
   WeekendStep,
 } from '../components/onboarding/AboutSteps'
 import { DiscoveryStep, NeedsStep, PhysicalPrefsStep } from '../components/onboarding/SeekingSteps'
+import SparkGoDeeperSection from '../components/onboarding/SparkGoDeeperSection'
 import { IntentionStep, RecommendationScreen, intentForPath } from '../components/onboarding/IntentionSteps'
 import { GoDeeperIntro, GoDeeperQuestion } from '../components/onboarding/GoDeeperSteps'
 import {
@@ -66,11 +67,11 @@ import {
   MAX_PHOTOS,
   MAX_REFRESH_PHOTOS,
   MIN_AGE,
-  MIN_PROMPT_ANSWERS,
   PROMPT_COUNT,
   STRESS_RESPONSE_LABELS,
   TOGETHERNESS_STYLE_LABELS,
-  answeredPromptCount,
+  REQUIRED_PROMPT_ANSWERS,
+  totalPromptAnswers,
   heightToInches,
   parseBirthday,
   releasePhotoPreview,
@@ -214,7 +215,8 @@ function isStepValid(
     case 'discovery':
       return d.ageMin < d.ageMax
     case 'prompts':
-      return d.selectedPromptIds.length === PROMPT_COUNT && answeredPromptCount(d) >= MIN_PROMPT_ANSWERS
+      // Any mix of the standard prompts and Go Deeper.
+      return d.selectedPromptIds.length === PROMPT_COUNT && totalPromptAnswers(d) >= REQUIRED_PROMPT_ANSWERS
     case 'conflict':
       return d.conflictStyle !== null
     case 'togetherness':
@@ -622,7 +624,15 @@ export default function Onboarding() {
       case 'discovery':
         return <DiscoveryStep {...props} />
       case 'prompts':
-        return <PromptsStep {...props} />
+        return (
+          <>
+            <p className="mb-4 text-right text-xs font-semibold text-[#7C9BFF]">
+              {Math.min(totalPromptAnswers(draft), REQUIRED_PROMPT_ANSWERS)} of {REQUIRED_PROMPT_ANSWERS} required
+            </p>
+            <PromptsStep {...props} />
+            <SparkGoDeeperSection draft={draft} update={update} />
+          </>
+        )
       case 'goDeeper':
         return <GoDeeperIntro onStart={() => goTo('conflict')} onSkip={() => goTo('bio')} />
       case 'conflict':

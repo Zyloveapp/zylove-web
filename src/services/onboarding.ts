@@ -22,6 +22,7 @@ import {
 import type { PromptAnswer, SparkProfile } from '../types/dualProfile'
 import { computeSparkCompleteness } from '../types/scorecard'
 import {
+  answeredGoDeeper,
   INITIAL_DRAFT,
   PROMPT_COUNT,
   parseBirthday,
@@ -112,6 +113,9 @@ export interface SeekingPreferencesDoc {
   seekingTraits: SeekingTrait[]
   dealbreakers: Dealbreaker[]
   seekingHeightNoPreference: boolean
+  seekingBodyNoPreference?: boolean
+  // null = "Doesn't matter" (no body-type filter in matching).
+  bodyTypePreference?: null
   seekingHeightMinCm?: number
   seekingHeightMaxCm?: number
   _lastUpdated: number
@@ -254,6 +258,9 @@ export async function saveSparkOnboarding(
   const intention =
     d.onboardingPath !== null ? { intentionAnswers: d.intentionAnswers, onboardingPath: d.onboardingPath } : {}
 
+  // Spark Go Deeper answers (answered ones only), on the root and Spark docs.
+  const goDeeper = { goDeeper: answeredGoDeeper(d) }
+
   const batch = writeBatch(db)
 
   if (existing.exists()) {
@@ -272,6 +279,7 @@ export async function saveSparkOnboarding(
         ...deletions,
         ...(keys.changed && { publicKey: keys.publicKey }),
         ...intention,
+        ...goDeeper,
         ...meta,
       },
       { merge: true },
@@ -296,6 +304,7 @@ export async function saveSparkOnboarding(
       publicKey: keys.publicKey,
       createdAt: now,
       ...intention,
+      ...goDeeper,
       ...meta,
     }
     batch.set(rootRef, profile)
@@ -331,11 +340,13 @@ export async function saveSparkOnboarding(
   batch.set(sparkRef, spark, { merge: true })
   // set+merge merges map keys, so a prompt swapped out would linger in
   // sparkPromptAnswers (which loadOwnProfile prefers). Replace the map whole.
-  batch.update(sparkRef, { sparkPromptAnswers })
+  batch.update(sparkRef, { sparkPromptAnswers, ...goDeeper })
 
   const seeking: SeekingPreferencesDoc = {
     uid,
-    seekingBodyTypes: d.seekingBodyTypes,
+    seekingBodyTypes: d.seekingBodyNoPreference ? [] : d.seekingBodyTypes,
+    seekingBodyNoPreference: d.seekingBodyNoPreference,
+    ...(d.seekingBodyNoPreference && { bodyTypePreference: null }),
     seekingTraits: d.seekingTraits,
     dealbreakers: d.dealbreakers,
     seekingHeightNoPreference: d.seekingHeightNoPreference,
@@ -455,6 +466,12 @@ export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null
     parentalCurrent: str(p.parentalCurrent),
     parentalIntent: str(p.parentalIntent),
     seekingHeightNoPreference: s.seekingHeightNoPreference !== false,
+    seekingBodyNoPreference: s.seekingBodyNoPreference === true,
+    sparkGoDeeper: Array.isArray(p.goDeeper)
+      ? (p.goDeeper as { question?: unknown; answer?: unknown }[])
+          .filter((g) => typeof g?.question === 'string' && typeof g?.answer === 'string')
+          .map((g) => ({ question: g.question as string, answer: g.answer as string }))
+      : [],
     seekingHeightMin: cmToHeight(minCm, INITIAL_DRAFT.seekingHeightMin),
     seekingHeightMax: cmToHeight(maxCm, INITIAL_DRAFT.seekingHeightMax),
     seekingBodyTypes: arr(s.seekingBodyTypes),

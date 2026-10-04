@@ -81,9 +81,24 @@ export function PhysicalPrefsStep({ draft, update }: StepProps) {
       <FieldLabel>Body type preference</FieldLabel>
       <ChipMultiSelect
         options={SEEKING_BODY_OPTIONS}
-        value={draft.seekingBodyTypes}
-        onChange={(seekingBodyTypes) => update({ seekingBodyTypes })}
+        value={draft.seekingBodyNoPreference ? [] : draft.seekingBodyTypes}
+        onChange={(seekingBodyTypes) => update({ seekingBodyTypes, seekingBodyNoPreference: false })}
       />
+      {/* Last option, and exclusive: clears any body types picked. */}
+      <button
+        type="button"
+        aria-pressed={draft.seekingBodyNoPreference}
+        onClick={() =>
+          update({ seekingBodyNoPreference: !draft.seekingBodyNoPreference, seekingBodyTypes: [] })
+        }
+        className={`mt-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+          draft.seekingBodyNoPreference
+            ? 'border-[color:var(--zy-accent,#1B4FD8)] bg-[color:var(--zy-accent,#1B4FD8)] text-white'
+            : 'border-white/15 bg-white/5 text-white/80 hover:border-white/40'
+        }`}
+      >
+        Doesn't matter
+      </button>
     </div>
   )
 }

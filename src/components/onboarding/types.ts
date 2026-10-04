@@ -95,6 +95,10 @@ export interface OnboardingDraft {
   parentalCurrent: ParentalCurrent | null
   parentalIntent: ParentalIntent | null
   seekingHeightNoPreference: boolean
+  // Body type "Doesn't matter": no body types, and no body-type filter.
+  seekingBodyNoPreference: boolean
+  // Spark Go Deeper: AI-written questions (generateSparkGoDeeper) and answers.
+  sparkGoDeeper: { question: string; answer: string }[]
   seekingHeightMin: HeightFtIn
   seekingHeightMax: HeightFtIn
   seekingBodyTypes: BodyType[]
@@ -147,6 +151,8 @@ export const INITIAL_DRAFT: OnboardingDraft = {
   parentalCurrent: null,
   parentalIntent: null,
   seekingHeightNoPreference: true,
+  seekingBodyNoPreference: false,
+  sparkGoDeeper: [],
   seekingHeightMin: { feet: 5, inches: 0 },
   seekingHeightMax: { feet: 6, inches: 6 },
   seekingBodyTypes: [],
@@ -239,6 +245,17 @@ export function heightToInches(h: HeightFtIn): number {
 
 export function answeredPromptCount(d: OnboardingDraft): number {
   return d.selectedPromptIds.filter((id) => (d.promptAnswers[id] ?? '').trim().length > 0).length
+}
+
+// Prompts step gate: standard and Go Deeper answers together.
+export const REQUIRED_PROMPT_ANSWERS = 3
+
+export function answeredGoDeeper(d: OnboardingDraft): { question: string; answer: string }[] {
+  return d.sparkGoDeeper.map((g) => ({ question: g.question, answer: g.answer.trim() })).filter((g) => g.question && g.answer)
+}
+
+export function totalPromptAnswers(d: OnboardingDraft): number {
+  return answeredPromptCount(d) + answeredGoDeeper(d).length
 }
 
 export function includesPlay(intent: DatingIntent | null): boolean {

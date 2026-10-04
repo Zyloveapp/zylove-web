@@ -32,6 +32,7 @@ import {
   cleanGoDeeperQuestion,
   parsePlayGoDeeperRequest,
 } from './playGoDeeperPrompt'
+import { SPARK_GO_DEEPER_FOCUS, buildSparkGoDeeperPrompt, parseSparkGoDeeperRequest } from './sparkGoDeeperPrompt'
 import { LOOKUP_SECRETS, SMS_SECRETS, claimSparkSmsSlot, lookupLineType, nameFor, sendSMS, smsTarget } from './sms'
 
 export { assignFounderBadge, onLaunchConfigUpdated } from './founders'
@@ -262,6 +263,62 @@ export const generatePlayGoDeeper = onCall(
       tx.set(
         userRef,
         { goDeeperGenerations: { play: [...recent, now].slice(-PLAY_GO_DEEPER_WEEKLY_LIMIT) } },
+        { merge: true },
+      )
+    })
+    return { questions: [first, second] }
+  },
+)
+
+// ─── generateSparkGoDeeper ────────────────────────────────────────────────────
+
+const SPARK_GO_DEEPER_WEEKLY_LIMIT = 3
+
+function recentSparkGoDeeper(data: DocumentData | undefined, now: number): number[] {
+  const raw: unknown = data?.goDeeperGenerations?.spark
+  return Array.isArray(raw) ? raw.filter((t): t is number => typeof t === 'number' && now - t < WEEK_MS) : []
+}
+
+// Spark onboarding's Go Deeper: two personal questions from the user's Spark
+// answers, same two-call shape as generatePlayGoDeeper (the second sees the
+// first so it takes a different angle). 3 successful pairs per rolling week.
+export const generateSparkGoDeeper = onCall(
+  { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
+  async (request): Promise<{ questions: [string, string] }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to generate questions.')
+    const userRef = getFirestore().doc(`users/${request.auth.uid}`)
+
+    const snap = await userRef.get()
+    if (recentSparkGoDeeper(snap.data(), Date.now()).length >= SPARK_GO_DEEPER_WEEKLY_LIMIT) {
+      throw new HttpsError('resource-exhausted', 'Go Deeper limit reached. Try again next week.')
+    }
+
+    const input = parseSparkGoDeeperRequest(request.data)
+    let first = ''
+    let second = ''
+    try {
+      first = await askGoDeeper(
+        buildSparkGoDeeperPrompt(input, { focus: SPARK_GO_DEEPER_FOCUS[0] }),
+        GO_DEEPER_TEMPERATURES[0],
+      )
+      if (first) {
+        const secondPrompt = buildSparkGoDeeperPrompt(input, { focus: SPARK_GO_DEEPER_FOCUS[1], previousQuestion: first })
+        second = await askGoDeeper(secondPrompt, GO_DEEPER_TEMPERATURES[1])
+        if (second && sameQuestion(first, second)) second = await askGoDeeper(secondPrompt, GO_DEEPER_TEMPERATURES[1])
+      }
+    } catch (err) {
+      logger.error('generateSparkGoDeeper failed', { message: err instanceof Error ? err.message : String(err) })
+    }
+    if (!first || !second || sameQuestion(first, second)) {
+      throw new HttpsError('unavailable', "Couldn't generate questions right now.")
+    }
+
+    await getFirestore().runTransaction(async (tx) => {
+      const now = Date.now()
+      const recent = recentSparkGoDeeper((await tx.get(userRef)).data(), now)
+      tx.set(
+        userRef,
+        { goDeeperGenerations: { spark: [...recent, now].slice(-SPARK_GO_DEEPER_WEEKLY_LIMIT) } },
         { merge: true },
       )
     })
