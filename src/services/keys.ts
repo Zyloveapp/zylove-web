@@ -3,9 +3,11 @@ import naclUtil from 'tweetnacl-util'
 import { doc, getDoc, onSnapshot, updateDoc, type Unsubscribe } from 'firebase/firestore'
 import { db } from './firebase'
 import { isRealPublicKey } from './encryption'
+import { deleteBackup, getBackupInfo, restoreBackup, saveBackup, type RestoreResult } from './keyBackup'
 
-// Private keys live only in this browser's IndexedDB — never Firestore,
-// never localStorage. Only the public key is published on users/{uid}.
+// Private keys live in this browser's IndexedDB — never Firestore in the
+// clear, never localStorage. Only the public key is published on users/{uid};
+// a PIN-encrypted copy can be backed up for other devices (keyBackup.ts).
 
 const DB_NAME = 'zylove_keys'
 const STORE = 'keys'
@@ -68,27 +70,113 @@ export function publicKeyFor(privateKeyB64: string): string | null {
   }
 }
 
-// Resolves this browser's keypair without touching Firestore. Reuses the
-// stored private key when there is one (so message history stays readable),
-// otherwise generates and stores a new one. `changed` means the published key
-// on users/{uid} needs updating.
+// Resolves this browser's keypair without touching Firestore.
+//
+// One keypair per account, shared by every device: once a real public key is
+// published on users/{uid}, a browser never replaces it on its own (that
+// used to swap keys on every device switch and make history unreadable).
+// A browser whose stored key doesn't match — none yet, or a stale one —
+// reports `mismatch`: it has to restore from the PIN backup (keyBackup.ts)
+// or explicitly reset. Only when nothing real is published does it publish
+// its own (`changed`).
 export async function resolveKeypair(
   uid: string,
   existingPublicKey?: string,
-): Promise<{ publicKey: string; changed: boolean }> {
+): Promise<{ publicKey: string; changed: boolean; mismatch?: boolean }> {
   const stored = await getPrivateKey(uid)
   const derived = stored ? publicKeyFor(stored) : null
-  if (derived) return { publicKey: derived, changed: derived !== existingPublicKey }
+  if (isRealPublicKey(existingPublicKey)) {
+    return derived === existingPublicKey
+      ? { publicKey: existingPublicKey, changed: false }
+      : { publicKey: existingPublicKey, changed: false, mismatch: true }
+  }
+  if (derived) return { publicKey: derived, changed: true }
 
   const { publicKey, privateKey } = generateKeypair()
   await storePrivateKey(uid, privateKey)
   return { publicKey, changed: true }
 }
 
-export async function getOrCreateKeypair(uid: string, existingPublicKey?: string): Promise<{ publicKey: string }> {
-  const { publicKey, changed } = await resolveKeypair(uid, existingPublicKey)
+// ─── Key status (per account, this browser) ─────────────────────────────────
+// ready: this browser holds the published key · needs_restore: it doesn't,
+// and a PIN backup exists · locked: it doesn't, and there's no backup (only
+// a reset, or setting a PIN on the device that has the key, will help).
+// backedUp: whether a PIN backup of the current key exists (null = unknown).
+
+export type KeyStatus = 'unknown' | 'ready' | 'needs_restore' | 'locked'
+export interface KeyState {
+  status: KeyStatus
+  backedUp: boolean | null
+}
+
+const states = new Map<string, KeyState>()
+const listeners = new Map<string, Set<(s: KeyState) => void>>()
+
+function setState(uid: string, next: KeyState): void {
+  states.set(uid, next)
+  for (const fn of listeners.get(uid) ?? []) fn(next)
+}
+
+export function keyState(uid: string): KeyState {
+  return states.get(uid) ?? { status: 'unknown', backedUp: null }
+}
+
+export function subscribeKeyState(uid: string, onChange: (s: KeyState) => void): () => void {
+  if (!listeners.has(uid)) listeners.set(uid, new Set())
+  listeners.get(uid)!.add(onChange)
+  onChange(keyState(uid))
+  return () => listeners.get(uid)?.delete(onChange)
+}
+
+// Works out this browser's status against the published key and the backup.
+// Never republishes over a real key.
+export async function checkKeyState(uid: string): Promise<KeyState> {
+  const snap = await getDoc(doc(db, 'users', uid))
+  if (!snap.exists()) return keyState(uid)
+  const published: unknown = snap.data().publicKey
+  const { publicKey, changed, mismatch } = await resolveKeypair(uid, typeof published === 'string' ? published : undefined)
   if (changed) await updateDoc(doc(db, 'users', uid), { publicKey })
-  return { publicKey }
+  const info = await getBackupInfo().catch(() => null)
+  const backupMatches = info?.exists === true && info.publicKey === publicKey
+  const next: KeyState = mismatch
+    ? { status: backupMatches ? 'needs_restore' : 'locked', backedUp: backupMatches }
+    : { status: 'ready', backedUp: info ? backupMatches : null }
+  setState(uid, next)
+  return next
+}
+
+// The PIN backup of this browser's (current) key.
+export async function backUpKeyWithPin(uid: string, pin: string): Promise<void> {
+  const privateKey = await getPrivateKey(uid)
+  const publicKey = privateKey ? publicKeyFor(privateKey) : null
+  if (!privateKey || !publicKey) throw new Error('No chat key on this device.')
+  await saveBackup(pin, privateKey, publicKey)
+  setState(uid, { status: 'ready', backedUp: true })
+}
+
+// New device: unlock the account's key with the PIN.
+export async function restoreKeyWithPin(uid: string, pin: string): Promise<RestoreResult> {
+  const info = await getBackupInfo()
+  const result = await restoreBackup(pin, info)
+  if (!result.ok) return result
+  const publicKey = publicKeyFor(result.privateKey)
+  const published: unknown = (await getDoc(doc(db, 'users', uid))).data()?.publicKey
+  // A backup for a key that's since been replaced can't read current chats.
+  if (!publicKey || publicKey !== published) return { ok: false, reason: 'corrupt' }
+  await storePrivateKey(uid, result.privateKey)
+  setState(uid, { status: 'ready', backedUp: true })
+  return result
+}
+
+// "Forgot my PIN" / no backup: a new key for the account from this browser.
+// Earlier encrypted messages stay unreadable; other browsers become locked
+// until they restore from the new backup.
+export async function resetKeyOnThisDevice(uid: string): Promise<void> {
+  const { publicKey, privateKey } = generateKeypair()
+  await storePrivateKey(uid, privateKey)
+  await updateDoc(doc(db, 'users', uid), { publicKey })
+  await deleteBackup().catch(() => {})
+  setState(uid, { status: 'ready', backedUp: false })
 }
 
 const pending = new Map<string, Promise<void>>()
@@ -98,16 +186,21 @@ const pending = new Map<string, Promise<void>>()
 export function initKeysForUser(uid: string): Promise<void> {
   let p = pending.get(uid)
   if (!p) {
-    p = (async () => {
-      const snap = await getDoc(doc(db, 'users', uid))
-      if (!snap.exists()) return
-      const publicKey: unknown = snap.data().publicKey
-      await getOrCreateKeypair(uid, typeof publicKey === 'string' ? publicKey : undefined)
-    })()
+    p = checkKeyState(uid).then(() => {})
     p.catch(() => pending.delete(uid))
     pending.set(uid, p)
   }
   return p
+}
+
+// The private key to encrypt with, or null while this browser is locked
+// (needs_restore / locked): a stale key would produce messages the other
+// person can't open, since they decrypt with the published public key.
+export async function getSendingKey(uid: string): Promise<string | null> {
+  await keysReady(uid)
+  const { status } = keyState(uid)
+  if (status === 'needs_restore' || status === 'locked') return null
+  return getPrivateKey(uid)
 }
 
 // Resolves once any in-flight key setup for uid has finished (or failed).

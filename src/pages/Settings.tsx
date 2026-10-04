@@ -33,6 +33,8 @@ import { listDeletions } from '../services/adminTools'
 import { setPhotoConsent, subscribePhotoConsent, type PhotoConsent, type PhotoConsentMode } from '../services/photoConsent'
 import { useGoBack } from '../hooks/useGoBack'
 import { SUPPORT_EMAIL } from '../services/errors'
+import { subscribeKeyState, type KeyState } from '../services/keys'
+import { KEY_BACKUP_EVENT } from '../components/KeyBackupGate'
 
 // On colour: cobalt by default (settings that cover both modes), red for Play.
 const SWITCH_ON = { spark: 'bg-[#1B4FD8]', play: 'bg-[#E03131]' } as const
@@ -375,6 +377,32 @@ function AdminSection({ uid }: { uid: string }) {
   )
 }
 
+// Chat key backup (KeyBackupGate does the work): set, change, or unlock.
+function ChatPinRow({ uid }: { uid: string }) {
+  const [state, setState] = useState<KeyState | null>(null)
+  useEffect(() => (uid ? subscribeKeyState(uid, setState) : undefined), [uid])
+  const locked = state?.status === 'needs_restore' || state?.status === 'locked'
+  return (
+    <button
+      type="button"
+      onClick={() => window.dispatchEvent(new CustomEvent(KEY_BACKUP_EVENT, { detail: locked ? 'unlock' : 'set' }))}
+      className="flex w-full items-center justify-between border-t border-white/5 px-5 py-4 text-left hover:bg-white/[0.03]"
+    >
+      <span>
+        <span className="block font-medium">
+          {locked ? 'Unlock your chats' : state?.backedUp ? 'Change chat PIN' : 'Set a chat PIN'}
+        </span>
+        <span className="block text-sm text-white/50">
+          {locked ? 'Enter your chat PIN to read messages on this device.' : 'Lets you read your messages on any device.'}
+        </span>
+      </span>
+      <span className="text-white/30" aria-hidden>
+        ›
+      </span>
+    </button>
+  )
+}
+
 type Loaded = { uid: string; settings: SmsSettings } | 'error'
 
 export default function Settings() {
@@ -657,6 +685,7 @@ export default function Settings() {
             </span>
           </button>
           {notice && <p className="px-5 pb-4 text-sm text-emerald-300">{notice}</p>}
+          <ChatPinRow uid={uid} />
           <DeleteProfileControls uid={uid} />
           <button
             type="button"

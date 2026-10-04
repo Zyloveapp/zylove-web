@@ -10,7 +10,8 @@ import {
   type ChatMessage,
 } from '../../services/chat'
 import { decryptMessage } from '../../services/encryption'
-import { getPrivateKey, keysReady, subscribePublicKey } from '../../services/keys'
+import { getPrivateKey, keysReady, subscribeKeyState, subscribePublicKey, type KeyState } from '../../services/keys'
+import { KEY_BACKUP_EVENT } from '../KeyBackupGate'
 import { markMatchRead, type MatchEntry } from '../../services/matches'
 import {
   markMutualVibeCelebrated,
@@ -84,11 +85,11 @@ type Loaded = { matchId: string; messages: ChatMessage[]; error: boolean }
 type PartnerKey = { partnerUid: string; key: string; error: boolean }
 
 const UNDECRYPTABLE = 'Unable to decrypt message'
-// Shown once in place of every bubble that won't open — typically history
-// from before this browser's private key was lost (site data cleared). The
-// key lives only in IndexedDB, so those messages can't be recovered.
+// Shown once in place of every bubble that won't open: this device is locked
+// (unlock with the chat PIN brings them back), or they were sent before a
+// chat key was reset ("start fresh"), which can't be undone.
 const KEY_RESET_NOTICE =
-  "Earlier messages can't be decrypted on this device — an encryption key was reset. New messages will work normally."
+  "Some earlier messages can't be read on this device. If you've set a chat PIN, unlock your chats to read them."
 // Own typing: write at most every 2s, clear after 3s idle. Partner's counts
 // as typing while their typingAt is under 5s old.
 const TYPING_WRITE_MS = 2000
@@ -223,6 +224,11 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     [partnerUid],
   )
 
+  // This device's chat key status; a PIN unlock or reset (KeyBackupGate)
+  // bumps it, and the private key is re-read.
+  const [deviceKey, setDeviceKey] = useState<KeyState | null>(null)
+  useEffect(() => subscribeKeyState(uid, setDeviceKey), [uid])
+  const deviceKeyStatus = deviceKey?.status ?? 'unknown'
   useEffect(() => {
     let cancelled = false
     keysReady(uid)
@@ -233,7 +239,8 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     return () => {
       cancelled = true
     }
-  }, [uid])
+  }, [uid, deviceKeyStatus])
+  const deviceLocked = deviceKeyStatus === 'needs_restore' || deviceKeyStatus === 'locked'
 
   const partnerKey = partnerKeyState?.partnerUid === partnerUid ? partnerKeyState : null
   const myPrivateKey = myKeyState?.uid === uid ? myKeyState.key : undefined
@@ -381,7 +388,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
       setText((cur) => (cur.trim() ? `${sent}\n${cur}` : sent))
       setSendError(
         err instanceof Error && err.message === ENCRYPTION_KEY_MISSING
-          ? 'Unable to send — your encryption key is missing. Try signing out and back in.'
+          ? 'To send messages here, unlock your chats with your chat PIN (Settings → Chat PIN).'
           : friendlyError(err, "Couldn't send. Try again."),
       )
     }
@@ -721,6 +728,18 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
         {!online && !match.ended && (
           <p className="mb-2 text-center text-sm text-amber-200/80" role="status">
             You're offline. Messages you send will go out when you reconnect — keep this tab open.
+          </p>
+        )}
+        {deviceLocked && !match.ended && (
+          <p className="mb-2 text-center text-sm text-amber-200/90" role="status">
+            Your chats are locked on this device.{' '}
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent(KEY_BACKUP_EVENT, { detail: 'unlock' }))}
+              className="font-semibold underline hover:text-white"
+            >
+              Unlock with your chat PIN
+            </button>
           </p>
         )}
         {partnerKey?.error && (

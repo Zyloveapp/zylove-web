@@ -3,7 +3,7 @@ import { getBytes, ref, uploadBytes } from 'firebase/storage'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions, storage } from './firebase'
 import { ENCRYPTION_KEYS_UNAVAILABLE, decryptPhoto, encryptPhoto, isRealPublicKey } from './encryption'
-import { getPrivateKey, keysReady, publicKeyFor } from './keys'
+import { getPrivateKey, getSendingKey, keysReady, publicKeyFor } from './keys'
 import type { ConsentCode, PhotoPayload } from './chat'
 
 // ─── Consent ─────────────────────────────────────────────────────────────────
@@ -156,8 +156,7 @@ export async function sendEncryptedPhoto(
   photoBytes: Uint8Array,
   timerSeconds: PhotoTimer,
 ): Promise<void> {
-  await keysReady(uid)
-  const privateKey = await getPrivateKey(uid)
+  const privateKey = await getSendingKey(uid)
   const senderPublicKey = privateKey ? publicKeyFor(privateKey) : null
   const recipientKey: unknown = (await getDoc(doc(db, 'users', recipientUid))).data()?.publicKey
   if (!privateKey || !senderPublicKey || typeof recipientKey !== 'string' || !isRealPublicKey(recipientKey)) {

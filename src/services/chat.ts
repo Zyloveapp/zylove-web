@@ -12,7 +12,7 @@ import {
 } from 'firebase/firestore'
 import { db } from './firebase'
 import { encryptMessage, isRealPublicKey } from './encryption'
-import { getPrivateKey, keysReady } from './keys'
+import { getSendingKey } from './keys'
 
 // Message format shared with the mobile app. `ciphertext` holds a base64
 // nacl.box payload, or plaintext when the nonce is 'stub' / 'stub-nonce' /
@@ -149,8 +149,7 @@ export async function sendMessage(
   text: string,
   recipientPublicKey: string,
 ): Promise<{ delivered: Promise<void> }> {
-  await keysReady(uid)
-  const privateKey = await getPrivateKey(uid)
+  const privateKey = await getSendingKey(uid)
   const recipientHasKey = isRealPublicKey(recipientPublicKey)
   if (recipientHasKey && !privateKey) throw new Error(ENCRYPTION_KEY_MISSING)
   const { ciphertext, nonce } =

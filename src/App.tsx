@@ -18,6 +18,7 @@ import Nav from './components/Nav'
 import ReviewPrompter from './components/ReviewPrompter'
 import PlayLock from './components/PlayLock'
 import TrialExpiry from './components/TrialExpiry'
+import KeyBackupGate from './components/KeyBackupGate'
 import Login from './pages/Login'
 import Terms from './pages/public/Terms'
 import Privacy from './pages/public/Privacy'
@@ -143,6 +144,7 @@ function AppLayout() {
       <ReviewPrompter />
       <PlayLock />
       <TrialExpiry />
+      <KeyBackupGate />
       <AdminNotice />
     </div>
   )
