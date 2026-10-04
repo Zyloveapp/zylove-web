@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { signOut } from 'firebase/auth'
 import { auth } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
+import { useModeStore } from '../store/modeStore'
 import { hasPin } from '../services/playPin'
 import {
   SMS_SECTIONS,
@@ -203,6 +204,8 @@ type Loaded = { uid: string; settings: SmsSettings } | 'error'
 export default function Settings() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const phone = useAuthStore((s) => s.user?.phoneNumber) ?? null
+  // Only the current mode's notification section is shown.
+  const mode = useModeStore((s) => s.mode)
   const navigate = useNavigate()
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [consentOpen, setConsentOpen] = useState(false)
@@ -295,7 +298,7 @@ export default function Settings() {
             />
           </div>
 
-          {SMS_SECTIONS.map(({ mode, title, items }) => {
+          {SMS_SECTIONS.filter((section) => section.mode === mode).map(({ mode, title, items }) => {
             const prefs = sms ? sectionPreferences(sms.preferences, mode) : null
             // The section switch is on while any of its texts are; flipping
             // it sets all three.
