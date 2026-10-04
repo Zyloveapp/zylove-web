@@ -11,6 +11,7 @@ import {
   type KnownMatch,
 } from '../services/zyloveScore'
 import ReviewModal from './chat/ReviewModal'
+import { useExitReviewStore } from '../store/exitReviewStore'
 
 type Pending = KnownMatch & { matchId: string; generation: number }
 
@@ -28,6 +29,9 @@ export default function ReviewPrompter() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const { pathname } = useLocation()
   const [queue, setQueue] = useState<{ uid: string; items: Pending[] }>({ uid: '', items: [] })
+  // Just ended from a chat (ChatView): shown at once, wherever they land.
+  const exitReview = useExitReviewStore((s) => s.pending)
+  const clearExitReview = useExitReviewStore((s) => s.clear)
 
   useEffect(() => {
     if (!uid) return
@@ -93,9 +97,26 @@ export default function ReviewPrompter() {
     )
   }, [uid])
 
+  if (exitReview) {
+    return (
+      <ReviewModal
+        key={knownKey(exitReview.matchId, exitReview.generation)}
+        matchId={exitReview.matchId}
+        generation={exitReview.generation}
+        partnerUid={exitReview.partnerUid}
+        name={exitReview.name}
+        onClose={() => {
+          markReviewed(exitReview.matchId, exitReview.generation)
+          clearExitReview()
+        }}
+      />
+    )
+  }
+
   // Never over a conversation: chats live on /matches and /chat/:id.
   const inConversation = pathname.startsWith('/matches') || pathname.startsWith('/chat')
-  const current = queue.uid === uid ? queue.items[0] : undefined
+  // Skips any reviewed since the list was built (e.g. the exit review).
+  const current = queue.uid === uid ? queue.items.find((p) => !reviewed(p.matchId, p.generation)) : undefined
   if (!current || inConversation) return null
 
   function close() {

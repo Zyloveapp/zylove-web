@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, serverTimestamp, updateDoc } from 'firebase/firestore'
+import { collection, getDocs } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 
@@ -9,10 +9,12 @@ export async function blockMatch(matchId: string, targetUid: string): Promise<vo
   await httpsCallable<{ targetUid: string; matchId: string }, { success: true }>(functions, 'blockUser')({ targetUid, matchId })
 }
 
-// Soft unmatch: the match stays (so it can still be reviewed and reported)
-// but counts as ended everywhere.
-export async function unmatch(matchId: string, uid: string): Promise<void> {
-  await updateDoc(doc(db, 'matches', matchId), { unmatchedAt: serverTimestamp(), unmatchedBy: uid })
+// Unmatch ends the connection for good, as mobile's does: the
+// unmatchConnection callable records it (so it can still be reviewed and
+// reported) and deletes the match, and the server then deletes its messages
+// and photos.
+export async function unmatch(matchId: string): Promise<void> {
+  await httpsCallable<{ matchId: string }, { success: true }>(functions, 'unmatchConnection')({ matchId })
 }
 
 // Everyone blocked in either direction. Unreadable → nobody, rather than

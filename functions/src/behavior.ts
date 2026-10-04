@@ -61,6 +61,64 @@ async function bump(uid: string, field: string): Promise<void> {
     .set({ [field]: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
 }
 
+// Names, dates and message counts of one ended match generation, for
+// "Report a past connection" and for reviewing it after the doc and its
+// messages are gone (90 days). Never message content. until: the next
+// generation's start when a re-match overwrote this one. Returns the
+// per-person message counts.
+async function recordPastConnection(
+  matchId: string,
+  match: DocumentData,
+  endedAt: number,
+  until: number | null,
+  endedBy?: string,
+): Promise<Record<string, number>> {
+  const generation = generationOf(match)
+  const users = participants(match)
+  const counts = await countMessages(matchId, generation, until)
+  const sentCounts = Object.fromEntries(users.map((u) => [u, counts.bySender[u] ?? 0]))
+  await getFirestore()
+    .collection(PAST)
+    .doc(pastConnectionId(matchId, generation))
+    .set({
+      matchId,
+      generation,
+      users,
+      names: Object.fromEntries(users.map((u) => [u, displayName(match, u)])),
+      matchedAt: matchedAtOf(match),
+      endedAt,
+      mode: match.mode === 'play' ? 'play' : 'spark',
+      messageCount: counts.total,
+      sentCounts,
+      ...(endedBy ? { endedBy } : {}),
+    })
+  return sentCounts
+}
+
+// ─── unmatchConnection ───────────────────────────────────────────────────────
+
+// Web unmatch: ends the match for good, as mobile's does. Records the past
+// connection first — so the exit review and "Report a past connection" work
+// straight away — then deletes the match doc, which sets off the purge of its
+// messages and photos (onMatchBehaviorUpdate → purgeMatchContent).
+export const unmatchConnection = onCall(
+  { timeoutSeconds: 60, memory: '256MiB', invoker: 'public' },
+  async (request): Promise<{ success: true }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    const uid = request.auth.uid
+    const matchId = (request.data as { matchId?: unknown } | null)?.matchId
+    if (typeof matchId !== 'string' || !matchId) throw new HttpsError('invalid-argument', 'matchId is required')
+    const ref = getFirestore().collection('matches').doc(matchId)
+    const match = (await ref.get()).data()
+    if (!match) return { success: true } // already gone
+    if (!participants(match).includes(uid)) throw new HttpsError('permission-denied', 'Not a participant in this match')
+    if (!isBotMatch(match) && !match.unmatchedAt) await recordPastConnection(matchId, match, Date.now(), null, uid)
+    await ref.delete()
+    logger.info('unmatchConnection', { matchId })
+    return { success: true }
+  },
+)
+
 // ─── onMatchBehaviorUpdate ───────────────────────────────────────────────────
 
 // One match's life, keyed by generation (see matchGeneration.ts):
@@ -108,32 +166,23 @@ export const onMatchBehaviorUpdate = onDocumentWritten(
         }
       }
 
-      const unmatchedNow = after === undefined || (!replaced && Boolean(after.unmatchedAt) && !before.unmatchedAt)
+      // A delete after a soft unmatch (unmatchedAt) was already handled then.
+      const unmatchedNow =
+        (after === undefined && !before.unmatchedAt) || (after !== undefined && !replaced && Boolean(after.unmatchedAt) && !before.unmatchedAt)
       if (unmatchedNow || replaced) {
         const matchedAt = matchedAtOf(before)
         const endedAt = after && !replaced ? toMillis(after.unmatchedAt) || Date.now() : Date.now()
-        const counts = await countMessages(matchId, beforeGen, replaced ? afterGen : null)
-
-        // Names, dates and message counts for "Report a past connection" and
-        // for reviewing an ended match (90 days). Never message content.
-        await db
-          .collection(PAST)
-          .doc(pastConnectionId(matchId, beforeGen))
-          .set({
-            matchId,
-            generation: beforeGen,
-            users,
-            names: Object.fromEntries(users.map((u) => [u, displayName(before, u)])),
-            matchedAt,
-            endedAt,
-            mode: before.mode === 'play' ? 'play' : 'spark',
-            messageCount: counts.total,
-            sentCounts: Object.fromEntries(users.map((u) => [u, counts.bySender[u] ?? 0])),
-          })
+        // unmatchConnection records the end itself before deleting (so a
+        // review can follow at once); reuse that record rather than recount.
+        const recorded = after === undefined ? (await db.collection(PAST).doc(pastConnectionId(matchId, beforeGen)).get()).data() : undefined
+        const sent: Record<string, number> =
+          recorded && typeof recorded.sentCounts === 'object' && recorded.sentCounts !== null
+            ? (recorded.sentCounts as Record<string, number>)
+            : await recordPastConnection(matchId, before, endedAt, replaced ? afterGen : null)
 
         // Matched, talked, gone within a day — attributed to whoever ended it.
-        if (unmatchedNow && matchedAt && endedAt - matchedAt < FAST_UNMATCH_MS && users.every((u) => (counts.bySender[u] ?? 0) > 0)) {
-          let unmatcher: unknown = after?.unmatchedBy
+        if (unmatchedNow && matchedAt && endedAt - matchedAt < FAST_UNMATCH_MS && users.every((u) => num(sent[u]) > 0)) {
+          let unmatcher: unknown = after?.unmatchedBy ?? recorded?.endedBy
           if (typeof unmatcher !== 'string') {
             const reason = await db.collection('unmatchReasons').where('matchId', '==', matchId).limit(1).get()
             unmatcher = reason.docs[0]?.data().reporterUid

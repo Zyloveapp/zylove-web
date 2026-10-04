@@ -114,6 +114,9 @@ export default function ChatActionsSheet({ name, onReport, onEnd, onClose, photo
                 ? `Block ${name}? They won't be able to message you and will be removed from your matches.`
                 : `End this connection with ${name}?`}
             </p>
+            {confirm === 'unmatch' && (
+              <p className="mt-2 text-sm text-white/60">Your conversation and any shared photos will be deleted for both of you.</p>
+            )}
             {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
             <button
               type="button"

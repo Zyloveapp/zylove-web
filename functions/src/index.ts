@@ -1707,7 +1707,7 @@ export const getCuriousVisitors = onCall(
 
 // Bot chats: "typing…" while a bot reply is on its way (see botTyping.ts).
 export { botTypingStart, botTypingStop } from './botTyping'
-export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate } from './behavior'
+export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate, unmatchConnection } from './behavior'
 export { markChatPhotoViewed, sweepChatPhotos } from './photos'
 export { checkTrialStatus } from './trial'
 export { createCheckoutSession, createPortalSession, stripeWebhook } from './stripe'

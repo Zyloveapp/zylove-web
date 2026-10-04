@@ -28,10 +28,10 @@ import {
   conversationCold,
   isBotUid,
   markColdReviewShown,
-  markReviewed,
   reviewed,
 } from '../../services/zyloveScore'
 import { blockMatch, unmatch } from '../../services/safety'
+import { useExitReviewStore } from '../../store/exitReviewStore'
 import {
   markPhotoBannerSeen,
   pausePhotoSharing,
@@ -111,8 +111,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const [showReview, setShowReview] = useState(false)
   const [showActions, setShowActions] = useState(false)
   const [showReport, setShowReport] = useState(false)
-  // Block/unmatch done: the review card, then back to the list.
-  const [exitReview, setExitReview] = useState(false)
+  const offerExitReview = useExitReviewStore((s) => s.offer)
   const [consentState, setConsentState] = useState<{ matchId: string; consent: PhotoConsent | null } | null>(null)
   const [showPhotoBanner, setShowPhotoBanner] = useState(false)
   const [showPhotoPicker, setShowPhotoPicker] = useState(false)
@@ -412,12 +411,15 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
 
   async function endConnection(action: Exclude<ChatAction, 'report'>) {
     if (action === 'block') await blockMatch(matchId, partnerUid)
-    else await unmatch(matchId, uid)
+    else await unmatch(matchId)
     setShowActions(false)
     // Same rules as the app-wide prompt: a real person, a real conversation,
-    // not already reviewed.
-    if (!isBotUid(partnerUid) && conversation.length > 0 && !reviewed(matchId, match.startedAt)) setExitReview(true)
-    else leave()
+    // not already reviewed. Offered app-wide: unmatching deletes the match,
+    // which closes this chat.
+    if (!isBotUid(partnerUid) && conversation.length > 0 && !reviewed(matchId, match.startedAt)) {
+      offerExitReview({ matchId, generation: match.startedAt, partnerUid, name: match.name })
+    }
+    leave()
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -596,7 +598,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           partnerUid={partnerUid}
           mode={match.mode === 'play' ? 'play' : 'spark'}
           messages={conversation}
-          suppressed={showFirstChat || showVibeCheck || showReview || showReport || exitReview || showPhotoPicker || showPhotoBanner}
+          suppressed={showFirstChat || showVibeCheck || showReview || showReport || showPhotoPicker || showPhotoBanner}
           onPick={setText}
         />
         {photoNotice && (
@@ -737,19 +739,6 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
 
       {showReport && (
         <ReviewModal matchId={matchId} generation={match.startedAt} partnerUid={partnerUid} name={match.name} onClose={() => setShowReport(false)} />
-      )}
-
-      {exitReview && (
-        <ReviewModal
-          matchId={matchId}
-          generation={match.startedAt}
-          partnerUid={partnerUid}
-          name={match.name}
-          onClose={() => {
-            markReviewed(matchId, match.startedAt)
-            leave()
-          }}
-        />
       )}
 
       {showReview && (
