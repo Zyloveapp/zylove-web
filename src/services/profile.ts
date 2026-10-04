@@ -91,6 +91,8 @@ export function profileCompleteness({ profile: p, bio, prompts }: OwnProfile): n
 
 export interface SparkEdits {
   displayName: string
+  // The saved name: a change stamps displayNameUpdatedAt (30-day limit).
+  previousDisplayName: string
   pronouns: string
   bio: string
   prompts: PromptAnswer[]
@@ -105,9 +107,11 @@ export async function saveSparkEdits(uid: string, e: SparkEdits): Promise<void> 
     .map((p) => ({ promptId: p.promptId, answer: p.answer.trim() }))
     .filter((p) => p.answer)
   const pronouns = e.pronouns.trim()
+  const displayName = e.displayName.trim()
+  const nameChanged = displayName !== e.previousDisplayName.trim()
   const batch = writeBatch(db)
   batch.update(doc(db, 'users', uid), {
-    displayName: e.displayName.trim(),
+    ...(nameChanged && { displayName, displayNameUpdatedAt: serverTimestamp() }),
     pronouns: pronouns || deleteField(),
     bio,
     promptAnswers,
@@ -117,6 +121,7 @@ export async function saveSparkEdits(uid: string, e: SparkEdits): Promise<void> 
     doc(db, `users/${uid}/sparkProfile/data`),
     {
       uid,
+      ...(nameChanged && { displayName }),
       bio,
       promptAnswers,
       sparkPromptAnswers: Object.fromEntries(promptAnswers.map((p) => [p.promptId, p.answer])),

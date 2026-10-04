@@ -12,6 +12,7 @@ import {
 } from '../../types/dualProfile'
 import { promptQuestion } from '../discover/labels'
 import { typePreferenceLabels } from '../../types/playDescriptors'
+import { playNameOf } from '../../services/displayNames'
 import { PhotoHero, Pills, ProfileHeader, SectionHeading } from './ProfileSections'
 import { badgeTier } from '../TierBadge'
 
@@ -140,6 +141,8 @@ export default function PlayProfileSections({
   play: PlayProfileData
   afterHeader?: ReactNode
 }) {
+  // Play shows the Play name; the header reads it through displayName.
+  const named = { ...profile, displayName: playNameOf(play, profile) || profile.displayName }
   const photos = play.photoURLs.length > 0 ? play.photoURLs : list(profile.photoURLs)
   const bio = play.playBio || profile.bio?.trim() || ''
 
@@ -147,10 +150,10 @@ export default function PlayProfileSections({
     <>
       <PhotoHero
         photos={photos}
-        name={profile.displayName ?? ''}
+        name={named.displayName ?? ''}
         glow={badgeTier((profile as Record<string, unknown>).zyloveScoreTier)}
       />
-      <ProfileHeader profile={profile} nameFallback="Someone" />
+      <ProfileHeader profile={named} nameFallback="Someone" />
       {afterHeader}
       <PlayDetailsBody bio={bio} play={play} />
     </>

@@ -34,6 +34,8 @@ export type PlayTagCategory = 'arrangement' | 'acts' | 'dynamic' | 'vibe' | 'pla
 
 export interface PlayDraft {
   photos: PhotoDraft[]
+  // The name shown on the Play profile (falls back to displayName when empty).
+  playDisplayName: string
   bio: string
   spiceLevel: SpiceLevel | null
   // Every selected tag, across all five categories.
@@ -65,6 +67,7 @@ export const MAX_PLAY_PROMPTS = 5
 export function emptyPlayDraft(uid: string): PlayDraft {
   return {
     photos: [],
+    playDisplayName: '',
     bio: '',
     spiceLevel: null,
     tags: [],
@@ -85,7 +88,7 @@ export function tagsIn(tags: PlayInterestTag[], category: PlayTagCategory): Play
   return tags.filter((t) => PLAY_TAG_LABELS[t]?.category === category)
 }
 
-function answeredPrompts(d: PlayDraft): { promptId: string; answer: string }[] {
+export function answeredPrompts(d: PlayDraft): { promptId: string; answer: string }[] {
   return d.promptIds
     .map((promptId) => ({ promptId, answer: (d.answers[promptId] ?? '').trim() }))
     .filter((p) => p.answer)
@@ -106,7 +109,7 @@ function promptText(id: string): string {
 
 // The about-you and type fields as saved on playProfile/data and mirrored to
 // the root doc. Unset values are null so an edit can clear them.
-function descriptorFields(d: PlayDraft) {
+export function descriptorFields(d: PlayDraft) {
   return {
     playBodyType: d.bodyType,
     playHeight: d.heightCm,
@@ -199,12 +202,22 @@ export async function savePlayOnboarding(uid: string, d: PlayDraft, { keepIntent
   const playRef = doc(db, `users/${uid}/playProfile/data`)
   const existing = await getDoc(playRef)
   const now = Date.now()
+  // A changed Play name (edits) starts its 30-day wait; the first one doesn't.
+  const previousName: unknown = existing.data()?.playDisplayName
+  const playName = d.playDisplayName.trim()
+  const nameFields = playName
+    ? {
+        playDisplayName: playName,
+        ...(typeof previousName === 'string' && previousName !== playName && { playDisplayNameUpdatedAt: now }),
+      }
+    : {}
   const batch = writeBatch(db)
   batch.set(
     playRef,
     {
       uid,
       photoURLs,
+      ...nameFields,
       playBio: bio,
       spiceLevel: d.spiceLevel,
       playInterestTags: d.tags,
@@ -225,6 +238,7 @@ export async function savePlayOnboarding(uid: string, d: PlayDraft, { keepIntent
   // these Play fields from the root doc, not the playProfile subcollection.
   batch.update(doc(db, 'users', uid), {
     ...(!keepIntent && { intent: 'open' }),
+    ...nameFields,
     spiceLevel: d.spiceLevel,
     playInterestTags: d.tags,
     playNonNegotiables: d.nonNegotiables,
@@ -281,6 +295,8 @@ export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, pl
       age,
       ...(!identityLocked && birthday && { birthday: birthday.iso }),
       ...(!identityLocked && { genderIdentity }),
+      // Private; locked by the rules with the identity fields.
+      ...(!identityLocked && d.legalName.trim() && { legalName: d.legalName.trim() }),
       ...(!identityLocked && genderIdentity === 'self_describe' && selfDescribe && { genderSelfDescribe: selfDescribe }),
       ...(!identityLocked &&
         OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) &&
@@ -303,6 +319,7 @@ export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, pl
       openToCrossover: false,
       // Mirrors mobile's Play onboarding: mobile Discover and profile cards
       // read these Play fields from the root doc.
+      ...(play.playDisplayName.trim() && { playDisplayName: play.playDisplayName.trim() }),
       spiceLevel: play.spiceLevel,
       playInterestTags: play.tags,
       playNonNegotiables: play.nonNegotiables,
@@ -321,6 +338,7 @@ export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, pl
     playRef,
     {
       uid,
+      ...(play.playDisplayName.trim() && { playDisplayName: play.playDisplayName.trim() }),
       playBio: bio,
       spiceLevel: play.spiceLevel,
       playInterestTags: play.tags,
@@ -422,6 +440,7 @@ export async function loadPlayDraft(uid: string, suggested: string[]): Promise<P
 
   return {
     photos: strings(d.photoURLs).map((url) => ({ id: url, file: null, previewUrl: url })),
+    playDisplayName: typeof d.playDisplayName === 'string' ? d.playDisplayName : '',
     bio: typeof d.playBio === 'string' ? d.playBio : '',
     spiceLevel: typeof d.spiceLevel === 'string' ? (d.spiceLevel as SpiceLevel) : null,
     tags: strings(d.playInterestTags) as PlayInterestTag[],

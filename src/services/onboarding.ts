@@ -184,6 +184,8 @@ export async function saveSparkOnboarding(
     age,
     ...(!identityLocked && birthday && { birthday: birthday.iso }),
     ...(!identityLocked && { genderIdentity }),
+    // Private; locked by the rules with the identity fields.
+    ...(!identityLocked && d.legalName.trim() && { legalName: d.legalName.trim() }),
     attractedTo: d.attractedTo,
     relationshipStatus,
     openTo: d.openTo,
@@ -415,6 +417,7 @@ export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null
   const draft: OnboardingDraft = {
     ...INITIAL_DRAFT,
     termsAccepted: true,
+    legalName: str(p.legalName) ?? '',
     displayName: str(p.displayName) ?? '',
     birthdayRaw: isoToBirthdayRaw(p.birthday),
     photos: arr(p.photoURLs).map((url) => ({ id: crypto.randomUUID(), file: null, previewUrl: url })),

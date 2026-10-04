@@ -4,6 +4,7 @@ import { displayAge, type DiscoverProfile } from '../../services/discover'
 import { UserTierBadge } from '../TierBadge'
 import { relativeTime } from '../../services/matches'
 import type { Mode } from '../../store/modeStore'
+import { playNameOf } from '../../services/displayNames'
 
 function expiresIn(expiresAt: number): string {
   const ms = expiresAt - Date.now()
@@ -50,12 +51,13 @@ function Card({
   )
 }
 
-function NameLine({ profile, uid }: { profile: DiscoverProfile; uid: string }) {
+function NameLine({ profile, uid, mode }: { profile: DiscoverProfile; uid: string; mode: Mode }) {
   const age = displayAge(profile)
+  const name = mode === 'play' ? playNameOf(profile.playProfile, profile) : profile.displayName
   return (
     <span className="flex min-w-0 items-center gap-2">
       <span className="truncate text-lg font-semibold text-white">
-        {profile.displayName ?? 'Someone'}
+        {name || 'Someone'}
         {age !== null && <span className="font-normal text-white/50">, {age}</span>}
       </span>
       <UserTierBadge uid={uid} />
@@ -105,7 +107,7 @@ export default function SparksList({ sparks, mode, matchedUids, onSelect, scores
             {topPicks && <span className="block text-xs font-semibold text-[#F59E0B]">✦ Top Pick</span>}
             {s.isWeeklySpark && <span className="block text-xs font-semibold text-[#F59E0B]">✦ Weekly Spark</span>}
             {revealed ? (
-              <NameLine profile={s.profile} uid={s.likerUid} />
+              <NameLine profile={s.profile} uid={s.likerUid} mode={mode} />
             ) : (
               <span className="block text-base font-semibold text-white">Your compatibility report is ready ✦</span>
             )}
@@ -207,7 +209,7 @@ export function CuriousList({
           score={v.score ? <ScorePill score={v.score.value} mode={mode} /> : null}
         >
           <span className="block text-xs font-semibold text-[#9DB4FF]">Revealed your compatibility ✦</span>
-          <NameLine profile={v.profile} uid={v.uid} />
+          <NameLine profile={v.profile} uid={v.uid} mode={mode} />
           {v.profile.locationLabel && (
             <span className="mt-0.5 block truncate text-sm text-white/50">📍 {v.profile.locationLabel}</span>
           )}

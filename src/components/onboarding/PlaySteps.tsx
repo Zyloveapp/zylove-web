@@ -31,6 +31,7 @@ import {
   type PlayTagCategory,
 } from '../../services/playOnboarding'
 import { HeightPicker } from './ui'
+import { MAX_PLAY_NAME, formatNameChangeDate } from '../../services/displayNames'
 
 // The Play steps, shared by the Play-only path in /onboarding and by
 // /play-onboarding (mode-pill setup and Play edits).
@@ -120,6 +121,43 @@ function SinglePills<T extends string>({
 function cmToFeetInches(cm: number): { feet: number; inches: number } {
   const total = Math.round(cm / 2.54)
   return { feet: Math.floor(total / 12), inches: total % 12 }
+}
+
+// The Play profile's own name. lockedUntil: a recent change (edits only) —
+// shown read-only until the 30 days are up.
+export function PlayNameStep({
+  play,
+  update,
+  lockedUntil = null,
+  placeholder,
+}: PlayStepProps & { lockedUntil?: Date | null; placeholder?: string }) {
+  return (
+    <>
+      <Heading
+        title="What should they call you?"
+        subtitle="Your Play name is shown on your Play profile. It can be different from your Spark name."
+      />
+      <input
+        value={play.playDisplayName}
+        onChange={(e) => update({ playDisplayName: e.target.value.slice(0, MAX_PLAY_NAME) })}
+        maxLength={MAX_PLAY_NAME}
+        readOnly={lockedUntil !== null}
+        placeholder={placeholder ?? 'Your Play name'}
+        aria-label="Play name"
+        className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-lg text-white placeholder:text-white/30 focus:border-[#E03131]/50 focus:outline-none read-only:opacity-60"
+      />
+      <div className="mt-2 flex justify-between text-xs text-white/40">
+        <span>
+          {lockedUntil
+            ? `Next change available: ${formatNameChangeDate(lockedUntil)}`
+            : 'You can change your Play name once every 30 days.'}
+        </span>
+        <span>
+          {play.playDisplayName.length}/{MAX_PLAY_NAME}
+        </span>
+      </div>
+    </>
+  )
 }
 
 // /play-onboarding only — the Play-only path's recommendation screen already

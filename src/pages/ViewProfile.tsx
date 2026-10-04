@@ -11,6 +11,7 @@ import ProfileSections from '../components/profile/ProfileSections'
 import PlayProfileSections from '../components/profile/PlayProfileSections'
 import CompatibilityBlock from '../components/discover/CompatibilityBlock'
 import MatchOverlay, { type NewMatch } from '../components/discover/MatchOverlay'
+import { playNameOf } from '../services/displayNames'
 
 type Loaded = { uid: string; data: OwnProfile | null; play: PlayProfileData | null }
 
@@ -112,7 +113,8 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
           setNewMatch({
             matchId: result.matchId,
             theirUid: targetUid,
-            theirName: current.data.profile.displayName ?? 'Someone',
+            theirName:
+              (viewMode === 'play' ? playNameOf(play, current.data.profile) : current.data.profile.displayName) || 'Someone',
             theirPhoto: current.data.profile.photoURLs?.[0] ?? null,
             mode: viewMode,
           })

@@ -68,6 +68,8 @@ export interface HeightFtIn {
 
 export interface OnboardingDraft {
   termsAccepted: boolean
+  // Private first name — never shown; locked with identity.
+  legalName: string
   displayName: string
   birthdayRaw: string
   photos: PhotoDraft[]
@@ -119,6 +121,7 @@ export type OnboardingPath = 'spark' | 'play' | 'both' | 'unsure'
 
 export const INITIAL_DRAFT: OnboardingDraft = {
   termsAccepted: false,
+  legalName: '',
   displayName: '',
   birthdayRaw: '',
   photos: [],

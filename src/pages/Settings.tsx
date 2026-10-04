@@ -421,7 +421,8 @@ export default function Settings() {
             <span>
               <span className="block font-medium">SMS Notifications</span>
               <span className="block text-sm text-white/40">
-                {phone ? `Texts to ${phone}` : 'Sign in with a phone number to get texts.'}
+                {/* One switch for both modes; Play says so, since everything else here is Play-only. */}
+                {phone ? `Texts to ${phone}${mode === 'play' ? ' · Spark & Play' : ''}` : 'Sign in with a phone number to get texts.'}
               </span>
             </span>
             <Switch

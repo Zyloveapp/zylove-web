@@ -15,6 +15,7 @@ import {
 } from '../services/profile'
 import { MODERATION_MESSAGES, uploadModeratedPhoto } from '../services/moderatedPhotos'
 import { isPlayOnlyUser } from '../services/playOnboarding'
+import { formatNameChangeDate, nextNameChange } from '../services/displayNames'
 import type { DiscoverProfile } from '../services/discover'
 import { SPARK_PROMPT_BANK, type PromptAnswer } from '../types/dualProfile'
 import { profileGenderLabel, promptQuestion } from '../components/discover/labels'
@@ -199,7 +200,7 @@ export default function EditProfile() {
     setSaving(true)
     setSaveState(null)
     try {
-      await saveSparkEdits(uid, { displayName, pronouns, bio, prompts })
+      await saveSparkEdits(uid, { displayName, previousDisplayName: profile?.displayName ?? '', pronouns, bio, prompts })
       setSaveState('saved')
       setTimeout(() => navigate('/profile'), 1200)
     } catch {
@@ -231,6 +232,8 @@ export default function EditProfile() {
 
   const gender = profileGenderLabel(profile)
   const deeper = goDeeperAnswers(profile)
+  // A display name change starts a 30-day wait before the next one.
+  const nameLockedUntil = nextNameChange((profile as Record<string, unknown>).displayNameUpdatedAt)
 
   return (
     <div className={page}>
@@ -246,7 +249,18 @@ export default function EditProfile() {
         <Section emoji="🪪" title="Identity" sub="How you show up across Zylove">
           <label className="block">
             <span className="mb-1 block text-sm text-white/60">Display name</span>
-            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={40} className={inputClass} />
+            <input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              maxLength={40}
+              readOnly={nameLockedUntil !== null}
+              className={`${inputClass} read-only:opacity-60`}
+            />
+            <span className="mt-1 block text-xs text-white/40">
+              {nameLockedUntil
+                ? `Next change available: ${formatNameChangeDate(nameLockedUntil)}`
+                : 'You can change your display name once every 30 days.'}
+            </span>
           </label>
           <label className="block">
             <span className="mb-1 block text-sm text-white/60">Pronouns (optional)</span>

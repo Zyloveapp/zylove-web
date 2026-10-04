@@ -138,9 +138,9 @@ export default function Profile() {
         {/* Sits above the mobile bottom nav (h-16). */}
         <div className="sticky bottom-16 border-t border-[#E03131]/20 bg-gray-950 px-4 py-3">
           <div className={`mx-auto grid max-w-xl gap-2 text-sm leading-tight ${playData ? 'grid-cols-3' : 'grid-cols-2'}`}>
-            {/* Play onboarding in edit mode: prefilled, starts at photos. */}
+            {/* Section-by-section editor; "Reset the vibe" is the full onboarding redo. */}
             <Link
-              to="/play-onboarding?edit=true"
+              to="/edit-play-profile"
               className="flex items-center justify-center rounded-xl border border-[#E03131] px-2 py-3 text-center font-semibold text-white transition-colors hover:bg-[#E03131]/15"
             >
               ✏ Edit Play profile

@@ -8,6 +8,7 @@ import PhotosStep from '../components/onboarding/PhotosStep'
 import { MAX_PHOTOS, releasePhotoPreview } from '../components/onboarding/types'
 import { selectPlayPrompts } from '../types/dualProfile'
 import { PLAY_BODY_TYPE_LABELS, type PlayBodyType } from '../types/playDescriptors'
+import { nextNameChange } from '../services/displayNames'
 import {
   MIN_PLAY_ANSWERS,
   emptyPlayDraft,
@@ -25,6 +26,7 @@ import {
   NonNegotiablesStep,
   PLAY_BIO_MAX,
   PlayBioStep,
+  PlayNameStep,
   PlayPromptsStep,
   PlayReviewStep,
   PlayWelcomeStep,
@@ -39,6 +41,7 @@ const RED = '#E03131'
 const STEPS = [
   'welcome',
   'photos',
+  'playName',
   'spice',
   'aboutYou',
   'arrangement',
@@ -89,6 +92,12 @@ export default function PlayOnboarding() {
     genderIdentity: null,
     attractedTo: null,
   })
+  // Spark display name (placeholder for the Play name) and, when editing, how
+  // long a recent Play name change keeps it locked.
+  const [names, setNames] = useState<{ displayName: string; playNameLockedUntil: Date | null }>({
+    displayName: '',
+    playNameLockedUntil: null,
+  })
 
   const update = (patch: Partial<PlayDraft>) => setDraft((d) => ({ ...d, ...patch }))
 
@@ -118,6 +127,10 @@ export default function PlayOnboarding() {
       .then((snap) => {
         const data = snap.data()
         setIdentity({ genderIdentity: data?.genderIdentity, attractedTo: data?.attractedTo })
+        setNames({
+          displayName: typeof data?.displayName === 'string' ? data.displayName : '',
+          playNameLockedUntil: wantsEdit ? nextNameChange(data?.playDisplayNameUpdatedAt) : null,
+        })
         if (wantsEdit) return
         const heightCm: unknown = data?.heightCm
         const bodyType: unknown = data?.bodyType
@@ -147,6 +160,8 @@ export default function PlayOnboarding() {
     switch (id) {
       case 'photos':
         return draft.photos.length >= 1 && draft.photos.length <= MAX_PHOTOS
+      case 'playName':
+        return draft.playDisplayName.trim().length > 0
       case 'spice':
         return draft.spiceLevel !== null
       case 'arrangement':
@@ -219,6 +234,14 @@ export default function PlayOnboarding() {
             subtitle={`Up to ${MAX_PHOTOS} photos · Not shared with Spark.`}
             photos={draft.photos}
             onChange={(photos) => update({ photos })}
+          />
+        )
+      case 'playName':
+        return (
+          <PlayNameStep
+            {...props}
+            lockedUntil={editing ? names.playNameLockedUntil : null}
+            placeholder={names.displayName || undefined}
           />
         )
       case 'spice':

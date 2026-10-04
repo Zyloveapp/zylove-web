@@ -7,6 +7,8 @@ import { parseTypePreferences, playDescriptorLabels, type TypePreferences } from
 // other service imports so discover.ts and profile.ts can both use it.
 export interface PlayProfileData {
   photoURLs: string[]
+  // Shown instead of displayName on Play profiles; '' when unset.
+  playDisplayName: string
   playBio: string
   spiceLevel: string | null
   playInterestTags: string[]
@@ -44,6 +46,7 @@ function playPrompts(d: DocumentData): PromptAnswer[] {
 export function parsePlayProfile(d: DocumentData): PlayProfileData {
   return {
     photoURLs: strings(d.photoURLs),
+    playDisplayName: typeof d.playDisplayName === 'string' ? d.playDisplayName.trim() : '',
     playBio: typeof d.playBio === 'string' ? d.playBio.trim() : '',
     spiceLevel: typeof d.spiceLevel === 'string' && d.spiceLevel ? d.spiceLevel : null,
     playInterestTags: strings(d.playInterestTags),

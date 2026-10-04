@@ -6,6 +6,7 @@ import SparkleIcon from '../icons/SparkleIcon'
 import { actionErrorMessage, type DiscoverProfile } from '../../services/discover'
 import { dismissSpark, likeBackSpark, loadSparkProfile, type SparkEntry } from '../../services/sparks'
 import { loadPlayProfile, parsePlayProfile } from '../../services/playProfile'
+import { playNameOf } from '../../services/displayNames'
 
 interface SparkProfileViewProps {
   uid: string
@@ -62,13 +63,14 @@ export default function SparkProfileView({
   const isFlame = spark.mode === 'play'
   const photo = (profile.playProfile?.photoURLs.length ? profile.playProfile.photoURLs : profile.photoURLs)?.[0]
   // Name from the like snapshot; only bots and matched people are named.
-  const headerName = ((spark.isBot || matched) && spark.profile.displayName?.trim()) || 'Someone'
+  const snapshotName = isFlame ? playNameOf(spark.profile.playProfile, spark.profile) : spark.profile.displayName?.trim()
+  const headerName = ((spark.isBot || matched) && snapshotName) || 'Someone'
 
   async function handleMatch() {
     if (busy) return
     setBusy(true)
     setError(null)
-    onMatchStart(profile.displayName ?? 'someone')
+    onMatchStart((isFlame ? playNameOf(profile.playProfile, profile) : profile.displayName) || 'someone')
     try {
       const matchId = await likeBackSpark(uid, spark, profile)
       setLinked(true)

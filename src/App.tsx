@@ -10,6 +10,7 @@ import FounderCelebration from './components/FounderCelebration'
 import AuthGuard from './components/AuthGuard'
 import AdminGuard from './components/AdminGuard'
 import AdminPhotos from './pages/AdminPhotos'
+import EditPlayProfile from './pages/EditPlayProfile'
 import PauseGuard from './components/PauseGuard'
 import Header from './components/Header'
 import Nav from './components/Nav'
@@ -141,6 +142,7 @@ export default function App() {
               <Route path="/sparks" element={<Sparks />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/profile/edit" element={<EditProfile />} />
+              <Route path="/edit-play-profile" element={<EditPlayProfile />} />
               <Route path="/profile/:uid" element={<ViewProfile />} />
               <Route path="/profile/go-deeper" element={<GoDeeper />} />
               <Route path="/zylove-score" element={<ZyloveScore />} />

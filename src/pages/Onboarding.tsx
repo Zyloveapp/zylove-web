@@ -53,6 +53,7 @@ import {
   NonNegotiablesStep,
   PLAY_BIO_MAX,
   PlayBioStep,
+  PlayNameStep,
   PlayPromptsStep,
   PlayReviewStep,
   PlayTrialWelcome,
@@ -127,6 +128,7 @@ const PLAY_STEPS = [
   { id: 'recommendation', title: 'Your path' },
   { id: 'attractedTo', title: 'Attraction' },
   { id: 'discovery', title: 'Who you see' },
+  { id: 'playName', title: 'Play name' },
   { id: 'spice', title: 'Spice level' },
   { id: 'aboutYou', title: 'About you' },
   { id: 'arrangement', title: 'Looking for' },
@@ -179,7 +181,7 @@ function isStepValid(
     case 'name': {
       if (identityLocked) return d.displayName.trim().length > 0
       const b = parseBirthday(d.birthdayRaw)
-      return d.displayName.trim().length > 0 && b !== null && b.age >= MIN_AGE
+      return d.legalName.trim().length > 0 && d.displayName.trim().length > 0 && b !== null && b.age >= MIN_AGE
     }
     case 'photos':
       return d.photos.length >= 1 && d.photos.length <= maxPhotos
@@ -221,6 +223,8 @@ function isStepValid(
       return d.stressResponse !== null
     case 'bio':
       return !bioGenerating
+    case 'playName':
+      return play.playDisplayName.trim().length > 0
     case 'spice':
       return play.spiceLevel !== null
     case 'arrangement':
@@ -558,6 +562,7 @@ export default function Onboarding() {
       case 'name':
         return (
           <NameStep
+            legalName={draft.legalName}
             displayName={draft.displayName}
             birthdayRaw={draft.birthdayRaw}
             birthdayLocked={identityLocked}
@@ -672,6 +677,8 @@ export default function Onboarding() {
         )
       case 'review':
         return <ReviewStep draft={draft} saving={saving} error={saveError} onCreate={createProfile} />
+      case 'playName':
+        return <PlayNameStep {...playProps} placeholder={draft.displayName.trim() || undefined} />
       case 'spice':
         return <SpiceStep {...playProps} />
       case 'aboutYou':

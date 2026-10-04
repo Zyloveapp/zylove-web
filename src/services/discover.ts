@@ -21,6 +21,7 @@ import { genderToAttractedToCategory } from '../utils/genderUtils'
 import type { DatingProfile } from '../types/profile'
 import type { Mode } from '../store/modeStore'
 import { parsePlayProfile, type PlayProfileData } from './playProfile'
+import { playNameOf } from './displayNames'
 import { loadBlockedUids } from './safety'
 
 const CANDIDATE_LIMIT = 50
@@ -255,7 +256,9 @@ async function withPlayProfiles(candidates: DiscoverProfile[]): Promise<Discover
   )
   return candidates.flatMap((p, i) => {
     const playProfile = play[i]
-    return playProfile ? [{ ...p, playProfile }] : []
+    // Play Explore shows the Play name everywhere the card, details or match
+    // overlay read displayName.
+    return playProfile ? [{ ...p, playProfile, displayName: playNameOf(playProfile, p) || p.displayName }] : []
   })
 }
 
