@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useModeStore } from '../../store/modeStore'
 
 const POINTS: { icon: string; text: string; warn?: boolean }[] = [
   { icon: '✓', text: 'Both people must agree before photos can be shared' },
@@ -16,6 +17,8 @@ interface PhotoConsentBannerProps {
 // Shown the first time someone asks to share photos in a chat
 // (zylove_photo_consent_seen_{matchId}).
 export default function PhotoConsentBanner({ onProceed, onCancel }: PhotoConsentBannerProps) {
+  // Play: red checkmarks and button; Spark keeps green and cobalt.
+  const play = useModeStore((s) => s.mode) === 'play'
   useEffect(() => {
     function onKey(e: globalThis.KeyboardEvent) {
       if (e.key === 'Escape') onCancel()
@@ -41,7 +44,7 @@ export default function PhotoConsentBanner({ onProceed, onCancel }: PhotoConsent
         <ul className="mt-6 space-y-4">
           {POINTS.map((p) => (
             <li key={p.text} className="flex gap-3">
-              <span className={`mt-0.5 shrink-0 font-bold ${p.warn ? 'text-amber-300' : 'text-emerald-300'}`} aria-hidden>
+              <span className={`mt-0.5 shrink-0 font-bold ${p.warn ? 'text-amber-300' : play ? 'text-[#E03131]' : 'text-emerald-300'}`} aria-hidden>
                 {p.icon}
               </span>
               <span className={p.warn ? 'text-amber-100/90' : 'text-white/80'}>{p.text}</span>
@@ -53,7 +56,9 @@ export default function PhotoConsentBanner({ onProceed, onCancel }: PhotoConsent
             type="button"
             onClick={onProceed}
             autoFocus
-            className="w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold text-white transition-opacity hover:opacity-90"
+            className={`w-full rounded-xl py-3 font-semibold text-white transition-opacity hover:opacity-90 ${
+              play ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
+            }`}
           >
             Got it — send a request
           </button>
