@@ -3,7 +3,7 @@ import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
-import { coordsOf, requestLocation, saveUserLocation } from '../services/location'
+import { coordsOf, lastLocationDenied, requestLocation, saveUserLocation } from '../services/location'
 
 type Permission = 'checking' | 'granted' | 'prompt' | 'denied'
 // What's shown: the feed, a spinner, or the ask.
@@ -127,8 +127,9 @@ export default function LocationGate({ children }: { children: ReactNode }) {
     setSaveError(false)
     const location = await requestLocation()
     if (!location) {
-      // Allowed but no position (timed out, no fix): retry, not "blocked".
-      if (permission === 'granted') setSaveError(true)
+      // No position but not refused (timed out, no fix — common on Macs
+      // locating over Wi-Fi): retry, not "blocked".
+      if (permission === 'granted' || !lastLocationDenied()) setSaveError(true)
       else {
         setPermission('denied')
         setStillBlocked(retry)
@@ -217,7 +218,7 @@ export default function LocationGate({ children }: { children: ReactNode }) {
         <button
           type="button"
           onClick={() => {
-            window.location.href = 'https://zylove.app'
+            window.location.href = 'https://www.zylove.app'
           }}
           className={`mt-8 w-full max-w-xs rounded-full px-6 py-3.5 font-semibold text-white transition-opacity hover:opacity-90 ${
             play ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'

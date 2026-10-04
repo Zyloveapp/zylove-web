@@ -15,7 +15,21 @@ function snap(v: number): number {
   return Math.round(Math.round(v / GRID_DEG) * GRID_DEG * 1000) / 1000
 }
 
+// Left behind by an earlier build; nothing reads it any more.
+try {
+  localStorage.removeItem('zylove_location_allowed')
+} catch {
+  // ignore
+}
+
 let pending: Promise<LatLng | null> | null = null
+let lastDenied = false
+
+// Whether the most recent requestLocation() failed because the user or
+// browser refused (as opposed to a timeout or no fix).
+export function lastLocationDenied(): boolean {
+  return lastDenied
+}
 
 // Browser position, or null if unsupported, denied or timed out. Never throws.
 // Concurrent callers share one request, so the user sees one prompt.
@@ -23,9 +37,13 @@ export function requestLocation(): Promise<LatLng | null> {
   if (typeof navigator === 'undefined' || !navigator.geolocation) return Promise.resolve(null)
   pending ??= new Promise<LatLng | null>((resolve) => {
     navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      (pos) => {
+        lastDenied = false
+        resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+      },
       (err) => {
-        console.warn('[location] getCurrentPosition failed', err.code, err.message)
+        console.warn('[location] getCurrentPosition failed', location.origin, err.code, err.message)
+        lastDenied = err.code === err.PERMISSION_DENIED
         resolve(null)
       },
       { timeout: 10000, maximumAge: 300000 },
