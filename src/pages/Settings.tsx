@@ -13,7 +13,6 @@ import {
   setQuietHours,
   setQuietNudge,
   setSmsPreference,
-  setSmsSection,
   subscribeSmsSettings,
   type QuietHours,
   type SmsSettings,
@@ -357,7 +356,8 @@ export default function Settings() {
   }, [uid])
 
   const sms = loaded !== null && loaded !== 'error' && loaded.uid === uid ? loaded.settings : null
-  const enabled = sms?.enabled === true
+  // Each mode has its own master switch; this page shows the current mode's.
+  const enabled = sms?.enabled?.[mode] === true
 
   async function run(action: () => Promise<void>) {
     setBusy(true)
@@ -372,15 +372,17 @@ export default function Settings() {
   }
 
   function toggleMaster(next: boolean) {
-    if (!next) return void run(() => setSmsEnabled(uid, false))
-    // Consent is asked once; after that, switching back on is immediate.
-    if (sms?.consented) return void run(() => setSmsEnabled(uid, true))
+    const current = sms?.enabled ?? null
+    if (!next) return void run(() => setSmsEnabled(uid, mode, false, current))
+    // Consent is asked once per account (from either mode); after that,
+    // switching a mode on is immediate.
+    if (sms?.consented) return void run(() => setSmsEnabled(uid, mode, true, current))
     setConsentOpen(true)
   }
 
   async function acceptConsent() {
     if (!phone) return
-    await run(() => grantSmsConsent(uid, phone))
+    await run(() => grantSmsConsent(uid, phone, mode))
     setConsentOpen(false)
   }
 
@@ -417,46 +419,27 @@ export default function Settings() {
         <DiscoverySettings />
 
         <Section title="Notifications">
-          <div className="flex items-center justify-between gap-4 px-5 py-4">
-            <span>
-              <span className="block font-medium">SMS Notifications</span>
-              <span className="block text-sm text-white/40">
-                {/* One switch for both modes; Play says so, since everything else here is Play-only. */}
-                {phone ? `Texts to ${phone}${mode === 'play' ? ' · Spark & Play' : ''}` : 'Sign in with a phone number to get texts.'}
-              </span>
-            </span>
-            <Switch
-              checked={enabled}
-              disabled={busy || sms === null || !phone}
-              label="SMS Notifications"
-              onChange={toggleMaster}
-            />
-          </div>
-
           {SMS_SECTIONS.filter((section) => section.mode === mode).map(({ mode, title, items }) => {
             const prefs = sms ? sectionPreferences(sms.preferences, mode) : null
-            // The section switch is on while any of its texts are; flipping
-            // it sets all three.
-            const sectionOn = prefs !== null && items.some((i) => prefs[i.key])
             return (
-              <div key={mode} className={`border-t border-white/5 transition-opacity ${enabled ? '' : 'opacity-40'}`}>
-                <div className="flex items-center justify-between gap-4 px-5 pt-4 pb-2">
-                  <h3
-                    className={`text-xs font-semibold uppercase tracking-widest ${
-                      mode === 'play' ? 'text-red-400' : 'text-[#6B8FFF]'
-                    }`}
-                  >
-                    {title}
-                  </h3>
+              <div key={mode}>
+                {/* This mode's master switch: its texts only go out while it's on. */}
+                <div className="flex items-center justify-between gap-4 px-5 py-4">
+                  <span>
+                    <span className={`block font-medium ${mode === 'play' ? 'text-red-300' : 'text-[#9DB4FF]'}`}>{title}</span>
+                    <span className="block text-sm text-white/40">
+                      {phone ? `Texts to ${phone}` : 'Sign in with a phone number to get texts.'}
+                    </span>
+                  </span>
                   <Switch
-                    checked={sectionOn}
-                    disabled={!enabled || busy}
+                    checked={enabled}
+                    disabled={busy || sms === null || !phone}
                     label={title}
                     tone={mode}
-                    onChange={(next) => void run(() => setSmsSection(uid, mode, next))}
+                    onChange={toggleMaster}
                   />
                 </div>
-                <ul className={`pb-2 transition-opacity ${sectionOn ? '' : 'opacity-50'}`}>
+                <ul className={`border-t border-white/5 py-2 transition-opacity ${enabled ? '' : 'opacity-40'}`}>
                   {items.map(({ key, label, description }) => (
                     <li key={key} className="flex items-center justify-between gap-4 px-5 py-2.5">
                       <span>
@@ -465,7 +448,7 @@ export default function Settings() {
                       </span>
                       <Switch
                         checked={prefs?.[key] ?? false}
-                        disabled={!enabled || !sectionOn || busy}
+                        disabled={!enabled || busy}
                         label={`${title}: ${label}`}
                         tone={mode}
                         onChange={(next) => void run(() => setSmsPreference(uid, mode, key, next))}

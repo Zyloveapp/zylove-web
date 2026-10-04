@@ -113,9 +113,21 @@ function parseQuietHours(v: unknown): QuietHours {
   }
 }
 
+// One master switch per mode: users/{uid}.smsNotificationsEnabled =
+// { spark, play }. Older accounts hold one boolean, which counts for both
+// modes until the next change rewrites it as the object.
+export type SmsEnabled = Record<SmsMode, boolean>
+
+function parseEnabled(v: unknown): SmsEnabled | null {
+  if (typeof v === 'boolean') return { spark: v, play: v }
+  if (typeof v !== 'object' || v === null) return null
+  const e = v as Record<string, unknown>
+  return { spark: e.spark === true, play: e.play === true }
+}
+
 export interface SmsSettings {
   // null: never set up (the field is missing), which drives the ⚙ dot.
-  enabled: boolean | null
+  enabled: SmsEnabled | null
   consented: boolean
   preferences: SmsPreferences
   quietHours: QuietHours
@@ -128,7 +140,7 @@ export function subscribeSmsSettings(uid: string, onChange: (s: SmsSettings) => 
       const d = snap.data() ?? {}
       const preferences = parsePreferences(d.smsNotifications)
       onChange({
-        enabled: typeof d.smsNotificationsEnabled === 'boolean' ? d.smsNotificationsEnabled : null,
+        enabled: parseEnabled(d.smsNotificationsEnabled),
         consented: typeof d.smsConsent === 'object' && d.smsConsent !== null,
         preferences,
         quietHours: parseQuietHours(d.smsQuietHours),
@@ -138,11 +150,12 @@ export function subscribeSmsSettings(uid: string, onChange: (s: SmsSettings) => 
   )
 }
 
-// First opt-in: records consent, the default preferences and default quiet
+// First opt-in, from either mode's switch: records consent, turns that mode
+// on (the other stays off), and saves the default preferences and quiet
 // hours (on, 9pm–8am local), so texts respect the night from the start.
-export async function grantSmsConsent(uid: string, phone: string): Promise<void> {
+export async function grantSmsConsent(uid: string, phone: string, mode: SmsMode): Promise<void> {
   await updateDoc(doc(db, 'users', uid), {
-    smsNotificationsEnabled: true,
+    smsNotificationsEnabled: { spark: mode === 'spark', play: mode === 'play' },
     smsConsent: { grantedAt: serverTimestamp(), phone },
     smsNotifications: DEFAULT_PREFERENCES,
     smsQuietHours: defaultQuietHours(),
@@ -154,20 +167,17 @@ export async function setQuietHours(uid: string, q: Omit<QuietHours, 'timezone'>
   await updateDoc(doc(db, 'users', uid), { smsQuietHours: { ...q, timezone: browserTimezone() } })
 }
 
+// One mode's master switch. Writes the whole object, which also migrates an
+// old single boolean (current carries its value for the other mode).
 // Turning off keeps the preferences for next time.
-export async function setSmsEnabled(uid: string, enabled: boolean): Promise<void> {
-  await updateDoc(doc(db, 'users', uid), { smsNotificationsEnabled: enabled })
+export async function setSmsEnabled(uid: string, mode: SmsMode, enabled: boolean, current: SmsEnabled | null): Promise<void> {
+  const next: SmsEnabled = { spark: current?.spark ?? false, play: current?.play ?? false, [mode]: enabled }
+  await updateDoc(doc(db, 'users', uid), { smsNotificationsEnabled: next })
 }
 
 // One toggle inside a mode section.
 export async function setSmsPreference(uid: string, mode: SmsMode, key: string, value: boolean): Promise<void> {
   await updateDoc(doc(db, 'users', uid), { [`smsNotifications.${mode}.${key}`]: value })
-}
-
-// A section's master toggle: sets all three of that mode's toggles.
-export async function setSmsSection(uid: string, mode: SmsMode, value: boolean): Promise<void> {
-  const keys = SMS_SECTIONS.find((s) => s.mode === mode)?.items.map((i) => i.key) ?? []
-  await updateDoc(doc(db, 'users', uid), Object.fromEntries(keys.map((k) => [`smsNotifications.${mode}.${k}`, value])))
 }
 
 export async function setQuietNudge(uid: string, value: boolean): Promise<void> {

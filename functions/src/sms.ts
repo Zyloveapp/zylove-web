@@ -52,6 +52,14 @@ export async function lookupLineType(phoneNumber: string): Promise<string | null
 export type SmsPreference = 'newSpark' | 'newMessage' | 'newMatch' | 'quietNudge'
 export type SmsMode = 'spark' | 'play'
 
+// users/{uid}.smsNotificationsEnabled = { spark, play } — one master switch
+// per mode. Accounts from before the split hold a single boolean, which
+// counts for both modes (Settings migrates it on the next change).
+export function smsEnabledFor(enabled: unknown, mode: SmsMode): boolean {
+  if (typeof enabled === 'boolean') return enabled
+  return typeof enabled === 'object' && enabled !== null && (enabled as Record<string, unknown>)[mode] === true
+}
+
 // users/{uid}.smsNotifications = {
 //   spark: { newSpark, newMessage, newMatch },
 //   play:  { newFlame, newMessage, newMatch },
@@ -156,7 +164,9 @@ export async function smsTarget(uid: string, preference: SmsPreference, mode: Sm
   try {
     const snap = await getFirestore().doc(`users/${uid}`).get()
     const user = snap.data()
-    if (!user || user.smsNotificationsEnabled !== true || !smsPreferenceOn(user.smsNotifications, preference, mode)) return null
+    if (!user || !smsEnabledFor(user.smsNotificationsEnabled, mode) || !smsPreferenceOn(user.smsNotifications, preference, mode)) {
+      return null
+    }
     if (inQuietHours(user.smsQuietHours)) {
       logger.info('Skipped — quiet hours', { preference, mode })
       return null

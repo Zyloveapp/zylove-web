@@ -1476,8 +1476,8 @@ export { checkTrialStatus } from './trial'
 export { acceptPhotoConsent, getBlockedUsers, onBeforeSignIn, reportAndBan, unblockMember } from './trust'
 
 // ─── SMS notifications ───────────────────────────────────────────────────────
-// Opt-in texts (Settings → SMS Notifications). Each checks the recipient's
-// users/{uid}.smsNotificationsEnabled, the per-kind preference and their quiet
+// Opt-in texts (Settings → Notifications). Each checks the recipient's
+// master switch for that mode (smsNotificationsEnabled.spark|play), the per-kind preference and their quiet
 // hours (a text in quiet hours is dropped, not delayed); sendSMS
 // never throws, so a texting problem never affects the write that fired it.
 
@@ -1609,7 +1609,8 @@ export const nudgeQuietChats = onSchedule(
 
       let nudged = false
       for (const uid of users) {
-        const target = await smsTarget(uid, 'quietNudge')
+        // The chat's own mode decides which master switch applies.
+        const target = await smsTarget(uid, 'quietNudge', match.mode === 'play' ? 'play' : 'spark')
         if (!target) continue
         const otherName = await nameFor(users.find((u) => u !== uid) ?? '', match.participantSnapshots)
         if (await sendSMS(target.phone, `☕ Your conversation with ${otherName} has been quiet. Need a spark? zylove.app/matches`)) {

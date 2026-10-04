@@ -3,7 +3,7 @@ import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { getStorage } from 'firebase-admin/storage'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
-import { SMS_SECRETS, sendSMS } from './sms'
+import { SMS_SECRETS, sendSMS, smsEnabledFor } from './sms'
 import { storagePath } from './storagePath'
 
 // Admin photo review (/admin/photos). onPhotoUpload (mobile codebase) parks
@@ -58,13 +58,14 @@ function millis(v: unknown): number | null {
 
 // Moderation notices are transactional, but still only go to people who
 // turned SMS on. sendSMS skips quietly while Twilio isn't configured.
-async function textUser(uid: string, user: DocumentData | undefined, body: string): Promise<void> {
-  if (user?.smsNotificationsEnabled !== true) return
+async function textUser(uid: string, user: DocumentData | undefined, mode: Mode, body: string): Promise<void> {
+  // The photo's mode decides which master switch applies.
+  if (!smsEnabledFor(user?.smsNotificationsEnabled, mode)) return
   const authPhone = await getAuth()
     .getUser(uid)
     .then((u) => u.phoneNumber ?? null)
     .catch(() => null)
-  const consentPhone: unknown = user.smsConsent?.phone
+  const consentPhone: unknown = user?.smsConsent?.phone
   const phone = authPhone ?? (typeof consentPhone === 'string' ? consentPhone : null)
   if (phone) await sendSMS(phone, body)
 }
@@ -174,7 +175,7 @@ export const reviewPendingPhoto = onCall(
       timestamp: Timestamp.now(),
     })
 
-    await textUser(targetUid, user, action === 'approve' ? APPROVED_SMS : REJECTED_SMS).catch((err) =>
+    await textUser(targetUid, user, mode, action === 'approve' ? APPROVED_SMS : REJECTED_SMS).catch((err) =>
       logger.error('reviewPendingPhoto: SMS failed', { message: String(err) }),
     )
     return { status: action === 'approve' ? 'approved' : 'rejected' }
