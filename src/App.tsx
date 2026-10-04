@@ -40,6 +40,8 @@ import Upgrade from './pages/Upgrade'
 import SubscriptionSync from './components/SubscriptionSync'
 import Chat from './pages/Chat'
 import ClaimFounder from './pages/ClaimFounder'
+import FounderMessages from './pages/FounderMessages'
+import AdminMessages from './pages/admin/AdminMessages'
 
 // Protected pages share the nav. Leaves room for the mobile bottom bar.
 // Location (and the founder check) run once per user per page load.
@@ -137,6 +139,7 @@ export default function App() {
               <Route path="/profile/go-deeper" element={<GoDeeper />} />
               <Route path="/zylove-score" element={<ZyloveScore />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/founder-messages" element={<FounderMessages />} />
               <Route path="/settings/report" element={<ReportPastConnection />} />
               <Route path="/settings/blocked" element={<BlockedUsers />} />
               <Route path="/settings/reviews" element={<ReviewHistory />} />
@@ -144,6 +147,7 @@ export default function App() {
               <Route path="/claim-founder" element={<ClaimFounder />} />
               <Route element={<AdminGuard />}>
                 <Route path="/admin/photos" element={<AdminPhotos />} />
+                <Route path="/admin/messages" element={<AdminMessages />} />
               </Route>
             </Route>
           </Route>

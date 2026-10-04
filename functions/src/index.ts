@@ -1475,6 +1475,14 @@ export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate } from 
 export { markChatPhotoViewed, sweepChatPhotos } from './photos'
 export { checkTrialStatus } from './trial'
 export { createCheckoutSession, createPortalSession, stripeWebhook } from './stripe'
+export {
+  broadcastToFounders,
+  getFounderThread,
+  getFounderThreads,
+  markFounderThreadRead,
+  replyToFounder,
+  sendFounderMessage,
+} from './founderMessages'
 export { acceptPhotoConsent, getBlockedUsers, onBeforeSignIn, reportAndBan, unblockMember } from './trust'
 
 // ─── SMS notifications ───────────────────────────────────────────────────────

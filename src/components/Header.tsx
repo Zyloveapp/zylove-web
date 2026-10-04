@@ -16,6 +16,7 @@ import PlayPinFlow from './PlayPinFlow'
 import { subscribeSmsSettings } from '../services/notifications'
 import ModeTransition from './ModeTransition'
 import { PaywallModal } from './PaywallGate'
+import { isAdmin } from '../services/adminPhotos'
 import { useSubscriptionStore } from '../store/subscriptionStore'
 import { canAccess } from '../services/subscription'
 import { isPlayOnlyUser } from '../services/playOnboarding'
@@ -29,11 +30,13 @@ const playLaunchChecked = new Set<string>()
 function VisibilitySheet({
   mode,
   current,
+  admin,
   onPick,
   onClose,
 }: {
   mode: Mode
   current: Visibility
+  admin: boolean
   onPick: (v: Visibility) => void
   onClose: () => void
 }) {
@@ -75,6 +78,11 @@ function VisibilitySheet({
             </li>
           ))}
         </ul>
+        {admin && (
+          <p className="border-t border-white/5 px-4 py-3 text-xs text-white/50">
+            Hiding your profile doesn't affect your admin access or founder messaging.
+          </p>
+        )}
       </div>
     </>
   )
@@ -198,6 +206,20 @@ export default function Header() {
     if (!uid) return
     return subscribeVisibility(uid, setVisibilityState, () => setVisibilityState(null))
   }, [uid])
+
+  // Admins get a note in the visibility sheet: hiding keeps admin tools.
+  const [adminFor, setAdminFor] = useState<string | null>(null)
+  useEffect(() => {
+    if (!uid) return
+    let cancelled = false
+    isAdmin(uid)
+      .then((value) => !cancelled && value && setAdminFor(uid))
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [uid])
+  const admin = adminFor === uid
 
   // ⚙ gets a dot until SMS notifications have been set up (on or off).
   const [smsSetUp, setSmsSetUp] = useState<{ uid: string; done: boolean } | null>(null)
@@ -347,7 +369,9 @@ export default function Header() {
           </Link>
         </div>
 
-        {sheetOpen && current && <VisibilitySheet mode={mode} current={current} onPick={pick} onClose={() => setSheetOpen(false)} />}
+        {sheetOpen && current && (
+          <VisibilitySheet mode={mode} current={current} admin={admin} onPick={pick} onClose={() => setSheetOpen(false)} />
+        )}
       </div>
 
       {sparkSetup && (

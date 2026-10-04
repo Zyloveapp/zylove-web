@@ -24,6 +24,8 @@ import InstallAppSection from '../components/InstallAppSection'
 import BlockedUsersLink from '../components/BlockedUsersLink'
 import DeleteProfileControls from '../components/DeleteProfileControls'
 import MembershipSection from '../components/MembershipSection'
+import FounderSettingsSection from '../components/FounderSettingsSection'
+import { getFounderThreads } from '../services/founderMessages'
 import PhotoConsentCopy from '../components/PhotoConsentCopy'
 import { isAdmin } from '../services/adminPhotos'
 import { setPhotoConsent, subscribePhotoConsent, type PhotoConsent, type PhotoConsentMode } from '../services/photoConsent'
@@ -250,13 +252,23 @@ function PrivacySection({ uid }: { uid: string }) {
 function AdminSection({ uid }: { uid: string }) {
   const navigate = useNavigate()
   const [admin, setAdmin] = useState<{ uid: string; value: boolean } | null>(null)
+  // Founder threads with something the admin hasn't opened.
+  const [unread, setUnread] = useState(0)
 
   useEffect(() => {
     if (!uid) return
     let cancelled = false
     isAdmin(uid)
       .catch(() => false)
-      .then((value) => !cancelled && setAdmin({ uid, value }))
+      .then((value) => {
+        if (cancelled) return
+        setAdmin({ uid, value })
+        if (value) {
+          getFounderThreads()
+            .then(({ threads }) => !cancelled && setUnread(threads.filter((t) => t.hasUnread).length))
+            .catch(() => {})
+        }
+      })
     return () => {
       cancelled = true
     }
@@ -267,8 +279,23 @@ function AdminSection({ uid }: { uid: string }) {
     <Section title="Admin">
       <button
         type="button"
-        onClick={() => navigate('/admin/photos')}
+        onClick={() => navigate('/admin/messages')}
         className="flex w-full items-center justify-between px-5 py-4 text-left hover:bg-white/[0.03]"
+      >
+        <span className="flex items-center gap-2 font-medium">
+          Founder messages
+          {unread > 0 && (
+            <span className="rounded-full bg-[#E03131] px-2 py-0.5 text-xs font-semibold text-white">{unread}</span>
+          )}
+        </span>
+        <span className="text-white/30" aria-hidden>
+          →
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => navigate('/admin/photos')}
+        className="flex w-full items-center justify-between border-t border-white/5 px-5 py-4 text-left hover:bg-white/[0.03]"
       >
         <span>
           <span className="block font-medium">Photo review</span>
@@ -369,6 +396,8 @@ export default function Settings() {
         </div>
 
         <MembershipSection uid={uid} />
+
+        <FounderSettingsSection uid={uid} />
 
         <InstallAppSection />
 

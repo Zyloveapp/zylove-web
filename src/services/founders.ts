@@ -27,10 +27,10 @@ export function bucketFor(genderIdentity: unknown): Bucket {
 
 const count = (v: unknown) => (typeof v === 'number' ? v : 0)
 
-// Whether a spot is open in this city and half. Austin also counts founder
-// codes, which only config/launch records, so it goes by the higher count
-// (as the server does).
-export async function spotOpen(cityId: string, bucket: Bucket): Promise<boolean> {
+// Open spots in this city and half. Austin also counts founder codes,
+// which only config/launch records, so it goes by the higher count (as the
+// server does).
+export async function spotsRemaining(cityId: string, bucket: Bucket): Promise<number> {
   const key = bucket === 'women' ? 'womenCount' : 'menCount'
   const [city, launch] = await Promise.all([
     getDoc(doc(db, cityConfigPath(cityId))),
@@ -38,7 +38,11 @@ export async function spotOpen(cityId: string, bucket: Bucket): Promise<boolean>
   ])
   const c = city.data() ?? {}
   const target = typeof c.founderTarget === 'number' ? c.founderTarget : DEFAULT_FOUNDER_TARGET
-  return Math.max(count(c[key]), count(launch?.data()?.[key])) < target
+  return Math.max(0, target - Math.max(count(c[key]), count(launch?.data()?.[key])))
+}
+
+export async function spotOpen(cityId: string, bucket: Bucket): Promise<boolean> {
+  return (await spotsRemaining(cityId, bucket)) > 0
 }
 
 export interface FounderOffer {
