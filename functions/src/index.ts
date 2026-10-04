@@ -506,7 +506,8 @@ function requireString(data: unknown, field: string): string {
 // Loads matches/{matchId} and checks that the caller and otherUid are its two
 // participants. Callables run with admin privileges, so without this check a
 // caller could move any user's score or read any pair of profiles.
-async function requireMatchPair(matchId: string, callerId: string, otherUid: string): Promise<void> {
+// Returns the match doc's data for callers that need more than the check.
+async function requireMatchPair(matchId: string, callerId: string, otherUid: string): Promise<DocumentData> {
   if (otherUid === callerId) throw new HttpsError('invalid-argument', 'otherUid must be your match')
   const snap = await getFirestore().collection('matches').doc(matchId).get()
   // 'participants' is the legacy name for 'users'.
@@ -514,6 +515,7 @@ async function requireMatchPair(matchId: string, callerId: string, otherUid: str
   if (!snap.exists || !Array.isArray(users) || !users.includes(callerId) || !users.includes(otherUid)) {
     throw new HttpsError('permission-denied', 'Not a participant in this match')
   }
+  return snap.data() ?? {}
 }
 
 // ─── recordVibeRating ────────────────────────────────────────────────────────
@@ -977,6 +979,30 @@ Rules: under 15 words each, conversational not formal, based on something specif
 Return as JSON array of 3 strings.`
 }
 
+// Play matches: openers from the Play profiles only (playProfile/data and
+// the Play name), never Spark data — the two modes stay sealed.
+const PLAY_FALLBACK_STARTERS = [
+  "What's the vibe you're hoping for?",
+  'What caught your eye on my profile?',
+  "What's your idea of a good first meet?",
+]
+
+function playPersonLine(root: DocumentData | undefined, play: DocumentData | undefined): string {
+  const name =
+    [root?.playDisplayName, play?.displayName].find((n): n is string => typeof n === 'string' && n.trim() !== '') ?? 'Someone'
+  const bio = typeof play?.playBio === 'string' && play.playBio.trim() ? `"${play.playBio.trim().slice(0, 200)}"` : 'none'
+  const spice = typeof play?.spiceLevel === 'string' ? play.spiceLevel : 'unknown'
+  return `${name}, Play bio: ${bio}, spice level: ${spice}, into: ${list(play?.playInterestTags)}, prompts: ${promptSummary(play?.promptAnswers)}`
+}
+
+function buildPlayStarterPrompt(lines: [string, string]): string {
+  return `Generate 3 short, natural opening messages for two adults who just matched in the casual, flirty "Play" side of a dating app.
+Person A: ${lines[0]}
+Person B: ${lines[1]}
+Rules: under 15 words each, playful and confident, flirty but tasteful and respectful — nothing explicit or graphic, consent-minded, based on something specific from their Play profiles, no generic openers like 'hey' or 'how are you'
+Return as JSON array of 3 strings.`
+}
+
 function parseStarters(text: string): string[] | null {
   try {
     const parsed: unknown = JSON.parse(text.replace(/```json|```/g, '').trim())
@@ -991,9 +1017,10 @@ function parseStarters(text: string): string[] | null {
   }
 }
 
-// "Need a spark?" — three openers for the caller to send their match, written
-// from both profiles. Never throws after the participant check: any failure
-// returns the fallback starters.
+// "Need a spark?" (Play: "Need inspiration? 🔥") — three openers for the
+// caller to send their match, written from both profiles of the match's mode.
+// Never throws after the participant check: any failure returns the
+// fallback starters.
 export const generateConversationStarter = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ starters: string[] }> => {
@@ -1002,14 +1029,21 @@ export const generateConversationStarter = onCall(
     const matchId = requireString(request.data, 'matchId')
     const otherUid = requireString(request.data, 'otherUid')
     // Gates AI spend and profile reads to the caller's own match.
-    await requireMatchPair(matchId, callerId, otherUid)
+    const match = await requireMatchPair(matchId, callerId, otherUid)
+    const play = match.mode === 'play'
+    const fallback = play ? PLAY_FALLBACK_STARTERS : FALLBACK_STARTERS
 
     try {
       const db = getFirestore()
-      const [me, them] = await Promise.all([
+      const [me, them, myPlay, theirPlay] = await Promise.all([
         db.collection('users').doc(callerId).get(),
         db.collection('users').doc(otherUid).get(),
+        play ? db.doc(`users/${callerId}/playProfile/data`).get() : Promise.resolve(null),
+        play ? db.doc(`users/${otherUid}/playProfile/data`).get() : Promise.resolve(null),
       ])
+      const prompt = play
+        ? buildPlayStarterPrompt([playPersonLine(me.data(), myPlay?.data()), playPersonLine(them.data(), theirPlay?.data())])
+        : buildStarterPrompt(me.data(), them.data())
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -1020,17 +1054,17 @@ export const generateConversationStarter = onCall(
         body: JSON.stringify({
           model: MODEL,
           max_tokens: 300,
-          messages: [{ role: 'user', content: buildStarterPrompt(me.data(), them.data()) }],
+          messages: [{ role: 'user', content: prompt }],
         }),
       })
       if (!response.ok) {
-        logger.error('generateConversationStarter: Anthropic API error', { status: response.status })
-        return { starters: FALLBACK_STARTERS }
+        logger.error('generateConversationStarter: Anthropic API error', { status: response.status, play })
+        return { starters: fallback }
       }
-      return { starters: parseStarters(extractText(await response.json())) ?? FALLBACK_STARTERS }
+      return { starters: parseStarters(extractText(await response.json())) ?? fallback }
     } catch (err) {
-      logger.error('generateConversationStarter failed', { message: err instanceof Error ? err.message : String(err) })
-      return { starters: FALLBACK_STARTERS }
+      logger.error('generateConversationStarter failed', { play, message: err instanceof Error ? err.message : String(err) })
+      return { starters: fallback }
     }
   },
 )
