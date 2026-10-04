@@ -86,7 +86,7 @@ const RECOMMENDATION: Record<
   both: {
     glow: 'linear-gradient(90deg, rgba(27,79,216,0.45), transparent 45%, transparent 55%, rgba(224,49,49,0.45))',
     title: '✦ Zylove has two sides.',
-    body: 'Start with Spark. You can unlock Play anytime.',
+    body: 'Start with Spark. You can set up Play anytime from the mode pill.',
     button: '✦ Start with Spark →',
   },
   unsure: {

@@ -12,6 +12,10 @@ import ModeTransition from './ModeTransition'
 import { PaywallModal } from './PaywallGate'
 import { useSubscriptionStore } from '../store/subscriptionStore'
 import { canAccess } from '../services/subscription'
+import { isPlayOnlyUser } from '../services/playOnboarding'
+
+// Play-only users start every app load in Play, once per user per page load.
+const playLaunchChecked = new Set<string>()
 
 const VISIBILITY: { value: Visibility; label: string; pill: string; description: string; dot: string; tone: string }[] = [
   {
@@ -175,8 +179,26 @@ export default function Header() {
     const next = new URLSearchParams(searchParams)
     next.delete('play_setup_complete')
     setSearchParams(next, { replace: true })
+    // This load is already headed into Play.
+    if (uid) playLaunchChecked.add(uid)
     setPinFlow(true)
-  }, [searchParams, setSearchParams])
+  }, [searchParams, setSearchParams, uid])
+
+  // Play-only (no Spark profile): go into Play on load through the same entry
+  // as the pill — Play access (Elite or trial), then the PIN, then the
+  // transition. Waits for the tier so the gate is never skipped.
+  useEffect(() => {
+    if (!uid || tier === null || playLaunchChecked.has(uid)) return
+    if (searchParams.get('play_setup_complete') === 'true') return
+    playLaunchChecked.add(uid)
+    isPlayOnlyUser(uid)
+      .then((playOnly) => {
+        if (!playOnly || useModeStore.getState().mode === 'play') return
+        if (!canAccess(tier, 'play_mode')) setPlayPaywall(true)
+        else setPinFlow(true)
+      })
+      .catch(() => {})
+  }, [uid, tier, searchParams])
 
   const isPlay = mode === 'play'
   const current = visibility?.[mode] ?? null

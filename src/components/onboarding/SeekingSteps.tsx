@@ -149,7 +149,7 @@ function AgeRangeSlider({ min, max, onChange }: { min: number; max: number; onCh
       <div className="zy-dual-range relative h-10">
         <div className="absolute top-1/2 h-1.5 w-full -translate-y-1/2 rounded-full bg-white/10" />
         <div
-          className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-[#1B4FD8]"
+          className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-[color:var(--zy-accent,#1B4FD8)]"
           style={{ left: `${pct(min)}%`, right: `${100 - pct(hi)}%` }}
         />
         <input
@@ -193,7 +193,7 @@ export function DiscoveryStep({ draft, update }: StepProps) {
             aria-pressed={draft.radiusMiles === d.value}
             onClick={() => update({ radiusMiles: d.value })}
             className={`rounded-full border px-4 py-2 text-sm font-medium ${
-              draft.radiusMiles === d.value ? 'border-[#1B4FD8] bg-[#1B4FD8] text-white' : 'border-white/15 text-white/80'
+              draft.radiusMiles === d.value ? 'border-[color:var(--zy-accent,#1B4FD8)] bg-[color:var(--zy-accent,#1B4FD8)] text-white' : 'border-white/15 text-white/80'
             }`}
           >
             {d.label}

@@ -3,13 +3,15 @@ import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from './firebase'
 import { uploadModeratedPhotos } from './moderatedPhotos'
+import { keysReady, resolveKeypair } from './keys'
+import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
 import {
   PLAY_TAG_LABELS,
   type PlayInterestTag,
   type PlayNonNegotiable,
   type SpiceLevel,
 } from '../types/dualProfile'
-import type { PhotoDraft } from '../components/onboarding/types'
+import { parseBirthday, type OnboardingDraft, type PhotoDraft } from '../components/onboarding/types'
 
 export type PlayTagCategory = 'arrangement' | 'acts' | 'dynamic' | 'vibe' | 'place'
 
@@ -120,6 +122,131 @@ export async function savePlayOnboarding(uid: string, d: PlayDraft, { keepIntent
 
   const { notices } = await uploadModeratedPhotos(uid, 'play', newPhotos)
   return notices
+}
+
+// Play-only onboarding (the Play path in /onboarding): no Spark profile. The
+// root doc gets identity, discovery settings and the minimum Spark fields
+// mobile and scoring expect, hidden from Spark; trust/trial fields come from
+// initUserDefaults (rules reject client writes to them). Root photoURLs are
+// filled by mirrorPlayOnlyPhotos once moderation approves the Play photos.
+const NO_LIMIT_RADIUS_MILES = 500
+
+export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, play: PlayDraft): Promise<string[]> {
+  const rootRef = doc(db, 'users', uid)
+  const playRef = doc(db, `users/${uid}/playProfile/data`)
+  const [existing, existingPlay] = await Promise.all([getDoc(rootRef), getDoc(playRef)])
+  const data = existing.data()
+  // Once identity is locked the rules reject any change to birthday,
+  // genderIdentity or matchableAs, so a re-save leaves them untouched.
+  const identityLocked = data?.identityLockedAt != null
+  const birthday = parseBirthday(d.birthdayRaw)
+  const age = birthday?.age ?? (identityLocked && typeof data?.age === 'number' ? data.age : null)
+  if (age === null) throw new Error('Onboarding incomplete: birthday')
+  const genderIdentity = d.genderIdentity
+  if (genderIdentity === null) throw new Error('Onboarding incomplete: genderIdentity')
+
+  const prompts = answeredPrompts(play)
+  const bio = play.bio.trim()
+  const newPhotos = d.photos.map((p) => p.file).filter((f): f is File => f !== null)
+  const pronouns = d.pronouns.trim()
+  const selfDescribe = d.genderSelfDescribe.trim()
+  const now = Date.now()
+
+  // Private key goes to IndexedDB now; the public key rides in the batch below.
+  await keysReady(uid)
+  const keys = await resolveKeypair(uid, typeof data?.publicKey === 'string' ? data.publicKey : undefined)
+
+  const batch = writeBatch(db)
+  batch.set(
+    rootRef,
+    {
+      uid,
+      displayName: d.displayName.trim(),
+      age,
+      ...(!identityLocked && birthday && { birthday: birthday.iso }),
+      ...(!identityLocked && { genderIdentity }),
+      ...(!identityLocked && genderIdentity === 'self_describe' && selfDescribe && { genderSelfDescribe: selfDescribe }),
+      ...(!identityLocked &&
+        OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) &&
+        d.matchableAs.length > 0 && { matchableAs: d.matchableAs }),
+      ...(pronouns && { pronouns }),
+      attractedTo: d.attractedTo,
+      radiusMiles: d.radiusMiles,
+      ageMin: d.ageMin,
+      ageMax: d.ageMax,
+      relationshipStatus: 'prefer_not_to_say',
+      openTo: [],
+      intent: 'open',
+      intentionAnswers: d.intentionAnswers,
+      onboardingPath: 'play',
+      onboardingComplete: true,
+      mode: 'play',
+      sparkVisibility: 'hidden',
+      playVisibility: 'active',
+      aiPhotoScanningConsent: true,
+      openToCrossover: false,
+      // Mirrors mobile's Play onboarding: mobile Discover and profile cards
+      // read these Play fields from the root doc.
+      spiceLevel: play.spiceLevel,
+      playInterestTags: play.tags,
+      playNonNegotiables: play.nonNegotiables,
+      playBio: bio,
+      playPromptAnswers: prompts,
+      lastActive: now,
+      profileUpdatedAt: serverTimestamp(),
+      ...((keys.changed || !existing.exists()) && { publicKey: keys.publicKey }),
+      ...(!existing.exists() && { photoURLs: [], geohash: '', locationLabel: '', phoneVerified: false, createdAt: now }),
+    },
+    { merge: true },
+  )
+  batch.set(
+    playRef,
+    {
+      uid,
+      playBio: bio,
+      spiceLevel: play.spiceLevel,
+      playInterestTags: play.tags,
+      playNonNegotiables: play.nonNegotiables,
+      playPromptAnswers: Object.fromEntries(prompts.map((p) => [p.promptId, p.answer])),
+      promptAnswers: prompts,
+      playOnboardingComplete: true,
+      aiPhotoScanningConsent: true,
+      isActive: d.photos.length > 0,
+      radiusMiles: d.radiusMiles ?? NO_LIMIT_RADIUS_MILES,
+      ageMin: d.ageMin,
+      ageMax: d.ageMax,
+      lastUpdated: now,
+      ...(!existingPlay.exists() && { photoURLs: [], createdAt: now }),
+    },
+    { merge: true },
+  )
+  await batch.commit()
+
+  // Server sets the trust/trial fields clients can't write (isSuspended,
+  // sparkScore, subscriptionTier, trial, sortKey). Awaited so the profile is
+  // discoverable before Explore; idempotent, so a failure is safe to retry.
+  try {
+    await httpsCallable(functions, 'initUserDefaults')({})
+  } catch (err) {
+    console.warn('initUserDefaults failed; profile saved but may be hidden from Discover', err)
+  }
+  httpsCallable(functions, 'claimWomenElite')({}).catch(() => {})
+
+  // playProfile/data exists now, so onPhotoUpload can publish to it.
+  const { notices } = await uploadModeratedPhotos(uid, 'play', newPhotos)
+  return notices
+}
+
+// Play-only: chose the Play path, finished Play, and never built a Spark
+// profile. Everyone else (missing or other onboardingPath) is a Spark user.
+export async function isPlayOnlyUser(uid: string): Promise<boolean> {
+  const user = await getDoc(doc(db, 'users', uid))
+  if (user.data()?.onboardingPath !== 'play') return false
+  const [play, spark] = await Promise.all([
+    getDoc(doc(db, `users/${uid}/playProfile/data`)),
+    getDoc(doc(db, `users/${uid}/sparkProfile/data`)),
+  ])
+  return play.data()?.playOnboardingComplete === true && !spark.exists()
 }
 
 // ─── Edit ────────────────────────────────────────────────────────────────────

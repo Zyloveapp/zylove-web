@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { FirebaseError } from 'firebase/app'
 import { useAuthStore } from '../store/authStore'
+import { useModeStore } from '../store/modeStore'
 import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
 import { loadRefreshDraft, recordLegalAcceptance, saveSparkOnboarding } from '../services/onboarding'
-import type { PromptAnswer } from '../types/dualProfile'
+import { selectPlayPrompts, type PromptAnswer } from '../types/dualProfile'
+import { generatePlayBio, savePlayOnlyOnboarding, tagsIn, type PlayDraft } from '../services/playOnboarding'
 import { generateSparkBio } from '../services/bio'
 import { claimFounderBadge } from '../services/founders'
 import FounderCelebration from '../components/FounderCelebration'
@@ -34,6 +36,17 @@ import { DiscoveryStep, NeedsStep, PhysicalPrefsStep } from '../components/onboa
 import { IntentionStep, RecommendationScreen, intentForPath } from '../components/onboarding/IntentionSteps'
 import { GoDeeperIntro, GoDeeperQuestion } from '../components/onboarding/GoDeeperSteps'
 import {
+  ArrangementStep,
+  NonNegotiablesStep,
+  PLAY_BIO_MAX,
+  PlayBioStep,
+  PlayPromptsStep,
+  PlayReviewStep,
+  PlayWelcomeStep,
+  SceneStep,
+  SpiceStep,
+} from '../components/onboarding/PlaySteps'
+import {
   CONFLICT_STYLE_LABELS,
   INITIAL_DRAFT,
   MAX_PHOTOS,
@@ -48,11 +61,15 @@ import {
   parseBirthday,
   releasePhotoPreview,
   type OnboardingDraft,
+  type OnboardingPath,
 } from '../components/onboarding/types'
 
 // Founder badge check after the final save, and how long the celebration shows.
 const FOUNDER_CHECK_MS = 12_000
 const FOUNDER_CELEBRATION_MS = 1500
+
+const COBALT = '#1B4FD8'
+const RED = '#E03131'
 
 const STEPS = [
   { id: 'terms', title: 'Terms' },
@@ -86,13 +103,36 @@ const STEPS = [
   { id: 'review', title: 'Review' },
 ] as const
 
-type StepId = (typeof STEPS)[number]['id']
+// Play-only path: the shared first six steps, attraction and discovery, then
+// the Play profile itself. No Spark profile is built.
+const PLAY_STEPS = [
+  { id: 'terms', title: 'Terms' },
+  { id: 'name', title: 'Name' },
+  { id: 'photos', title: 'Photos' },
+  { id: 'gender', title: 'Gender' },
+  { id: 'intention', title: 'What you want' },
+  { id: 'recommendation', title: 'Your path' },
+  { id: 'attractedTo', title: 'Attraction' },
+  { id: 'discovery', title: 'Who you see' },
+  { id: 'playWelcome', title: 'Play' },
+  { id: 'spice', title: 'Spice level' },
+  { id: 'arrangement', title: 'Looking for' },
+  { id: 'scene', title: 'Your scene' },
+  { id: 'nonNegotiables', title: 'Non-negotiables' },
+  { id: 'playPrompts', title: 'Prompts' },
+  { id: 'playBio', title: 'Bio' },
+  { id: 'playReview', title: 'Review' },
+] as const
 
-// Every path builds the full Spark profile; the Play path just ends in Play
-// setup instead of Explore. A refresh skips terms (already accepted), the
+type StepId = (typeof STEPS)[number]['id'] | (typeof PLAY_STEPS)[number]['id']
+type Step = { id: StepId; title: string }
+
+// Spark, Both and Unsure build the full Spark profile; Play builds only the
+// Play profile. A refresh (always Spark) skips terms (already accepted), the
 // intention steps (first run only) and, once identity is locked, gender.
-function stepsFor(refresh: boolean, identityLocked: boolean) {
-  return STEPS.filter(
+function stepsFor(refresh: boolean, identityLocked: boolean, path: OnboardingPath | null): readonly Step[] {
+  const base: readonly Step[] = !refresh && path === 'play' ? PLAY_STEPS : STEPS
+  return base.filter(
     (s) =>
       !(refresh && (s.id === 'terms' || s.id === 'intention' || s.id === 'recommendation')) &&
       !(identityLocked && s.id === 'gender'),
@@ -105,6 +145,8 @@ function isStepValid(
   bioGenerating: boolean,
   identityLocked: boolean,
   maxPhotos: number,
+  play: PlayDraft,
+  playBioBusy: boolean,
 ): boolean {
   switch (id) {
     case 'terms':
@@ -154,6 +196,14 @@ function isStepValid(
       return d.stressResponse !== null
     case 'bio':
       return !bioGenerating
+    case 'spice':
+      return play.spiceLevel !== null
+    case 'arrangement':
+      return tagsIn(play.tags, 'arrangement').length > 0
+    case 'playPrompts':
+      return play.promptIds.some((pid) => (play.answers[pid] ?? '').trim())
+    case 'playBio':
+      return play.bio.trim().length > 0 && !playBioBusy
     default:
       return true
   }
@@ -174,6 +224,7 @@ function saveErrorMessage(err: unknown): string {
 
 export default function Onboarding() {
   const navigate = useNavigate()
+  const setMode = useModeStore((s) => s.setMode)
   const user = useAuthStore((s) => s.user)
   const authLoading = useAuthStore((s) => s.loading)
   const [searchParams] = useSearchParams()
@@ -192,6 +243,21 @@ export default function Onboarding() {
   const [founderNumber, setFounderNumber] = useState<number | null>(null)
   // Incremented to discard an in-flight bio request (skip or regenerate).
   const bioRequest = useRef(0)
+  // Play-only path: the Play profile answers (photos live on draft.photos).
+  const [play, setPlay] = useState<PlayDraft>(() => ({
+    photos: [],
+    bio: '',
+    spiceLevel: null,
+    tags: [],
+    nonNegotiables: [],
+    promptIds: selectPlayPrompts(user?.uid ?? '').map((p) => p.id),
+    answers: {},
+  }))
+  const [playBioEditing, setPlayBioEditing] = useState(false)
+  const [playBioBusy, setPlayBioBusy] = useState(false)
+  const [playBioMessage, setPlayBioMessage] = useState<string | null>(null)
+  // Set after a successful Play save when some photos didn't publish yet.
+  const [playNotices, setPlayNotices] = useState<string[] | null>(null)
 
   // Release photo preview object URLs when leaving the page.
   const photosRef = useRef(draft.photos)
@@ -254,9 +320,14 @@ export default function Onboarding() {
   const refreshInfo = refresh && typeof refreshLoad === 'object' ? refreshLoad : null
   const identityLocked = refreshInfo?.locked ?? false
   const maxPhotos = refresh ? MAX_REFRESH_PHOTOS : MAX_PHOTOS
-  const steps = stepsFor(refresh, identityLocked)
+  const steps = stepsFor(refresh, identityLocked, draft.onboardingPath)
   const step = steps[stepIndex]
   const update = (patch: Partial<OnboardingDraft>) => setDraft((d) => ({ ...d, ...patch }))
+  const updatePlay = (patch: Partial<PlayDraft>) => setPlay((p) => ({ ...p, ...patch }))
+  // Play-only path turns red once the Play recommendation has been accepted.
+  const playPath = !refresh && draft.onboardingPath === 'play'
+  const red = playPath && stepIndex > steps.findIndex((s) => s.id === 'recommendation')
+  const accent = red ? RED : COBALT
 
   function startBio() {
     const id = ++bioRequest.current
@@ -292,6 +363,21 @@ export default function Onboarding() {
     next()
   }
 
+  // Austin Founding Circle: capped so a location prompt left open can't
+  // hold onboarding up; any failure just carries on.
+  async function finishWithFounderCheck(finish: () => void) {
+    const founder = await Promise.race([
+      claimFounderBadge(uid),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), FOUNDER_CHECK_MS)),
+    ])
+    if (founder?.eligible) {
+      setFounderNumber(founder.cohortNumber)
+      setTimeout(finish, FOUNDER_CELEBRATION_MS)
+    } else {
+      finish()
+    }
+  }
+
   async function createProfile() {
     setSaving(true)
     setSaveError(null)
@@ -299,25 +385,54 @@ export default function Onboarding() {
       const photoNotices = await saveSparkOnboarding(uid, draft, { extraPrompts: refreshInfo?.extraPrompts })
       // A photo still under review (or slow) goes on the profile page, where
       // the notice shows; Discover needs a published photo anyway.
-      const finish = () => {
-        // Play path: straight on to Play setup once the Spark basics are saved.
-        if (!refresh && draft.onboardingPath === 'play') navigate('/play-onboarding', { replace: true })
-        else if (photoNotices.length > 0) navigate('/profile', { replace: true, state: { flash: photoNotices.join(' ') } })
+      await finishWithFounderCheck(() => {
+        if (photoNotices.length > 0) navigate('/profile', { replace: true, state: { flash: photoNotices.join(' ') } })
         else if (refresh) navigate('/profile', { replace: true, state: { flash: '✦ Profile refreshed.' } })
         else navigate('/discover', { replace: true })
-      }
-      // Austin Founding Circle: capped so a location prompt left open can't
-      // hold onboarding up; any failure just carries on.
-      const founder = await Promise.race([
-        claimFounderBadge(uid),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), FOUNDER_CHECK_MS)),
-      ])
-      if (founder?.eligible) {
-        setFounderNumber(founder.cohortNumber)
-        setTimeout(finish, FOUNDER_CELEBRATION_MS)
-      } else {
-        finish()
-      }
+      })
+    } catch (err) {
+      setSaveError(saveErrorMessage(err))
+      setSaving(false)
+    }
+  }
+
+  async function generatePlayBioDraft() {
+    setPlayBioBusy(true)
+    setPlayBioMessage(null)
+    setPlayBioEditing(true)
+    // From the draft: the root profile doesn't exist yet on this path.
+    const result = await generatePlayBio(play, { genderIdentity: draft.genderIdentity, attractedTo: draft.attractedTo })
+    if ('bio' in result) updatePlay({ bio: result.bio.slice(0, PLAY_BIO_MAX) })
+    else
+      setPlayBioMessage(
+        result.error === 'limit'
+          ? "You've used this week's 3 bio generations — write it yourself for now."
+          : "Couldn't generate a bio right now. Try again or write it yourself.",
+      )
+    setPlayBioBusy(false)
+  }
+
+  // Not straight into Play: Header sees the param and runs the normal entry
+  // (PIN setup, then the "Play time." transition).
+  function continueToPlay() {
+    setMode('spark')
+    navigate('/discover?play_setup_complete=true', { replace: true })
+  }
+
+  async function launchPlay() {
+    setSaving(true)
+    setSaveError(null)
+    try {
+      const notices = await savePlayOnlyOnboarding(uid, draft, play)
+      await finishWithFounderCheck(() => {
+        // Saved; a photo still under review is explained before moving on.
+        if (notices.length > 0) {
+          setPlayNotices(notices)
+          setSaving(false)
+        } else {
+          continueToPlay()
+        }
+      })
     } catch (err) {
       setSaveError(saveErrorMessage(err))
       setSaving(false)
@@ -326,6 +441,7 @@ export default function Onboarding() {
 
   function renderStep() {
     const props = { draft, update }
+    const playProps = { play, update: updatePlay }
     switch (step.id) {
       case 'terms':
         return <TermsStep accepted={draft.termsAccepted} onAccept={acceptTerms} />
@@ -351,7 +467,9 @@ export default function Onboarding() {
             onContinue={next}
             onChoose={(path, advance) => {
               update({ onboardingPath: path, intent: intentForPath(path) })
-              if (advance) setStepIndex((i) => i + 1)
+              // The step list depends on the path, so re-anchor by step id.
+              const at = stepsFor(refresh, identityLocked, path).findIndex((s) => s.id === 'recommendation')
+              setStepIndex(advance ? at + 1 : at)
             }}
             onBack={() => setStepIndex((i) => i - 1)}
           />
@@ -444,7 +562,44 @@ export default function Onboarding() {
         )
       case 'review':
         return <ReviewStep draft={draft} saving={saving} error={saveError} onCreate={createProfile} />
+      case 'playWelcome':
+        return <PlayWelcomeStep />
+      case 'spice':
+        return <SpiceStep {...playProps} />
+      case 'arrangement':
+        return <ArrangementStep {...playProps} />
+      case 'scene':
+        return <SceneStep {...playProps} />
+      case 'nonNegotiables':
+        return <NonNegotiablesStep {...playProps} />
+      case 'playPrompts':
+        return <PlayPromptsStep {...playProps} />
+      case 'playBio':
+        return (
+          <PlayBioStep
+            bio={play.bio}
+            editing={playBioEditing}
+            busy={playBioBusy}
+            message={playBioMessage}
+            onChange={(bio) => updatePlay({ bio })}
+            onGenerate={generatePlayBioDraft}
+            onWrite={() => setPlayBioEditing(true)}
+          />
+        )
+      case 'playReview':
+        return (
+          <PlayReviewStep play={play} photoUrl={draft.photos[0]?.previewUrl ?? null} error={saveError} notices={playNotices} />
+        )
     }
+  }
+
+  function nextLabel(id: StepId): string {
+    if (id === 'intention') return 'Continue →'
+    if (!playPath) return 'Next'
+    if (id === 'discovery') return "Let's go 🔥"
+    if (id === 'playWelcome') return "Let's go →"
+    if (id === 'scene' || id === 'nonNegotiables') return 'Next (optional) →'
+    return 'Next'
   }
 
   // Steps that render their own primary action instead of the bottom Next.
@@ -452,12 +607,13 @@ export default function Onboarding() {
     (step.id === 'terms' && !draft.termsAccepted) ||
     step.id === 'goDeeper' ||
     step.id === 'review' ||
+    step.id === 'playReview' ||
     step.id === 'recommendation'
-  const canAdvance = isStepValid(step.id, draft, bioGenerating, identityLocked, maxPhotos)
+  const canAdvance = isStepValid(step.id, draft, bioGenerating, identityLocked, maxPhotos, play, playBioBusy)
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white [color-scheme:dark]">
-      <div className="mx-auto w-full max-w-md px-4 pb-28 pt-6">
+    <div className="min-h-screen bg-gray-950 text-white [color-scheme:dark]" style={{ '--zy-accent': accent } as CSSProperties}>
+      <div className={`mx-auto w-full max-w-md px-4 pt-6 ${step.id === 'playReview' ? 'pb-36' : 'pb-28'}`}>
         {refresh && (
           <p className="mb-5 rounded-lg bg-white/10 px-4 py-3 text-sm text-white/80">
             Refreshing your profile — your existing answers are pre-filled. Update anything that's changed.
@@ -466,8 +622,8 @@ export default function Onboarding() {
         <div className="mb-6">
           <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
             <div
-              className="h-full rounded-full bg-[#1B4FD8] transition-all"
-              style={{ width: `${((stepIndex + 1) / steps.length) * 100}%` }}
+              className="h-full rounded-full transition-all"
+              style={{ width: `${((stepIndex + 1) / steps.length) * 100}%`, backgroundColor: accent }}
             />
           </div>
           <p className="mt-2 text-xs font-medium uppercase tracking-wide text-white/50">
@@ -478,27 +634,50 @@ export default function Onboarding() {
         <main>{renderStep()}</main>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 border-t border-white/10 bg-gray-950/95 backdrop-blur">
+      <nav
+        className={`fixed inset-x-0 bottom-0 border-t bg-gray-950/95 backdrop-blur ${
+          red ? 'border-[#E03131]/20' : 'border-white/10'
+        }`}
+      >
         <div className="mx-auto flex w-full max-w-md gap-3 px-4 py-3">
           <button
             type="button"
             onClick={() => setStepIndex((i) => i - 1)}
-            disabled={stepIndex === 0 || saving}
-            className="flex-1 rounded-lg border border-white/15 px-4 py-3 font-medium text-white/80 disabled:opacity-40"
+            disabled={stepIndex === 0 || saving || playNotices !== null}
+            className={`flex-1 rounded-lg border px-4 py-3 font-medium text-white/80 disabled:opacity-40 ${
+              red ? 'border-[#E03131]/30' : 'border-white/15'
+            }`}
           >
             Back
           </button>
+          {step.id === 'playReview' && (
+            <button
+              type="button"
+              onClick={playNotices ? continueToPlay : launchPlay}
+              disabled={saving}
+              className="flex-[2] rounded-lg px-4 py-3 font-semibold text-white disabled:opacity-40"
+              style={{ backgroundColor: RED }}
+            >
+              {playNotices ? 'Continue to Play →' : saving ? 'Saving…' : '🔥 Launch Play ✦'}
+            </button>
+          )}
           {!ownsPrimary && (
             <button
               type="button"
               onClick={next}
               disabled={!canAdvance}
-              className="flex-1 rounded-lg bg-[#1B4FD8] px-4 py-3 font-medium text-white disabled:opacity-40"
+              className="flex-1 rounded-lg px-4 py-3 font-medium text-white disabled:opacity-40"
+              style={{ backgroundColor: accent }}
             >
-              {step.id === 'intention' ? 'Continue →' : 'Next'}
+              {nextLabel(step.id)}
             </button>
           )}
         </div>
+        {step.id === 'playReview' && (
+          <p className="mx-auto max-w-md px-4 pb-3 text-center text-xs text-white/40">
+            You can always build a Spark profile later — tap the mode pill anytime.
+          </p>
+        )}
       </nav>
 
       {founderNumber !== null && <FounderCelebration number={founderNumber} />}

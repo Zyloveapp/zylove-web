@@ -21,7 +21,7 @@ export function FieldLabel({ children, hint }: { children: ReactNode; hint?: str
 
 function chipClass(selected: boolean): string {
   return `rounded-full border px-3 py-1.5 text-sm transition-colors disabled:opacity-40 ${
-    selected ? 'border-[#1B4FD8] bg-[#1B4FD8] text-white' : 'border-white/15 bg-white/5 text-white/80 hover:border-white/40'
+    selected ? 'border-[color:var(--zy-accent,#1B4FD8)] bg-[color:var(--zy-accent,#1B4FD8)] text-white' : 'border-white/15 bg-white/5 text-white/80 hover:border-white/40'
   }`
 }
 
@@ -100,7 +100,7 @@ export function ChipMultiSelect<T extends string>({
 
 function cardClass(selected: boolean): string {
   return `w-full rounded-xl border-2 p-3.5 text-left transition-colors disabled:opacity-40 ${
-    selected ? 'border-[#1B4FD8] bg-white/5' : 'border-white/10 hover:border-white/40'
+    selected ? 'border-[color:var(--zy-accent,#1B4FD8)] bg-white/5' : 'border-white/10 hover:border-white/40'
   }`
 }
 

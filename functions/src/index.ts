@@ -18,6 +18,7 @@ import { LOOKUP_SECRETS, SMS_SECRETS, claimSparkSmsSlot, lookupLineType, nameFor
 
 export { assignFounderBadge, onLaunchConfigUpdated } from './founders'
 export { ensureSortKey } from './discovery'
+export { mirrorPlayOnlyPhotos } from './playPhotoMirror'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
 import {
