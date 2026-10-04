@@ -8,6 +8,7 @@ import PlayProfileSections from '../components/profile/PlayProfileSections'
 import VisibilityControl from '../components/profile/VisibilityControl'
 import JustForYouCard from '../components/profile/JustForYouCard'
 import ProfileReviewModal from '../components/profile/ProfileReviewModal'
+import PlayReviewModal from '../components/profile/PlayReviewModal'
 import ProfileSections, { Pills, SectionHeading } from '../components/profile/ProfileSections'
 import { dealbreakerLabel, seekingTraitLabel } from '../components/discover/labels'
 
@@ -36,6 +37,7 @@ export default function Profile() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [showReview, setShowReview] = useState(false)
+  const [showPlayReview, setShowPlayReview] = useState(false)
   // e.g. "✦ Profile refreshed." after Reimagine my profile. Read once, then
   // cleared from history so a reload doesn't show it again.
   const location = useLocation()
@@ -122,7 +124,7 @@ export default function Profile() {
 
         {/* Sits above the mobile bottom nav (h-16). */}
         <div className="sticky bottom-16 border-t border-[#E03131]/20 bg-gray-950 px-4 py-3">
-          <div className="mx-auto grid max-w-xl grid-cols-2 gap-2 text-sm leading-tight">
+          <div className={`mx-auto grid max-w-xl gap-2 text-sm leading-tight ${playData ? 'grid-cols-3' : 'grid-cols-2'}`}>
             {/* Play onboarding in edit mode: prefilled, starts at photos. */}
             <Link
               to="/play-onboarding?edit=true"
@@ -130,6 +132,15 @@ export default function Profile() {
             >
               ✏ Edit Play profile
             </Link>
+            {playData && (
+              <button
+                type="button"
+                onClick={() => setShowPlayReview(true)}
+                className="flex items-center justify-center rounded-xl border border-[#E03131]/60 bg-[#E03131]/10 px-2 py-3 text-center font-semibold text-white transition-colors hover:bg-[#E03131]/20"
+              >
+                How's my Play profile? 🔥
+              </button>
+            )}
             <Link
               to="/zylove-score"
               className="flex items-center justify-center rounded-xl border border-white/20 px-2 py-3 text-center font-semibold text-white/80 transition-colors hover:bg-white/10"
@@ -138,6 +149,8 @@ export default function Profile() {
             </Link>
           </div>
         </div>
+
+        {showPlayReview && <PlayReviewModal onClose={() => setShowPlayReview(false)} />}
       </div>
     )
   }

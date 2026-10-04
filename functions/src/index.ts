@@ -14,6 +14,7 @@ import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 import { buildBioPrompt, parseBioRequest } from './bioPrompt'
 import { buildPlayBioPrompt, parsePlayBioRequest } from './playBioPrompt'
+import { buildPlayReviewPrompt } from './playReviewPrompt'
 import {
   GO_DEEPER_FOCUS,
   buildPlayGoDeeperPrompt,
@@ -1163,6 +1164,41 @@ Keep the whole response under 200 words. Be specific to their actual profile, no
       logger.error('reviewProfile failed', { message: err instanceof Error ? err.message : String(err) })
       return FALLBACK_REVIEW
     }
+  },
+)
+
+// ─── reviewPlayProfile ───────────────────────────────────────────────────────
+
+const PLAY_REVIEW_WEEKLY_LIMIT = 3
+
+// Successful Play reviews in the last week (users/{uid}.profileReviews.play).
+function recentPlayReviews(data: DocumentData | undefined, now: number): number[] {
+  const raw: unknown = data?.profileReviews?.play
+  return Array.isArray(raw) ? raw.filter((t): t is number => typeof t === 'number' && now - t < WEEK_MS) : []
+}
+
+// "How's my Play profile? 🔥" — reviews the caller's saved Play profile.
+// 3 per rolling week; only successful reviews count.
+export const reviewPlayProfile = onCall(
+  { timeoutSeconds: 120, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
+  async (request): Promise<{ review: string }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    const db = getFirestore()
+    const userRef = db.doc(`users/${request.auth.uid}`)
+    const [userSnap, playSnap] = await Promise.all([userRef.get(), userRef.collection('playProfile').doc('data').get()])
+    if (recentPlayReviews(userSnap.data(), Date.now()).length >= PLAY_REVIEW_WEEKLY_LIMIT) {
+      throw new HttpsError('resource-exhausted', 'Play profile review limit reached. Try again next week.')
+    }
+    if (!playSnap.exists) throw new HttpsError('failed-precondition', 'Set up your Play profile first.')
+
+    const review = (await askClaude('reviewPlayProfile', buildPlayReviewPrompt(playSnap.data() ?? {}), 700)).trim()
+    if (!review) throw new HttpsError('unavailable', "Couldn't review your profile right now.")
+    await db.runTransaction(async (tx) => {
+      const now = Date.now()
+      const recent = recentPlayReviews((await tx.get(userRef)).data(), now)
+      tx.set(userRef, { profileReviews: { play: [...recent, now].slice(-PLAY_REVIEW_WEEKLY_LIMIT) } }, { merge: true })
+    })
+    return { review }
   },
 )
 
