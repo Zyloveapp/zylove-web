@@ -8,14 +8,21 @@ interface ChatActionsSheetProps {
   // Rejects on failure; the sheet shows the error and stays open.
   onEnd: (action: 'block' | 'unmatch') => Promise<void>
   onClose: () => void
-  // Request / pause photo sharing; absent when photos aren't possible here.
-  photoAction?: { label: string; run: () => void }
+  // Photo sharing with this match; absent when photos aren't possible here
+  // (a curated profile, or an ended chat).
+  photo?: {
+    // off: never asked, declined or revoked · waiting: our request is out ·
+    // incoming: they asked us · enabled: both agreed.
+    state: 'off' | 'waiting' | 'incoming' | 'enabled'
+    onAllow: () => void
+    onRevoke: () => void
+  }
 }
 
-// The chat header's ••• menu: photo sharing, Report, Block, Unmatch. Block and Unmatch ask
-// for confirmation first.
-export default function ChatActionsSheet({ name, onReport, onEnd, onClose, photoAction }: ChatActionsSheetProps) {
-  const [confirm, setConfirm] = useState<'block' | 'unmatch' | null>(null)
+// The chat header's ••• menu: photo sharing, Report, Block, Unmatch. Revoking
+// photos, Block and Unmatch ask for confirmation first.
+export default function ChatActionsSheet({ name, onReport, onEnd, onClose, photo }: ChatActionsSheetProps) {
+  const [confirm, setConfirm] = useState<'block' | 'unmatch' | 'revoke' | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -54,9 +61,21 @@ export default function ChatActionsSheet({ name, onReport, onEnd, onClose, photo
       >
         {confirm === null ? (
           <div className="divide-y divide-white/5">
-            {photoAction && (
-              <button type="button" onClick={photoAction.run} className={option}>
-                {photoAction.label}
+            {photo?.state === 'enabled' && (
+              <>
+                <p className="px-6 py-4 font-medium text-emerald-300">Photo sharing enabled ✓</p>
+                <button type="button" onClick={() => setConfirm('revoke')} className={option}>
+                  Revoke photo sharing
+                </button>
+              </>
+            )}
+            {photo?.state === 'waiting' && (
+              <p className="px-6 py-4 text-white/50">Photo sharing · waiting for {name} to accept</p>
+            )}
+            {(photo?.state === 'off' || photo?.state === 'incoming') && (
+              <button type="button" onClick={photo.onAllow} className={option}>
+                Allow photo sharing
+                {photo.state === 'incoming' && <span className="block text-sm font-normal text-white/50">{name} asked to share photos</span>}
               </button>
             )}
             <button type="button" onClick={onReport} className={option} autoFocus>
@@ -69,6 +88,22 @@ export default function ChatActionsSheet({ name, onReport, onEnd, onClose, photo
               Unmatch
             </button>
             <button type="button" onClick={onClose} className={`${option} text-center text-white/50`}>
+              Cancel
+            </button>
+          </div>
+        ) : confirm === 'revoke' ? (
+          <div className="px-6 pt-6 pb-6">
+            <p className="text-lg font-semibold">Revoke photo sharing with {name}?</p>
+            <p className="mt-2 text-sm text-white/60">Neither of you can send new photos until one of you asks again and the other accepts.</p>
+            <button
+              type="button"
+              onClick={() => photo?.onRevoke()}
+              autoFocus
+              className="mt-6 w-full rounded-xl bg-white/15 py-3 font-semibold text-white transition-opacity hover:opacity-90"
+            >
+              Revoke
+            </button>
+            <button type="button" onClick={() => setConfirm(null)} className="mt-2 w-full py-2 text-sm text-white/50 hover:text-white">
               Cancel
             </button>
           </div>

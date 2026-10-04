@@ -39,6 +39,7 @@ import PhotoConsentBanner from './PhotoConsentBanner'
 import PhotoConsentRequest from './PhotoConsentRequest'
 import PhotoMessage from './PhotoMessage'
 import PhotoPicker from './PhotoPicker'
+import CameraIcon from '../icons/CameraIcon'
 import { PaywallModal, useCanAccess } from '../PaywallGate'
 import TypingIndicator from './TypingIndicator'
 import ReviewModal from './ReviewModal'
@@ -290,10 +291,12 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
 
   // ── Photo sharing ──────────────────────────────────────────────────────────
   const consent = consentState?.matchId === matchId ? consentState.consent : null
-  // 📷 shows in every live chat with a person. Photos are always encrypted,
-  // so sending also needs the partner's real key — mobile-only users have a
-  // stubbed one until they sign in on the web — and tapping explains that.
-  const photosAvailable = !match.ended && !isBotUid(partnerUid)
+  // The camera shows in every live chat; photos only go to real people.
+  // Photos are always encrypted, so sending also needs the partner's real
+  // key — mobile-only users have a stubbed one until they sign in on the
+  // web — and tapping explains that.
+  const botChat = isBotUid(partnerUid)
+  const photosAvailable = !match.ended && !botChat
   const partnerCanReceivePhotos = partnerKey !== null && partnerKey.key !== ''
   const latestRequestId = useMemo(
     () => [...(messages ?? [])].reverse().find((m) => consentCode(m) === 'photo_consent_request')?.id ?? null,
@@ -319,6 +322,9 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
 
   function handlePhotoTap() {
     setPhotoNotice(null)
+    if (botChat) {
+      return setPhotoNotice({ text: 'Photo sharing is available with members, not curated profiles.', offerRequest: false })
+    }
     // Free: 📷 still shows, but sending photos is Spark+.
     if (photosAllowed === false) return setPhotoPaywall(true)
     if (!partnerCanReceivePhotos) {
@@ -515,17 +521,17 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           <p className="py-2 text-center text-sm text-white/40">This connection has ended.</p>
         ) : (
           <form onSubmit={handleSend} className="flex items-end gap-2">
-            {photosAvailable && (
-              <button
-                type="button"
-                onClick={handlePhotoTap}
-                disabled={consentBusy}
-                aria-label="Share a photo"
-                className="rounded-xl px-2 py-2.5 text-xl leading-none text-white/60 hover:bg-white/10 hover:text-white disabled:opacity-40"
-              >
-                📷
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handlePhotoTap}
+              disabled={consentBusy}
+              aria-label="Share a photo"
+              className={`rounded-xl p-2 hover:bg-white/10 disabled:opacity-40 ${
+                match.mode === 'play' ? 'text-[#E03131]' : 'text-[#7C9BFF]'
+              }`}
+            >
+              <CameraIcon className="h-6 w-6" />
+            </button>
             <textarea
               rows={1}
               value={text}
@@ -570,24 +576,31 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
           }}
           onEnd={endConnection}
           onClose={() => setShowActions(false)}
-          photoAction={
+          photo={
             !photosAvailable
               ? undefined
-              : consent?.status === 'accepted'
-                ? {
-                    label: 'Pause photo sharing',
-                    run: () => {
-                      setShowActions(false)
-                      void runConsent(() => pausePhotoSharing(matchId, uid))
-                    },
-                  }
-                : {
-                    label: 'Request photo sharing',
-                    run: () => {
-                      setShowActions(false)
-                      handlePhotoTap()
-                    },
-                  }
+              : {
+                  state:
+                    consent?.status === 'accepted'
+                      ? 'enabled'
+                      : consent?.status === 'pending'
+                        ? consent.requestedBy === uid
+                          ? 'waiting'
+                          : 'incoming'
+                        : 'off',
+                  // Theirs pending: accept it. Otherwise the 📷 flow (plan,
+                  // keys, first-time explainer, then the request).
+                  onAllow: () => {
+                    setShowActions(false)
+                    if (consent?.status === 'pending' && consent.requestedBy !== uid) {
+                      void runConsent(() => respondToPhotoConsent(matchId, uid, true))
+                    } else handlePhotoTap()
+                  },
+                  onRevoke: () => {
+                    setShowActions(false)
+                    void runConsent(() => pausePhotoSharing(matchId, uid))
+                  },
+                }
           }
         />
       )}
