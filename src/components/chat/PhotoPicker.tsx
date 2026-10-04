@@ -150,9 +150,10 @@ export default function PhotoPicker({ matchId, uid, partnerUid, mode, onClose }:
         >
           {sending ? 'Encrypting & sending…' : timer > 0 ? `Send · disappears in ${timer}s` : 'Send photo'}
         </button>
-        <p className="mt-3 text-center text-xs text-white/40">
-          Sending content that violates community guidelines may result in account suspension.
-        </p>
+        {/* Play: the consent + encryption notice above says enough. */}
+        {!play && (
+          <p className="mt-3 text-center text-xs text-white/40">Photos are end-to-end encrypted and only visible to you two.</p>
+        )}
       </div>
     </div>
   )
