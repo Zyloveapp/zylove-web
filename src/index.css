@@ -398,3 +398,31 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .zy-dot-fill { animation: none; }
 }
+
+/* Mutual vibe celebration (VibeCelebration.tsx): particles rise from the
+   bottom of the chat; the whole layer fades out at the end. */
+@keyframes zy-vibe-rise {
+  0% { transform: translate(0, 0) scale(0.6) rotate(0deg); opacity: 0; }
+  12% { opacity: 1; }
+  75% { opacity: 0.85; }
+  100% { transform: translate(var(--zy-drift, 0px), -105vh) scale(1.1) rotate(var(--zy-spin, 0deg)); opacity: 0; }
+}
+@keyframes zy-vibe-flicker {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.35); }
+}
+@keyframes zy-vibe-glow {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.9; }
+}
+@keyframes zy-vibe-layer {
+  0%, 85% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.zy-vibe-layer { animation: zy-vibe-layer 8s ease-out forwards; }
+.zy-vibe-particle { position: absolute; bottom: -8%; will-change: transform, opacity; animation: zy-vibe-rise var(--zy-dur, 4s) cubic-bezier(0.22, 0.61, 0.36, 1) var(--zy-delay, 0s) both; }
+.zy-vibe-flame { animation: zy-vibe-rise var(--zy-dur, 3s) cubic-bezier(0.3, 0.7, 0.4, 1) var(--zy-delay, 0s) both, zy-vibe-flicker 0.35s ease-in-out infinite; }
+.zy-vibe-glow { animation: zy-vibe-glow 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .zy-vibe-layer { display: none; }
+}

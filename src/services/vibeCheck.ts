@@ -1,4 +1,4 @@
-import { doc, getDoc } from 'firebase/firestore'
+import { doc, getDoc, onSnapshot, Timestamp, type Unsubscribe } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { PLAY_PROMPTS, SPARK_PROMPTS, UNIVERSAL_PROMPTS, type PromptAnswer } from '../types/profile'
@@ -74,6 +74,30 @@ export function markVibeCheckFired(matchId: string, messageCount: number): void 
 
 export function markVibeCheckRated(matchId: string): void {
   writeNumber(`zylove_vibecheck_rated_${matchId}`, Date.now())
+}
+
+// ─── Mutual vibe ─────────────────────────────────────────────────────────────
+// recordVibeRating stamps matches/{id}.mutualVibeAt when both people's
+// latest rating is "Loving it". Each stamp is celebrated once per browser.
+
+export function subscribeMutualVibe(matchId: string, onChange: (at: number | null) => void): Unsubscribe {
+  return onSnapshot(
+    doc(db, 'matches', matchId),
+    (snap) => {
+      const at: unknown = snap.data()?.mutualVibeAt
+      onChange(at instanceof Timestamp ? at.toMillis() : null)
+    },
+    () => onChange(null),
+  )
+}
+
+export function mutualVibeCelebrated(matchId: string, at: number): boolean {
+  const seen = readNumber(`zylove_vibe_celebrated_${matchId}`)
+  return seen !== null && seen >= at
+}
+
+export function markMutualVibeCelebrated(matchId: string, at: number): void {
+  writeNumber(`zylove_vibe_celebrated_${matchId}`, at)
 }
 
 // ─── Openers ─────────────────────────────────────────────────────────────────

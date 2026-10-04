@@ -526,6 +526,28 @@ const VIBE_RATINGS: readonly VibeRating[] = ['loving_it', 'alright', 'meh']
 // Asymmetric like mobile's vibeCheck.ts: one bad vibe barely matters.
 const VIBE_POINTS: Record<VibeRating, number> = { loving_it: 3, alright: 0, meh: -1 }
 const VIBE_COOLDOWN_MS = 24 * 60 * 60 * 1000
+// Both "Loving it" within this window of each other is a mutual vibe.
+const MUTUAL_VIBE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+
+// After a 'loving_it': if the partner's latest rating is also 'loving_it',
+// recent, and not already part of an earlier mutual, stamp the match
+// (mutualVibeAt) — both chats celebrate it once (ChatView). Transactional so
+// two near-simultaneous ratings stamp it once.
+async function markMutualVibe(matchId: string, otherUid: string): Promise<boolean> {
+  const db = getFirestore()
+  const ref = db.collection('matches').doc(matchId)
+  return db.runTransaction(async (tx) => {
+    const m = (await tx.get(ref)).data() ?? {}
+    const theirs = m[`lastVibeRating_${otherUid}`]
+    const theirAt: unknown = m[`lastVibeRatedAt_${otherUid}`]
+    const lastMutual: unknown = m.mutualVibeAt
+    if (theirs !== 'loving_it' || !(theirAt instanceof Timestamp)) return false
+    if (Date.now() - theirAt.toMillis() > MUTUAL_VIBE_WINDOW_MS) return false
+    if (lastMutual instanceof Timestamp && theirAt.toMillis() <= lastMutual.toMillis()) return false
+    tx.update(ref, { mutualVibeAt: FieldValue.serverTimestamp(), mutualVibeCount: FieldValue.increment(1) })
+    return true
+  })
+}
 
 // Records the caller's in-chat vibe rating of their match. Ratings are never
 // shown to the rated person; only 'loving_it' surfaces, as the match's
@@ -576,7 +598,14 @@ export const recordVibeRating = onCall(
       )
     }
 
-    logger.info('recordVibeRating', { matchId, rating: vibe })
+    const mutual =
+      vibe === 'loving_it' &&
+      (await markMutualVibe(matchId, otherUid).catch((err: unknown) => {
+        logger.error('recordVibeRating: mutual check failed', { matchId, message: err instanceof Error ? err.message : String(err) })
+        return false
+      }))
+
+    logger.info('recordVibeRating', { matchId, rating: vibe, mutual })
     return { success: true }
   },
 )

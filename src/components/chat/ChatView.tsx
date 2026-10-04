@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ENCRYPTION_KEY_MISSING,
@@ -12,7 +12,13 @@ import {
 import { decryptMessage } from '../../services/encryption'
 import { getPrivateKey, keysReady, subscribePublicKey } from '../../services/keys'
 import { markMatchRead, type MatchEntry } from '../../services/matches'
-import { markVibeCheckFired, shouldTriggerVibeCheck } from '../../services/vibeCheck'
+import {
+  markMutualVibeCelebrated,
+  markVibeCheckFired,
+  mutualVibeCelebrated,
+  shouldTriggerVibeCheck,
+  subscribeMutualVibe,
+} from '../../services/vibeCheck'
 import { clearTyping, setTyping, subscribeTyping } from '../../services/typing'
 import {
   coldReviewShown,
@@ -44,6 +50,7 @@ import { PaywallModal, useCanAccess } from '../PaywallGate'
 import TypingIndicator from './TypingIndicator'
 import ReviewModal from './ReviewModal'
 import VibeCheckModal from './VibeCheckModal'
+import VibeCelebration, { CELEBRATION_MS } from './VibeCelebration'
 import { firstChatSeen, firstChatSeenRemotely } from './firstChatSeen'
 import { fetchPublicUserDoc } from '../../services/publicUserDoc'
 
@@ -404,56 +411,31 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     }
   }
 
-  return (
-    // Mobile: full-screen over the bottom nav, sized to the dynamic viewport so
-    // the keyboard shrinks the message list instead of exposing the page below.
-    // Desktop: fills its pane.
-    <div className="fixed inset-0 z-50 flex h-[100dvh] flex-col overscroll-none bg-gray-950 text-white lg:static lg:z-auto lg:h-full">
-      <header className="flex shrink-0 items-center gap-3 border-b border-white/10 px-4 py-3 lg:px-6">
-        {onBack && (
-          <button type="button" onClick={onBack} className="text-xl text-white/60 hover:text-white lg:hidden" aria-label="Back">
-            ←
-          </button>
-        )}
-        {/* Name and avatar open their profile; ••• (right) holds Report/Block/Unmatch. */}
-        <button
-          type="button"
-          onClick={() => navigate(`/profile/${partnerUid}`)}
-          aria-label={`View ${match.name}'s profile`}
-          className="flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left transition-opacity hover:opacity-80"
-        >
-          {match.photoURL ? (
-            <img src={match.photoURL} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />
-          ) : (
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/10 font-semibold text-white/70">
-              {match.name.charAt(0).toUpperCase()}
-            </span>
-          )}
-          <span className="min-w-0 truncate font-semibold">
-            {match.name}
-            {match.age !== null && <span className="font-normal text-white/50">, {match.age}</span>}
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowActions(true)}
-          aria-label="More options"
-          className="shrink-0 rounded-full px-2 py-1 text-xl leading-none text-white/60 hover:bg-white/10 hover:text-white"
-        >
-          •••
-        </button>
-      </header>
+  // Mutual "Loving it" (matches/{id}.mutualVibeAt, stamped server-side):
+  // celebrate once per stamp in this browser — live if they're here, or on
+  // opening the chat later — then leave a system line where it happened.
+  const [mutualVibeAt, setMutualVibeAt] = useState<number | null>(null)
+  const [celebrating, setCelebrating] = useState(false)
+  useEffect(() => subscribeMutualVibe(matchId, setMutualVibeAt), [matchId])
+  useEffect(() => {
+    if (mutualVibeAt === null || mutualVibeCelebrated(matchId, mutualVibeAt)) return
+    markMutualVibeCelebrated(matchId, mutualVibeAt)
+    setCelebrating(true)
+    const done = setTimeout(() => setCelebrating(false), CELEBRATION_MS)
+    return () => clearTimeout(done)
+  }, [matchId, mutualVibeAt])
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 lg:px-6">
-        <div className="flex min-h-full flex-col justify-end gap-3">
-          {messages === null ? (
-            <div className="flex justify-center py-10">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-            </div>
-          ) : loaded?.error ? (
-            <p className="py-10 text-center text-sm text-white/40">Couldn't load messages.</p>
-          ) : (
-            messages.map((m) => {
+  const vibeLine =
+    mutualVibeAt !== null && !celebrating ? (
+      <p key="mutual-vibe" className={`text-center text-xs font-medium ${match.mode === 'play' ? 'text-[#FF8A80]' : 'text-[#9DB4FF]'}`}>
+        {match.mode === 'play' ? '🔥 The vibe is mutual.' : "✦ You're both feeling it."}
+      </p>
+    ) : null
+  // Before the first message sent after the moment; -1 = after them all.
+  const vibeLineIndex =
+    mutualVibeAt === null || !messages ? -1 : messages.findIndex((m) => m.sentAt !== null && m.sentAt > mutualVibeAt)
+
+  function renderMessage(m: ChatMessage & { text: string }) {
               const code = consentCode(m)
               if (code) {
                 return (
@@ -510,11 +492,76 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
                   </span>
                 </div>
               )
+  }
+
+  return (
+    // Mobile: full-screen over the bottom nav, sized to the dynamic viewport so
+    // the keyboard shrinks the message list instead of exposing the page below.
+    // Desktop: fills its pane.
+    <div className="fixed inset-0 z-50 flex h-[100dvh] flex-col overscroll-none bg-gray-950 text-white lg:static lg:z-auto lg:h-full">
+      <header className="flex shrink-0 items-center gap-3 border-b border-white/10 px-4 py-3 lg:px-6">
+        {onBack && (
+          <button type="button" onClick={onBack} className="text-xl text-white/60 hover:text-white lg:hidden" aria-label="Back">
+            ←
+          </button>
+        )}
+        {/* Name and avatar open their profile; ••• (right) holds Report/Block/Unmatch. */}
+        <button
+          type="button"
+          onClick={() => navigate(`/profile/${partnerUid}`)}
+          aria-label={`View ${match.name}'s profile`}
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left transition-opacity hover:opacity-80"
+        >
+          {match.photoURL ? (
+            <img src={match.photoURL} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />
+          ) : (
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/10 font-semibold text-white/70">
+              {match.name.charAt(0).toUpperCase()}
+            </span>
+          )}
+          <span className="min-w-0 truncate font-semibold">
+            {match.name}
+            {match.age !== null && <span className="font-normal text-white/50">, {match.age}</span>}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowActions(true)}
+          aria-label="More options"
+          className="shrink-0 rounded-full px-2 py-1 text-xl leading-none text-white/60 hover:bg-white/10 hover:text-white"
+        >
+          •••
+        </button>
+      </header>
+
+      <div className="relative min-h-0 flex-1">
+      {celebrating && <VibeCelebration mode={match.mode === 'play' ? 'play' : 'spark'} />}
+      <div className="h-full overflow-y-auto overscroll-contain px-4 py-4 lg:px-6">
+        <div className="flex min-h-full flex-col justify-end gap-3">
+          {messages === null ? (
+            <div className="flex justify-center py-10">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+            </div>
+          ) : loaded?.error ? (
+            <p className="py-10 text-center text-sm text-white/40">Couldn't load messages.</p>
+          ) : (
+            messages.map((m, i) => {
+              const el = renderMessage(m)
+              return i === vibeLineIndex ? (
+                <Fragment key={m.id}>
+                  {vibeLine}
+                  {el}
+                </Fragment>
+              ) : (
+                el
+              )
             })
           )}
+          {messages !== null && !loaded?.error && vibeLineIndex === -1 && vibeLine}
           <TypingIndicator visible={showTyping} mode={match.mode} />
           <div ref={bottomRef} />
         </div>
+      </div>
       </div>
 
       <div className="shrink-0 border-t border-white/10 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] lg:px-6">
