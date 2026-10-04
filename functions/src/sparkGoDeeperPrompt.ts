@@ -3,7 +3,6 @@
 // the label maps, so only known values reach the prompt.
 
 import {
-  CONFLICT_STYLE_LABELS,
   LIFESTYLE_TAG_LABELS,
   LOVE_LANGUAGE_LABELS,
   OPEN_TO_LABELS,
@@ -11,8 +10,6 @@ import {
   RELATIONSHIP_STATUS_LABELS,
   RELATIONSHIP_VALUE_LABELS,
   SPARK_PROMPTS,
-  STRESS_RESPONSE_LABELS,
-  TOGETHERNESS_STYLE_LABELS,
   UNIVERSAL_PROMPTS,
 } from './shared/profile'
 
@@ -35,9 +32,6 @@ export interface SparkGoDeeperRequest {
   openTo: string[]
   relationshipStatus: string | null
   promptAnswers: { question: string; answer: string }[]
-  conflict: string | null
-  togetherness: string | null
-  stress: string | null
 }
 
 function has(record: object, key: unknown): key is string {
@@ -83,9 +77,6 @@ export function parseSparkGoDeeperRequest(raw: unknown): SparkGoDeeperRequest {
     openTo: labels(d.openTo, OPEN_TO_LABELS),
     relationshipStatus: one(d.relationshipStatus, RELATIONSHIP_STATUS_LABELS),
     promptAnswers: answers(d.promptAnswers),
-    conflict: one(d.conflict, CONFLICT_STYLE_LABELS),
-    togetherness: one(d.togetherness, TOGETHERNESS_STYLE_LABELS),
-    stress: one(d.stress, STRESS_RESPONSE_LABELS),
   }
 }
 
@@ -96,13 +87,6 @@ export function buildSparkGoDeeperPrompt(
   { focus, previousQuestion }: { focus: string; previousQuestion?: string },
 ): string {
   const prompts = r.promptAnswers.map((p) => `Q: ${p.question}\nA: ${p.answer}`).join('\n\n') || 'none yet'
-  const operate = [
-    r.conflict && `conflict → ${r.conflict}`,
-    r.togetherness && `togetherness → ${r.togetherness}`,
-    r.stress && `stress → ${r.stress}`,
-  ]
-    .filter(Boolean)
-    .join(', ')
   return [
     'You are generating a personal Go Deeper question for a dating profile on Zylove Spark — an intentional dating platform for people looking for real connections.',
     '',
@@ -116,7 +100,6 @@ export function buildSparkGoDeeperPrompt(
     `Open to: ${list(r.openTo)}`,
     `Relationship status: ${r.relationshipStatus ?? 'not shared'}`,
     `Prompt answers:\n${prompts}`,
-    `How they operate: ${operate || 'not shared'}`,
     '',
     'Generate ONE question for them to answer on their profile.',
     `Focus on: ${focus}`,

@@ -19,9 +19,6 @@ function requestFrom(d: OnboardingDraft) {
     promptAnswers: d.selectedPromptIds
       .map((promptId) => ({ promptId, answer: (d.promptAnswers[promptId] ?? '').trim() }))
       .filter((p) => p.answer),
-    conflict: d.conflictStyle,
-    togetherness: d.togethernessStyle,
-    stress: d.stressResponse,
   }
 }
 
