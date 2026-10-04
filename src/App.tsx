@@ -86,8 +86,9 @@ function AppLayout() {
       .then((admin) => {
         if (cancelled || !admin) return
         window.__resetVibeCheck = (matchId: string) => {
-          resetVibeCheckForTesting(matchId)
-          console.info(`Vibe check reset for ${matchId} — reopen the chat.`)
+          resetVibeCheckForTesting(matchId, uid)
+            .then(() => console.info(`Vibe check reset for ${matchId} — reopen the chat.`))
+            .catch((err: unknown) => console.error('Vibe check reset failed', err))
         }
       })
       .catch(() => {})

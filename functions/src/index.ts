@@ -525,7 +525,8 @@ type VibeRating = 'loving_it' | 'alright' | 'meh'
 const VIBE_RATINGS: readonly VibeRating[] = ['loving_it', 'alright', 'meh']
 // Asymmetric like mobile's vibeCheck.ts: one bad vibe barely matters.
 const VIBE_POINTS: Record<VibeRating, number> = { loving_it: 3, alright: 0, meh: -1 }
-const VIBE_COOLDOWN_MS = 24 * 60 * 60 * 1000
+// Between ratings of one conversation, by mode (as the web client's cadence).
+const VIBE_COOLDOWN_MS = { spark: 24 * 60 * 60 * 1000, play: 12 * 60 * 60 * 1000 } as const
 // Both "Loving it" within this window of each other is a mutual vibe.
 const MUTUAL_VIBE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -565,7 +566,9 @@ export const recordVibeRating = onCall(
       throw new HttpsError('invalid-argument', "rating must be 'loving_it', 'alright' or 'meh'")
     }
     const vibe = rating as VibeRating
-    await requireMatchPair(matchId, callerId, otherUid)
+    const match = await requireMatchPair(matchId, callerId, otherUid)
+    // 'entanglement' is an older name for Play.
+    const cooldownMs = match.mode === 'play' || match.mode === 'entanglement' ? VIBE_COOLDOWN_MS.play : VIBE_COOLDOWN_MS.spark
 
     const db = getFirestore()
     const vibeRef = db.collection('vibeChecks').doc(`${matchId}_${callerId}`)
@@ -575,10 +578,10 @@ export const recordVibeRating = onCall(
     // rating is recorded, the points and behaviour signal aren't.
     const [previous, caller] = await Promise.all([vibeRef.get(), db.collection('users').doc(callerId).get()])
     const previousAt: unknown = previous.data()?.createdAt
-    const inCooldown = previousAt instanceof Timestamp && Date.now() - previousAt.toMillis() < VIBE_COOLDOWN_MS
+    const inCooldown = previousAt instanceof Timestamp && Date.now() - previousAt.toMillis() < cooldownMs
     const adminRepeat = inCooldown && caller.data()?.isAdmin === true
     if (inCooldown && !adminRepeat) {
-      throw new HttpsError('resource-exhausted', 'Already rated this conversation in the last 24 hours')
+      throw new HttpsError('resource-exhausted', `Already rated this conversation in the last ${cooldownMs / 3_600_000} hours`)
     }
 
     // update() rather than set(merge) on users/* so a deleted profile fails
@@ -588,6 +591,8 @@ export const recordVibeRating = onCall(
     batch.update(db.collection('matches').doc(matchId), {
       [`lastVibeRating_${callerId}`]: vibe,
       [`lastVibeRatedAt_${callerId}`]: FieldValue.serverTimestamp(),
+      // The web client's vibe-check state (its cooldown reads this).
+      [`vibeCheckState_${callerId}.lastRatedAt`]: FieldValue.serverTimestamp(),
       ...(vibe === 'loving_it' ? { warmSignal: true } : {}),
     })
     const points = adminRepeat ? 0 : VIBE_POINTS[vibe]

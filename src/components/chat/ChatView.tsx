@@ -18,6 +18,9 @@ import {
   mutualVibeCelebrated,
   shouldTriggerVibeCheck,
   subscribeMutualVibe,
+  subscribeVibeCheckState,
+  vibeModeOf,
+  type VibeCheckState,
 } from '../../services/vibeCheck'
 import { clearTyping, setTyping, subscribeTyping } from '../../services/typing'
 import {
@@ -216,15 +219,22 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     [messages],
   )
 
+  // This user's vibe-check state (matches/{id}.vibeCheckState_{uid}).
+  const [vibeState, setVibeState] = useState<{ matchId: string; state: VibeCheckState } | null>(null)
+  useEffect(() => subscribeVibeCheckState(matchId, uid, (state) => setVibeState({ matchId, state })), [matchId, uid])
+  const vibe = vibeState?.matchId === matchId ? vibeState.state : null
+  const vibeMode = vibeModeOf(match.mode)
+
   useEffect(() => {
-    if (vibeCheckFired.current || showFirstChat) return
+    // Waits for the state, so a check already shown elsewhere doesn't repeat.
+    if (vibeCheckFired.current || showFirstChat || !vibe) return
     const senders = conversation.map((m) => m.senderId)
-    if (!shouldTriggerVibeCheck(senders, uid, matchId)) return
+    if (!shouldTriggerVibeCheck(senders, uid, vibe, vibeMode)) return
     vibeCheckFired.current = true
-    markVibeCheckFired(matchId, senders.length)
+    void markVibeCheckFired(matchId, uid, senders.length)
     // Kept in a ref so a message arriving during the delay doesn't cancel it.
     vibeCheckTimer.current = setTimeout(() => setShowVibeCheck(true), VIBE_CHECK_DELAY_MS)
-  }, [conversation, showFirstChat, uid, matchId])
+  }, [conversation, showFirstChat, uid, matchId, vibe, vibeMode])
 
   useEffect(() => () => clearTimeout(vibeCheckTimer.current), [])
 

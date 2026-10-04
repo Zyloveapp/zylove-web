@@ -1,4 +1,4 @@
-import { doc, getDoc, onSnapshot, Timestamp, type Unsubscribe } from 'firebase/firestore'
+import { deleteField, doc, getDoc, onSnapshot, Timestamp, updateDoc, type Unsubscribe } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { PLAY_PROMPTS, SPARK_PROMPTS, UNIVERSAL_PROMPTS, type PromptAnswer } from '../types/profile'
@@ -16,32 +16,58 @@ export function recordVibeRating(matchId: string, otherUid: string, rating: Vibe
 }
 
 // ─── Trigger ─────────────────────────────────────────────────────────────────
+// Cadence by mode: Play conversations move faster, so they're checked sooner
+// and more often.
+//   Spark: 10, 25, 50, then every 50 · 24h between ratings
+//   Play:  8, 20, 40, then every 40  · 12h between ratings
+// recordVibeRating enforces the same cooldowns server-side.
+
+export type VibeMode = 'spark' | 'play'
+
+const CADENCE: Record<VibeMode, { milestones: number[]; every: number; cooldownMs: number }> = {
+  spark: { milestones: [10, 25, 50], every: 50, cooldownMs: 24 * 60 * 60 * 1000 },
+  play: { milestones: [8, 20, 40], every: 40, cooldownMs: 12 * 60 * 60 * 1000 },
+}
 
 const MIN_MESSAGES = 6
 const MIN_FROM_EACH = 2
-const COOLDOWN_MS = 24 * 60 * 60 * 1000
 
-// Milestones: 10, 25, 50, then every 50 (100, 150, ...) — same as mobile.
-export function nextVibeCheckMilestone(lastFiredAt: number): number {
-  if (lastFiredAt < 10) return 10
-  if (lastFiredAt < 25) return 25
-  if (lastFiredAt < 50) return 50
-  return Math.floor(lastFiredAt / 50) * 50 + 50
+// The match doc's mode ('entanglement' is an older name for Play).
+export function vibeModeOf(mode: unknown): VibeMode {
+  return mode === 'play' || mode === 'entanglement' ? 'play' : 'spark'
 }
 
-export function shouldTriggerVibeCheck(senderIds: string[], uid: string, matchId: string): boolean {
+export function nextVibeCheckMilestone(lastFiredAt: number, mode: VibeMode): number {
+  const { milestones, every } = CADENCE[mode]
+  const next = milestones.find((m) => lastFiredAt < m)
+  return next ?? Math.floor(lastFiredAt / every) * every + every
+}
+
+// This user's vibe-check state for one match: the message count the last
+// check fired at, and when they last rated (ms).
+export interface VibeCheckState {
+  lastThreshold: number
+  lastRatedAt: number | null
+}
+
+export function shouldTriggerVibeCheck(senderIds: string[], uid: string, state: VibeCheckState, mode: VibeMode): boolean {
   const count = senderIds.length
   if (count < MIN_MESSAGES) return false
-  if (count < nextVibeCheckMilestone(lastFiredCount(matchId))) return false
+  if (count < nextVibeCheckMilestone(state.lastThreshold, mode)) return false
   const mine = senderIds.filter((s) => s === uid).length
   if (mine < MIN_FROM_EACH || count - mine < MIN_FROM_EACH) return false
-  const ratedAt = lastRatedAt(matchId)
-  return ratedAt === null || Date.now() - ratedAt >= COOLDOWN_MS
+  return state.lastRatedAt === null || Date.now() - state.lastRatedAt >= CADENCE[mode].cooldownMs
 }
 
-// ─── localStorage ────────────────────────────────────────────────────────────
-// Storage failures fall back to "never fired / never rated"; the server
-// enforces the 24h rating cooldown regardless.
+// ─── State: matches/{id}.vibeCheckState_{uid} ───────────────────────────────
+// { lastThreshold, lastRatedAt } on the match doc, so every device agrees.
+// lastThreshold is written here when a check fires; lastRatedAt by
+// recordVibeRating. Older matches kept both in this browser's localStorage:
+// read as a fallback, copied up once, then cleared.
+
+const stateField = (uid: string) => `vibeCheckState_${uid}`
+const legacyFiredKey = (matchId: string) => `zylove_vibecheck_${matchId}`
+const legacyRatedKey = (matchId: string) => `zylove_vibecheck_rated_${matchId}`
 
 function readNumber(key: string): number | null {
   try {
@@ -56,36 +82,84 @@ function writeNumber(key: string, value: number): void {
   try {
     localStorage.setItem(key, String(value))
   } catch {
-    // Storage unavailable — the prompt may repeat next visit.
+    // Storage unavailable.
   }
 }
 
-function lastFiredCount(matchId: string): number {
-  return readNumber(`zylove_vibecheck_${matchId}`) ?? 0
-}
-
-function lastRatedAt(matchId: string): number | null {
-  return readNumber(`zylove_vibecheck_rated_${matchId}`)
-}
-
-export function markVibeCheckFired(matchId: string, messageCount: number): void {
-  writeNumber(`zylove_vibecheck_${matchId}`, messageCount)
-}
-
-export function markVibeCheckRated(matchId: string): void {
-  writeNumber(`zylove_vibecheck_rated_${matchId}`, Date.now())
-}
-
-// Testing only (admin console: window.__resetVibeCheck): forgets that this
-// browser fired or rated a vibe check for the match, so the next one shows
-// on reopening the chat. The server's 24h rating cooldown still applies.
-export function resetVibeCheckForTesting(matchId: string): void {
+function clearLegacy(matchId: string): void {
   try {
-    localStorage.removeItem(`zylove_vibecheck_${matchId}`)
-    localStorage.removeItem(`zylove_vibecheck_rated_${matchId}`)
+    localStorage.removeItem(legacyFiredKey(matchId))
+    localStorage.removeItem(legacyRatedKey(matchId))
   } catch {
     // Storage unavailable: nothing to clear.
   }
+}
+
+function toMillis(v: unknown): number | null {
+  if (v instanceof Timestamp) return v.toMillis()
+  return typeof v === 'number' && v > 0 ? v : null
+}
+
+// Live state from the match doc, merged with any legacy localStorage values
+// (the later of each wins). Legacy values are copied to the doc once and
+// cleared. A read error reports "never fired, never rated", as before.
+export function subscribeVibeCheckState(matchId: string, uid: string, onChange: (state: VibeCheckState) => void): Unsubscribe {
+  let migrated = false
+  return onSnapshot(
+    doc(db, 'matches', matchId),
+    (snap) => {
+      const raw: unknown = snap.data()?.[stateField(uid)]
+      const remote = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
+      const remoteThreshold = typeof remote.lastThreshold === 'number' ? remote.lastThreshold : 0
+      const remoteRated = toMillis(remote.lastRatedAt)
+      const localThreshold = readNumber(legacyFiredKey(matchId)) ?? 0
+      const localRated = readNumber(legacyRatedKey(matchId))
+      const state: VibeCheckState = {
+        lastThreshold: Math.max(remoteThreshold, localThreshold),
+        lastRatedAt: Math.max(remoteRated ?? 0, localRated ?? 0) || null,
+      }
+      onChange(state)
+
+      if (!migrated && (localThreshold > 0 || localRated !== null)) {
+        migrated = true
+        const up: Record<string, number> = {}
+        if (localThreshold > remoteThreshold) up[`${stateField(uid)}.lastThreshold`] = localThreshold
+        if (localRated !== null && localRated > (remoteRated ?? 0)) up[`${stateField(uid)}.lastRatedAt`] = localRated
+        const write = Object.keys(up).length > 0 ? updateDoc(doc(db, 'matches', matchId), up) : Promise.resolve()
+        write.then(() => clearLegacy(matchId)).catch(() => {})
+      }
+    },
+    () => onChange({ lastThreshold: 0, lastRatedAt: null }),
+  )
+}
+
+// A check fired at this message count. If the write fails, this browser
+// remembers it (the fallback) so the prompt doesn't repeat here.
+export async function markVibeCheckFired(matchId: string, uid: string, messageCount: number): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'matches', matchId), { [`${stateField(uid)}.lastThreshold`]: messageCount })
+    clearLegacy(matchId)
+  } catch {
+    writeNumber(legacyFiredKey(matchId), messageCount)
+  }
+}
+
+// recordVibeRating stamps lastRatedAt on the doc; this only drops any
+// legacy local copy so it can't outlive the server's value.
+export function markVibeCheckRated(matchId: string): void {
+  try {
+    localStorage.removeItem(legacyRatedKey(matchId))
+  } catch {
+    // ignore
+  }
+}
+
+// Testing only (admin console: window.__resetVibeCheck): clears this user's
+// state for the match, on the doc and in this browser, so the next check
+// shows on reopening the chat. Admins also skip the server's rating cooldown.
+export async function resetVibeCheckForTesting(matchId: string, uid: string): Promise<void> {
+  clearLegacy(matchId)
+  await updateDoc(doc(db, 'matches', matchId), { [stateField(uid)]: deleteField() })
 }
 
 // ─── Mutual vibe ─────────────────────────────────────────────────────────────
