@@ -4,8 +4,14 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
-import { useModeStore } from '../store/modeStore'
-import { setVisibility, subscribeVisibility, type Visibility, type VisibilityState } from '../services/visibility'
+import { useModeStore, type Mode } from '../store/modeStore'
+import {
+  setVisibility,
+  subscribeVisibility,
+  visibilityOptions,
+  type Visibility,
+  type VisibilityState,
+} from '../services/visibility'
 import PlayPinFlow from './PlayPinFlow'
 import { subscribeSmsSettings } from '../services/notifications'
 import ModeTransition from './ModeTransition'
@@ -17,35 +23,19 @@ import { isPlayOnlyUser } from '../services/playOnboarding'
 // Play-only users start every app load in Play, once per user per page load.
 const playLaunchChecked = new Set<string>()
 
-const VISIBILITY: { value: Visibility; label: string; pill: string; description: string; dot: string; tone: string }[] = [
-  {
-    value: 'active',
-    label: 'Active',
-    pill: '🟢 Active',
-    description: "You're visible in Explore",
-    dot: 'bg-emerald-500',
-    tone: 'border-emerald-500/30 bg-emerald-500/15 text-emerald-400',
-  },
-  {
-    value: 'hidden',
-    label: 'Hidden',
-    pill: '👻 Hidden',
-    description: 'Hidden from Explore. Your links can still reach you.',
-    dot: 'bg-gray-400',
-    tone: 'border-white/20 bg-white/10 text-white/70',
-  },
-  {
-    value: 'paused',
-    label: 'On a break',
-    pill: '☕ Break',
-    description: 'Your profile is on a break.',
-    dot: 'bg-amber-500',
-    tone: 'border-amber-500/30 bg-amber-500/15 text-amber-400',
-  },
-]
 
 // Drops down under the header; any tap outside closes it.
-function VisibilitySheet({ current, onPick, onClose }: { current: Visibility; onPick: (v: Visibility) => void; onClose: () => void }) {
+function VisibilitySheet({
+  mode,
+  current,
+  onPick,
+  onClose,
+}: {
+  mode: Mode
+  current: Visibility
+  onPick: (v: Visibility) => void
+  onClose: () => void
+}) {
   useEffect(() => {
     function onKey(e: globalThis.KeyboardEvent) {
       if (e.key === 'Escape') onClose()
@@ -58,9 +48,11 @@ function VisibilitySheet({ current, onPick, onClose }: { current: Visibility; on
     <>
       <button type="button" aria-label="Close" onClick={onClose} className="fixed inset-0 top-12 z-40 cursor-default bg-black/30 lg:top-14" />
       <div className="zy-drop absolute right-2 top-[calc(100%+0.5rem)] z-50 w-72 overflow-hidden rounded-2xl border border-white/10 bg-gray-900 shadow-2xl">
-        <p className="px-4 pt-3 text-xs font-semibold uppercase tracking-widest text-white/40">Profile visibility</p>
+        <p className="px-4 pt-3 text-xs font-semibold uppercase tracking-widest text-white/40">
+          {mode === 'play' ? 'Play' : 'Spark'} visibility
+        </p>
         <ul className="p-2">
-          {VISIBILITY.map((o) => (
+          {visibilityOptions(mode).map((o) => (
             <li key={o.value}>
               <button
                 type="button"
@@ -202,7 +194,7 @@ export default function Header() {
 
   const isPlay = mode === 'play'
   const current = visibility?.[mode] ?? null
-  const dot = VISIBILITY.find((o) => o.value === current)
+  const dot = visibilityOptions(mode).find((o) => o.value === current)
 
   // Into Play: needs Play access (Elite or trial), a Play profile, then the
   // PIN. Back to Spark needs none of it.
@@ -282,7 +274,7 @@ export default function Header() {
           </Link>
         </div>
 
-        {sheetOpen && current && <VisibilitySheet current={current} onPick={pick} onClose={() => setSheetOpen(false)} />}
+        {sheetOpen && current && <VisibilitySheet mode={mode} current={current} onPick={pick} onClose={() => setSheetOpen(false)} />}
       </div>
 
       {playSetup && (
