@@ -22,6 +22,7 @@ import DiscoverySettings from '../components/DiscoverySettings'
 import InstallAppSection from '../components/InstallAppSection'
 import BlockedUsersLink from '../components/BlockedUsersLink'
 import DeleteProfileControls from '../components/DeleteProfileControls'
+import MembershipSection from '../components/MembershipSection'
 import PhotoConsentCopy from '../components/PhotoConsentCopy'
 import { isAdmin } from '../services/adminPhotos'
 import { setPhotoConsent, subscribePhotoConsent, type PhotoConsent, type PhotoConsentMode } from '../services/photoConsent'
@@ -413,6 +414,8 @@ export default function Settings() {
           </button>
           <h1 className="text-2xl font-bold">Settings</h1>
         </div>
+
+        <MembershipSection uid={uid} />
 
         <InstallAppSection />
 

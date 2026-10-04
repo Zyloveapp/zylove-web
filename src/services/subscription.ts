@@ -44,8 +44,13 @@ function gender(user: TierFields): string {
   return typeof g === 'string' ? g : ''
 }
 
+// Complimentary Elite by gender identity (founders aside).
+export function hasEliteIdentity(user: TierFields): boolean {
+  return ALWAYS_ELITE_IDENTITIES.includes(gender(user))
+}
+
 export function isAlwaysElite(user: TierFields): boolean {
-  return ALWAYS_ELITE_IDENTITIES.includes(gender(user)) || user.isFounder === true
+  return hasEliteIdentity(user) || user.isFounder === true
 }
 
 export function getUserTier(user: TierFields): Tier {

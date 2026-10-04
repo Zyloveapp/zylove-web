@@ -1,4 +1,5 @@
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useBackLinkClass } from '../store/modeStore'
 import { useAuthStore } from '../store/authStore'
 import { useSubscriptionStore } from '../store/subscriptionStore'
@@ -10,6 +11,7 @@ const SPARK_PLUS = ['See who liked you', 'Full compatibility reports', 'Encrypte
 const ELITE_EXTRAS = ['Play mode', 'Zylove Score', 'Top Picks']
 
 function Plan({
+  id,
   name,
   price,
   intro,
@@ -20,6 +22,7 @@ function Plan({
   busy,
   onClick,
 }: {
+  id: string
   name: string
   price: string
   intro?: string
@@ -31,7 +34,7 @@ function Plan({
   onClick: () => void
 }) {
   return (
-    <section className={`rounded-2xl border bg-white/5 p-6 ${current ? 'border-white/40' : 'border-white/10'}`}>
+    <section id={id} className={`scroll-mt-6 rounded-2xl border bg-white/5 p-6 ${current ? 'border-white/40' : 'border-white/10'}`}>
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="text-lg font-bold">{name}</h2>
         <p className="text-sm text-white/70">
@@ -83,9 +86,14 @@ export default function Upgrade() {
   const backLinkClass = useBackLinkClass()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const { hash } = useLocation()
   const signedIn = useAuthStore((s) => s.user !== null)
   const { tier, daysLeft, alwaysElite, subscriptionStatus, trialEnded } = useSubscriptionStore()
   const { pending, error, checkout, portal } = useBilling()
+  // /upgrade#elite (Settings, for Spark+ members): jump to the Elite plan.
+  useEffect(() => {
+    if (hash) document.getElementById(hash.slice(1))?.scrollIntoView({ behavior: 'smooth' })
+  }, [hash])
   const trialProgress = daysLeft !== null ? Math.min(100, Math.max(0, ((TRIAL_DAYS - daysLeft) / TRIAL_DAYS) * 100)) : 0
 
   const succeeded = searchParams.get('success') === 'true'
@@ -164,6 +172,7 @@ export default function Upgrade() {
             )}
             {error && <p className="text-center text-sm text-red-400">{error}</p>}
             <Plan
+              id="spark-plus"
               name="Spark+"
               price="$14.99"
               features={SPARK_PLUS}
@@ -174,6 +183,7 @@ export default function Upgrade() {
               onClick={() => choose('spark_plus')}
             />
             <Plan
+              id="elite"
               name="Elite"
               price="$30"
               intro="Everything in Spark+ plus:"
