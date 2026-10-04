@@ -45,6 +45,7 @@ import TypingIndicator from './TypingIndicator'
 import ReviewModal from './ReviewModal'
 import VibeCheckModal from './VibeCheckModal'
 import { firstChatSeen, firstChatSeenRemotely } from './firstChatSeen'
+import { fetchPublicUserDoc } from '../../services/publicUserDoc'
 
 function messageTime(ms: number | null): string {
   if (ms === null) return 'Sending…'
@@ -81,7 +82,11 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
-  const [showFirstChat, setShowFirstChat] = useState(() => !firstChatSeen(matchId))
+  // The first-chat card promises "You're talking to a real human", so it's
+  // never shown for demonstration profiles — known by uid prefix right away,
+  // or by isBot on their user doc (checked before the card appears).
+  const [showFirstChat, setShowFirstChat] = useState(() => !firstChatSeen(matchId) && !isBotUid(partnerUid))
+  const [humanPartner, setHumanPartner] = useState<string | null>(null)
   const [partnerKeyState, setPartnerKeyState] = useState<PartnerKey | null>(null)
   const [myKeyState, setMyKeyState] = useState<{ uid: string; key: string | null } | null>(null)
   const [showVibeCheck, setShowVibeCheck] = useState(false)
@@ -130,6 +135,19 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
     () => subscribePhotoConsent(matchId, (consent) => setConsentState({ matchId, consent })),
     [matchId],
   )
+
+  useEffect(() => {
+    if (isBotUid(partnerUid)) return
+    let cancelled = false
+    fetchPublicUserDoc(partnerUid).then((partner) => {
+      if (cancelled) return
+      if (partner?.isBot === true) setShowFirstChat(false)
+      else setHumanPartner(partnerUid)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [partnerUid])
 
   // Hide the first-chat modal if it was already dismissed on mobile.
   useEffect(() => {
@@ -552,7 +570,7 @@ export default function ChatView({ uid, match, onBack }: ChatViewProps) {
         )}
       </div>
 
-      {showFirstChat && (
+      {showFirstChat && humanPartner === partnerUid && (
         <FirstChatModal
           matchId={matchId}
           mode={match.mode === 'play' ? 'play' : 'spark'}
