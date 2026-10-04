@@ -5,8 +5,17 @@ import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
 import { loadRefreshDraft, recordLegalAcceptance, saveSparkOnboarding } from '../services/onboarding'
-import { selectPlayPrompts, type PromptAnswer } from '../types/dualProfile'
-import { generatePlayBio, savePlayOnlyOnboarding, tagsIn, type PlayDraft } from '../services/playOnboarding'
+import type { PromptAnswer } from '../types/dualProfile'
+import {
+  MIN_PLAY_ANSWERS,
+  emptyPlayDraft,
+  generatePlayBio,
+  needsPlayTrialWelcome,
+  playAnswerCount,
+  savePlayOnlyOnboarding,
+  tagsIn,
+  type PlayDraft,
+} from '../services/playOnboarding'
 import { generateSparkBio } from '../services/bio'
 import { claimFounderBadge } from '../services/founders'
 import FounderCelebration from '../components/FounderCelebration'
@@ -36,12 +45,15 @@ import { DiscoveryStep, NeedsStep, PhysicalPrefsStep } from '../components/onboa
 import { IntentionStep, RecommendationScreen, intentForPath } from '../components/onboarding/IntentionSteps'
 import { GoDeeperIntro, GoDeeperQuestion } from '../components/onboarding/GoDeeperSteps'
 import {
+  AboutYouStep,
   ArrangementStep,
+  MyTypeStep,
   NonNegotiablesStep,
   PLAY_BIO_MAX,
   PlayBioStep,
   PlayPromptsStep,
   PlayReviewStep,
+  PlayTrialWelcome,
   PlayWelcomeStep,
   SceneStep,
   SpiceStep,
@@ -116,9 +128,11 @@ const PLAY_STEPS = [
   { id: 'discovery', title: 'Who you see' },
   { id: 'playWelcome', title: 'Play' },
   { id: 'spice', title: 'Spice level' },
+  { id: 'aboutYou', title: 'About you' },
   { id: 'arrangement', title: 'Looking for' },
   { id: 'scene', title: 'Your scene' },
   { id: 'nonNegotiables', title: 'Non-negotiables' },
+  { id: 'myType', title: 'My type' },
   { id: 'playPrompts', title: 'Prompts' },
   { id: 'playBio', title: 'Bio' },
   { id: 'playReview', title: 'Review' },
@@ -201,7 +215,7 @@ function isStepValid(
     case 'arrangement':
       return tagsIn(play.tags, 'arrangement').length > 0
     case 'playPrompts':
-      return play.promptIds.some((pid) => (play.answers[pid] ?? '').trim())
+      return playAnswerCount(play) >= MIN_PLAY_ANSWERS
     case 'playBio':
       return play.bio.trim().length > 0 && !playBioBusy
     default:
@@ -244,20 +258,15 @@ export default function Onboarding() {
   // Incremented to discard an in-flight bio request (skip or regenerate).
   const bioRequest = useRef(0)
   // Play-only path: the Play profile answers (photos live on draft.photos).
-  const [play, setPlay] = useState<PlayDraft>(() => ({
-    photos: [],
-    bio: '',
-    spiceLevel: null,
-    tags: [],
-    nonNegotiables: [],
-    promptIds: selectPlayPrompts(user?.uid ?? '').map((p) => p.id),
-    answers: {},
-  }))
+  const [play, setPlay] = useState<PlayDraft>(() => emptyPlayDraft(user?.uid ?? ''))
   const [playBioEditing, setPlayBioEditing] = useState(false)
   const [playBioBusy, setPlayBioBusy] = useState(false)
   const [playBioMessage, setPlayBioMessage] = useState<string | null>(null)
   // Set after a successful Play save when some photos didn't publish yet.
   const [playNotices, setPlayNotices] = useState<string[] | null>(null)
+  // After the Play save: whether the trial welcome is due, and whether it's showing.
+  const [trialWelcomeDue, setTrialWelcomeDue] = useState(false)
+  const [trialWelcomeOpen, setTrialWelcomeOpen] = useState(false)
 
   // Release photo preview object URLs when leaving the page.
   const photosRef = useRef(draft.photos)
@@ -419,18 +428,27 @@ export default function Onboarding() {
     navigate('/discover?play_setup_complete=true', { replace: true })
   }
 
+  // Trial users see the welcome first; its button carries on into Play.
+  function enterPlay(welcomeDue = trialWelcomeDue) {
+    if (welcomeDue) setTrialWelcomeOpen(true)
+    else continueToPlay()
+  }
+
   async function launchPlay() {
     setSaving(true)
     setSaveError(null)
     try {
       const notices = await savePlayOnlyOnboarding(uid, draft, play)
-      await finishWithFounderCheck(() => {
+      // Founder badge first: a founder never sees the trial welcome.
+      await finishWithFounderCheck(async () => {
+        const welcomeDue = await needsPlayTrialWelcome(uid).catch(() => false)
+        setTrialWelcomeDue(welcomeDue)
         // Saved; a photo still under review is explained before moving on.
         if (notices.length > 0) {
           setPlayNotices(notices)
           setSaving(false)
         } else {
-          continueToPlay()
+          enterPlay(welcomeDue)
         }
       })
     } catch (err) {
@@ -566,6 +584,10 @@ export default function Onboarding() {
         return <PlayWelcomeStep />
       case 'spice':
         return <SpiceStep {...playProps} />
+      case 'aboutYou':
+        return <AboutYouStep {...playProps} />
+      case 'myType':
+        return <MyTypeStep {...playProps} />
       case 'arrangement':
         return <ArrangementStep {...playProps} />
       case 'scene':
@@ -598,7 +620,7 @@ export default function Onboarding() {
     if (!playPath) return 'Next'
     if (id === 'discovery') return "Let's go 🔥"
     if (id === 'playWelcome') return "Let's go →"
-    if (id === 'scene' || id === 'nonNegotiables') return 'Next (optional) →'
+    if (id === 'aboutYou' || id === 'scene' || id === 'nonNegotiables' || id === 'myType') return 'Next (optional) →'
     return 'Next'
   }
 
@@ -653,12 +675,12 @@ export default function Onboarding() {
           {step.id === 'playReview' && (
             <button
               type="button"
-              onClick={playNotices ? continueToPlay : launchPlay}
+              onClick={playNotices ? () => enterPlay() : launchPlay}
               disabled={saving}
               className="flex-[2] rounded-lg px-4 py-3 font-semibold text-white disabled:opacity-40"
               style={{ backgroundColor: RED }}
             >
-              {playNotices ? 'Continue to Play →' : saving ? 'Saving…' : '🔥 Launch Play ✦'}
+              {playNotices ? 'Continue to Play →' : saving ? 'Saving…' : "🔥 Let's Play"}
             </button>
           )}
           {!ownsPrimary && (
@@ -681,6 +703,7 @@ export default function Onboarding() {
       </nav>
 
       {founderNumber !== null && <FounderCelebration number={founderNumber} />}
+      {trialWelcomeOpen && <PlayTrialWelcome onContinue={continueToPlay} />}
     </div>
   )
 }

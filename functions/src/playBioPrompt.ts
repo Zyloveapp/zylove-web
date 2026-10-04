@@ -12,6 +12,7 @@ import {
   type SpiceLevel,
 } from './shared/dualProfile'
 import { ATTRACTED_TO_LABELS, GENDER_LABELS } from './shared/profile'
+import { parsePlayAbout, parseQuestionAnswers, qaBlocks, type PlayAbout } from './playGoDeeperPrompt'
 
 const MAX_ANSWER = 300
 const MAX_ANSWERS = 6
@@ -31,6 +32,8 @@ export interface PlayBioRequest {
   dynamicPrompt: string | null
   genderIdentity: string[]
   attractedTo: string[]
+  about: PlayAbout
+  goDeeper: { question: string; answer: string }[]
 }
 
 function has<T extends object>(record: T, key: unknown): key is keyof T {
@@ -79,6 +82,8 @@ export function parsePlayBioRequest(raw: unknown): PlayBioRequest {
       typeof d.dynamicPrompt === 'string' && d.dynamicPrompt.trim() ? d.dynamicPrompt.trim().slice(0, MAX_DYNAMIC_PROMPT) : null,
     genderIdentity: labels(d.genderIdentity, GENDER_LABELS),
     attractedTo: labels(d.attractedTo, ATTRACTED_TO_LABELS),
+    about: parsePlayAbout(d),
+    goDeeper: parseQuestionAnswers(d.goDeeper),
   }
 }
 
@@ -96,6 +101,9 @@ export function buildPlayBioPrompt(r: PlayBioRequest): string {
   const nonNegotiables = r.nonNegotiables.map((k) => PLAY_NON_NEGOTIABLE_LABELS[k]).join(', ')
   const genderStr = r.genderIdentity.join(' ')
   const attractedToStr = r.attractedTo.join(', ')
+  const goDeeperText = qaBlocks(r.goDeeper)
+  const { bodyType, height, bodyHair, grooming, energy } = r.about
+  const hasPhysical = Boolean(bodyType || height || bodyHair || grooming || energy)
 
   const promptText = r.promptAnswers
     .map((pa) => {
@@ -134,8 +142,22 @@ export function buildPlayBioPrompt(r: PlayBioRequest): string {
     vibe ? `Their vibe: ${vibe}` : '',
     place ? `Where they play: ${place}` : '',
     '',
+    hasPhysical ? '── WHO THEY ARE (PHYSICAL) ──' : '',
+    r.about.bodyType ? `Body type: ${r.about.bodyType}` : '',
+    r.about.height ? `Height: ${r.about.height}` : '',
+    r.about.bodyHair ? `Body hair: ${r.about.bodyHair}` : '',
+    r.about.grooming ? `Grooming: ${r.about.grooming}` : '',
+    r.about.energy ? `Energy: ${r.about.energy}` : '',
+    '',
+    // Omitted entirely when every category is "Doesn't matter" or unanswered.
+    r.about.typePreferences.length ? '── WHAT THEY\'RE DRAWN TO ──' : '',
+    r.about.typePreferences.length ? `Their type: ${r.about.typePreferences.join(', ')}` : '',
+    '',
     '── THEIR OWN WORDS ──',
     promptText || 'none provided',
+    '',
+    goDeeperText ? '── GO DEEPER ANSWERS ──' : '',
+    goDeeperText,
     '',
     '── RULES ──',
     '- Maximum 300 characters',
@@ -144,6 +166,10 @@ export function buildPlayBioPrompt(r: PlayBioRequest): string {
     '- No emojis',
     '- Let the prompt answers set the voice — they are the most important input',
     '- Their spice level and dynamic selections should be felt in the tone, not stated explicitly',
+    '- Physical descriptors should be felt in the tone, not listed explicitly',
+    '- Someone Dom + Intense + Bearded should sound that way without saying it',
+    '- Go Deeper answers are the most revealing — weight them as heavily as regular prompts',
+    '- Type preferences can subtly inform the ending hook — who they\'re calling toward',
     '- Do not mention every selection — choose the combination that paints the most compelling picture',
     '- Someone with "High chemistry only" and "Connection first" should sound completely different from someone with "Purely physical" and "No strings"',
     '- No clichés. Never: "drama free", "good vibes only", "fluent in sarcasm"',

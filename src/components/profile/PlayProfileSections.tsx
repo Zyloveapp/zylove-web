@@ -11,6 +11,7 @@ import {
   type SpiceLevel,
 } from '../../types/dualProfile'
 import { promptQuestion } from '../discover/labels'
+import { typePreferenceLabels } from '../../types/playDescriptors'
 import { PhotoHero, Pills, ProfileHeader, SectionHeading } from './ProfileSections'
 import { badgeTier } from '../TierBadge'
 
@@ -47,6 +48,8 @@ export function PlayDetailsBody({ bio, play }: { bio: string; play: PlayProfileD
     has(PLAY_NON_NEGOTIABLE_LABELS, k) ? PLAY_NON_NEGOTIABLE_LABELS[k as PlayNonNegotiable] : k.replace(/_/g, ' '),
   )
   const prompts = play.promptAnswers
+  // Hidden when every category is "Doesn't matter" or unanswered.
+  const myType = typePreferenceLabels(play.typePreferences)
 
   return (
     <>
@@ -74,6 +77,13 @@ export function PlayDetailsBody({ bio, play }: { bio: string; play: PlayProfileD
         </section>
       )}
 
+      {play.descriptors.length > 0 && (
+        <section>
+          <SectionHeading>About me</SectionHeading>
+          <Pills items={play.descriptors} />
+        </section>
+      )}
+
       {groupedInterests(play.playInterestTags).map((g) => (
         <section key={g.title}>
           <SectionHeading>{g.title}</SectionHeading>
@@ -88,12 +98,31 @@ export function PlayDetailsBody({ bio, play }: { bio: string; play: PlayProfileD
         </section>
       )}
 
+      {myType.length > 0 && (
+        <section>
+          <SectionHeading>My type</SectionHeading>
+          <Pills items={myType} tone="red" />
+        </section>
+      )}
+
       {prompts.length > 0 && (
         <section className="space-y-3">
           {prompts.map((q) => (
             <div key={q.promptId} className="rounded-2xl border border-white/10 bg-white/5 p-5">
               <p className="text-sm text-white/40">{promptQuestion(q.promptId)}</p>
               <p className="mt-2 text-lg text-white">{q.answer}</p>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {play.goDeeper.length > 0 && (
+        <section className="space-y-3">
+          <SectionHeading>Go Deeper 🔥</SectionHeading>
+          {play.goDeeper.map((g) => (
+            <div key={g.question} className="rounded-2xl border border-[#E03131]/25 bg-[#E03131]/5 p-5">
+              <p className="text-sm text-white/40">{g.question}</p>
+              <p className="mt-2 text-lg text-white">{g.answer}</p>
             </div>
           ))}
         </section>

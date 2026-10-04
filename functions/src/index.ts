@@ -14,6 +14,7 @@ import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 import { buildBioPrompt, parseBioRequest } from './bioPrompt'
 import { buildPlayBioPrompt, parsePlayBioRequest } from './playBioPrompt'
+import { buildPlayGoDeeperPrompt, cleanGoDeeperQuestion, parsePlayGoDeeperRequest } from './playGoDeeperPrompt'
 import { LOOKUP_SECRETS, SMS_SECRETS, claimSparkSmsSlot, lookupLineType, nameFor, sendSMS, smsTarget } from './sms'
 
 export { assignFounderBadge, onLaunchConfigUpdated } from './founders'
@@ -162,6 +163,84 @@ export const generatePlayBio = onCall(
       logger.error('generatePlayBio failed', { message: err instanceof Error ? err.message : String(err) })
       return { bio: '' }
     }
+  },
+)
+
+// ─── generatePlayGoDeeper ─────────────────────────────────────────────────────
+
+// Go Deeper generations (each one a pair of questions) per rolling week.
+const PLAY_GO_DEEPER_WEEKLY_LIMIT = 3
+const GO_DEEPER_TEMPERATURES = [0.9, 1.0] as const
+
+function recentGoDeeper(data: DocumentData | undefined, now: number): number[] {
+  const raw: unknown = data?.goDeeperGenerations?.play
+  return Array.isArray(raw) ? raw.filter((t): t is number => typeof t === 'number' && now - t < WEEK_MS) : []
+}
+
+// One question from the shared prompt, or '' on any API failure.
+async function askGoDeeper(prompt: string, temperature: number): Promise<string> {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': anthropicKey.value(),
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 100,
+      temperature,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  })
+  if (!response.ok) {
+    logger.error('generatePlayGoDeeper: Anthropic API error', { status: response.status })
+    return ''
+  }
+  return cleanGoDeeperQuestion(extractText(await response.json()))
+}
+
+const sameQuestion = (a: string, b: string) => a.toLowerCase().replace(/\W/g, '') === b.toLowerCase().replace(/\W/g, '')
+
+// Two personal Go Deeper questions written from the user's Play answers. Same
+// prompt twice at different temperatures; if both land on the same question
+// the second is asked once more. Rate limited like generatePlayBio — only a
+// successful pair counts.
+export const generatePlayGoDeeper = onCall(
+  { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
+  async (request): Promise<{ questions: [string, string] }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to generate questions.')
+    const userRef = getFirestore().doc(`users/${request.auth.uid}`)
+
+    const snap = await userRef.get()
+    if (recentGoDeeper(snap.data(), Date.now()).length >= PLAY_GO_DEEPER_WEEKLY_LIMIT) {
+      throw new HttpsError('resource-exhausted', 'Go Deeper limit reached. Try again next week.')
+    }
+
+    const prompt = buildPlayGoDeeperPrompt(parsePlayGoDeeperRequest(request.data))
+    let first = ''
+    let second = ''
+    try {
+      ;[first, second] = await Promise.all(GO_DEEPER_TEMPERATURES.map((t) => askGoDeeper(prompt, t)))
+      if (first && second && sameQuestion(first, second)) second = await askGoDeeper(prompt, GO_DEEPER_TEMPERATURES[1])
+    } catch (err) {
+      logger.error('generatePlayGoDeeper failed', { message: err instanceof Error ? err.message : String(err) })
+    }
+    if (!first || !second || sameQuestion(first, second)) {
+      throw new HttpsError('unavailable', "Couldn't generate questions right now.")
+    }
+
+    // Re-checked in the transaction so parallel calls can't record past the limit.
+    await getFirestore().runTransaction(async (tx) => {
+      const now = Date.now()
+      const recent = recentGoDeeper((await tx.get(userRef)).data(), now)
+      tx.set(
+        userRef,
+        { goDeeperGenerations: { play: [...recent, now].slice(-PLAY_GO_DEEPER_WEEKLY_LIMIT) } },
+        { merge: true },
+      )
+    })
+    return { questions: [first, second] }
   },
 )
 

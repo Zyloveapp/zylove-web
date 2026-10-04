@@ -1,6 +1,7 @@
 import { doc, getDoc, type DocumentData } from 'firebase/firestore'
 import { db } from './firebase'
 import type { PromptAnswer } from '../types/dualProfile'
+import { parseTypePreferences, playDescriptorLabels, type TypePreferences } from '../types/playDescriptors'
 
 // users/{uid}/playProfile/data — the Play face of a profile. Kept free of
 // other service imports so discover.ts and profile.ts can both use it.
@@ -11,6 +12,10 @@ export interface PlayProfileData {
   playInterestTags: string[]
   playNonNegotiables: string[]
   promptAnswers: PromptAnswer[]
+  // "A little about you" as display labels (height, body type, …).
+  descriptors: string[]
+  typePreferences: TypePreferences
+  goDeeper: { question: string; answer: string }[]
 }
 
 function strings(v: unknown): string[] {
@@ -44,6 +49,16 @@ export function parsePlayProfile(d: DocumentData): PlayProfileData {
     playInterestTags: strings(d.playInterestTags),
     playNonNegotiables: strings(d.playNonNegotiables),
     promptAnswers: playPrompts(d),
+    descriptors: playDescriptorLabels(d),
+    typePreferences: parseTypePreferences(d.typePreferences),
+    goDeeper: Array.isArray(d.goDeeper)
+      ? d.goDeeper.filter(
+          (g: unknown): g is { question: string; answer: string } =>
+            typeof (g as { question?: unknown })?.question === 'string' &&
+            typeof (g as { answer?: unknown })?.answer === 'string' &&
+            (g as { answer: string }).answer.trim() !== '',
+        )
+      : [],
   }
 }
 

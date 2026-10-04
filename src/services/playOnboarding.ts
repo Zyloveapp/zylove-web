@@ -4,13 +4,30 @@ import { FirebaseError } from 'firebase/app'
 import { db, functions } from './firebase'
 import { uploadModeratedPhotos } from './moderatedPhotos'
 import { keysReady, resolveKeypair } from './keys'
+import { isAlwaysElite } from './subscription'
 import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
 import {
+  PLAY_PROMPT_BANK,
   PLAY_TAG_LABELS,
+  SPICE_META,
+  selectPlayPrompts,
   type PlayInterestTag,
   type PlayNonNegotiable,
   type SpiceLevel,
 } from '../types/dualProfile'
+import {
+  EMPTY_TYPE_PREFERENCES,
+  PLAY_BODY_HAIR_LABELS,
+  PLAY_BODY_TYPE_LABELS,
+  PLAY_ENERGY_LABELS,
+  PLAY_GROOMING_LABELS,
+  parseTypePreferences,
+  type PlayBodyHair,
+  type PlayBodyType,
+  type PlayEnergy,
+  type PlayGrooming,
+  type TypePreferences,
+} from '../types/playDescriptors'
 import { parseBirthday, type OnboardingDraft, type PhotoDraft } from '../components/onboarding/types'
 
 export type PlayTagCategory = 'arrangement' | 'acts' | 'dynamic' | 'vibe' | 'place'
@@ -22,9 +39,46 @@ export interface PlayDraft {
   // Every selected tag, across all five categories.
   tags: PlayInterestTag[]
   nonNegotiables: PlayNonNegotiable[]
-  // The three prompts shown (seeded per user, swappable) and their answers.
+  // The prompts shown (three seeded per user, swappable, up to five) and
+  // their answers.
   promptIds: string[]
   answers: Record<string, string>
+  // "A little about you" — all optional. Height in cm.
+  bodyType: PlayBodyType | null
+  heightCm: number | null
+  bodyHair: PlayBodyHair | null
+  grooming: PlayGrooming | null
+  energy: PlayEnergy | null
+  typePreferences: TypePreferences
+  // The two AI-written Go Deeper questions and their (optional) answers.
+  goDeeper: GoDeeperAnswer[]
+}
+
+export interface GoDeeperAnswer {
+  question: string
+  answer: string
+}
+
+export const MIN_PLAY_ANSWERS = 3
+export const MAX_PLAY_PROMPTS = 5
+
+export function emptyPlayDraft(uid: string): PlayDraft {
+  return {
+    photos: [],
+    bio: '',
+    spiceLevel: null,
+    tags: [],
+    nonNegotiables: [],
+    promptIds: selectPlayPrompts(uid).map((p) => p.id),
+    answers: {},
+    bodyType: null,
+    heightCm: null,
+    bodyHair: null,
+    grooming: null,
+    energy: null,
+    typePreferences: EMPTY_TYPE_PREFERENCES,
+    goDeeper: [],
+  }
 }
 
 export function tagsIn(tags: PlayInterestTag[], category: PlayTagCategory): PlayInterestTag[] {
@@ -35,6 +89,32 @@ function answeredPrompts(d: PlayDraft): { promptId: string; answer: string }[] {
   return d.promptIds
     .map((promptId) => ({ promptId, answer: (d.answers[promptId] ?? '').trim() }))
     .filter((p) => p.answer)
+}
+
+export function answeredGoDeeper(d: PlayDraft): GoDeeperAnswer[] {
+  return d.goDeeper.map((g) => ({ question: g.question, answer: g.answer.trim() })).filter((g) => g.answer)
+}
+
+// Standard prompts and Go Deeper together count toward the gate.
+export function playAnswerCount(d: PlayDraft): number {
+  return answeredPrompts(d).length + answeredGoDeeper(d).length
+}
+
+function promptText(id: string): string {
+  return PLAY_PROMPT_BANK.find((p) => p.id === id)?.text ?? id
+}
+
+// The about-you and type fields as saved on playProfile/data and mirrored to
+// the root doc. Unset values are null so an edit can clear them.
+function descriptorFields(d: PlayDraft) {
+  return {
+    playBodyType: d.bodyType,
+    playHeight: d.heightCm,
+    playBodyHair: d.bodyHair,
+    playGrooming: d.grooming,
+    playEnergy: d.energy,
+    typePreferences: d.typePreferences,
+  }
 }
 
 // ─── Bio ─────────────────────────────────────────────────────────────────────
@@ -59,9 +139,41 @@ export async function generatePlayBio(
       promptAnswers: answeredPrompts(d),
       genderIdentity: identity.genderIdentity,
       attractedTo: identity.attractedTo,
+      ...descriptorFields(d),
+      goDeeper: answeredGoDeeper(d),
     })
     const bio = data.bio?.trim()
     return bio ? { bio } : { error: 'failed' }
+  } catch (err) {
+    return { error: err instanceof FirebaseError && err.code === 'functions/resource-exhausted' ? 'limit' : 'failed' }
+  }
+}
+
+// ─── Go Deeper ───────────────────────────────────────────────────────────────
+
+export type GoDeeperResult = { questions: string[] } | { error: 'limit' | 'failed' }
+
+// Two questions written from everything answered so far (generatePlayGoDeeper,
+// 3 per rolling week). The standard prompt answers go along as context.
+export async function generatePlayGoDeeper(d: PlayDraft): Promise<GoDeeperResult> {
+  try {
+    const { data } = await httpsCallable<object, { questions?: unknown }>(functions, 'generatePlayGoDeeper', {
+      timeout: 60_000,
+    })({
+      spiceLevel: d.spiceLevel,
+      spiceDescription: d.spiceLevel ? SPICE_META[d.spiceLevel].description : null,
+      arrangementTags: tagsIn(d.tags, 'arrangement'),
+      dynamicTags: tagsIn(d.tags, 'dynamic'),
+      vibeTags: tagsIn(d.tags, 'vibe'),
+      actsTags: tagsIn(d.tags, 'acts'),
+      nonNegotiables: d.nonNegotiables,
+      ...descriptorFields(d),
+      existingPromptAnswers: answeredPrompts(d).map((p) => ({ question: promptText(p.promptId), answer: p.answer })),
+    })
+    const questions = Array.isArray(data.questions)
+      ? data.questions.filter((q): q is string => typeof q === 'string' && q.trim() !== '')
+      : []
+    return questions.length === 2 ? { questions } : { error: 'failed' }
   } catch (err) {
     return { error: err instanceof FirebaseError && err.code === 'functions/resource-exhausted' ? 'limit' : 'failed' }
   }
@@ -99,6 +211,8 @@ export async function savePlayOnboarding(uid: string, d: PlayDraft, { keepIntent
       playNonNegotiables: d.nonNegotiables,
       playPromptAnswers: Object.fromEntries(prompts.map((p) => [p.promptId, p.answer])),
       promptAnswers: prompts,
+      ...descriptorFields(d),
+      goDeeper: answeredGoDeeper(d),
       playOnboardingComplete: true,
       aiPhotoScanningConsent: true,
       isActive: d.photos.length > 0,
@@ -116,6 +230,8 @@ export async function savePlayOnboarding(uid: string, d: PlayDraft, { keepIntent
     playNonNegotiables: d.nonNegotiables,
     playBio: bio,
     playPromptAnswers: prompts,
+    ...descriptorFields(d),
+    playGoDeeper: answeredGoDeeper(d),
     profileUpdatedAt: serverTimestamp(),
   })
   await batch.commit()
@@ -192,6 +308,8 @@ export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, pl
       playNonNegotiables: play.nonNegotiables,
       playBio: bio,
       playPromptAnswers: prompts,
+      ...descriptorFields(play),
+      playGoDeeper: answeredGoDeeper(play),
       lastActive: now,
       profileUpdatedAt: serverTimestamp(),
       ...((keys.changed || !existing.exists()) && { publicKey: keys.publicKey }),
@@ -209,6 +327,8 @@ export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, pl
       playNonNegotiables: play.nonNegotiables,
       playPromptAnswers: Object.fromEntries(prompts.map((p) => [p.promptId, p.answer])),
       promptAnswers: prompts,
+      ...descriptorFields(play),
+      goDeeper: answeredGoDeeper(play),
       playOnboardingComplete: true,
       aiPhotoScanningConsent: true,
       isActive: d.photos.length > 0,
@@ -237,6 +357,15 @@ export async function savePlayOnlyOnboarding(uid: string, d: OnboardingDraft, pl
   return notices
 }
 
+// Gets Play on the 30-day trial rather than for free: not a founder, not an
+// always-Elite gender, not already Elite. Read after initUserDefaults has run,
+// so subscriptionTier reflects the server's decision.
+export async function needsPlayTrialWelcome(uid: string): Promise<boolean> {
+  const data = (await getDoc(doc(db, 'users', uid))).data()
+  if (!data) return false
+  return !isAlwaysElite(data) && data.subscriptionTier !== 'elite'
+}
+
 // Play-only: chose the Play path, finished Play, and never built a Spark
 // profile. Everyone else (missing or other onboardingPath) is a Spark user.
 export async function isPlayOnlyUser(uid: string): Promise<boolean> {
@@ -252,6 +381,10 @@ export async function isPlayOnlyUser(uid: string): Promise<boolean> {
 // ─── Edit ────────────────────────────────────────────────────────────────────
 
 const PROMPT_SLOTS = 3
+
+function oneOf<T extends string>(record: Record<T, string>, v: unknown): T | null {
+  return typeof v === 'string' && Object.prototype.hasOwnProperty.call(record, v) ? (v as T) : null
+}
 
 // The saved Play profile as an onboarding draft, or null if there isn't one.
 // Photos come back as already-uploaded entries (file: null); prompt slots are
@@ -272,11 +405,20 @@ export async function loadPlayDraft(uid: string, suggested: string[]): Promise<P
       if (typeof answer === 'string' && answer.trim()) answers[id] = answer
     }
   }
-  const promptIds = Object.keys(answers).slice(0, PROMPT_SLOTS)
+  const promptIds = Object.keys(answers).slice(0, MAX_PLAY_PROMPTS)
   for (const id of suggested) {
     if (promptIds.length >= PROMPT_SLOTS) break
     if (!promptIds.includes(id)) promptIds.push(id)
   }
+
+  const goDeeper: GoDeeperAnswer[] = Array.isArray(d.goDeeper)
+    ? d.goDeeper
+        .filter((g: unknown): g is GoDeeperAnswer => {
+          const q = g as GoDeeperAnswer
+          return typeof q?.question === 'string' && typeof q?.answer === 'string' && q.question.trim() !== ''
+        })
+        .map((g: GoDeeperAnswer) => ({ question: g.question, answer: g.answer }))
+    : []
 
   return {
     photos: strings(d.photoURLs).map((url) => ({ id: url, file: null, previewUrl: url })),
@@ -286,5 +428,12 @@ export async function loadPlayDraft(uid: string, suggested: string[]): Promise<P
     nonNegotiables: strings(d.playNonNegotiables) as PlayNonNegotiable[],
     promptIds,
     answers,
+    bodyType: oneOf(PLAY_BODY_TYPE_LABELS, d.playBodyType),
+    heightCm: typeof d.playHeight === 'number' && d.playHeight > 0 ? d.playHeight : null,
+    bodyHair: oneOf(PLAY_BODY_HAIR_LABELS, d.playBodyHair),
+    grooming: oneOf(PLAY_GROOMING_LABELS, d.playGrooming),
+    energy: oneOf(PLAY_ENERGY_LABELS, d.playEnergy),
+    typePreferences: parseTypePreferences(d.typePreferences),
+    goDeeper,
   }
 }
