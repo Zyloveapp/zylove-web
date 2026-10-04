@@ -12,13 +12,15 @@ interface PlayPinFlowProps {
   purpose: 'unlock' | 'change'
   onDone: () => void
   onCancel: () => void
+  // Shown under the entry title — the inactivity lock's timeout note.
+  entrySubtitle?: string
 }
 
 // Entry → (forgot → SMS reset) → setup, as needed. With no PIN yet, starts
 // at setup. Changing a PIN means entering the current one first. The saved
 // PIN is checked in Firestore first, so a browser that lost its copy asks
 // for the existing PIN instead of making the user set a new one.
-export default function PlayPinFlow({ uid, purpose, onDone, onCancel }: PlayPinFlowProps) {
+export default function PlayPinFlow({ uid, purpose, onDone, onCancel, entrySubtitle }: PlayPinFlowProps) {
   const [step, setStep] = useState<Step | null>(() => (hasPin(uid) ? 'entry' : null))
 
   useEffect(() => {
@@ -38,7 +40,8 @@ export default function PlayPinFlow({ uid, purpose, onDone, onCancel }: PlayPinF
   return (
     <PinEntry
       uid={uid}
-      title={purpose === 'change' ? 'Enter your current PIN' : 'Enter your Play PIN'}
+      title={purpose === 'change' ? 'Enter your current PIN' : '🔥 Enter your Play PIN'}
+      subtitle={entrySubtitle}
       onSuccess={purpose === 'change' ? () => setStep('setup') : onDone}
       onCancel={onCancel}
       onForgot={() => setStep('reset')}

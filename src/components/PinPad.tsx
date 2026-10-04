@@ -36,8 +36,10 @@ export default function PinPad({ value, onChange, disabled = false, shake = fals
         {Array.from({ length: PIN_LENGTH }, (_, i) => (
           <span
             key={i}
-            className={`h-4 w-4 rounded-full border-2 transition-colors ${
-              i < value.length ? 'border-white bg-white' : 'border-white/40 bg-transparent'
+            className={`h-4 w-4 rounded-full border transition-colors ${
+              i < value.length
+                ? 'zy-dot-fill border-[#E03131] bg-[#E03131] shadow-[0_0_8px_rgba(224,49,49,0.6)]'
+                : 'border-white/20 bg-transparent'
             }`}
           />
         ))}
@@ -53,7 +55,7 @@ export default function PinPad({ value, onChange, disabled = false, shake = fals
               onClick={() => press(key)}
               disabled={disabled}
               aria-label={key === 'back' ? 'Delete' : key}
-              className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-white/[0.07] text-2xl font-medium text-white transition-colors hover:bg-white/15 active:bg-white/25 disabled:opacity-30"
+              className="flex h-[72px] w-[72px] items-center justify-center rounded-full border border-transparent bg-white/10 text-2xl font-medium text-white transition-[transform,background-color,border-color] duration-100 hover:bg-white/15 active:scale-95 active:border-[#E03131]/40 active:bg-[#E03131]/30 disabled:opacity-30"
             >
               {key === 'back' ? '⌫' : key}
             </button>
@@ -64,8 +66,8 @@ export default function PinPad({ value, onChange, disabled = false, shake = fals
   )
 }
 
-// Full-screen dark shell shared by the PIN screens. Portaled to <body> so it
-// sits above the sticky header and bottom nav that open it.
+// Full-screen dark shell shared by the (Play) PIN screens, with a red glow.
+// Portaled to <body> so it sits above the sticky header and bottom nav.
 export function PinScreen({ title, subtitle, children }: { title: string; subtitle?: ReactNode; children: ReactNode }) {
   return createPortal(
     <div
@@ -74,11 +76,16 @@ export function PinScreen({ title, subtitle, children }: { title: string; subtit
       aria-modal="true"
       aria-labelledby="pin-title"
     >
-      <h2 id="pin-title" className="text-2xl font-bold">
+      <div
+        className="pointer-events-none fixed inset-0"
+        style={{ background: 'radial-gradient(ellipse at center, rgba(224, 49, 49, 0.15) 0%, transparent 70%)' }}
+        aria-hidden
+      />
+      <h2 id="pin-title" className="relative text-2xl font-bold">
         {title}
       </h2>
-      {subtitle && <p className="mt-2 max-w-xs text-sm text-white/60">{subtitle}</p>}
-      <div className="mt-10">{children}</div>
+      {subtitle && <p className="relative mt-2 max-w-xs text-sm text-white/60">{subtitle}</p>}
+      <div className="relative mt-10">{children}</div>
     </div>,
     document.body,
   )

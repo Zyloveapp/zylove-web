@@ -5,13 +5,22 @@ import { PIN_LENGTH, checkPin, lockedUntil } from '../services/playPin'
 interface PinEntryProps {
   uid: string
   title?: string
+  // e.g. the inactivity lock's "Your session timed out for privacy."
+  subtitle?: string
   onSuccess: () => void
   onCancel: () => void
   onForgot: () => void
 }
 
 // Auto-submits on the fourth digit. Three misses lock entry for 30 seconds.
-export default function PinEntry({ uid, title = 'Enter your Play PIN', onSuccess, onCancel, onForgot }: PinEntryProps) {
+export default function PinEntry({
+  uid,
+  title = '🔥 Enter your Play PIN',
+  subtitle,
+  onSuccess,
+  onCancel,
+  onForgot,
+}: PinEntryProps) {
   const [value, setValue] = useState('')
   const [checking, setChecking] = useState(false)
   const [wrong, setWrong] = useState(false)
@@ -49,16 +58,16 @@ export default function PinEntry({ uid, title = 'Enter your Play PIN', onSuccess
   const secondsLeft = Math.ceil((lockEnd - now) / 1000)
 
   return (
-    <PinScreen title={title}>
+    <PinScreen title={title} subtitle={subtitle && <span className="text-white/40">{subtitle}</span>}>
       <PinPad value={value} onChange={change} disabled={checking || locked} shake={shake} />
       <p className="mt-6 h-5 text-sm text-red-400" role="alert">
         {locked ? `Too many attempts. Try again in ${secondsLeft} seconds.` : wrong ? 'Incorrect PIN' : ''}
       </p>
       <div className="mt-4 flex flex-col items-center gap-3">
-        <button type="button" onClick={onForgot} className="text-sm text-[#7C9BFF] hover:text-white">
+        <button type="button" onClick={onForgot} className="text-sm text-[#E03131]/70 hover:text-[#E03131]">
           Forgot your PIN?
         </button>
-        <button type="button" onClick={onCancel} className="text-sm text-white/50 hover:text-white">
+        <button type="button" onClick={onCancel} className="text-sm text-white/40 hover:text-white">
           Cancel
         </button>
       </div>

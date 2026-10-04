@@ -388,3 +388,13 @@ body {
   border: 3px solid #1b4fd8;
   cursor: pointer;
 }
+
+/* Play PIN dot filling in. */
+@keyframes zy-dot-fill {
+  from { transform: scale(0.8); }
+  to { transform: scale(1); }
+}
+.zy-dot-fill { animation: zy-dot-fill 150ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .zy-dot-fill { animation: none; }
+}

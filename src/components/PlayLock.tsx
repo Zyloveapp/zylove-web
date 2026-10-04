@@ -35,6 +35,7 @@ export default function PlayLock() {
     <PlayPinFlow
       uid={uid}
       purpose="unlock"
+      entrySubtitle="Your session timed out for privacy."
       onDone={() => {
         markPlayActive()
         setLocked(false)
