@@ -6,6 +6,7 @@ import { auth, db } from '../services/firebase'
 import { useModeStore } from '../store/modeStore'
 import { deleteAccount, deletePlayProfile, deleteSparkProfile } from '../services/profileDeletion'
 import { setVisibility } from '../services/visibility'
+import { SUPPORT_EMAIL } from '../services/errors'
 
 type Pending = 'profile' | 'account' | null
 
@@ -58,8 +59,7 @@ function FounderWarningModal({
         {what === 'account' ? (
           <div className="mt-3 space-y-3 text-sm text-white/60">
             <p>
-              Deleting your account permanently removes your {founder.badge} status and Elite access forever. Your spot will
-              open to someone else immediately.
+              Deleting your account ends your {founder.badge} status and your free Elite access.
             </p>
             <p>You can hide your account instead — your founder status stays safe and you can come back anytime.</p>
           </div>
@@ -337,7 +337,7 @@ export default function DeleteProfileControls({ uid }: { uid: string }) {
       {pending === 'account' && (
         <ConfirmModal
           title="Delete your account?"
-          body="This permanently deletes your Spark profile, Play profile, all matches and messages. This cannot be undone."
+          body={`Your Spark profile, Play profile, matches and messages come down right away. Changed your mind? Email ${SUPPORT_EMAIL} within 90 days and we can restore your account — after that it's permanently deleted.`}
           confirm="Delete my account"
           typeToConfirm="DELETE"
           busy={busy}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Navigate } from 'react-router-dom'
 import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
@@ -12,6 +12,7 @@ import {
   type FounderMessage,
 } from '../services/founderMessages'
 import { FounderComposer, FounderThreadView } from '../components/founder/FounderThread'
+import { useGoBack } from '../hooks/useGoBack'
 
 type Founder = { uid: string; isFounder: boolean; lastMessageAt: number | null; hasUnread: boolean }
 
@@ -22,7 +23,7 @@ export default function FounderMessages() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const mode = useModeStore((s) => s.mode)
   const backLinkClass = useBackLinkClass()
-  const navigate = useNavigate()
+  const goBack = useGoBack('/settings')
   const [founder, setFounder] = useState<Founder | null>(null)
   const [messages, setMessages] = useState<FounderMessage[] | null>(null)
   const [error, setError] = useState(false)
@@ -69,7 +70,7 @@ export default function FounderMessages() {
   return (
     <div className="mx-auto flex min-h-[calc(100dvh-7rem)] max-w-xl flex-col bg-gray-950 text-white">
       <div className="flex items-center gap-3 px-4 pt-6">
-        <button type="button" onClick={() => navigate(-1)} className={`text-sm font-medium ${backLinkClass} hover:text-white`}>
+        <button type="button" onClick={goBack} className={`text-sm font-medium ${backLinkClass} hover:text-white`}>
           ← Back
         </button>
         <h1 className="text-xl font-bold">Messages from the Founder</h1>

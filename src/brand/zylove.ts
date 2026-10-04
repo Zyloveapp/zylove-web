@@ -22,7 +22,7 @@ export const BRAND = {
   scoreTagline:   'Your reputation, earned.',
 
   // Legal
-  companyName:    'Zylove Inc.',
+  companyName:    'Zylove, LLC',
   supportEmail:   'support@zylove.app',
   privacyUrl:     'https://zylove.app/privacy',
   termsUrl:       'https://zylove.app/terms',
@@ -122,7 +122,6 @@ export const NOTIFICATION_COPY = {
 export const FEATURE_NAMES = {
   topPicks:       'Top 10',
   zyloveScore:   'Zylove Score',
-  playPass:     'Play Pass',
   trustedBadge: 'Trusted',
   forYou:       'For You',
 } as const

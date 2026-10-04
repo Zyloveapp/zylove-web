@@ -42,6 +42,7 @@ import Upgrade from './pages/Upgrade'
 import SubscriptionSync from './components/SubscriptionSync'
 import Chat from './pages/Chat'
 import ClaimFounder from './pages/ClaimFounder'
+import NotFound from './pages/NotFound'
 import FounderMessages from './pages/FounderMessages'
 import AdminMessages from './pages/admin/AdminMessages'
 import AdminDeletions from './pages/admin/AdminDeletions'
@@ -194,6 +195,7 @@ export default function App() {
             </Route>
           </Route>
         </Route>
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
   )

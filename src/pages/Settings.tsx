@@ -31,6 +31,8 @@ import PhotoConsentCopy from '../components/PhotoConsentCopy'
 import { isAdmin } from '../services/adminPhotos'
 import { listDeletions } from '../services/adminTools'
 import { setPhotoConsent, subscribePhotoConsent, type PhotoConsent, type PhotoConsentMode } from '../services/photoConsent'
+import { useGoBack } from '../hooks/useGoBack'
+import { SUPPORT_EMAIL } from '../services/errors'
 
 // On colour: cobalt by default (settings that cover both modes), red for Play.
 const SWITCH_ON = { spark: 'bg-[#1B4FD8]', play: 'bg-[#E03131]' } as const
@@ -382,6 +384,7 @@ export default function Settings() {
   // Only the current mode's notification section is shown.
   const mode = useModeStore((s) => s.mode)
   const navigate = useNavigate()
+  const goBack = useGoBack('/profile')
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [consentOpen, setConsentOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -451,7 +454,7 @@ export default function Settings() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => navigate(-1)}
+            onClick={goBack}
             className={`text-sm font-medium ${backLinkClass} hover:text-white`}
           >
             ← Back
@@ -598,6 +601,39 @@ export default function Settings() {
               →
             </span>
           </button>
+        </Section>
+
+        <Section title="Help & support">
+          <a
+            href={`mailto:${SUPPORT_EMAIL}`}
+            className="flex w-full items-center justify-between px-5 py-4 text-left hover:bg-white/[0.03]"
+          >
+            <span>
+              <span className="block font-medium">Contact support</span>
+              <span className="block text-sm text-white/50">{SUPPORT_EMAIL} — we read every message.</span>
+            </span>
+            <span className="text-white/30" aria-hidden>
+              ↗
+            </span>
+          </a>
+          {[
+            ['/community', 'Community guidelines'],
+            ['/terms', 'Terms of service'],
+            ['/privacy', 'Privacy policy'],
+          ].map(([to, label]) => (
+            <a
+              key={to}
+              href={to}
+              target="_blank"
+              rel="noopener"
+              className="flex w-full items-center justify-between border-t border-white/5 px-5 py-4 text-left hover:bg-white/[0.03]"
+            >
+              <span className="font-medium">{label}</span>
+              <span className="text-white/30" aria-hidden>
+                ↗
+              </span>
+            </a>
+          ))}
         </Section>
 
         <Section title="Account">

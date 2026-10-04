@@ -62,6 +62,8 @@ export default function Profile() {
     }
   }, [uid, mode])
 
+  // Bumped by "Try again" after a failed load.
+  const [reloadKey, setReloadKey] = useState(0)
   useEffect(() => {
     if (!uid) return
     let cancelled = false
@@ -73,7 +75,7 @@ export default function Profile() {
     return () => {
       cancelled = true
     }
-  }, [uid])
+  }, [uid, reloadKey])
 
   // Play-only accounts have no Spark profile to reimagine; null until known.
   const [playOnly, setPlayOnly] = useState<{ uid: string; value: boolean } | null>(null)
@@ -101,7 +103,19 @@ export default function Profile() {
   if (!loaded.data) {
     return (
       <div className={`flex items-center justify-center px-4 ${page}`}>
-        <p className="text-white/60">Couldn't load your profile.</p>
+        <div className="text-center">
+          <p className="text-white/60">Couldn't load your profile.</p>
+          <button
+            type="button"
+            onClick={() => {
+              setLoaded(null)
+              setReloadKey((n) => n + 1)
+            }}
+            className="mt-3 text-sm text-white/40 underline hover:text-white/60"
+          >
+            Try again
+          </button>
+        </div>
       </div>
     )
   }

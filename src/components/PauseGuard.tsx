@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { signOut } from 'firebase/auth'
+import { auth } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import { isOnBreak, setVisibility, subscribeVisibility, type VisibilityState } from '../services/visibility'
 
 // Covers every protected page with mobile's "You're on a break." screen while
 // all of the user's modes are paused. Renders children underneath so state
-// survives the round trip.
+// survives the round trip. Settings stays reachable (to delete, manage a
+// plan, or sign out) without un-pausing.
 export default function PauseGuard() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const mode = useModeStore((s) => s.mode)
@@ -20,7 +23,9 @@ export default function PauseGuard() {
     return subscribeVisibility(uid, setState, () => setState(null))
   }, [uid])
 
-  const onBreak = state !== null && isOnBreak(state)
+  const location = useLocation()
+  const navigate = useNavigate()
+  const onBreak = state !== null && isOnBreak(state) && !location.pathname.startsWith('/settings')
 
   async function resume() {
     if (!state) return
@@ -66,6 +71,18 @@ export default function PauseGuard() {
             I'm back ✦
           </button>
           {error && <p className="mt-4 text-sm text-red-400">Couldn't resume. Try again.</p>}
+          <div className="mt-8 flex gap-6 text-sm text-white/40">
+            <button type="button" onClick={() => navigate('/settings')} className="underline hover:text-white/70">
+              Settings
+            </button>
+            <button
+              type="button"
+              onClick={() => void signOut(auth).then(() => navigate('/login', { replace: true }))}
+              className="underline hover:text-white/70"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       )}
     </>

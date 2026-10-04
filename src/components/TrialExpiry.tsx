@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { signOut } from 'firebase/auth'
 import { auth } from '../services/firebase'
+import { SUPPORT_EMAIL } from '../services/errors'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import { useSubscriptionStore } from '../store/subscriptionStore'
@@ -11,7 +12,7 @@ import { ConfirmModal } from './DeleteProfileControls'
 import { useBilling } from './PaywallGate'
 
 // Trial over and no plan: blocks the app (no close button, no Escape) until
-// they subscribe or delete. Women and founders are Elite for life, so their
+// they subscribe, sign out, or delete. Women and founders are Elite for life, so their
 // tier is never 'free' and this never shows. /upgrade sits outside the app
 // layout, so Checkout's return page is never covered.
 // Play needs Elite: Play-only accounts see only Elite; in Play with a Spark
@@ -95,6 +96,15 @@ export default function TrialExpiry() {
               </button>
             )}
             {error && <p className="text-sm text-red-400">{error}</p>}
+            {/* Never a trap: they can always leave and come back later. */}
+            <button
+              type="button"
+              onClick={() => void signOut(auth).then(() => navigate('/login', { replace: true }))}
+              disabled={pending !== null}
+              className="w-full rounded-xl border border-white/15 py-3 font-semibold text-white/80 hover:bg-white/10"
+            >
+              Sign out
+            </button>
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
@@ -110,7 +120,7 @@ export default function TrialExpiry() {
       {confirmDelete && (
         <ConfirmModal
           title="Delete your account?"
-          body="This permanently deletes your Spark profile, Play profile, all matches and messages. This cannot be undone."
+          body={`Your Spark profile, Play profile, matches and messages come down right away. Changed your mind? Email ${SUPPORT_EMAIL} within 90 days and we can restore your account — after that it's permanently deleted.`}
           confirm="Delete my account"
           typeToConfirm="DELETE"
           busy={deleting}

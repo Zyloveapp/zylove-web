@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { doc, getDoc } from 'firebase/firestore'
-import { db } from '../services/firebase'
+import { signOut } from 'firebase/auth'
+import { auth, db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import { isPlayOnlyUser } from '../services/playOnboarding'
@@ -11,8 +12,8 @@ type ProfileStatus = 'complete' | 'incomplete' | 'error'
 
 function Spinner() {
   return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-gray-800" />
+    <div className="flex min-h-screen items-center justify-center bg-gray-950">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
     </div>
   )
 }
@@ -65,17 +66,20 @@ export default function AuthGuard() {
   // back through onboarding, which overwrites their photos and prompts.
   if (status === 'error') {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-4 text-center">
-        <p className="text-gray-700">We couldn't load your profile.</p>
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-gray-950 px-4 text-center text-white">
+        <p className="text-white/70">We couldn't load your profile. Check your connection and try again.</p>
         <button
           type="button"
           onClick={() => {
             setResult(null)
             setAttempt((n) => n + 1)
           }}
-          className="rounded-lg bg-gray-900 px-4 py-2 font-medium text-white"
+          className="rounded-xl bg-[#1B4FD8] px-5 py-2.5 font-semibold text-white transition-opacity hover:opacity-90"
         >
           Try again
+        </button>
+        <button type="button" onClick={() => void signOut(auth)} className="text-sm text-white/40 underline hover:text-white/70">
+          Sign out
         </button>
       </div>
     )
