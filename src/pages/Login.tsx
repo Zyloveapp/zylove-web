@@ -9,6 +9,7 @@ import PublicFooter from '../components/public/PublicFooter'
 import Wordmark from '../components/public/Wordmark'
 import FoundingCounter from '../components/public/FoundingCounter'
 import { requestLocation, saveUserLocation } from '../services/location'
+import { afterLoginPath } from '../services/afterLogin'
 
 // US numbers only: the field shows a fixed +1 and holds just the 10 digits.
 // Pasting "+1 555…" or "1555…" drops the leading country code.
@@ -96,7 +97,7 @@ function SignInCard() {
         setSubmitting(true)
         try {
           await signInWithEmailAndPassword(auth, email, password)
-          navigate('/discover', { replace: true })
+          navigate(afterLoginPath('/discover'), { replace: true })
         } catch (err) {
           setError(errorMessage(err))
           setSubmitting(false)
@@ -156,7 +157,7 @@ function SignInCard() {
       const { user } = await confirmOtp(confirmation, code)
       // Fire and forget: location never blocks sign-in, and a denial is silent.
       void requestLocation().then((loc) => (loc ? saveUserLocation(user.uid, loc) : undefined)).catch(() => {})
-      navigate('/discover', { replace: true })
+      navigate(afterLoginPath('/discover'), { replace: true })
     } catch (err) {
       setError(errorMessage(err))
       setSubmitting(false)
@@ -265,7 +266,7 @@ export default function Login() {
   // Blank (same background) while auth resolves, so signed-in users never
   // see the landing page flash before the redirect.
   if (loading) return <div className="min-h-screen bg-gray-950" />
-  if (user) return <Navigate to="/discover" replace />
+  if (user) return <Navigate to={afterLoginPath('/discover')} replace />
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">

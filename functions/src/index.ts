@@ -36,6 +36,7 @@ import { SPARK_GO_DEEPER_FOCUS, buildSparkGoDeeperPrompt, parseSparkGoDeeperRequ
 import { LOOKUP_SECRETS, SMS_SECRETS, claimSparkSmsSlot, lookupLineType, nameFor, sendSMS, smsTarget } from './sms'
 
 export { assignFounderBadge, onLaunchConfigUpdated } from './founders'
+export { checkFounderActivity, founderHeartbeat } from './founderActivity'
 export { ensureSortKey } from './discovery'
 export { mirrorPlayOnlyPhotos } from './playPhotoMirror'
 export { listPendingPhotos, reviewPendingPhoto } from './photoReview'

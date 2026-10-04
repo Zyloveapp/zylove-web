@@ -19,8 +19,11 @@ import {
   type PlayDraft,
 } from '../services/playOnboarding'
 import { generateSparkBio } from '../services/bio'
-import { claimFounderBadge } from '../services/founders'
+import { claimFounderBadge, founderOffer, markFounderInviteShown, type FounderOffer } from '../services/founders'
+import { grantSmsConsent } from '../services/notifications'
 import FounderCelebration from '../components/FounderCelebration'
+import FounderInviteModal from '../components/FounderInvite'
+import SmsConsentModal from '../components/SmsConsentModal'
 import TermsStep from '../components/onboarding/TermsStep'
 import NameStep from '../components/onboarding/NameStep'
 import PhotosStep from '../components/onboarding/PhotosStep'
@@ -274,6 +277,14 @@ export default function Onboarding() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [founder, setFounder] = useState<{ number: number; cityName?: string } | null>(null)
+  // End of onboarding with a founder spot open: SMS consent (if not given
+  // yet), then the invitation; finish runs once they've chosen.
+  const [invite, setInvite] = useState<{ offer: FounderOffer; mode: 'spark' | 'play'; stage: 'sms' | 'invite' } | null>(
+    null,
+  )
+  const [inviteBusy, setInviteBusy] = useState(false)
+  const [inviteError, setInviteError] = useState<string | null>(null)
+  const inviteFinish = useRef<() => void>(() => {})
   // Incremented to discard an in-flight bio request (skip or regenerate).
   const bioRequest = useRef(0)
   // Play-only path: the Play profile answers (photos live on draft.photos).
@@ -449,19 +460,58 @@ export default function Onboarding() {
     next()
   }
 
-  // City founding circle: capped so a location prompt left open can't
-  // hold onboarding up; any failure just carries on.
-  async function finishWithFounderCheck(finish: () => void) {
-    const founder = await Promise.race([
-      claimFounderBadge(uid),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), FOUNDER_CHECK_MS)),
-    ])
-    if (founder?.eligible) {
-      setFounder({ number: founder.cohortNumber, cityName: founder.cityName })
-      setTimeout(finish, FOUNDER_CELEBRATION_MS)
+  // City founding circle: if their city has a spot open in their half,
+  // invite them before moving on. The check is capped so a location prompt
+  // left open can't hold onboarding up; any failure just carries on.
+  // Reimagine-my-profile runs skip it (the profile banner offers it).
+  async function finishWithFounderInvite(finish: () => void, mode: 'spark' | 'play') {
+    const offer = refresh
+      ? null
+      : await Promise.race([
+          founderOffer(uid, { ask: true }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), FOUNDER_CHECK_MS)),
+        ])
+    if (!offer) return finish()
+    inviteFinish.current = finish
+    // Consent first, so people who opt in hear about spots that open later.
+    const askSms = !offer.smsConsented && !!user?.phoneNumber
+    if (!askSms) void markFounderInviteShown(uid)
+    setInvite({ offer, mode, stage: askSms ? 'sms' : 'invite' })
+  }
+
+  function showInvite() {
+    void markFounderInviteShown(uid)
+    setInvite((i) => (i ? { ...i, stage: 'invite' } : i))
+  }
+
+  async function acceptSms() {
+    const phone = user?.phoneNumber
+    if (!invite || !phone) return showInvite()
+    setInviteBusy(true)
+    await grantSmsConsent(uid, phone, invite.mode).catch(() => {})
+    setInviteBusy(false)
+    showInvite()
+  }
+
+  async function acceptInvite() {
+    setInviteBusy(true)
+    setInviteError(null)
+    const result = await claimFounderBadge(uid)
+    setInviteBusy(false)
+    if (!result) return setInviteError("Couldn't save your spot. Try again, or decide later from your profile.")
+    setInvite(null)
+    if (result.eligible) {
+      setFounder({ number: result.cohortNumber, cityName: result.cityName })
+      setTimeout(inviteFinish.current, FOUNDER_CELEBRATION_MS)
     } else {
-      finish()
+      // Taken in the meantime: carry on.
+      inviteFinish.current()
     }
+  }
+
+  function declineInvite() {
+    setInvite(null)
+    inviteFinish.current()
   }
 
   async function createProfile() {
@@ -474,13 +524,13 @@ export default function Onboarding() {
       })
       // A photo still under review (or slow) goes on the profile page, where
       // the notice shows; Discover needs a published photo anyway.
-      await finishWithFounderCheck(() => {
+      await finishWithFounderInvite(() => {
         // Both profiles now exist, so Spark is home.
         if (sparkSetup) setMode('spark')
         if (photoNotices.length > 0) navigate('/profile', { replace: true, state: { flash: photoNotices.join(' ') } })
         else if (refresh) navigate('/profile', { replace: true, state: { flash: '✦ Profile refreshed.' } })
         else navigate('/discover', { replace: true })
-      })
+      }, 'spark')
     } catch (err) {
       setSaveError(saveErrorMessage(err))
       setSaving(false)
@@ -521,8 +571,8 @@ export default function Onboarding() {
     setSaveError(null)
     try {
       const notices = await savePlayOnlyOnboarding(uid, draft, play)
-      // Founder badge first: a founder never sees the trial welcome.
-      await finishWithFounderCheck(async () => {
+      // Founder invitation first: a founder never sees the trial welcome.
+      await finishWithFounderInvite(async () => {
         const welcomeDue = await needsPlayTrialWelcome(uid).catch(() => false)
         setTrialWelcomeDue(welcomeDue)
         // Saved; a photo still under review is explained before moving on.
@@ -532,7 +582,7 @@ export default function Onboarding() {
         } else {
           enterPlay(welcomeDue)
         }
-      })
+      }, 'play')
     } catch (err) {
       setSaveError(saveErrorMessage(err))
       setSaving(false)
@@ -809,6 +859,16 @@ export default function Onboarding() {
         )}
       </nav>
 
+      {invite?.stage === 'sms' && <SmsConsentModal busy={inviteBusy} onAccept={() => void acceptSms()} onDecline={showInvite} />}
+      {invite?.stage === 'invite' && (
+        <FounderInviteModal
+          cityName={invite.offer.city.name}
+          busy={inviteBusy}
+          error={inviteError}
+          onAccept={() => void acceptInvite()}
+          onLater={declineInvite}
+        />
+      )}
       {founder && <FounderCelebration number={founder.number} cityName={founder.cityName} />}
       {trialWelcomeOpen && <PlayTrialWelcome onContinue={continueToPlay} />}
     </div>

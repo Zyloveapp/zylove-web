@@ -7,6 +7,7 @@ import { loadPlayProfile, type PlayProfileData } from '../services/playProfile'
 import PlayProfileSections from '../components/profile/PlayProfileSections'
 import VisibilityControl from '../components/profile/VisibilityControl'
 import JustForYouCard from '../components/profile/JustForYouCard'
+import FounderClaimBanner from '../components/profile/FounderClaimBanner'
 import ProfileReviewSheet from '../components/profile/ProfileReviewSheet'
 import ProfileSections, { Pills, SectionHeading } from '../components/profile/ProfileSections'
 import { dealbreakerLabel, seekingTraitLabel } from '../components/discover/labels'
@@ -181,6 +182,13 @@ export default function Profile() {
           prompts={own.prompts}
           dynamicPrompt={own.dynamicPrompt}
           nameFallback="You"
+          afterHeader={
+            <FounderClaimBanner
+              uid={uid}
+              profile={own.profile}
+              onClaimed={() => void loadOwnProfile(uid).then((data) => data && setLoaded({ uid, data }))}
+            />
+          }
           lookingFor={
             (own.seekingTraits.length > 0 || own.dealbreakers.length > 0) && (
               <section>

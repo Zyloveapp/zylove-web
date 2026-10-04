@@ -1,12 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { BrowserRouter, Outlet, Routes, Route, useNavigate } from 'react-router-dom'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from './services/firebase'
 import { useAuthStore } from './store/authStore'
 import { refreshLocationIfStale } from './services/location'
-import { claimFounderBadge, founderCheckDone } from './services/founders'
+import { founderHeartbeat } from './services/founders'
 import { loadPin } from './services/playPin'
-import FounderCelebration from './components/FounderCelebration'
 import AuthGuard from './components/AuthGuard'
 import AdminGuard from './components/AdminGuard'
 import AdminPhotos from './pages/AdminPhotos'
@@ -40,11 +39,11 @@ import ReviewHistory from './pages/ReviewHistory'
 import Upgrade from './pages/Upgrade'
 import SubscriptionSync from './components/SubscriptionSync'
 import Chat from './pages/Chat'
+import ClaimFounder from './pages/ClaimFounder'
 
 // Protected pages share the nav. Leaves room for the mobile bottom bar.
 // Location (and the founder check) run once per user per page load.
 const locationChecked = new Set<string>()
-const CELEBRATION_MS = 1500
 
 // Chose the Play path in onboarding but never finished Play setup (left it,
 // or the redirect didn't happen): send them back once per session.
@@ -82,26 +81,16 @@ function AppLayout() {
       cancelled = true
     }
   }, [uid, navigate])
-  const [founder, setFounder] = useState<{ number: number; cityName?: string } | null>(null)
-
   // Signed in and onboarded: refresh a missing or week-old location in the
-  // background, then — once per user, for people who finished onboarding
-  // before founder badges existed — check for a city founder badge.
-  // Never blocks or errors.
+  // background, and let the server know an active founder is around (keeps
+  // their spot; see founderActivity.ts). Never blocks or errors.
   useEffect(() => {
     if (!uid || locationChecked.has(uid)) return
     locationChecked.add(uid)
     // Pull the Play PIN into this browser's cache (Settings reads it sync).
     void loadPin(uid)
-    void (async () => {
-      await refreshLocationIfStale(uid)
-      if (founderCheckDone(uid)) return
-      const result = await claimFounderBadge(uid)
-      if (result?.eligible) {
-        setFounder({ number: result.cohortNumber, cityName: result.cityName })
-        setTimeout(() => setFounder(null), CELEBRATION_MS)
-      }
-    })()
+    void refreshLocationIfStale(uid)
+    void founderHeartbeat(uid)
   }, [uid])
 
   return (
@@ -114,7 +103,6 @@ function AppLayout() {
       <ReviewPrompter />
       <PlayLock />
       <TrialExpiry />
-      {founder && <FounderCelebration number={founder.number} cityName={founder.cityName} />}
     </div>
   )
 }
@@ -153,6 +141,7 @@ export default function App() {
               <Route path="/settings/blocked" element={<BlockedUsers />} />
               <Route path="/settings/reviews" element={<ReviewHistory />} />
               <Route path="/chat/:matchId" element={<Chat />} />
+              <Route path="/claim-founder" element={<ClaimFounder />} />
               <Route element={<AdminGuard />}>
                 <Route path="/admin/photos" element={<AdminPhotos />} />
               </Route>

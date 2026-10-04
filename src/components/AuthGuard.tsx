@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Navigate, Outlet } from 'react-router-dom'
+import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import { isPlayOnlyUser } from '../services/playOnboarding'
+import { rememberAfterLogin } from '../services/afterLogin'
 
 type ProfileStatus = 'complete' | 'incomplete' | 'error'
 
@@ -20,6 +21,7 @@ export default function AuthGuard() {
   const user = useAuthStore((s) => s.user)
   const loading = useAuthStore((s) => s.loading)
   const uid = user?.uid
+  const location = useLocation()
 
   // Keyed by uid so a result for a previous user is never reused.
   const [result, setResult] = useState<{ uid: string; status: ProfileStatus } | null>(null)
@@ -50,7 +52,11 @@ export default function AuthGuard() {
   }, [uid, attempt])
 
   if (loading) return <Spinner />
-  if (!user) return <Navigate to="/login" replace />
+  if (!user) {
+    // A founder-claim text tapped while signed out comes back here after login.
+    if (location.pathname === '/claim-founder') rememberAfterLogin(location.pathname + location.search)
+    return <Navigate to="/login" replace />
+  }
 
   const status = result?.uid === user.uid ? result.status : null
   if (status === null) return <Spinner />

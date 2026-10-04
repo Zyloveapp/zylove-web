@@ -9,6 +9,12 @@
 // public copy (members / capacity). Flat ids: config and publicStats are
 // one-level collections in the rules.
 //
+// Founders must stay active during launch (founderActivity.ts). The
+// lifecycle lives in founderRecords/{uid}, which only Cloud Functions can
+// read or write (rules default-deny); the users/{uid} copies (founderStatus,
+// founderLastActiveAt, …) are display mirrors, since clients can edit
+// those fields on their own doc.
+//
 // Austin also keeps config/launch and publicStats/founding up to date: they
 // are shared with the mobile founder-code program (redeemFounderCode) and
 // the landing page. Filling Austin no longer sets config/launch.botsActive,
@@ -18,10 +24,10 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { onDocumentUpdated } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { FieldPath, FieldValue, getFirestore } from 'firebase-admin/firestore'
-import { getNearestCity } from './cities'
+import { ZYLOVE_CITIES, getNearestCity } from './cities'
 
 // Per half (women / men); a city's circle is twice this.
-const DEFAULT_FOUNDER_TARGET = 50
+export const DEFAULT_FOUNDER_TARGET = 50
 // Everyone else counts toward the other half.
 const MEN_IDENTITIES = new Set(['man', 'trans_man'])
 const BOT_PREFIX = 'zbot-'
@@ -41,13 +47,21 @@ function parseCoords(data: unknown): { lat: number; lng: number } {
   return { lat, lng }
 }
 
+export type Bucket = 'women' | 'men'
+
+// Lifecycle (founderRecords/{uid}.status). Spot holders count toward the
+// city's womenCount/menCount; only active and permanent founders count as
+// members on the public counter.
+export type FounderStatus = 'active' | 'pending_revocation' | 'permanent' | 'revoked' | 'converted'
+const MEMBER_STATUSES = new Set(['active', 'permanent'])
+
 // Spark profiles store a string, Play an array; the first entry decides.
-function bucketFor(genderIdentity: unknown): 'women' | 'men' {
+export function bucketFor(genderIdentity: unknown): Bucket {
   const g = Array.isArray(genderIdentity) ? genderIdentity[0] : genderIdentity
   return typeof g === 'string' && MEN_IDENTITIES.has(g) ? 'men' : 'women'
 }
 
-const num = (v: unknown, fallback: number) => (typeof v === 'number' ? v : fallback)
+export const num = (v: unknown, fallback: number) => (typeof v === 'number' ? v : fallback)
 
 // Location is self-reported (browser geolocation, snapped to ~3 miles), so
 // this is a launch-period gate, not proof of residence.
@@ -65,17 +79,22 @@ export const assignFounderBadge = onCall(
     const statsRef = db.doc(`publicStats/city_${city.id}`)
     const launchRef = db.doc('config/launch')
     const userRef = db.doc(`users/${uid}`)
+    const recordRef = db.doc(`founderRecords/${uid}`)
     const isAustin = city.id === 'austin'
 
     const result = await db.runTransaction(async (tx): Promise<FounderResult> => {
-      const [citySnap, userSnap, launchSnap] = await Promise.all([
+      const [citySnap, userSnap, launchSnap, recordSnap] = await Promise.all([
         tx.get(cityRef),
         tx.get(userRef),
         isAustin ? tx.get(launchRef) : Promise.resolve(null),
+        tx.get(recordRef),
       ])
       const user = userSnap.data()
       if (!user || user.onboardingComplete !== true) return { eligible: false, reason: 'no_profile' }
       if (user.isFounder === true) return { eligible: false, reason: 'already_assigned' }
+      // Revoked founders may claim again; converted ones (Spark+ for good)
+      // already had their turn.
+      if (recordSnap.data()?.status === 'converted') return { eligible: false, reason: 'already_assigned' }
 
       // A missing city doc is created with the defaults (init-cities.mjs
       // normally makes them first).
@@ -92,7 +111,8 @@ export const assignFounderBadge = onCall(
 
       const nextWomen = bucket === 'women' ? women + 1 : women
       const nextMen = bucket === 'men' ? men + 1 : men
-      const cohortNumber = Math.max(nextWomen + nextMen, isAustin ? num(launch.founderCount, 0) + 1 : 0)
+      // Member numbers never repeat, even after revocations free spots.
+      const cohortNumber = Math.max(num(config.founderSeq, women + men), isAustin ? num(launch.founderCount, 0) : 0) + 1
       const capacity = target * 2
 
       tx.set(
@@ -111,16 +131,25 @@ export const assignFounderBadge = onCall(
           }),
           womenCount: nextWomen,
           menCount: nextMen,
+          founderSeq: cohortNumber,
           // Both halves full: this city is live, its bots go.
           ...(nextWomen >= target && nextMen >= target && { botsActive: false }),
         },
         { merge: true },
       )
-      tx.set(
-        statsRef,
-        { members: cohortNumber, capacity, cityName: city.name, state: city.state, updatedAt: FieldValue.serverTimestamp() },
-        { merge: true },
-      )
+      // members is recounted after the transaction (refreshCityMembers).
+      tx.set(statsRef, { capacity, cityName: city.name, state: city.state }, { merge: true })
+      tx.set(recordRef, {
+        uid,
+        cityId: city.id,
+        cityName: city.name,
+        bucket,
+        status: 'active' satisfies FounderStatus,
+        acceptedAt: FieldValue.serverTimestamp(),
+        lastActiveAt: FieldValue.serverTimestamp(),
+        warningSentAt: null,
+        pendingAt: null,
+      })
       tx.update(userRef, {
         isFounder: true,
         // Display name, as the mobile app shows it ("Founding Member — Austin").
@@ -132,29 +161,27 @@ export const assignFounderBadge = onCall(
         founderBadgeAssignedAt: FieldValue.serverTimestamp(),
         // Same perk as a founder code (redeemFounderCode).
         subscriptionTier: 'elite',
+        founderStatus: 'active',
+        founderStatusAcceptedAt: FieldValue.serverTimestamp(),
+        founderLastActiveAt: FieldValue.serverTimestamp(),
       })
 
       // Austin's legacy counters (founder codes count here too).
       if (isAustin) {
-        const founderCount = cohortNumber
         tx.set(
           launchRef,
           {
-            founderCount,
+            founderCount: num(launch.founderCount, 0) + 1,
             [`${bucket}Count`]: bucket === 'women' ? nextWomen : nextMen,
             [bucket === 'women' ? 'austinWomenCount' : 'austinMenCount']:
               num(launch[bucket === 'women' ? 'austinWomenCount' : 'austinMenCount'], 0) + 1,
           },
           { merge: true },
         )
-        tx.set(
-          db.doc('publicStats/founding'),
-          { members: founderCount, capacity: num(launch.founderTarget, capacity), updatedAt: FieldValue.serverTimestamp() },
-          { merge: true },
-        )
       }
       return { eligible: true, cohortNumber, cityId: city.id, cityName: city.name }
     })
+    if (result.eligible) await refreshCityMembers(city.id)
 
     logger.info('assignFounderBadge', {
       city: city.id,
@@ -163,6 +190,38 @@ export const assignFounderBadge = onCall(
     return result
   },
 )
+
+// Recounts publicStats/city_{id}.members from the founders themselves:
+// active and permanent only. Founders from before the lifecycle (no status,
+// e.g. founder codes) count as active. Austin's count also goes to
+// publicStats/founding, which the landing page reads. Never throws.
+export async function refreshCityMembers(cityId: string): Promise<void> {
+  const city = ZYLOVE_CITIES.find((c) => c.id === cityId)
+  if (!city) return
+  try {
+    const db = getFirestore()
+    const users = db.collection('users')
+    // Older founders have only founderCohort (the city name).
+    const [byId, byName] = await Promise.all([
+      users.where('founderCityId', '==', city.id).select('isFounder', 'founderStatus').get(),
+      users.where('founderCohort', '==', city.name).select('isFounder', 'founderStatus').get(),
+    ])
+    const seen = new Set<string>()
+    let members = 0
+    for (const d of [...byId.docs, ...byName.docs]) {
+      if (seen.has(d.id)) continue
+      seen.add(d.id)
+      const u = d.data()
+      const status: unknown = u.founderStatus
+      if (u.isFounder === true && (status === undefined || (typeof status === 'string' && MEMBER_STATUSES.has(status)))) members++
+    }
+    const stamp = { members, updatedAt: FieldValue.serverTimestamp() }
+    await db.doc(`publicStats/city_${city.id}`).set(stamp, { merge: true })
+    if (city.id === 'austin') await db.doc('publicStats/founding').set(stamp, { merge: true })
+  } catch (err) {
+    logger.error('refreshCityMembers failed', { cityId, message: err instanceof Error ? err.message : String(err) })
+  }
+}
 
 // config/launch.botsActive true → false (a manual kill switch now): hide
 // every bot (zbot-* uid) in both modes, everywhere.
