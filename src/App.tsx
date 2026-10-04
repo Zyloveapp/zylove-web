@@ -8,6 +8,8 @@ import { claimFounderBadge, founderCheckDone } from './services/founders'
 import { loadPin } from './services/playPin'
 import FounderCelebration from './components/FounderCelebration'
 import AuthGuard from './components/AuthGuard'
+import AdminGuard from './components/AdminGuard'
+import AdminPhotos from './pages/AdminPhotos'
 import PauseGuard from './components/PauseGuard'
 import Header from './components/Header'
 import Nav from './components/Nav'
@@ -143,6 +145,9 @@ export default function App() {
               <Route path="/settings/report" element={<ReportPastConnection />} />
               <Route path="/settings/blocked" element={<BlockedUsers />} />
               <Route path="/chat/:matchId" element={<Chat />} />
+              <Route element={<AdminGuard />}>
+                <Route path="/admin/photos" element={<AdminPhotos />} />
+              </Route>
             </Route>
           </Route>
         </Route>

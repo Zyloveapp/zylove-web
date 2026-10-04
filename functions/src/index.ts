@@ -14,12 +14,18 @@ import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 import { buildBioPrompt, parseBioRequest } from './bioPrompt'
 import { buildPlayBioPrompt, parsePlayBioRequest } from './playBioPrompt'
-import { buildPlayGoDeeperPrompt, cleanGoDeeperQuestion, parsePlayGoDeeperRequest } from './playGoDeeperPrompt'
+import {
+  GO_DEEPER_FOCUS,
+  buildPlayGoDeeperPrompt,
+  cleanGoDeeperQuestion,
+  parsePlayGoDeeperRequest,
+} from './playGoDeeperPrompt'
 import { LOOKUP_SECRETS, SMS_SECRETS, claimSparkSmsSlot, lookupLineType, nameFor, sendSMS, smsTarget } from './sms'
 
 export { assignFounderBadge, onLaunchConfigUpdated } from './founders'
 export { ensureSortKey } from './discovery'
 export { mirrorPlayOnlyPhotos } from './playPhotoMirror'
+export { listPendingPhotos, reviewPendingPhoto } from './photoReview'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
 import {
@@ -202,9 +208,10 @@ async function askGoDeeper(prompt: string, temperature: number): Promise<string>
 
 const sameQuestion = (a: string, b: string) => a.toLowerCase().replace(/\W/g, '') === b.toLowerCase().replace(/\W/g, '')
 
-// Two personal Go Deeper questions written from the user's Play answers. Same
-// prompt twice at different temperatures; if both land on the same question
-// the second is asked once more. Rate limited like generatePlayBio — only a
+// Two personal Go Deeper questions written from the user's Play answers, one
+// after the other: each call has its own focus, and the second is shown the
+// first question so it picks a different angle. If they still match, the
+// second is asked once more. Rate limited like generatePlayBio — only a
 // successful pair counts.
 export const generatePlayGoDeeper = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
@@ -217,12 +224,16 @@ export const generatePlayGoDeeper = onCall(
       throw new HttpsError('resource-exhausted', 'Go Deeper limit reached. Try again next week.')
     }
 
-    const prompt = buildPlayGoDeeperPrompt(parsePlayGoDeeperRequest(request.data))
+    const input = parsePlayGoDeeperRequest(request.data)
     let first = ''
     let second = ''
     try {
-      ;[first, second] = await Promise.all(GO_DEEPER_TEMPERATURES.map((t) => askGoDeeper(prompt, t)))
-      if (first && second && sameQuestion(first, second)) second = await askGoDeeper(prompt, GO_DEEPER_TEMPERATURES[1])
+      first = await askGoDeeper(buildPlayGoDeeperPrompt(input, { focus: GO_DEEPER_FOCUS[0] }), GO_DEEPER_TEMPERATURES[0])
+      if (first) {
+        const secondPrompt = buildPlayGoDeeperPrompt(input, { focus: GO_DEEPER_FOCUS[1], previousQuestion: first })
+        second = await askGoDeeper(secondPrompt, GO_DEEPER_TEMPERATURES[1])
+        if (second && sameQuestion(first, second)) second = await askGoDeeper(secondPrompt, GO_DEEPER_TEMPERATURES[1])
+      }
     } catch (err) {
       logger.error('generatePlayGoDeeper failed', { message: err instanceof Error ? err.message : String(err) })
     }

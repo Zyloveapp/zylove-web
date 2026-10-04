@@ -21,6 +21,7 @@ import PlayPinFlow from '../components/PlayPinFlow'
 import DiscoverySettings from '../components/DiscoverySettings'
 import InstallAppSection from '../components/InstallAppSection'
 import BlockedUsersLink from '../components/BlockedUsersLink'
+import { isAdmin } from '../services/adminPhotos'
 
 // On colour: cobalt by default (settings that cover both modes), red for Play.
 const SWITCH_ON = { spark: 'bg-[#1B4FD8]', play: 'bg-[#E03131]' } as const
@@ -110,6 +111,42 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <h2 className="px-5 pt-4 text-xs font-semibold uppercase tracking-widest text-white/40">{title}</h2>
       {children}
     </section>
+  )
+}
+
+// Only rendered for users/{uid}.isAdmin === true.
+function AdminSection({ uid }: { uid: string }) {
+  const navigate = useNavigate()
+  const [admin, setAdmin] = useState<{ uid: string; value: boolean } | null>(null)
+
+  useEffect(() => {
+    if (!uid) return
+    let cancelled = false
+    isAdmin(uid)
+      .catch(() => false)
+      .then((value) => !cancelled && setAdmin({ uid, value }))
+    return () => {
+      cancelled = true
+    }
+  }, [uid])
+
+  if (admin?.uid !== uid || !admin.value) return null
+  return (
+    <Section title="Admin">
+      <button
+        type="button"
+        onClick={() => navigate('/admin/photos')}
+        className="flex w-full items-center justify-between px-5 py-4 text-left hover:bg-white/[0.03]"
+      >
+        <span>
+          <span className="block font-medium">Photo review</span>
+          <span className="block text-sm text-white/50">Approve or reject photos moderation held back.</span>
+        </span>
+        <span className="text-white/30" aria-hidden>
+          ›
+        </span>
+      </button>
+    </Section>
   )
 }
 
@@ -372,6 +409,8 @@ export default function Settings() {
           </button>
           <BlockedUsersLink />
         </Section>
+
+        <AdminSection uid={uid} />
 
         <Section title="Account">
           <p className="px-5 pt-2 text-sm text-white/40">

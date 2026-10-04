@@ -124,8 +124,18 @@ export function parsePlayGoDeeperRequest(raw: unknown): PlayGoDeeperRequest {
 
 const tagLabels = (list: PlayInterestTag[]) => list.map((t) => PLAY_TAG_LABELS[t].label).join(', ')
 
-// Lines with nothing to say are dropped rather than sent as blanks.
-export function buildPlayGoDeeperPrompt(r: PlayGoDeeperRequest): string {
+// The two calls look at different sides of the person.
+export const GO_DEEPER_FOCUS = [
+  'what they bring, their energy, their style',
+  "what they're looking for, what a good experience looks like for them, or something unexpected about them in this space",
+] as const
+
+// Lines with nothing to say are dropped rather than sent as blanks. The
+// second call gets the first question so it can steer away from it.
+export function buildPlayGoDeeperPrompt(
+  r: PlayGoDeeperRequest,
+  { focus, previousQuestion }: { focus: string; previousQuestion?: string },
+): string {
   const spice = r.spiceLevel ? SPICE_META[r.spiceLevel] : null
   const about = aboutLine(r.about)
   const existing = qaBlocks(r.existingPromptAnswers)
@@ -151,6 +161,14 @@ export function buildPlayGoDeeperPrompt(r: PlayGoDeeperRequest): string {
     ...facts,
     '',
     'Generate ONE question for them to answer on their profile.',
+    `Focus on: ${focus}`,
+    ...(previousQuestion
+      ? [
+          '',
+          `The first question already asked was: ${previousQuestion}`,
+          'Generate a COMPLETELY DIFFERENT question — different topic, different angle, different aspect of who they are.',
+        ]
+      : []),
     '',
     'Rules:',
     "- The question must be specific to THIS person's selections",
@@ -161,6 +179,9 @@ export function buildPlayGoDeeperPrompt(r: PlayGoDeeperRequest): string {
     '- No yes/no questions — open ended only',
     '- Tasteful but adult in tone',
     '- Do not reference specific tags by name — infer from them',
+    '- Cover a different aspect of their personality than their non-negotiables or trust — look at their dynamic, their vibe, their arrangement, their energy',
+    "- The question should surprise them slightly — something they haven't been asked before",
+    '- Never ask about trust, safety or limits — those are covered by their non-negotiables',
     '- Return ONLY the question, nothing else',
   ].join('\n')
 }
