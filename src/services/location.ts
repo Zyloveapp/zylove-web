@@ -12,9 +12,6 @@ export interface LatLng {
 const GRID_DEG = 0.05
 const STALE_MS = 7 * 24 * 60 * 60 * 1000
 
-const AUSTIN: LatLng = { lat: 30.2672, lng: -97.7431 }
-const AUSTIN_RADIUS_MILES = 50
-
 function snap(v: number): number {
   return Math.round(Math.round(v / GRID_DEG) * GRID_DEG * 1000) / 1000
 }
@@ -100,8 +97,4 @@ export function getDistanceMiles(lat1: number, lng1: number, lat2: number, lng2:
   const dLng = toRad(lng2 - lng1)
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
   return 3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
-export function isAustinArea(lat: number, lng: number): boolean {
-  return getDistanceMiles(lat, lng, AUSTIN.lat, AUSTIN.lng) <= AUSTIN_RADIUS_MILES
 }

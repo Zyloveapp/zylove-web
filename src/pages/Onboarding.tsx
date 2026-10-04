@@ -273,7 +273,7 @@ export default function Onboarding() {
   const [bioUsedFallback, setBioUsedFallback] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [founderNumber, setFounderNumber] = useState<number | null>(null)
+  const [founder, setFounder] = useState<{ number: number; cityName?: string } | null>(null)
   // Incremented to discard an in-flight bio request (skip or regenerate).
   const bioRequest = useRef(0)
   // Play-only path: the Play profile answers (photos live on draft.photos).
@@ -449,7 +449,7 @@ export default function Onboarding() {
     next()
   }
 
-  // Austin Founding Circle: capped so a location prompt left open can't
+  // City founding circle: capped so a location prompt left open can't
   // hold onboarding up; any failure just carries on.
   async function finishWithFounderCheck(finish: () => void) {
     const founder = await Promise.race([
@@ -457,7 +457,7 @@ export default function Onboarding() {
       new Promise<null>((resolve) => setTimeout(() => resolve(null), FOUNDER_CHECK_MS)),
     ])
     if (founder?.eligible) {
-      setFounderNumber(founder.cohortNumber)
+      setFounder({ number: founder.cohortNumber, cityName: founder.cityName })
       setTimeout(finish, FOUNDER_CELEBRATION_MS)
     } else {
       finish()
@@ -809,7 +809,7 @@ export default function Onboarding() {
         )}
       </nav>
 
-      {founderNumber !== null && <FounderCelebration number={founderNumber} />}
+      {founder && <FounderCelebration number={founder.number} cityName={founder.cityName} />}
       {trialWelcomeOpen && <PlayTrialWelcome onContinue={continueToPlay} />}
     </div>
   )

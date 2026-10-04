@@ -82,11 +82,11 @@ function AppLayout() {
       cancelled = true
     }
   }, [uid, navigate])
-  const [founderNumber, setFounderNumber] = useState<number | null>(null)
+  const [founder, setFounder] = useState<{ number: number; cityName?: string } | null>(null)
 
   // Signed in and onboarded: refresh a missing or week-old location in the
   // background, then — once per user, for people who finished onboarding
-  // before founder badges existed — check for the Austin founding badge.
+  // before founder badges existed — check for a city founder badge.
   // Never blocks or errors.
   useEffect(() => {
     if (!uid || locationChecked.has(uid)) return
@@ -98,8 +98,8 @@ function AppLayout() {
       if (founderCheckDone(uid)) return
       const result = await claimFounderBadge(uid)
       if (result?.eligible) {
-        setFounderNumber(result.cohortNumber)
-        setTimeout(() => setFounderNumber(null), CELEBRATION_MS)
+        setFounder({ number: result.cohortNumber, cityName: result.cityName })
+        setTimeout(() => setFounder(null), CELEBRATION_MS)
       }
     })()
   }, [uid])
@@ -114,7 +114,7 @@ function AppLayout() {
       <ReviewPrompter />
       <PlayLock />
       <TrialExpiry />
-      {founderNumber !== null && <FounderCelebration number={founderNumber} />}
+      {founder && <FounderCelebration number={founder.number} cityName={founder.cityName} />}
     </div>
   )
 }

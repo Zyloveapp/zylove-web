@@ -6,6 +6,7 @@ import ProfileDetails from '../components/discover/ProfileDetails'
 import DiscoverActions, { type DiscoverAction } from '../components/discover/DiscoverActions'
 import MatchOverlay, { type NewMatch } from '../components/discover/MatchOverlay'
 import LaunchBanner from '../components/discover/LaunchBanner'
+import LocationGate from '../components/LocationGate'
 import {
   actionErrorMessage,
   ensureUserDefaults,
@@ -31,7 +32,17 @@ function photosOf(p: DiscoverProfile): string[] {
   return p.playProfile?.photoURLs.length ? p.playProfile.photoURLs : (p.photoURLs ?? [])
 }
 
+// Explore mounts (and fetches) only once location is granted, so a newly
+// saved location is already in the feed's first load.
 export default function Discover() {
+  return (
+    <LocationGate>
+      <Explore />
+    </LocationGate>
+  )
+}
+
+function Explore() {
   // AuthGuard guarantees a signed-in user on this route.
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const mode = useModeStore((s) => s.mode)

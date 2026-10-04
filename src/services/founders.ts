@@ -3,12 +3,14 @@ import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { requestLocation, saveUserLocation } from './location'
 
-export type FounderResult = { eligible: true; cohortNumber: number } | { eligible: false; reason: string }
+export type FounderResult =
+  | { eligible: true; cohortNumber: number; cityId?: string; cityName?: string }
+  | { eligible: false; reason: string }
 
 // Answers that settle it for this user: earned, already a founder, outside
-// Austin, or the circle is full. Anything else (no location, network, the
+// every launch city, or their city's circle is full. Anything else (no location, network, the
 // function not deployed yet, no profile) is tried again next time.
-const FINAL_REASONS = new Set(['already_assigned', 'outside_austin', 'cohort_full'])
+const FINAL_REASONS = new Set(['already_assigned', 'outside_coverage', 'outside_austin', 'cohort_full'])
 
 function checkedKey(uid: string): string {
   return `zylove_founder_checked_${uid}`

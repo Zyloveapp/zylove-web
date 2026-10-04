@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom'
 
 // Full-screen moment after onboarding when someone earns the founder badge.
 // The caller navigates on after ~1.5s.
-export default function FounderCelebration({ number }: { number: number }) {
+export default function FounderCelebration({ number, cityName = 'Austin' }: { number: number; cityName?: string }) {
   return createPortal(
     <div
       role="status"
@@ -14,9 +14,9 @@ export default function FounderCelebration({ number }: { number: number }) {
       </span>
       <p className="zy-founder-in mt-6 text-5xl font-black tracking-tight">✦ You're in.</p>
       <p className="zy-founder-in mt-3 text-lg font-semibold text-white/90 [animation-delay:150ms]">
-        Austin Founding Circle · Member #{number}
+        {cityName} Founding Circle · Member #{number}
       </p>
-      <p className="zy-founder-in mt-1 text-white/70 [animation-delay:300ms]">One of the first 100.</p>
+      <p className="zy-founder-in mt-1 text-white/70 [animation-delay:300ms]">One of the first 100 {cityName} founders.</p>
     </div>,
     document.body,
   )

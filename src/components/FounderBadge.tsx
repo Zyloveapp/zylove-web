@@ -1,10 +1,18 @@
-// "✦ Austin Founding Circle" — shown whenever isFounder is true, which covers
-// auto-assigned founders (founderCohort set) and founder-code ones (no cohort).
+// "✦ Austin Founder", "✦ NYC Founder": the founderBadge set by
+// assignFounderBadge. Founders from before city circles, and founder-code
+// ones, have no founderBadge; they're all Austin.
+function founderBadgeLabel(profile: object): string | null {
+  const p = profile as Record<string, unknown>
+  if (p.isFounder !== true) return null
+  return typeof p.founderBadge === 'string' && p.founderBadge ? p.founderBadge : 'Austin Founder'
+}
+
 export default function FounderBadge({ profile }: { profile: object }) {
-  if ((profile as Record<string, unknown>).isFounder !== true) return null
+  const label = founderBadgeLabel(profile)
+  if (!label) return null
   return (
     <span className="inline-block rounded-full border border-[#1B4FD8]/30 bg-[#1B4FD8]/20 px-3 py-1 text-xs font-semibold text-[#6B8FFF]">
-      ✦ Austin Founding Circle
+      ✦ {label}
     </span>
   )
 }

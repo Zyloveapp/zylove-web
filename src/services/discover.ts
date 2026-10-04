@@ -16,7 +16,8 @@ import {
 import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from './firebase'
-import { getDistanceMiles, isAustinArea } from './location'
+import { getDistanceMiles } from './location'
+import { cityConfigPath, getNearestCity, isAustinArea } from '../config/cities'
 import { genderToAttractedToCategory } from '../utils/genderUtils'
 import type { DatingProfile } from '../types/profile'
 import type { Mode } from '../store/modeStore'
@@ -151,9 +152,9 @@ export async function fetchCandidates(uid: string, mode: Mode): Promise<Discover
   if (!meSnap.exists()) return []
   const me = { ...(meSnap.data() as DiscoverProfile), uid }
 
-  const blocked = await loadBlockedUids(uid)
+  const [blocked, botsOn] = await Promise.all([loadBlockedUids(uid), botsActiveFor(me)])
   const swiped = loadSwiped(uid, mode)
-  const eligible = (p: DiscoverProfile) => isEligible(me, p, mode, swiped, blocked)
+  const eligible = (p: DiscoverProfile) => isEligible(me, p, mode, swiped, blocked, botsOn)
 
   const users = collection(db, 'users')
   const notSuspended = where('isSuspended', '==', false)
@@ -178,7 +179,14 @@ export async function fetchCandidates(uid: string, mode: Mode): Promise<Discover
   return austinFirst(mode === 'play' ? await withPlayProfiles(located) : located)
 }
 
-function isEligible(me: DiscoverProfile, p: DiscoverProfile, mode: Mode, swiped: Set<string>, blocked: Set<string>): boolean {
+function isEligible(
+  me: DiscoverProfile,
+  p: DiscoverProfile,
+  mode: Mode,
+  swiped: Set<string>,
+  blocked: Set<string>,
+  botsOn: boolean,
+): boolean {
   const visibilityField = mode === 'play' ? 'playVisibility' : 'sparkVisibility'
   if (p.uid === me.uid || swiped.has(p.uid) || blocked.has(p.uid)) return false
   if (!p.photoURLs?.length) return false
@@ -187,7 +195,7 @@ function isEligible(me: DiscoverProfile, p: DiscoverProfile, mode: Mode, swiped:
   const age = displayAge(p)
   if (age !== null && me.ageMin && me.ageMax && (age < me.ageMin || age > me.ageMax)) return false
   if (!withinRadius(me, p)) return false
-  if (!botInMyCity(me, p)) return false
+  if (!botsOn && p.uid.startsWith(BOT_PREFIX)) return false
   return mutuallyAttracted(me, p)
 }
 
@@ -205,17 +213,16 @@ function cityOf(label: string | undefined): string | null {
   return city || null
 }
 
-// Bots only appear in their own city's feed ("Austin, TX" → Austin). Austin
-// bots count the whole Austin area (Round Rock, Georgetown, …) by the
-// viewer's coordinates, not just the city name. Real people are never
-// filtered by city, and a viewer with no city sees all bots.
-function botInMyCity(me: DiscoverProfile, p: DiscoverProfile): boolean {
-  if (!p.uid.startsWith(BOT_PREFIX)) return true
-  const botCity = cityOf(p.locationLabel)
-  if (!botCity) return true
-  if (botCity === 'austin' && hasLocation(me) && isAustinArea(me.locationLat, me.locationLng)) return true
-  const myCity = cityOf(me.locationLabel)
-  return !myCity || botCity === myCity
+// Bots (all Austin-seeded) are the preview of Zylove, so every viewer sees
+// them, wherever they are, until the viewer's own launch city fills its
+// founding circle (config/city_{id}.botsActive false). No location, no
+// launch city or an unreadable config all mean bots stay on.
+async function botsActiveFor(me: DiscoverProfile): Promise<boolean> {
+  if (!hasLocation(me)) return true
+  const city = getNearestCity(me.locationLat, me.locationLng)
+  if (!city) return true
+  const snap = await getDoc(doc(db, cityConfigPath(city.id))).catch(() => null)
+  return snap?.data()?.botsActive !== false
 }
 
 function hasLocation(p: DiscoverProfile): p is DiscoverProfile & { locationLat: number; locationLng: number } {
