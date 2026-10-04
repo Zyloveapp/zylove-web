@@ -153,7 +153,7 @@ function PinInput({ value, onChange, label, autoFocus }: { value: string; onChan
         value={value}
         autoFocus={autoFocus}
         onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, PIN_LENGTH))}
-        placeholder="••••••"
+        placeholder={'•'.repeat(PIN_LENGTH)}
         aria-label={label}
         className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-center text-2xl tracking-[0.5em] text-white placeholder:text-white/20 focus:border-[#1B4FD8] focus:outline-none"
       />
@@ -196,8 +196,8 @@ function SetPin({ replacing, onSave, onCancel }: { replacing: boolean; onSave: (
       </h2>
       <p className="mt-2 text-sm text-white/60">
         {confirm === null
-          ? "Set a 6-digit PIN so you can read your messages on any device. You'll enter it when you sign in somewhere new."
-          : 'Enter the same 6 digits again.'}
+          ? "Set a 4-digit PIN so you can read your messages on any device. You'll enter it when you sign in somewhere new."
+          : 'Enter the same 4 digits again.'}
       </p>
       <PinInput
         key={confirm === null ? 'pin' : 'confirm'}
@@ -253,7 +253,7 @@ function Unlock({ uid, onUnlocked, onForgot, onCancel }: { uid: string; onUnlock
       <h2 id="key-backup-title" className="text-xl font-bold">
         Unlock your chats
       </h2>
-      <p className="mt-2 text-sm text-white/60">Enter the 6-digit chat PIN you set on another device to read your messages here.</p>
+      <p className="mt-2 text-sm text-white/60">Enter the 4-digit chat PIN you set on another device to read your messages here.</p>
       <PinInput value={pin} onChange={setPin} label="Chat PIN" autoFocus />
       {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
       <button

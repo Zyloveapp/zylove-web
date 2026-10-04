@@ -3,17 +3,20 @@ import naclUtil from 'tweetnacl-util'
 import { httpsCallable } from 'firebase/functions'
 import { functions } from './firebase'
 
-// Chat key backup (functions/src/keyBackup.ts). A 6-digit PIN is stretched
+// Chat key backup (functions/src/keyBackup.ts). A 4-digit PIN is stretched
 // with PBKDF2-SHA256 (600k iterations, the browser's built-in WebCrypto)
 // into 64 bytes: the first 32 encrypt the private chat key (nacl secretbox),
 // the last 32 are the verifier the server checks before handing the
 // encrypted key back. Neither the PIN nor the private key leaves the device.
 
 const ITERATIONS = 600_000
-export const PIN_LENGTH = 6
+export const PIN_LENGTH = 4
 
 // Too easy to guess to protect anything.
-const WEAK_PINS = new Set(['000000', '111111', '123456', '654321', '121212', '112233', '123123', '696969', '999999', '888888', '777777', '666666', '555555', '444444', '333333', '222222'])
+const WEAK_PINS = new Set([
+  '0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999',
+  '1234', '4321', '1212', '1122', '1313', '2580', '6969', '1004', '2000', '2001', '1010', '0123', '9876',
+])
 
 export function pinProblem(pin: string): string | null {
   if (!new RegExp(`^\\d{${PIN_LENGTH}}$`).test(pin)) return `Enter ${PIN_LENGTH} digits.`

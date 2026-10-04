@@ -1,5 +1,5 @@
 // Chat key backup (WhatsApp-style): the browser encrypts the user's private
-// chat key with a key derived from a 6-digit PIN (PBKDF2, client-side) and
+// chat key with a key derived from a 4-digit PIN (PBKDF2, client-side) and
 // stores the ciphertext here. A new device asks for the PIN, proves it with a
 // second PIN-derived value (the verifier), and only then gets the ciphertext
 // back to decrypt locally. The PIN and the private key never reach us.
@@ -7,7 +7,7 @@
 // keyBackups/{uid} is server-only (rules default-deny): { salt, blob,
 // verifierHash, publicKey, failedAttempts, lockedUntil, updatedAt }.
 // Releasing the blob only after a verifier check, with lockouts, stops
-// someone holding a stolen session from guessing PINs offline. A 6-digit
+// someone holding a stolen session from guessing PINs offline. A 4-digit
 // PIN can still be brute-forced by anyone with raw database access — there's
 // no hardware vault behind this — so it protects against account takeover,
 // not against the operator.
