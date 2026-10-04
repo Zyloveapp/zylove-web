@@ -49,9 +49,10 @@ export interface BlockedUser {
   blockedAt: number
 }
 
-// People the caller blocked (never people who blocked them).
-export async function fetchBlockedUsers(): Promise<BlockedUser[]> {
-  const res = await httpsCallable<void, { blocked: BlockedUser[] }>(functions, 'getBlockedUsers')()
+// People the caller blocked (never people who blocked them), from that
+// mode's matches only.
+export async function fetchBlockedUsers(mode: 'spark' | 'play'): Promise<BlockedUser[]> {
+  const res = await httpsCallable<{ mode: string }, { blocked: BlockedUser[] }>(functions, 'getBlockedUsers')({ mode })
   return res.data.blocked
 }
 

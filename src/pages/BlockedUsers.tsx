@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useModeStore } from '../store/modeStore'
 import { useBackLinkClass } from '../store/modeStore'
 import { useNavigate } from 'react-router-dom'
 import { fetchBlockedUsers, unblockMember, type BlockedUser } from '../services/safety'
@@ -12,7 +13,15 @@ function blockedDate(ms: number): string {
 export default function BlockedUsers() {
   const backLinkClass = useBackLinkClass()
   const navigate = useNavigate()
-  const [blocked, setBlocked] = useState<BlockedUser[] | null>(null)
+  const mode = useModeStore((s) => s.mode)
+  // Keyed by mode: switching modes shows the loader until that mode's list arrives.
+  const [loaded, setLoaded] = useState<{ mode: string; list: BlockedUser[] } | null>(null)
+  const blocked = loaded?.mode === mode ? loaded.list : null
+  const setBlocked = (update: (list: BlockedUser[] | null) => BlockedUser[] | null) =>
+    setLoaded((l) => {
+      const next = update(l?.mode === mode ? l.list : null)
+      return next ? { mode, list: next } : null
+    })
   const [loadError, setLoadError] = useState(false)
   const [confirming, setConfirming] = useState<BlockedUser | null>(null)
   const [busy, setBusy] = useState(false)
@@ -20,13 +29,13 @@ export default function BlockedUsers() {
 
   useEffect(() => {
     let cancelled = false
-    fetchBlockedUsers()
-      .then((list) => !cancelled && setBlocked(list))
+    fetchBlockedUsers(mode)
+      .then((list) => !cancelled && setLoaded({ mode, list }))
       .catch(() => !cancelled && setLoadError(true))
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [mode])
 
   async function unblock(person: BlockedUser) {
     setBusy(true)

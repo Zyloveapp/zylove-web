@@ -6,8 +6,11 @@ import { db, functions } from './firebase'
 // returns whether the other profile exists, which decides where the user
 // lands: the other mode, or (nothing left) signed out back to onboarding.
 
-async function hasPlayProfile(uid: string): Promise<boolean> {
-  return (await getDoc(doc(db, `users/${uid}/playProfile/data`))).exists()
+// The Play profile's published photos, or null if there's no Play profile.
+async function playPhotos(uid: string): Promise<string[] | null> {
+  const data = (await getDoc(doc(db, `users/${uid}/playProfile/data`))).data()
+  if (!data) return null
+  return Array.isArray(data.photoURLs) ? data.photoURLs.filter((u: unknown): u is string => typeof u === 'string') : []
 }
 
 async function hasSparkProfile(uid: string): Promise<boolean> {
@@ -20,12 +23,15 @@ async function hasSparkProfile(uid: string): Promise<boolean> {
 // Spark lives on the root doc (plus sparkProfile/data). Identity (name, age,
 // gender, attraction) stays — Play uses it too.
 export async function deleteSparkProfile(uid: string): Promise<{ playRemains: boolean }> {
-  const playRemains = await hasPlayProfile(uid)
+  const remainingPlayPhotos = await playPhotos(uid)
+  const playRemains = remainingPlayPhotos !== null
   const batch = writeBatch(db)
   batch.update(doc(db, 'users', uid), {
     sparkVisibility: 'hidden',
     bio: deleteField(),
-    photoURLs: [],
+    // Explore reads root photoURLs; a Play-only account shows its Play photos
+    // there (mirrorPlayOnlyPhotos only syncs when the Play profile changes).
+    photoURLs: remainingPlayPhotos ?? [],
     promptAnswers: [],
     personalityTraits: [],
     relationshipValues: [],

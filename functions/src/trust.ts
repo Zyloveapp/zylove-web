@@ -4,6 +4,7 @@ import { beforeUserSignedIn } from 'firebase-functions/v2/identity'
 import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
+import { connectionMode } from './behavior'
 
 // Trust & safety: phone-level bans, the caller's blocked list, and
 // server-side photo consent acceptance.
@@ -141,7 +142,9 @@ export const onBeforeSignIn = beforeUserSignedIn({ timeoutSeconds: 7, memory: '2
 // with no record of who did it (mobile blocks from a profile) are left out
 // rather than risk showing — or letting someone undo — a block placed on them.
 
-async function blockedByCaller(uid: string): Promise<Map<string, number>> {
+// Who the caller blocked, with when. With a mode, only blocks made from that
+// mode's matches; legacy blocks (no match, no mode) count as Spark.
+async function blockedByCaller(uid: string, mode: 'spark' | 'play' | null = null): Promise<Map<string, number>> {
   const db = getFirestore()
   const [mirror, matches, legacy] = await Promise.all([
     db.collection(`users/${uid}/blockedUsers`).get(),
@@ -151,11 +154,13 @@ async function blockedByCaller(uid: string): Promise<Map<string, number>> {
   const mine = new Set<string>()
   for (const m of matches.docs) {
     const other = participants(m.data()).find((u) => u !== uid)
-    if (other) mine.add(other)
+    if (other && (!mode || connectionMode(m.data()) === mode)) mine.add(other)
   }
-  for (const b of legacy.docs) {
-    const other: unknown = b.data().blockedUid
-    if (typeof other === 'string') mine.add(other)
+  if (mode !== 'play') {
+    for (const b of legacy.docs) {
+      const other: unknown = b.data().blockedUid
+      if (typeof other === 'string') mine.add(other)
+    }
   }
   const result = new Map<string, number>()
   for (const d of mirror.docs) {
@@ -170,7 +175,9 @@ export const getBlockedUsers = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ blocked: { uid: string; name: string; blockedAt: number }[] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
-    const blocked = await blockedByCaller(request.auth.uid)
+    const rawMode = (request.data as { mode?: unknown } | null)?.mode
+    const mode = rawMode === 'spark' || rawMode === 'play' ? rawMode : null
+    const blocked = await blockedByCaller(request.auth.uid, mode)
     const db = getFirestore()
     const rows = await Promise.all(
       [...blocked].map(async ([uid, blockedAt]) => {

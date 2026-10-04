@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import ReviewModal from '../components/chat/ReviewModal'
 import { relativeTime } from '../services/matches'
 import { fetchPastConnections, type PastConnection } from '../services/pastConnections'
+import { useModeStore } from '../store/modeStore'
 
 const DONE_TEXT = 'Report submitted. Thank you for helping keep Zylove safe.'
 
@@ -12,19 +13,22 @@ const DONE_TEXT = 'Report submitted. Thank you for helping keep Zylove safe.'
 export default function ReportPastConnection() {
   const backLinkClass = useBackLinkClass()
   const navigate = useNavigate()
-  const [connections, setConnections] = useState<PastConnection[] | null>(null)
+  const mode = useModeStore((s) => s.mode)
+  // Keyed by mode: only the current mode's connections are shown.
+  const [loaded, setLoaded] = useState<{ mode: string; list: PastConnection[] } | null>(null)
+  const connections = loaded?.mode === mode ? loaded.list : null
   const [error, setError] = useState(false)
   const [reporting, setReporting] = useState<PastConnection | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    fetchPastConnections()
-      .then((list) => !cancelled && setConnections(list))
+    fetchPastConnections(mode)
+      .then((list) => !cancelled && setLoaded({ mode, list }))
       .catch(() => !cancelled && setError(true))
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [mode])
 
   return (
     <div className="min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] bg-gray-950 px-4 py-6 text-white">

@@ -1,21 +1,24 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchBlockedUsers } from '../services/safety'
+import { useModeStore } from '../store/modeStore'
 
 // Settings → Safety row. Shows the count once loaded; a failed load just
 // leaves the count off.
 export default function BlockedUsersLink() {
-  const [count, setCount] = useState<number | null>(null)
+  const mode = useModeStore((s) => s.mode)
+  const [loaded, setLoaded] = useState<{ mode: string; count: number } | null>(null)
+  const count = loaded?.mode === mode ? loaded.count : null
 
   useEffect(() => {
     let cancelled = false
-    fetchBlockedUsers()
-      .then((list) => !cancelled && setCount(list.length))
+    fetchBlockedUsers(mode)
+      .then((list) => !cancelled && setLoaded({ mode, count: list.length }))
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [mode])
 
   return (
     <Link

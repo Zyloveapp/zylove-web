@@ -12,7 +12,11 @@ export interface PastConnection {
   ended: boolean
 }
 
-export async function fetchPastConnections(): Promise<PastConnection[]> {
-  const res = await httpsCallable<void, { connections: PastConnection[] }>(functions, 'getPastConnections')()
+// Only the given mode's connections (old matches without a mode are Spark).
+export async function fetchPastConnections(mode: 'spark' | 'play'): Promise<PastConnection[]> {
+  const res = await httpsCallable<{ mode: string }, { connections: PastConnection[] }>(
+    functions,
+    'getPastConnections',
+  )({ mode })
   return res.data.connections
 }

@@ -295,11 +295,24 @@ interface PastConnection {
 
 // Everyone the caller matched with in the last 90 days — current matches and
 // ended ones — as names and dates only, newest first. Bots are left out.
+// 'play' (or legacy 'entanglement') is Play; anything else, including a
+// missing mode on older matches, is Spark.
+export function connectionMode(m: { mode?: unknown } | undefined): 'spark' | 'play' {
+  return m?.mode === 'play' || m?.mode === 'entanglement' ? 'play' : 'spark'
+}
+
+// Optional { mode }: only that mode's connections. Without it, all of them.
+function requestedMode(data: unknown): 'spark' | 'play' | null {
+  const mode = (data as { mode?: unknown } | null)?.mode
+  return mode === 'spark' || mode === 'play' ? mode : null
+}
+
 export const getPastConnections = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ connections: PastConnection[] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const uid = request.auth.uid
+    const mode = requestedMode(request.data)
     const db = getFirestore()
     const since = Date.now() - RETENTION_MS
     const [live, past] = await Promise.all([
@@ -313,6 +326,7 @@ export const getPastConnections = onCall(
       const users = participants(p)
       const otherUid = users.find((u) => u !== uid)
       if (!otherUid || isBotUid(otherUid) || toMillis(p.matchedAt) < since) continue
+      if (mode && connectionMode(p) !== mode) continue
       const name: unknown = p.names?.[otherUid]
       byId.set(d.id, {
         matchId: d.id,
@@ -326,6 +340,7 @@ export const getPastConnections = onCall(
       const m = d.data()
       const otherUid = participants(m).find((u) => u !== uid)
       if (!otherUid || isBotMatch(m) || matchedAtOf(m) < since) continue
+      if (mode && connectionMode(m) !== mode) continue
       byId.set(d.id, {
         matchId: d.id,
         otherUid,
