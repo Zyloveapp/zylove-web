@@ -54,7 +54,6 @@ import {
   PlayPromptsStep,
   PlayReviewStep,
   PlayTrialWelcome,
-  PlayWelcomeStep,
   SceneStep,
   SpiceStep,
 } from '../components/onboarding/PlaySteps'
@@ -126,7 +125,6 @@ const PLAY_STEPS = [
   { id: 'recommendation', title: 'Your path' },
   { id: 'attractedTo', title: 'Attraction' },
   { id: 'discovery', title: 'Who you see' },
-  { id: 'playWelcome', title: 'Play' },
   { id: 'spice', title: 'Spice level' },
   { id: 'aboutYou', title: 'About you' },
   { id: 'arrangement', title: 'Looking for' },
@@ -580,8 +578,6 @@ export default function Onboarding() {
         )
       case 'review':
         return <ReviewStep draft={draft} saving={saving} error={saveError} onCreate={createProfile} />
-      case 'playWelcome':
-        return <PlayWelcomeStep />
       case 'spice':
         return <SpiceStep {...playProps} />
       case 'aboutYou':
@@ -619,7 +615,6 @@ export default function Onboarding() {
     if (id === 'intention') return 'Continue →'
     if (!playPath) return 'Next'
     if (id === 'discovery') return "Let's go 🔥"
-    if (id === 'playWelcome') return "Let's go →"
     if (id === 'aboutYou' || id === 'scene' || id === 'nonNegotiables' || id === 'myType') return 'Next (optional) →'
     return 'Next'
   }

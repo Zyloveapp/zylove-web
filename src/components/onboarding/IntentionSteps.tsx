@@ -136,6 +136,14 @@ export function RecommendationScreen({
         ) : (
           <p className="mt-4 text-lg text-white/70">{r.body}</p>
         )}
+        {path === 'play' && (
+          <>
+            <div className="mx-auto mt-6 h-px w-16 bg-white/15" aria-hidden />
+            <p className="mb-2 mt-4 text-center text-sm text-white/50">
+              🔒 Play is completely separate. What happens in Play, stays in Play.
+            </p>
+          </>
+        )}
       </div>
       <div className="relative mx-auto w-full max-w-md px-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]">
         <button

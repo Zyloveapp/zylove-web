@@ -122,6 +122,8 @@ function cmToFeetInches(cm: number): { feet: number; inches: number } {
   return { feet: Math.floor(total / 12), inches: total % 12 }
 }
 
+// /play-onboarding only — the Play-only path's recommendation screen already
+// carries this reassurance.
 export function PlayWelcomeStep() {
   return (
     <div className="flex min-h-[60dvh] flex-col justify-center text-center">
