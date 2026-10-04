@@ -34,7 +34,7 @@ const MEN_IDENTITIES = new Set(['man', 'trans_man'])
 const BOT_PREFIX = 'zbot-'
 
 type Ineligible = 'outside_coverage' | 'already_assigned' | 'cohort_full' | 'no_profile'
-type FounderResult =
+export type FounderResult =
   | { eligible: true; cohortNumber: number; cityId: string; cityName: string }
   | { eligible: false; reason: Ineligible }
 // The transaction also says whether this claim was the one that filled the city.
@@ -108,130 +108,137 @@ export const assignFounderBadge = onCall(
   { timeoutSeconds: 60, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
   async (request): Promise<FounderResult> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
-    const uid = request.auth.uid
     const { lat, lng } = parseCoords(request.data)
-    const city = getNearestCity(lat, lng)
-    if (!city) return { eligible: false, reason: 'outside_coverage' }
+    return claimFounderSpot(request.auth.uid, lat, lng, 'assignFounderBadge')
+  },
+)
 
-    const db = getFirestore()
-    const cityRef = db.doc(`config/city_${city.id}`)
-    const statsRef = db.doc(`publicStats/city_${city.id}`)
-    const launchRef = db.doc('config/launch')
-    const userRef = db.doc(`users/${uid}`)
-    const recordRef = db.doc(`founderRecords/${uid}`)
-    const isAustin = city.id === 'austin'
+// The founder claim itself: the city at (lat, lng), its half's counter, the
+// user's founder fields and lifecycle record. Shared by the user's own
+// claim and the admin dashboard's "Make founder" (which passes the user's
+// saved location). The caller must provide SMS_SECRETS (city-live texts).
+export async function claimFounderSpot(uid: string, lat: number, lng: number, source: string): Promise<FounderResult> {
+  const city = getNearestCity(lat, lng)
+  if (!city) return { eligible: false, reason: 'outside_coverage' }
 
-    const claim = await db.runTransaction(async (tx): Promise<Claim> => {
-      const [citySnap, userSnap, launchSnap, recordSnap] = await Promise.all([
-        tx.get(cityRef),
-        tx.get(userRef),
-        isAustin ? tx.get(launchRef) : Promise.resolve(null),
-        tx.get(recordRef),
-      ])
-      const user = userSnap.data()
-      if (!user || user.onboardingComplete !== true) return { eligible: false, reason: 'no_profile' }
-      if (user.isFounder === true) return { eligible: false, reason: 'already_assigned' }
-      // Revoked founders may claim again; converted ones (Spark+ for good)
-      // already had their turn.
-      if (recordSnap.data()?.status === 'converted') return { eligible: false, reason: 'already_assigned' }
+  const db = getFirestore()
+  const cityRef = db.doc(`config/city_${city.id}`)
+  const statsRef = db.doc(`publicStats/city_${city.id}`)
+  const launchRef = db.doc('config/launch')
+  const userRef = db.doc(`users/${uid}`)
+  const recordRef = db.doc(`founderRecords/${uid}`)
+  const isAustin = city.id === 'austin'
 
-      // A missing city doc is created with the defaults (init-cities.mjs
-      // normally makes them first).
-      const config = citySnap.data() ?? {}
-      const target = num(config.founderTarget, DEFAULT_FOUNDER_TARGET)
-      // Austin founder codes (mobile) only count in config/launch, so Austin
-      // goes by whichever count is higher; the city doc catches up on write.
-      const launch = launchSnap?.data() ?? {}
-      const women = Math.max(num(config.womenCount, 0), isAustin ? num(launch.womenCount, 0) : 0)
-      const men = Math.max(num(config.menCount, 0), isAustin ? num(launch.menCount, 0) : 0)
+  const claim = await db.runTransaction(async (tx): Promise<Claim> => {
+    const [citySnap, userSnap, launchSnap, recordSnap] = await Promise.all([
+      tx.get(cityRef),
+      tx.get(userRef),
+      isAustin ? tx.get(launchRef) : Promise.resolve(null),
+      tx.get(recordRef),
+    ])
+    const user = userSnap.data()
+    if (!user || user.onboardingComplete !== true) return { eligible: false, reason: 'no_profile' }
+    if (user.isFounder === true) return { eligible: false, reason: 'already_assigned' }
+    // Revoked founders may claim again; converted ones (Spark+ for good)
+    // already had their turn.
+    if (recordSnap.data()?.status === 'converted') return { eligible: false, reason: 'already_assigned' }
 
-      const bucket = bucketFor(user.genderIdentity)
-      if ((bucket === 'women' ? women : men) >= target) return { eligible: false, reason: 'cohort_full' }
+    // A missing city doc is created with the defaults (init-cities.mjs
+    // normally makes them first).
+    const config = citySnap.data() ?? {}
+    const target = num(config.founderTarget, DEFAULT_FOUNDER_TARGET)
+    // Austin founder codes (mobile) only count in config/launch, so Austin
+    // goes by whichever count is higher; the city doc catches up on write.
+    const launch = launchSnap?.data() ?? {}
+    const women = Math.max(num(config.womenCount, 0), isAustin ? num(launch.womenCount, 0) : 0)
+    const men = Math.max(num(config.menCount, 0), isAustin ? num(launch.menCount, 0) : 0)
 
-      const nextWomen = bucket === 'women' ? women + 1 : women
-      const nextMen = bucket === 'men' ? men + 1 : men
-      // Member numbers never repeat, even after revocations free spots.
-      const cohortNumber = Math.max(num(config.founderSeq, women + men), isAustin ? num(launch.founderCount, 0) : 0) + 1
-      const capacity = target * 2
-      const fills = nextWomen >= target && nextMen >= target
+    const bucket = bucketFor(user.genderIdentity)
+    if ((bucket === 'women' ? women : men) >= target) return { eligible: false, reason: 'cohort_full' }
 
+    const nextWomen = bucket === 'women' ? women + 1 : women
+    const nextMen = bucket === 'men' ? men + 1 : men
+    // Member numbers never repeat, even after revocations free spots.
+    const cohortNumber = Math.max(num(config.founderSeq, women + men), isAustin ? num(launch.founderCount, 0) : 0) + 1
+    const capacity = target * 2
+    const fills = nextWomen >= target && nextMen >= target
+
+    tx.set(
+      cityRef,
+      {
+        ...(!citySnap.exists && {
+          id: city.id,
+          name: city.name,
+          state: city.state,
+          lat: city.lat,
+          lng: city.lng,
+          radiusMiles: city.radiusMiles,
+          founderTarget: target,
+          botsActive: true,
+          createdAt: FieldValue.serverTimestamp(),
+        }),
+        womenCount: nextWomen,
+        menCount: nextMen,
+        founderSeq: cohortNumber,
+        // Both halves full: this city is live, its bots go.
+        ...(fills && { botsActive: false }),
+      },
+      { merge: true },
+    )
+    // members is recounted after the transaction (refreshCityMembers).
+    tx.set(statsRef, { capacity, cityName: city.name, state: city.state }, { merge: true })
+    tx.set(recordRef, {
+      uid,
+      cityId: city.id,
+      cityName: city.name,
+      bucket,
+      status: 'active' satisfies FounderStatus,
+      acceptedAt: FieldValue.serverTimestamp(),
+      lastActiveAt: FieldValue.serverTimestamp(),
+      warningSentAt: null,
+      pendingAt: null,
+    })
+    tx.update(userRef, {
+      isFounder: true,
+      // Display name, as the mobile app shows it ("Founding Member — Austin").
+      founderCohort: city.name,
+      founderCity: city.name,
+      founderCityId: city.id,
+      founderBadge: `${city.badgeName ?? city.name} Founder`,
+      founderNumber: cohortNumber,
+      founderBadgeAssignedAt: FieldValue.serverTimestamp(),
+      // Same perk as a founder code (redeemFounderCode).
+      subscriptionTier: 'elite',
+      founderStatus: 'active',
+      founderStatusAcceptedAt: FieldValue.serverTimestamp(),
+      founderLastActiveAt: FieldValue.serverTimestamp(),
+    })
+
+    // Austin's legacy counters (founder codes count here too).
+    if (isAustin) {
       tx.set(
-        cityRef,
+        launchRef,
         {
-          ...(!citySnap.exists && {
-            id: city.id,
-            name: city.name,
-            state: city.state,
-            lat: city.lat,
-            lng: city.lng,
-            radiusMiles: city.radiusMiles,
-            founderTarget: target,
-            botsActive: true,
-            createdAt: FieldValue.serverTimestamp(),
-          }),
-          womenCount: nextWomen,
-          menCount: nextMen,
-          founderSeq: cohortNumber,
-          // Both halves full: this city is live, its bots go.
-          ...(fills && { botsActive: false }),
+          founderCount: num(launch.founderCount, 0) + 1,
+          [`${bucket}Count`]: bucket === 'women' ? nextWomen : nextMen,
+          [bucket === 'women' ? 'austinWomenCount' : 'austinMenCount']:
+            num(launch[bucket === 'women' ? 'austinWomenCount' : 'austinMenCount'], 0) + 1,
         },
         { merge: true },
       )
-      // members is recounted after the transaction (refreshCityMembers).
-      tx.set(statsRef, { capacity, cityName: city.name, state: city.state }, { merge: true })
-      tx.set(recordRef, {
-        uid,
-        cityId: city.id,
-        cityName: city.name,
-        bucket,
-        status: 'active' satisfies FounderStatus,
-        acceptedAt: FieldValue.serverTimestamp(),
-        lastActiveAt: FieldValue.serverTimestamp(),
-        warningSentAt: null,
-        pendingAt: null,
-      })
-      tx.update(userRef, {
-        isFounder: true,
-        // Display name, as the mobile app shows it ("Founding Member — Austin").
-        founderCohort: city.name,
-        founderCity: city.name,
-        founderCityId: city.id,
-        founderBadge: `${city.badgeName ?? city.name} Founder`,
-        founderNumber: cohortNumber,
-        founderBadgeAssignedAt: FieldValue.serverTimestamp(),
-        // Same perk as a founder code (redeemFounderCode).
-        subscriptionTier: 'elite',
-        founderStatus: 'active',
-        founderStatusAcceptedAt: FieldValue.serverTimestamp(),
-        founderLastActiveAt: FieldValue.serverTimestamp(),
-      })
+    }
+    return { eligible: true, cohortNumber, cityId: city.id, cityName: city.name, closedCity: fills && config.botsActive !== false }
+  })
+  const { closedCity, ...result } = claim
+  if (result.eligible) await refreshCityMembers(city.id)
+  if (closedCity) await announceCityLive(city.id, city.name)
 
-      // Austin's legacy counters (founder codes count here too).
-      if (isAustin) {
-        tx.set(
-          launchRef,
-          {
-            founderCount: num(launch.founderCount, 0) + 1,
-            [`${bucket}Count`]: bucket === 'women' ? nextWomen : nextMen,
-            [bucket === 'women' ? 'austinWomenCount' : 'austinMenCount']:
-              num(launch[bucket === 'women' ? 'austinWomenCount' : 'austinMenCount'], 0) + 1,
-          },
-          { merge: true },
-        )
-      }
-      return { eligible: true, cohortNumber, cityId: city.id, cityName: city.name, closedCity: fills && config.botsActive !== false }
-    })
-    const { closedCity, ...result } = claim
-    if (result.eligible) await refreshCityMembers(city.id)
-    if (closedCity) await announceCityLive(city.id, city.name)
-
-    logger.info('assignFounderBadge', {
-      city: city.id,
-      result: result.eligible ? `founder #${result.cohortNumber}` : result.reason,
-    })
-    return result
-  },
-)
+  logger.info(source, {
+    city: city.id,
+    result: result.eligible ? `founder #${result.cohortNumber}` : result.reason,
+  })
+  return result
+}
 
 // Recounts publicStats/city_{id}.members from the founders themselves:
 // active and permanent only. Founders from before the lifecycle (no status,

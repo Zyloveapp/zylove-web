@@ -85,7 +85,7 @@ export default function FounderMessages() {
             messages={messages}
             viewer="founder"
             bubble={mode === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'}
-            empty="No messages yet. Send Matthew a message — he reads every one."
+            empty="No messages yet. Send the founder a message — every message is read personally."
           />
         )}
       </div>

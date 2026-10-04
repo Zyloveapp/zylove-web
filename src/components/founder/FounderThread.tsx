@@ -67,8 +67,12 @@ export function FounderComposer({
     try {
       await onSend(trimmed)
       setText('')
-    } catch {
-      setError("Couldn't send. Try again.")
+    } catch (err) {
+      // failed-precondition carries a message meant for people ("You can't
+      // send a message to yourself."); anything else gets the generic one.
+      const code = typeof err === 'object' && err !== null && 'code' in err ? String(err.code) : ''
+      const message = err instanceof Error ? err.message : ''
+      setError(code === 'functions/failed-precondition' && message ? message : "Couldn't send. Try again.")
     } finally {
       setBusy(false)
     }

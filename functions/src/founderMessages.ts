@@ -124,6 +124,8 @@ export const sendFounderMessage = onCall(
     const uid = request.auth.uid
     const body = parseBody(request.data)
     const user = (await db().doc(`users/${uid}`).get()).data()
+    // The admin is the recipient: their own founder badge doesn't give them a thread.
+    if (user?.isAdmin === true) throw new HttpsError('failed-precondition', "You can't send a message to yourself.")
     if (!user || !isActiveFounder(uid, user)) throw new HttpsError('permission-denied', 'Founders only')
 
     const name = displayName(user)
