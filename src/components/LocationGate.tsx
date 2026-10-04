@@ -218,7 +218,7 @@ export default function LocationGate({ children }: { children: ReactNode }) {
         <button
           type="button"
           onClick={() => {
-            window.location.href = 'https://www.zylove.app'
+            window.location.href = 'https://zylove.app'
           }}
           className={`mt-8 w-full max-w-xs rounded-full px-6 py-3.5 font-semibold text-white transition-opacity hover:opacity-90 ${
             play ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
