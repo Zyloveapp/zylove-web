@@ -7,7 +7,9 @@ import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 // 30-day limit can't be skipped by writing directly.
 
 const CHANGE_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000
-const NAME_PATTERN = /^[\p{L}\p{M}\p{N}]+(?:[ -][\p{L}\p{M}\p{N}]+)*$/u
+// Letters (any language), numbers, and single spaces, hyphens or apostrophes
+// between them — O'Brien, Mary-Jane, D’Angelo.
+const NAME_PATTERN = /^[\p{L}\p{M}\p{N}]+(?:[ '’-][\p{L}\p{M}\p{N}]+)*$/u
 
 const FIELDS = {
   spark: { name: 'displayName', updatedAt: 'displayNameUpdatedAt', mirror: 'sparkProfile' },
@@ -31,7 +33,7 @@ export const updateDisplayName = onCall(
       throw new HttpsError('invalid-argument', 'Names must be 2–20 characters.')
     }
     if (!NAME_PATTERN.test(name)) {
-      throw new HttpsError('invalid-argument', 'Names can use letters, numbers, spaces and hyphens only.')
+      throw new HttpsError('invalid-argument', 'Names can use letters, numbers, spaces, hyphens and apostrophes only.')
     }
 
     const fields = FIELDS[mode]
