@@ -34,6 +34,7 @@ import ZyloveScore from './pages/ZyloveScore'
 import Settings from './pages/Settings'
 import ReportPastConnection from './pages/ReportPastConnection'
 import BlockedUsers from './pages/BlockedUsers'
+import ReviewHistory from './pages/ReviewHistory'
 import Upgrade from './pages/Upgrade'
 import SubscriptionSync from './components/SubscriptionSync'
 import Chat from './pages/Chat'
@@ -146,6 +147,7 @@ export default function App() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/settings/report" element={<ReportPastConnection />} />
               <Route path="/settings/blocked" element={<BlockedUsers />} />
+              <Route path="/settings/reviews" element={<ReviewHistory />} />
               <Route path="/chat/:matchId" element={<Chat />} />
               <Route element={<AdminGuard />}>
                 <Route path="/admin/photos" element={<AdminPhotos />} />

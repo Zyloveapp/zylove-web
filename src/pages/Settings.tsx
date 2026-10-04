@@ -544,6 +544,20 @@ export default function Settings() {
 
         <AdminSection uid={uid} />
 
+        {/* The current mode's reviews only (the history page reads the mode). */}
+        <Section title="Profile reviews">
+          <button
+            type="button"
+            onClick={() => navigate('/settings/reviews')}
+            className="flex w-full items-center justify-between px-5 py-4 text-left hover:bg-white/[0.03]"
+          >
+            <span className="block font-medium">My review history</span>
+            <span className="text-white/30" aria-hidden>
+              →
+            </span>
+          </button>
+        </Section>
+
         <Section title="Account">
           <p className="px-5 pt-2 text-sm text-white/40">
             ✦ Zylove has two modes — Spark and Play. Tap the mode pill in the header to explore.

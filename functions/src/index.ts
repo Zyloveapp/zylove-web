@@ -24,6 +24,7 @@ import {
   scorecardInstructions,
   type ProfileScorecard,
 } from './profileScorecard'
+import { saveReviewHistory } from './reviewHistory'
 import { loadReviewPhotos, photoConsent, type ImageBlock } from './reviewPhotos'
 import {
   GO_DEEPER_FOCUS,
@@ -1185,6 +1186,7 @@ ${scorecardInstructions(SPARK_REVIEW_SECTIONS, { photos: photos.length > 0 })}`
       logger.error('reviewProfile failed', { message: err instanceof Error ? err.message : String(err) })
     }
     if (!review) throw new HttpsError('unavailable', "Couldn't generate review. Try again.")
+    await saveReviewHistory(request.auth.uid, 'spark', review)
     return { review }
   },
 )
@@ -1233,6 +1235,7 @@ export const reviewPlayProfile = onCall(
       const recent = recentPlayReviews((await tx.get(userRef)).data(), now)
       tx.set(userRef, { profileReviews: { play: [...recent, now].slice(-PLAY_REVIEW_WEEKLY_LIMIT) } }, { merge: true })
     })
+    await saveReviewHistory(request.auth.uid, 'play', review)
     return { review }
   },
 )

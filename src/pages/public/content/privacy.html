@@ -1,7 +1,7 @@
 <div class="hero">
     <div class="hero-tag">✦ Legal</div>
     <h1>Privacy Policy</h1>
-    <p class="hero-meta">Effective date: April 12, 2026 · Last updated: April 12, 2026</p>
+    <p class="hero-meta">Effective date: April 12, 2026 · Last updated: October 4, 2026</p>
     <p class="hero-sub">
       Zylove is built on the belief that you deserve to know what happens to your data. This policy explains exactly what we collect, why we collect it, and how you can control it.
     </p>
@@ -148,7 +148,7 @@
           <li>Generate personalized onboarding questions based on your profile</li>
         </ul>
         <div class="callout callout-blue">
-          <strong>AI data use:</strong> Profile data sent to Anthropic for bio generation and coaching is processed per Anthropic's API data policy. We do not send your phone number, messages, or photos to Anthropic. Only profile text data (bio, prompts, preferences) is transmitted.
+          <strong>AI data use:</strong> Profile data sent to Anthropic for bio generation and coaching is processed per Anthropic's API data policy. We do not send your phone number or messages to Anthropic. Profile text data (bio, prompts, preferences) is always transmitted for bio generation and coaching. Profile photos are transmitted to Anthropic only when you explicitly opt in to photo analysis in Settings → Privacy. You can withdraw this consent at any time.
         </div>
         <h3>To process payments</h3>
         <p>
@@ -192,7 +192,17 @@
             <tr>
               <td><strong>Anthropic Claude API</strong></td>
               <td>Anthropic</td>
-              <td>Profile text for bio generation and coaching (no PII)</td>
+              <td>Profile text for bio generation and coaching; profile photos only with your explicit opt-in consent</td>
+            </tr>
+            <tr>
+              <td><strong>Sightengine</strong></td>
+              <td>Sightengine SAS</td>
+              <td>Profile photos for content moderation (nudity, gore, offensive content detection); liveness verification photos</td>
+            </tr>
+            <tr>
+              <td><strong>Twilio</strong></td>
+              <td>Twilio Inc.</td>
+              <td>Phone number for SMS verification and number type validation; phone number for SMS notifications (with your consent)</td>
             </tr>
             <tr>
               <td><strong>RevenueCat</strong></td>
@@ -247,7 +257,7 @@
         </p>
         <h3>Biometric re-authentication</h3>
         <p>
-          Switching between Spark and Play modes requires biometric verification every session. This protects your profile intent from being changed without your knowledge.
+          On mobile, switching between Spark and Play requires biometric verification (Face ID / Touch ID). On web, a 4-digit Play PIN is required, with automatic session lock after 2 minutes of inactivity to protect your privacy.
         </p>
         <h3>Infrastructure security</h3>
         <p>
