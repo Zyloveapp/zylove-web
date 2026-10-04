@@ -597,10 +597,10 @@ export const recordVibeRating = onCall(
     })
     const points = adminRepeat ? 0 : VIBE_POINTS[vibe]
     if (points !== 0) {
-      batch.update(db.collection('users').doc(otherUid), { 'zylovScore.vibePoints': FieldValue.increment(points) })
+      batch.update(db.collection('users').doc(otherUid), { 'zyloveScore.vibePoints': FieldValue.increment(points) })
     }
     if (!adminRepeat) {
-      batch.update(db.collection('users').doc(callerId), { 'zylovScore.participationPoints': FieldValue.increment(1) })
+      batch.update(db.collection('users').doc(callerId), { 'zyloveScore.participationPoints': FieldValue.increment(1) })
     }
     await batch.commit()
     if (adminRepeat) logger.info('recordVibeRating: admin test repeat, no score change', { matchId })
@@ -616,6 +616,18 @@ export const recordVibeRating = onCall(
         logger.error('recordVibeRating: mutual check failed', { matchId, message: err instanceof Error ? err.message : String(err) })
         return false
       }))
+
+    // Vibe checks feed the Zylove Score: refresh both people's adjustment now
+    // rather than waiting for their next review.
+    await Promise.all(
+      [otherUid, callerId]
+        .filter((uid) => !BOT_PREFIXES.some((p) => uid.startsWith(p)))
+        .map((uid) =>
+          applyVibeAdjustment(uid).catch((err: unknown) =>
+            logger.error('recordVibeRating: vibe adjustment failed', { uid, message: err instanceof Error ? err.message : String(err) }),
+          ),
+        ),
+    )
 
     logger.info('recordVibeRating', { matchId, rating: vibe, mutual })
     return { success: true }
@@ -711,9 +723,11 @@ function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n))
 }
 
+// The rolling review average. Docs from before the vibe adjustment held it
+// in score; since then score = reviewScore + vibeAdjustment.
 function readScoreState(data: DocumentData): ScoreState {
   return {
-    score: num(data.score, DEFAULT_ZYLOVE_SCORE),
+    score: num(data.reviewScore, num(data.score, DEFAULT_ZYLOVE_SCORE)),
     // Docs written before scoreSamples existed had one sample per review.
     samples: num(data.scoreSamples, num(data.reviewCount, 0)),
     history: Array.isArray(data.history) ? data.history : [],
@@ -729,6 +743,77 @@ function addSample(state: ScoreState, delta: number, reason: string): ScoreState
     samples: state.samples + 1,
     history: [...state.history, { delta, score, reason, timestamp: Date.now() }].slice(-SCORE_HISTORY_LENGTH),
   }
+}
+
+// ─── Vibe adjustment ─────────────────────────────────────────────────────────
+// Vibe checks shift the Zylove Score on top of the review average, as a
+// separate vibeAdjustment that's recomputed (never accumulated):
+//   positive rate ≥ 0.8 → +5, ≥ 0.5 → +2, < 0.3 → −3 (once there are
+//   MIN_VIBE_RATINGS ratings, so one rating can't swing it)
+//   vibePoints > 10 → +3
+// score = clamp(reviewScore + vibeAdjustment, 0, 100).
+const MIN_VIBE_RATINGS = 3
+
+// Points from both field names: zyloveScore.* (web functions) and the
+// older zylovScore.* that the mobile app still writes.
+function vibePointsOf(user: DocumentData | undefined): number {
+  return num(user?.zyloveScore?.vibePoints, 0) + num(user?.zylovScore?.vibePoints, 0)
+}
+
+function vibeAdjustment(signals: DocumentData | undefined, vibePoints: number): number {
+  const ratings = num(signals?.vibeRatings, 0)
+  const rate = num(signals?.vibeCheckPositiveRate, 0)
+  let adjustment = 0
+  if (ratings >= MIN_VIBE_RATINGS) {
+    if (rate >= 0.8) adjustment += 5
+    else if (rate >= 0.5) adjustment += 2
+    else if (rate < 0.3) adjustment -= 3
+  }
+  if (vibePoints > 10) adjustment += 3
+  return adjustment
+}
+
+// The displayed score for a review average and the stored adjustment.
+function withVibe(reviewScore: number, current: DocumentData): number {
+  return Math.round(clamp(reviewScore + num(current.vibeAdjustment, 0), 0, 100))
+}
+
+async function applyVibeAdjustment(uid: string): Promise<void> {
+  const db = getFirestore()
+  const userRef = db.collection('users').doc(uid)
+  const scoreRef = userRef.collection('zyloveScore').doc('current')
+  const signalsRef = db.collection('behaviorSignals').doc(uid)
+  await db.runTransaction(async (tx) => {
+    const [userSnap, scoreSnap, signalsSnap] = await Promise.all([tx.get(userRef), tx.get(scoreRef), tx.get(signalsRef)])
+    if (!userSnap.exists) return
+    const current = scoreSnap.data() ?? {}
+    const adjustment = vibeAdjustment(signalsSnap.data(), vibePointsOf(userSnap.data()))
+    if (scoreSnap.exists && num(current.vibeAdjustment, 0) === adjustment && current.reviewScore !== undefined) return
+    const reviewScore = readScoreState(current).score
+    const score = Math.round(clamp(reviewScore + adjustment, 0, 100))
+    const reviewCount = num(current.reviewCount, 0)
+    const tier = scoreToTier(score, reviewCount)
+    tx.set(
+      scoreRef,
+      {
+        uid,
+        reviewScore,
+        vibeAdjustment: adjustment,
+        score,
+        tier,
+        reviewCount,
+        // Mobile's score screen reads these unguarded.
+        pendingDisputeCount: num(current.pendingDisputeCount, 0),
+        unlockedPerks: Array.isArray(current.unlockedPerks) ? current.unlockedPerks : [],
+        topPositiveCategories: Array.isArray(current.topPositiveCategories) ? current.topPositiveCategories : [],
+        history: Array.isArray(current.history) ? current.history : [],
+        scoreSamples: num(current.scoreSamples, reviewCount),
+        lastUpdated: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    )
+    tx.update(userRef, { zyloveScoreTier: tier })
+  })
 }
 
 const positiveDelta = (n: number) => Math.min(n * POINTS_PER_POSITIVE, MAX_POSITIVE_DELTA)
@@ -851,7 +936,8 @@ export const submitReview = onCall(
       if (positive.length > 0) state = addSample(state, positiveDelta(positive.length), 'Positive review')
       if (applyNegativeNow) state = addSample(state, negativeDelta(negative.length), 'Review after a connection ended')
       const reviewCount = num(current.reviewCount, 0) + (countedNow ? 1 : 0)
-      const tier = scoreToTier(state.score, reviewCount)
+      const score = withVibe(state.score, current)
+      const tier = scoreToTier(score, reviewCount)
       const positiveCounts: Record<string, number> = { ...(current.positiveCategoryCounts ?? {}) }
       for (const c of positive) positiveCounts[c] = num(positiveCounts[c], 0) + 1
 
@@ -872,7 +958,8 @@ export const submitReview = onCall(
         scoreRef,
         {
           uid: reviewedUid,
-          score: state.score,
+          reviewScore: state.score,
+          score,
           tier,
           scoreSamples: state.samples,
           history: state.history,
@@ -890,7 +977,7 @@ export const submitReview = onCall(
         { merge: true },
       )
       tx.update(userRef, { zyloveScoreTier: tier })
-      return { newScore: state.score, newTier: tier }
+      return { newScore: score, newTier: tier }
     })
 
     // After the commit so the count includes this review. A failure here must
@@ -935,12 +1022,14 @@ async function applyPendingNegative(reviewRef: DocumentReference): Promise<void>
     const current = scoreSnap.data() ?? {}
     const state = addSample(readScoreState(current), negativeDelta(negatives.length), 'Review after a connection ended')
     const reviewCount = num(current.reviewCount, 0) + (review.counted === true ? 0 : 1)
-    const tier = scoreToTier(state.score, reviewCount)
+    const score = withVibe(state.score, current)
+    const tier = scoreToTier(score, reviewCount)
     tx.set(
       scoreRef,
       {
         uid: review.reviewedUid,
-        score: state.score,
+        reviewScore: state.score,
+        score,
         tier,
         scoreSamples: state.samples,
         history: state.history,
