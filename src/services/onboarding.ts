@@ -135,6 +135,8 @@ function required<T>(value: T | null, field: string): T {
 // (under review, slow, failed) — empty when they all passed.
 // extraPrompts: saved prompts beyond the PROMPT_COUNT a refresh shows. They're
 // kept as-is unless the draft now uses the same prompt.
+const NO_LIMIT_RADIUS_MILES = 500
+
 export async function saveSparkOnboarding(
   uid: string,
   d: OnboardingDraft,
@@ -309,7 +311,9 @@ export async function saveSparkOnboarding(
     intent: 'spark',
     height: heightCm,
     ...(d.bodyType && { bodyType: d.bodyType }),
-    radiusMiles: d.radiusMiles,
+    // The Spark profile mirror needs a number; 'no limit' is stored as a
+    // radius wider than anyone's search.
+    radiusMiles: d.radiusMiles ?? NO_LIMIT_RADIUS_MILES,
     ageMin: d.ageMin,
     ageMax: d.ageMax,
     isActive: hasPhotos,
@@ -446,7 +450,7 @@ export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null
     // Root dealbreakers (mobile) plus the private prefs (web).
     dealbreakers: arr(own.dealbreakers),
     intent: str(p.intent),
-    radiusMiles: num(p.radiusMiles, INITIAL_DRAFT.radiusMiles),
+    radiusMiles: p.radiusMiles === null ? null : num(p.radiusMiles, INITIAL_DRAFT.radiusMiles ?? 25),
     ageMin: num(p.ageMin, INITIAL_DRAFT.ageMin),
     ageMax: num(p.ageMax, INITIAL_DRAFT.ageMax),
     selectedPromptIds: prompts.map((q) => q.promptId),

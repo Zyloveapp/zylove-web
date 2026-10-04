@@ -103,7 +103,7 @@ export interface OnboardingDraft {
   // null on a profile refresh (the intention steps only run once).
   intentionAnswers: string[]
   onboardingPath: OnboardingPath | null
-  radiusMiles: number
+  radiusMiles: number | null // null = no limit (same as Settings → Discovery)
   ageMin: number
   ageMax: number
   selectedPromptIds: string[]

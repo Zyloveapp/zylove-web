@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Outlet, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Outlet, Routes, Route, useNavigate } from 'react-router-dom'
+import { doc, getDoc } from 'firebase/firestore'
+import { db } from './services/firebase'
 import { useAuthStore } from './store/authStore'
 import { refreshLocationIfStale } from './services/location'
 import { claimFounderBadge, founderCheckDone } from './services/founders'
@@ -38,8 +40,42 @@ import Chat from './pages/Chat'
 const locationChecked = new Set<string>()
 const CELEBRATION_MS = 1500
 
+// Chose the Play path in onboarding but never finished Play setup (left it,
+// or the redirect didn't happen): send them back once per session.
+const PLAY_SETUP_NUDGED = 'zylove_play_setup_nudged'
+
+async function needsPlaySetup(uid: string): Promise<boolean> {
+  try {
+    if (sessionStorage.getItem(PLAY_SETUP_NUDGED) === uid) return false
+  } catch {
+    // No session storage — still check, at worst it nudges again.
+  }
+  const user = await getDoc(doc(db, 'users', uid)).catch(() => null)
+  if (user?.data()?.onboardingPath !== 'play') return false
+  const play = await getDoc(doc(db, `users/${uid}/playProfile/data`)).catch(() => null)
+  return play !== null && !play.exists()
+}
+
 function AppLayout() {
   const uid = useAuthStore((s) => s.user?.uid)
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (!uid) return
+    let cancelled = false
+    needsPlaySetup(uid).then((needed) => {
+      if (!needed || cancelled) return
+      try {
+        sessionStorage.setItem(PLAY_SETUP_NUDGED, uid)
+      } catch {
+        // ignore
+      }
+      navigate('/play-onboarding', { replace: true })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [uid, navigate])
   const [founderNumber, setFounderNumber] = useState<number | null>(null)
 
   // Signed in and onboarded: refresh a missing or week-old location in the

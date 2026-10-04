@@ -498,7 +498,7 @@ export interface DatingProfile {
   locationLabel: string
   ageMin: number
   ageMax: number
-  radiusMiles: number
+  radiusMiles: number | null // null = no limit
   verificationStatus: 'unverified' | 'phone_verified' | 'fully_verified' | 'pending_review' | 'failed'
   phoneVerified: boolean
   reportCount: number
