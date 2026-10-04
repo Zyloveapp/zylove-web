@@ -142,8 +142,8 @@ function PhotoConsentModal({ onAccept, onCancel, busy }: { onAccept: () => void;
           Photo analysis consent
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-white/70">
-          Zylove uses AI-powered photo analysis for profile coaching. Your photos are processed securely to generate
-          feedback and are not stored by our review partner. Standard Zylove privacy protections apply.
+          Zylove uses AI-powered photo analysis for profile coaching. Photos are processed by our AI review partner for
+          coaching purposes only. Standard API data handling applies. Standard Zylove privacy protections apply.
         </p>
         <button
           type="button"
@@ -226,8 +226,8 @@ function PrivacySection({ uid }: { uid: string }) {
       </ul>
       {error && <p className="px-5 pb-2 text-sm text-red-400">{error}</p>}
       <p className="border-t border-white/5 px-5 py-3 text-xs text-white/40">
-        Zylove uses a third-party AI review service to analyze photos. Photos are processed securely and not retained.
-        By enabling, you consent to this analysis.
+        Zylove uses a third-party AI service to analyze photos for profile coaching. By enabling, you consent to your
+        photos being processed by that service.
       </p>
       {pending && <PhotoConsentModal busy={busy} onAccept={() => void accept()} onCancel={() => setPending(null)} />}
     </Section>
