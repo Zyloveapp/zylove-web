@@ -6,6 +6,16 @@ import { db, functions } from './firebase'
 // returns whether the other profile exists, which decides where the user
 // lands: the other mode, or (nothing left) signed out back to onboarding.
 
+// Deletes every file under photos/{uid}/{mode}/ (deleteModePhotos callable).
+// Never blocks the profile deletion: a failure is only logged.
+async function deletePhotoFolder(mode: 'spark' | 'play'): Promise<void> {
+  try {
+    await httpsCallable(functions, 'deleteModePhotos')({ mode })
+  } catch (err) {
+    console.warn(`Couldn't delete ${mode} photo files`, err)
+  }
+}
+
 // The Play profile's published photos, or null if there's no Play profile.
 async function playPhotos(uid: string): Promise<string[] | null> {
   const data = (await getDoc(doc(db, `users/${uid}/playProfile/data`))).data()
@@ -32,6 +42,7 @@ export async function deleteSparkProfile(uid: string): Promise<{ playRemains: bo
     // Explore reads root photoURLs; a Play-only account shows its Play photos
     // there (mirrorPlayOnlyPhotos only syncs when the Play profile changes).
     photoURLs: remainingPlayPhotos ?? [],
+    pendingPhotoURLs: [],
     promptAnswers: [],
     personalityTraits: [],
     relationshipValues: [],
@@ -49,6 +60,7 @@ export async function deleteSparkProfile(uid: string): Promise<{ playRemains: bo
   })
   batch.delete(doc(db, `users/${uid}/sparkProfile/data`))
   await batch.commit()
+  await deletePhotoFolder('spark')
   return { playRemains }
 }
 
@@ -73,8 +85,13 @@ export async function deletePlayProfile(uid: string): Promise<{ sparkRemains: bo
   await updateDoc(doc(db, 'users', uid), {
     ...Object.fromEntries(PLAY_ROOT_FIELDS.map((f) => [f, deleteField()])),
     playVisibility: 'hidden',
-    ...(sparkRemains ? { onboardingPath: 'spark', intent: 'spark' } : { onboardingComplete: false }),
+    // Root photoURLs are the Spark photos — unless this was a Play-only
+    // account, where they were the mirrored Play photos.
+    ...(sparkRemains
+      ? { onboardingPath: 'spark', intent: 'spark' }
+      : { onboardingComplete: false, photoURLs: [] }),
   })
+  await deletePhotoFolder('play')
   return { sparkRemains }
 }
 

@@ -122,7 +122,9 @@ export default function DeleteProfileControls({ uid }: { uid: string }) {
       if (mode === 'spark') {
         const { playRemains } = await deleteSparkProfile(uid)
         if (!playRemains) return void (await leaveSignedOut())
-        setMode('play')
+        // Into Play the normal way — access check, PIN, transition (Header
+        // runs it from the param); the PIN is always required for Play.
+        return void navigate('/discover?enter_play=true', { replace: true })
       } else {
         const { sparkRemains } = await deletePlayProfile(uid)
         if (!sparkRemains) return void (await leaveSignedOut())

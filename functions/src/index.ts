@@ -38,6 +38,7 @@ export { assignFounderBadge, onLaunchConfigUpdated } from './founders'
 export { ensureSortKey } from './discovery'
 export { mirrorPlayOnlyPhotos } from './playPhotoMirror'
 export { listPendingPhotos, reviewPendingPhoto } from './photoReview'
+export { deleteModePhotos } from './profilePhotos'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
 import {

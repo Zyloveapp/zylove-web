@@ -180,6 +180,19 @@ export default function Header() {
     setPinEntry('direct')
   }, [searchParams, setSearchParams, uid])
 
+  // ?enter_play=true: run the same way into Play as tapping the pill (used
+  // after deleting the Spark profile, which leaves a Play-only account).
+  useEffect(() => {
+    if (searchParams.get('enter_play') !== 'true') return
+    const next = new URLSearchParams(searchParams)
+    next.delete('enter_play')
+    setSearchParams(next, { replace: true })
+    if (uid) playLaunchChecked.add(uid)
+    if (useModeStore.getState().mode !== 'play') void togglePill()
+    // togglePill reads current state when called; only the param matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, setSearchParams, uid])
+
   // Play-only (no Spark profile): AuthGuard already put them in Play and the
   // Play lock asks for the PIN. Here only the access check remains — without
   // Play access (trial over) they drop back to Spark with the upgrade prompt.
