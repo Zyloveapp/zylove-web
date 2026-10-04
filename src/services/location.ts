@@ -39,7 +39,8 @@ export function requestLocation(): Promise<LatLng | null> {
 async function reverseGeocode({ lat, lng }: LatLng): Promise<string | null> {
   try {
     const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=10&addressdetails=1`
-    const res = await fetch(url, { headers: { Accept: 'application/json' } })
+    // Bounded: the save waits on this.
+    const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5000) })
     if (!res.ok) return null
     const data: unknown = await res.json()
     const address = (data as { address?: Record<string, string> }).address ?? {}

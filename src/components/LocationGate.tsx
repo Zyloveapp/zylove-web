@@ -1,8 +1,11 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { doc, onSnapshot } from 'firebase/firestore'
+import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
-import { requestLocation, saveUserLocation } from '../services/location'
-import { fetchPublicUserDoc } from '../services/publicUserDoc'
+import { coordsOf, requestLocation, saveUserLocation } from '../services/location'
 
+type Permission = 'checking' | 'granted' | 'prompt' | 'denied'
+// What's shown: the feed, a spinner, or the ask.
 type GateState = 'checking' | 'granted' | 'prompt' | 'denied'
 
 // Set once this tab gets a position, so browsers that report 'prompt' on
@@ -25,70 +28,128 @@ function markGranted(): void {
   }
 }
 
-// Explore needs a location to build the feed. Renders children once the
-// browser has granted geolocation; otherwise a full-page ask in their place
-// (only Explore uses this, so nav, chat and settings stay reachable).
-// Browsers without the Permissions API start at the ask.
+function forgetGranted(): void {
+  try {
+    sessionStorage.removeItem(GRANTED_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+// Explore needs a location to build the feed. Children render only when
+// BOTH the browser allows geolocation AND users/{uid} has coordinates saved
+// (locationLat/locationLng, or a _location map); otherwise a full-page ask in
+// their place (only Explore uses this, so nav, chat and settings stay
+// reachable). Both are watched live: revoking the permission or losing the
+// saved location brings the gate back. Permission already granted but
+// nothing saved: the position is fetched and saved without a tap.
 export default function LocationGate({ children }: { children: ReactNode }) {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
-  const [state, setState] = useState<GateState>(() => (grantedThisSession() ? 'granted' : 'checking'))
+  const [permission, setPermission] = useState<Permission>(() => (grantedThisSession() ? 'granted' : 'checking'))
+  // Whether users/{uid} has coordinates; null until the doc has loaded.
+  const [saved, setSaved] = useState<{ uid: string; value: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
   // "Try again" from the blocked view didn't get a location either.
   const [stillBlocked, setStillBlocked] = useState(false)
+  const [saveError, setSaveError] = useState(false)
   // Admins (users/{uid}.isAdmin) get a small link to preview the gate.
   const [isAdmin, setIsAdmin] = useState(false)
+  const [preview, setPreview] = useState<'prompt' | 'denied' | null>(null)
+  // One automatic save attempt per mount.
+  const autoSaveTried = useRef(false)
 
   useEffect(() => {
     if (!uid) return
-    let cancelled = false
-    fetchPublicUserDoc(uid).then((d) => !cancelled && setIsAdmin(d?.isAdmin === true))
-    return () => {
-      cancelled = true
-    }
+    return onSnapshot(
+      doc(db, 'users', uid),
+      (snap) => {
+        const d = snap.data()
+        setIsAdmin(d?.isAdmin === true)
+        setSaved({ uid, value: coordsOf(d) !== null })
+      },
+      // Can't read the doc: don't lock Explore over it.
+      () => setSaved({ uid, value: true }),
+    )
   }, [uid])
 
+  // The browser's permission, kept live: revoked in settings → gate again.
   useEffect(() => {
-    if (state !== 'checking') return
-    let cancelled = false
     if (!navigator.permissions?.query) {
-      setState('prompt')
+      if (!grantedThisSession()) setPermission('prompt')
       return
     }
+    let cancelled = false
+    let status: PermissionStatus | null = null
     navigator.permissions
       .query({ name: 'geolocation' })
-      .then((status) => {
+      .then((s) => {
         if (cancelled) return
-        setState(status.state)
-        // Allowed later from the browser's or phone's settings: let them in.
-        status.onchange = () => {
-          if (status.state === 'granted') setState('granted')
+        status = s
+        // Safari's "Ask" reports 'prompt' every visit; a position this
+        // session counts as granted.
+        if (s.state !== 'prompt' || !grantedThisSession()) setPermission(s.state)
+        s.onchange = () => {
+          if (s.state !== 'granted') forgetGranted()
+          setPermission(s.state)
         }
       })
-      .catch(() => !cancelled && setState('prompt'))
+      .catch(() => !cancelled && !grantedThisSession() && setPermission('prompt'))
     return () => {
       cancelled = true
+      if (status) status.onchange = null
     }
-  }, [state])
+  }, [])
 
-  // Asks for a position directly (getCurrentPosition), which brings up the
-  // browser's own prompt wherever it's still allowed to ask. A browser that
-  // has permanently blocked the site fails at once — the instructions are the
-  // only way back then.
-  async function allow() {
-    const retry = state === 'denied'
+  const hasSaved = saved?.uid === uid ? saved.value : null
+
+  // Gets a position and saves it. The gate opens when the saved
+  // coordinates show up on the user doc, not before.
+  async function locate(): Promise<void> {
+    const retry = permission === 'denied'
     setBusy(true)
     setStillBlocked(false)
+    setSaveError(false)
     const location = await requestLocation()
-    if (location) {
-      if (uid) await saveUserLocation(uid, location).catch(() => {})
-      markGranted()
-      setState('granted')
-    } else {
-      setState('denied')
-      setStillBlocked(retry)
+    if (!location) {
+      // Allowed but no position (timed out, no fix): retry, not "blocked".
+      if (permission === 'granted') setSaveError(true)
+      else {
+        setPermission('denied')
+        setStillBlocked(retry)
+      }
+      setBusy(false)
+      return
+    }
+    markGranted()
+    setPermission('granted')
+    try {
+      if (uid) await saveUserLocation(uid, location)
+    } catch {
+      setSaveError(true)
     }
     setBusy(false)
   }
+
+  // Allowed already, nothing saved (an earlier visit never saved, or the
+  // save failed): fetch and save without asking.
+  useEffect(() => {
+    if (permission !== 'granted' || hasSaved !== false || autoSaveTried.current) return
+    autoSaveTried.current = true
+    void locate()
+    // locate reads current state when called.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permission, hasSaved])
+
+  let state: GateState
+  if (preview) state = preview
+  else if (hasSaved === null || permission === 'checking') state = 'checking'
+  else if (permission === 'granted' && hasSaved) state = 'granted'
+  else if (permission === 'denied') state = 'denied'
+  // Granted but still saving (or the save failed): the ask, with its status.
+  else state = 'prompt'
+
+  const allow = () => void locate()
+  const setState = (s: 'prompt' | 'denied' | 'granted') => setPreview(s === 'granted' ? null : s)
 
   if (state === 'granted') {
     return (
@@ -128,6 +189,10 @@ export default function LocationGate({ children }: { children: ReactNode }) {
           : 'Zylove uses your location to show you real people nearby. We never share your exact location.'}
       </p>
 
+      {saveError && !denied && (
+        <p className="mt-4 max-w-xs text-sm text-red-400">Couldn't get your location. Check your connection and try again.</p>
+      )}
+
       {!denied && (
         <button
           type="button"
@@ -149,6 +214,11 @@ export default function LocationGate({ children }: { children: ReactNode }) {
           className="mt-6 text-xs text-white/30 underline hover:text-white/60"
         >
           Admin: preview {denied ? 'first-ask' : 'blocked'} view
+        </button>
+      )}
+      {isAdmin && preview && (
+        <button type="button" onClick={() => setState('granted')} className="mt-2 text-xs text-white/30 underline hover:text-white/60">
+          Admin: close preview
         </button>
       )}
 
