@@ -118,6 +118,20 @@ export default function Profile() {
               </Link>
             </section>
           )}
+          {playData && (
+            <div>
+              <button
+                type="button"
+                onClick={() => navigate('/play-onboarding?edit=true')}
+                className="w-full rounded-xl border border-white/15 py-3 font-semibold text-white/70 transition-colors hover:bg-white/5 hover:text-white"
+              >
+                Reset the vibe 🔥
+              </button>
+              <p className="mt-2 text-center text-xs text-white/40">
+                Go back through Play setup — your answers will be pre-filled.
+              </p>
+            </div>
+          )}
           <VisibilityControl />
         </div>
 

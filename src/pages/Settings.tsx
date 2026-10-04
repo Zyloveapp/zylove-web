@@ -22,6 +22,7 @@ import PlayPinFlow from '../components/PlayPinFlow'
 import DiscoverySettings from '../components/DiscoverySettings'
 import InstallAppSection from '../components/InstallAppSection'
 import BlockedUsersLink from '../components/BlockedUsersLink'
+import DeleteProfileControls from '../components/DeleteProfileControls'
 import PhotoConsentCopy from '../components/PhotoConsentCopy'
 import { isAdmin } from '../services/adminPhotos'
 import { setPhotoConsent, subscribePhotoConsent, type PhotoConsent, type PhotoConsentMode } from '../services/photoConsent'
@@ -587,6 +588,7 @@ export default function Settings() {
             </span>
           </button>
           {notice && <p className="px-5 pb-4 text-sm text-emerald-300">{notice}</p>}
+          <DeleteProfileControls uid={uid} />
           <button
             type="button"
             onClick={handleSignOut}
