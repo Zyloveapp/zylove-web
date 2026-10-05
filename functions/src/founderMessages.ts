@@ -118,7 +118,7 @@ function millis(v: unknown): number | null {
 // ─── Founder → Matthew ───────────────────────────────────────────────────────
 
 export const sendFounderMessage = onCall(
-  { timeoutSeconds: 30, memory: '128MiB', invoker: 'public', secrets: SMS_SECRETS },
+  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const uid = request.auth.uid
