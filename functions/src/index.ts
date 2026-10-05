@@ -2055,3 +2055,7 @@ export const validatePhoneNumber = onCall(
 export { deleteAccount, checkRestoreEligibility, restoreAccount } from './legacy/accountLifecycle'
 export { requestAccountDeletion, cancelAccountDeletion } from './legacy/trustSafety'
 export { onNightlyPurge, processGraceExpiredDeletions } from './legacy/onNightlyPurge'
+// Batch (b): photo moderation, pair rescoring, women's Elite.
+export { onPhotoUpload } from './legacy/onPhotoUpload'
+export { onProfileWrite } from './legacy/onProfileWrite'
+export { claimWomenElite } from './legacy/claimWomenElite'
