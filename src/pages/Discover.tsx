@@ -170,6 +170,8 @@ function Explore() {
         )}
         <h1 className="text-2xl font-semibold">You've seen everyone for now</h1>
         <p className="mt-3 text-white/50">New profiles appear as people join. Check back soon.</p>
+        {/* A match on the last card still celebrates (B-001). */}
+        {newMatch && <MatchOverlay match={newMatch} onClose={() => setNewMatch(null)} />}
       </div>
     )
   }
