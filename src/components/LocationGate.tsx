@@ -52,7 +52,7 @@ function isPrivateBrowser(): boolean {
 
 // Explore needs a location to build the feed. Children render only when
 // BOTH the browser allows geolocation AND users/{uid} has coordinates saved
-// (locationLat/locationLng, or a _location map); otherwise a full-page ask in
+// (locationLat/locationLng); otherwise a full-page ask in
 // their place (only Explore uses this, so nav, chat and settings stay
 // reachable). Both are watched live: revoking the permission or losing the
 // saved location brings the gate back. Permission already granted but

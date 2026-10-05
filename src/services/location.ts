@@ -135,14 +135,11 @@ export function getDistanceMiles(lat1: number, lng1: number, lat2: number, lng2:
   return 3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
-// A profile's coordinates: locationLat/locationLng (people) or the
-// _location map ({ latitude, longitude }) the seeded bots carry. Null when
-// neither is there.
+// A profile's snapped coordinates (locationLat/locationLng), or null. The
+// mobile app's _location map is raw GPS and is never read here.
 export function coordsOf(p: object | null | undefined): LatLng | null {
   const d = (p ?? {}) as Record<string, unknown>
   if (typeof d.locationLat === 'number' && typeof d.locationLng === 'number') return { lat: d.locationLat, lng: d.locationLng }
-  const geo = d._location as { latitude?: unknown; longitude?: unknown } | undefined
-  if (typeof geo?.latitude === 'number' && typeof geo?.longitude === 'number') return { lat: geo.latitude, lng: geo.longitude }
   return null
 }
 

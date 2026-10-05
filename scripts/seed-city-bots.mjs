@@ -377,26 +377,6 @@ const PERSONAS = [
 
 // ─── Builders ────────────────────────────────────────────────────────────────
 
-const GEOHASH = '0123456789bcdefghjkmnpqrstuvwxyz'
-function geohash(lat, lng, precision = 7) {
-  let [latMin, latMax, lngMin, lngMax] = [-90, 90, -180, 180]
-  let hash = ''
-  let bits = 0
-  let bit = 0
-  let even = true
-  while (hash.length < precision) {
-    if (even) {
-      const mid = (lngMin + lngMax) / 2
-      if (lng >= mid) { bits = (bits << 1) | 1; lngMin = mid } else { bits <<= 1; lngMax = mid }
-    } else {
-      const mid = (latMin + latMax) / 2
-      if (lat >= mid) { bits = (bits << 1) | 1; latMin = mid } else { bits <<= 1; latMax = mid }
-    }
-    even = !even
-    if (++bit === 5) { hash += GEOHASH[bits]; bits = 0; bit = 0 }
-  }
-  return hash
-}
 
 // Birth year so that age is right on TODAY.
 function birthday(age, mmdd) {
@@ -436,7 +416,9 @@ function build(p) {
     dealbreakers, seekingTraits: a.seekingTraits,
     seekingBodyTypes: seeking.includes('everyone') ? ['athletic', 'average', 'slim'] : BODY_PREFS[attractedTo[0]],
     ageMin, ageMax, radiusMiles: 25,
-    locationLabel: city.label, _location: { latitude: city.lat, longitude: city.lng }, geohash: geohash(city.lat, city.lng),
+    // City centre — public, not anyone's home. No _location / geohash (raw
+    // coordinates any signed-in user could read; see scrub-raw-location.mjs).
+    locationLabel: city.label, locationLat: city.lat, locationLng: city.lng,
     verificationStatus: 'phone_verified', phoneVerified: true, isBot: true, reportCount: 0, isSuspended: false,
     subscriptionTier: 'elite', mode: 'spark', sparkVisibility: 'active', playVisibility: 'active',
     publicKey: '', playStyle, relationshipStyle, sortKey: Math.random(),
