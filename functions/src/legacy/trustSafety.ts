@@ -106,7 +106,9 @@ export const requestAccountDeletion = onCall(LEGACY_RUNTIME, async (request) => 
   await db.collection("deletionRequests").doc(uid).set({
     uid,
     requestedAt: admin.firestore.FieldValue.serverTimestamp(),
-    scheduledFor,
+    // A Timestamp, so processGraceExpiredDeletions' scheduledFor <= now query
+    // matches it (Firestore never compares a number with a Timestamp). B-002.
+    scheduledFor: admin.firestore.Timestamp.fromMillis(scheduledFor),
     reason,
     status: "pending",
   });
