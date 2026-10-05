@@ -2048,3 +2048,10 @@ export const validatePhoneNumber = onCall(
     return { allowed: true }
   },
 )
+
+// ─── Ported from the mobile codebase (Stage 0) ───────────────────────────────
+// Deployed source moved into this codebase unchanged (see legacy/legacyOptions.ts
+// for the one edit: pinned runtime settings). Batch (a): account deletion.
+export { deleteAccount, checkRestoreEligibility, restoreAccount } from './legacy/accountLifecycle'
+export { requestAccountDeletion, cancelAccountDeletion } from './legacy/trustSafety'
+export { onNightlyPurge, processGraceExpiredDeletions } from './legacy/onNightlyPurge'
