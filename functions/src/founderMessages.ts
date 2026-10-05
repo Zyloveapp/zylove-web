@@ -186,7 +186,7 @@ export const sendFounderMessage = onCall(
 // ─── Matthew → one founder ───────────────────────────────────────────────────
 
 export const replyToFounder = onCall(
-  { timeoutSeconds: 30, memory: '128MiB', invoker: 'public', secrets: SMS_SECRETS },
+  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
   async (request): Promise<{ success: true }> => {
     const adminUid = await requireAdmin(request.auth?.uid)
     const data = (request.data ?? {}) as Record<string, unknown>
