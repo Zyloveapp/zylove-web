@@ -4,7 +4,7 @@ import { FirebaseError } from 'firebase/app'
 import { db, functions } from './firebase'
 import { photoProgress, uploadModeratedPhotos, type SaveProgress } from './moderatedPhotos'
 import { keysReady, resolveKeypair } from './keys'
-import { isAlwaysElite } from './subscription'
+import { getUserTier, isAlwaysElite } from './subscription'
 import { changeDisplayName } from './displayNames'
 import { addLegalName } from './privateIdentity'
 import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
@@ -402,13 +402,14 @@ export async function savePlayOnlyOnboarding(
   return [...notices, ...nameErrors]
 }
 
-// Gets Play on the 30-day trial rather than for free: not a founder, not an
-// always-Elite gender, not already Elite. Read after initUserDefaults has run,
-// so subscriptionTier reflects the server's decision.
+// Gets Play on a running 30-day trial rather than for free: not a founder,
+// not an always-Elite gender, not already Elite, and their market has opened
+// (pre-launch, Play is simply free). Read after initUserDefaults has run, so
+// the trial fields reflect the server's decision.
 export async function needsPlayTrialWelcome(uid: string): Promise<boolean> {
   const data = (await getDoc(doc(db, 'users', uid))).data()
   if (!data) return false
-  return !isAlwaysElite(data) && data.subscriptionTier !== 'elite'
+  return !isAlwaysElite(data) && data.subscriptionTier !== 'elite' && getUserTier(data) === 'trial'
 }
 
 // Play-only: chose the Play path, finished Play, and never built a Spark

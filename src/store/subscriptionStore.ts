@@ -11,6 +11,8 @@ interface SubscriptionState {
   subscriptionStatus: SubscriptionStatus | null
   // Free because the trial is over (TrialExpiry blocks the app).
   trialEnded: boolean
+  // The launch city covering their location (pre-launch line), or null.
+  marketName: string | null
   set: (s: Omit<SubscriptionState, 'set'>) => void
 }
 
@@ -21,5 +23,6 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   alwaysElite: false,
   subscriptionStatus: null,
   trialEnded: false,
+  marketName: null,
   set: (s) => set(s),
 }))

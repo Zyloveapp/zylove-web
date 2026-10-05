@@ -16,13 +16,13 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { logger } from 'firebase-functions'
-import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
+import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, distanceMiles } from './cities'
 import { SMS_SECRETS } from './sms'
 import { bucketFor, num, refreshCityMembers, textFounder, type Bucket, type FounderStatus } from './founders'
+import { CLEAR_TRIAL, cityOpen, hasEliteIdentity, hasPaidSubscription, newTrial } from './trial'
 
 const DAY_MS = 24 * 60 * 60 * 1000
-const TRIAL_MS = 30 * DAY_MS
 const LAUNCH_WINDOW_DAYS = 90
 const FOUNDER_WINDOW_DAYS = 180
 const RULES = {
@@ -54,9 +54,6 @@ function millis(v: unknown): number | null {
 }
 
 // Stripe owns the tier while a paid subscription is live.
-function hasPaidSubscription(user: DocumentData | undefined): boolean {
-  return user?.subscriptionStatus === 'active' || user?.subscriptionStatus === 'past_due'
-}
 
 // ─── Heartbeat ───────────────────────────────────────────────────────────────
 
@@ -89,9 +86,10 @@ export const founderHeartbeat = onCall(
 
 // ─── Revocation ──────────────────────────────────────────────────────────────
 
-// Takes the founder spot back: not a founder, a fresh 30-day trial (unless
-// Stripe is billing them, or their identity already gets Elite), and the
-// spot freed in the city's counters. Returns the opened spot, or null if
+// Takes the founder spot back: not a founder, back to the plan anyone else
+// in their city gets (trial.ts) — a fresh 30-day trial if the city has
+// opened, pre-launch (no clock) if not; neither if Stripe is billing them or
+// their identity gets Elite — and the spot freed in the city's counters. Returns the opened spot, or null if
 // the record had already moved on.
 export async function revokeFounderStatus(uid: string): Promise<{ cityId: string; bucket: Bucket } | null> {
   const db = getFirestore()
@@ -126,16 +124,15 @@ export async function revokeFounderStatus(uid: string): Promise<{ cityId: string
       )
     }
     if (user) {
+      // Not paying (checked below), so exempt only by identity: Elite.
+      const plan = hasEliteIdentity(user)
+        ? { subscriptionTier: 'elite' }
+        : { subscriptionTier: 'free', ...(cityOpen(citySnap.data()) ? newTrial() : CLEAR_TRIAL) }
       tx.update(userRef, {
         isFounder: false,
         founderStatus: 'revoked',
         founderRevokedAt: FieldValue.serverTimestamp(),
-        ...(!hasPaidSubscription(user) && {
-          subscriptionTier: 'trial',
-          trialStartedAt: FieldValue.serverTimestamp(),
-          trialEndsAt: Timestamp.fromMillis(Date.now() + TRIAL_MS),
-          trialExpired: false,
-        }),
+        ...(!hasPaidSubscription(user) && plan),
       })
     }
     return { cityId: record.cityId, bucket }

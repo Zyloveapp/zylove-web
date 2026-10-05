@@ -2,7 +2,16 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { doc, onSnapshot, type DocumentData } from 'firebase/firestore'
 import { db } from '../services/firebase'
-import { getDaysLeftInTrial, getSubscriptionStatus, getUserTier, hasEliteIdentity, hasTrialEnded } from '../services/subscription'
+import {
+  getDaysLeftInTrial,
+  getSubscriptionStatus,
+  getUserTier,
+  hasEliteIdentity,
+  hasTrialEnded,
+  marketOf,
+  prelaunchLine,
+  trialDaysLine,
+} from '../services/subscription'
 import { useModeStore, type Mode } from '../store/modeStore'
 import { useBilling } from './PaywallGate'
 
@@ -28,7 +37,7 @@ interface Row {
 }
 
 // First match wins: founder, complimentary (gender), paid Elite, paid Spark+,
-// failed payment, lapsed subscription, trial over, trial.
+// failed payment, lapsed subscription, pre-launch, trial over, trial.
 function membershipRow(user: DocumentData, mode: Mode): Row {
   const status = getSubscriptionStatus(user)
   const top = SUBLABEL_TOP[mode]
@@ -64,12 +73,21 @@ function membershipRow(user: DocumentData, mode: Mode): Row {
       action: 'upgrade',
     }
   }
+  // Market not open yet: free, no clock.
+  if (getUserTier(user) === 'prelaunch') {
+    return {
+      label: `✦ ${prelaunchLine(marketOf(user)?.name ?? null)}`,
+      sublabel: 'Your 30-day free trial starts when discovery opens near you.',
+      border: 'cobalt',
+      action: null,
+    }
+  }
   if (hasTrialEnded(user)) {
     return { label: '✦ Free · Trial ended', sublabel: 'Subscribe to continue →', border: 'red', action: 'upgrade' }
   }
   const days = getDaysLeftInTrial(user)
   return {
-    label: days === null ? '✦ Free trial' : `✦ Free · ${days} ${days === 1 ? 'day' : 'days'} remaining`,
+    label: days === null ? '✦ Free trial' : `✦ ${trialDaysLine(days)}`,
     sublabel: 'Upgrade to unlock everything →',
     border: 'cobalt',
     action: 'upgrade',

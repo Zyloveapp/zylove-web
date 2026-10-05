@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { useBackLinkClass } from '../store/modeStore'
 import { useAuthStore } from '../store/authStore'
 import { useSubscriptionStore } from '../store/subscriptionStore'
-import { TRIAL_DAYS } from '../services/subscription'
+import { TRIAL_DAYS, prelaunchLine, trialDaysLine } from '../services/subscription'
 import { PLAN_NAMES, type PaidTier } from '../services/billing'
 import { useBilling } from '../components/PaywallGate'
 import { usePageTitle } from '../components/public/usePageTitle'
@@ -90,7 +90,7 @@ export default function Upgrade() {
   const [searchParams] = useSearchParams()
   const { hash } = useLocation()
   const signedIn = useAuthStore((s) => s.user !== null)
-  const { tier, daysLeft, alwaysElite, subscriptionStatus, trialEnded } = useSubscriptionStore()
+  const { tier, daysLeft, alwaysElite, subscriptionStatus, trialEnded, marketName } = useSubscriptionStore()
   const { pending, error, checkout, portal } = useBilling()
   // /upgrade#elite (Settings, for Spark+ members): jump to the Elite plan.
   useEffect(() => {
@@ -110,7 +110,9 @@ export default function Upgrade() {
     canceled && tier !== null && !subscribed && !alwaysElite
       ? tier === 'trial'
         ? `No worries — your trial continues${daysLeft !== null ? ` (${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} left)` : ''}.`
-        : "Checkout canceled — you weren't charged."
+        : tier === 'prelaunch'
+          ? `Checkout canceled — you weren't charged. ${prelaunchLine(marketName)}.`
+          : "Checkout canceled — you weren't charged."
       : null
 
   function choose(plan: PaidTier) {
@@ -168,13 +170,19 @@ export default function Upgrade() {
             {tier === 'trial' && daysLeft !== null && (
               <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6">
                 <h2 className="text-lg font-bold">✦ Your free trial</h2>
-                <p className="mt-1 text-sm text-white/70">
-                  You have {daysLeft} {daysLeft === 1 ? 'day' : 'days'} left of full Elite access.
-                </p>
+                <p className="mt-1 text-sm text-white/70">{trialDaysLine(daysLeft)} Full Elite access until then.</p>
                 <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
                   <div className="h-full rounded-full bg-amber-400" style={{ width: `${trialProgress}%` }} />
                 </div>
                 <p className="mt-3 text-sm text-white/60">Enjoying Zylove? Upgrade before your trial ends.</p>
+              </section>
+            )}
+            {tier === 'prelaunch' && (
+              <section className="rounded-2xl border border-[#1B4FD8]/40 bg-[#1B4FD8]/10 p-6">
+                <h2 className="text-lg font-bold">✦ {prelaunchLine(marketName)}</h2>
+                <p className="mt-1 text-sm text-white/70">
+                  Everything's unlocked until discovery opens near you. Then your 30-day free trial starts.
+                </p>
               </section>
             )}
             {trialEnded && (

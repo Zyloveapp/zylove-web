@@ -15,7 +15,14 @@ import {
 
 const REFRESH_MS = 60_000
 
-const TIER_LABEL: Record<Tier, string> = { founder: 'Founder', elite: 'Elite', spark_plus: 'Spark+', trial: 'Trial', free: 'Free' }
+const TIER_LABEL: Record<Tier, string> = {
+  founder: 'Founder',
+  elite: 'Elite',
+  spark_plus: 'Spark+',
+  trial: 'Trial',
+  prelaunch: 'Pre-launch',
+  free: 'Free',
+}
 const MODE_LABEL: Record<Mode, string> = { spark: 'Spark', play: 'Play', both: 'Both', none: '—' }
 const STATUS_STYLE: Record<Status, string> = {
   active: 'bg-emerald-500/15 text-emerald-300',

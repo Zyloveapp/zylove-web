@@ -5,7 +5,7 @@ import { db, functions } from './firebase'
 // Admin activity dashboard (functions/src/adminActivity.ts). Every call is
 // checked server-side for users/{uid}.isAdmin.
 
-export type Tier = 'founder' | 'elite' | 'spark_plus' | 'trial' | 'free'
+export type Tier = 'founder' | 'elite' | 'spark_plus' | 'trial' | 'prelaunch' | 'free'
 export type Mode = 'spark' | 'play' | 'both' | 'none'
 export type Status = 'active' | 'hidden' | 'suspended' | 'deleted'
 

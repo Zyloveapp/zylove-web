@@ -41,10 +41,10 @@ function ms(v: unknown): number | null {
 const dayKeyFormat = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' })
 const dayKey = (t: number) => dayKeyFormat.format(t) // YYYY-MM-DD in Central time
 
-export type Tier = 'founder' | 'elite' | 'spark_plus' | 'trial' | 'free'
+export type Tier = 'founder' | 'elite' | 'spark_plus' | 'trial' | 'prelaunch' | 'free'
 export type Mode = 'spark' | 'play' | 'both' | 'none'
 export type Status = 'active' | 'hidden' | 'suspended' | 'deleted'
-const TIER_ORDER: Tier[] = ['founder', 'elite', 'spark_plus', 'trial', 'free']
+const TIER_ORDER: Tier[] = ['founder', 'elite', 'spark_plus', 'trial', 'prelaunch', 'free']
 
 export interface UserRow {
   uid: string
@@ -93,6 +93,8 @@ function tierOf(u: DocumentData, now: number): Tier {
   const g = Array.isArray(u.genderIdentity) ? u.genderIdentity[0] : u.genderIdentity
   if (u.subscriptionTier === 'elite' || (typeof g === 'string' && ELITE_IDENTITIES.has(g))) return 'elite'
   if (u.subscriptionTier === 'spark_plus') return 'spark_plus'
+  // No trial yet: their market hasn't opened (trial.ts).
+  if (u.trialStartedAt == null) return 'prelaunch'
   const ends = ms(u.trialEndsAt)
   if (u.trialExpired !== true && ends !== null && ends > now) return 'trial'
   return 'free'

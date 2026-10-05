@@ -180,8 +180,9 @@ export async function claimFounderSpot(uid: string, lat: number, lng: number, so
         womenCount: nextWomen,
         menCount: nextMen,
         founderSeq: cohortNumber,
-        // Both halves full: this city is live, its bots go.
-        ...(fills && { botsActive: false }),
+        // Both halves full: this city is live, its bots go, and its trials
+        // start (trial.ts onMarketOpened).
+        ...(fills && { botsActive: false, discoveryOpenedAt: FieldValue.serverTimestamp() }),
       },
       { merge: true },
     )

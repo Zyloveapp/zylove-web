@@ -48,6 +48,7 @@ export { updateDisplayName } from './displayName'
 export { processBotLikeBacks, queueBotLikeBack } from './botLikeBack'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
+import { ALWAYS_ELITE_IDENTITIES, marketFor, marketOpen, newTrial, trialExempt } from './trial'
 import { countMessages, generationOf, participants, pastConnectionId } from './matchGeneration'
 import {
   FLAG_CATEGORY_IDS,
@@ -343,16 +344,12 @@ const TRUST_DEFAULTS = {
   sparkScore: 50,
 } as const
 
-// Women and other non-male identities get lifetime Elite on the web ('nonbinary'
-// is how it's stored). Mobile still elevates only woman / trans_woman.
-const ALWAYS_ELITE_IDENTITIES = ['woman', 'trans_woman', 'nonbinary', 'non_binary', 'genderfluid', 'agender', 'self_describe']
-const TRIAL_MS = 30 * 24 * 60 * 60 * 1000
-
 // Fills in whichever trust/safety fields are missing on the caller's own
 // users/{uid} doc. Only missing fields are written, so values set elsewhere
 // (e.g. Elite from a founder code) are never overwritten. Idempotent.
-// Also starts the 30-day trial for anyone without one — existing users too,
-// since Explore calls this on every load.
+// Also starts the 30-day trial (trial.ts) for anyone without one whose market
+// has opened — existing users too, since the app calls this on every load.
+// In a pre-launch market (or none) there's no clock yet.
 export const initUserDefaults = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
@@ -378,9 +375,9 @@ export const initUserDefaults = onCall(
     if (data.identityLockedAt == null && data.genderIdentity != null) {
       missing.identityLockedAt = FieldValue.serverTimestamp()
     }
-    if (data.trialStartedAt === undefined) {
-      missing.trialStartedAt = FieldValue.serverTimestamp()
-      missing.trialEndsAt = Timestamp.fromMillis(Date.now() + TRIAL_MS)
+    if (data.trialStartedAt === undefined && !trialExempt(data)) {
+      const market = marketFor(data)
+      if (market && (await marketOpen(market))) Object.assign(missing, newTrial())
     }
     // Explore pool position (see discovery.ts): set once, never changed.
     if (typeof data.sortKey !== 'number') missing.sortKey = Math.random()
@@ -1685,13 +1682,15 @@ function toDate(v: unknown): Date | null {
 }
 
 // Elite-level access, as the web app's getUserTier (subscription.ts) grants
-// it: the always-Elite identities, founders, an elite subscription, or a
-// trial that hasn't ended. Spark+ and free don't count.
+// it: the always-Elite identities, founders, an elite subscription, a trial
+// that hasn't ended, or pre-launch (no trial started yet — free while the
+// network builds). Spark+ and free don't count.
 function hasEliteAccess(user: DocumentData | undefined): boolean {
   if (!user) return false
   const g: unknown = Array.isArray(user.genderIdentity) ? user.genderIdentity[0] : user.genderIdentity
   if (isWoman(g) || (typeof g === 'string' && ALWAYS_ELITE_IDENTITIES.includes(g))) return true
   if (user.isFounder === true || user.subscriptionTier === 'elite') return true
+  if (user.trialStartedAt == null && user.subscriptionTier !== 'spark_plus') return true
   const endsAt = toDate(user.trialEndsAt)
   return user.trialExpired !== true && endsAt !== null && endsAt > new Date()
 }
@@ -1790,7 +1789,7 @@ export const getCuriousVisitors = onCall(
 export { botTypingStart, botTypingStop } from './botTyping'
 export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate, unmatchConnection } from './behavior'
 export { markChatPhotoViewed, sweepChatPhotos } from './photos'
-export { checkTrialStatus } from './trial'
+export { checkTrialStatus, onMarketOpened } from './trial'
 export { createCheckoutSession, createPortalSession, stripeWebhook } from './stripe'
 export {
   broadcastToFounders,
