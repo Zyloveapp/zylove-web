@@ -1,0 +1,430 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helpers ────────────────────────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isUser(uid) {
+      return request.auth.uid == uid;
+    }
+
+    function isMatchParticipant(matchId) {
+      // Reads the parent match doc's users[] array — robust to UIDs that
+      // contain underscores (which would break matchId.split('_') heuristic).
+      // Cost: 1 billed read per message-subcollection rule evaluation.
+      return exists(/databases/$(database)/documents/matches/$(matchId))
+          && request.auth.uid in get(/databases/$(database)/documents/matches/$(matchId)).data.get('users', []);
+    }
+
+    function isPairParticipant(pairId) {
+      // pairId format: uid1_uid2 (sorted), same convention as matches
+      return pairId.split('_')[0] == request.auth.uid
+          || pairId.split('_')[1] == request.auth.uid;
+    }
+
+    function isVerified() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.phoneVerified == true;
+    }
+
+    // ─── Users ──────────────────────────────────────────────────────────────
+    // Own profile: full read/write (minus trust/safety fields)
+    // Other profiles: read only (discovery, matching); suspended targets hidden
+    // Trust/safety fields (isSuspended, reportCount, verificationStatus,
+    // sparkScore, subscriptionTier) are written ONLY by Cloud Functions
+    // via admin SDK — any client attempt is blocked.
+
+    match /users/{uid} {
+      allow read: if isSignedIn()
+                  && (resource == null
+                      || resource.data.get('isSuspended', false) == false);
+      allow create: if isUser(uid) && isSignedIn()
+                    && !request.resource.data.keys().hasAny([
+                        'isSuspended', 'reportCount', 'verificationStatus',
+                        'sparkScore', 'subscriptionTier', 'zyloveScoreTier', 'isAdmin',
+                        'isFounder', 'founderCohort', 'founderNumber', 'founderBadgeAssignedAt',
+                        'trialStartedAt', 'trialEndsAt', 'trialExpired',
+                        'legalName', 'displayNameUpdatedAt', 'playDisplayNameUpdatedAt'
+                      ]);
+      // Trust/safety, founder-badge and trial fields: always blocked client-side
+      // (Cloud Functions only: redeemFounderCode, assignFounderBadge,
+      // initUserDefaults / checkTrialStatus in zylove-web).
+      // legalName lives only in the owner-only private/identity doc, never
+      // here. The name-change timestamps are server-only (zylove-web's
+      // updateDisplayName enforces the 30-day limit with them).
+      // Identity-lock fields (birthday, genderIdentity, matchableAs,
+      // identityLockedAt): blocked AFTER identityLockedAt is set. First
+      // write (when field is still null) is permitted — that's the slide-2
+      // confirm or the retroactive ensureIdentityLock write.
+      // Public names (displayName, playDisplayName): the first one is set
+      // directly by onboarding; after that only updateDisplayName changes them.
+      allow update: if isUser(uid) && isSignedIn()
+                    && !request.resource.data.diff(resource.data).affectedKeys()
+                        .hasAny(['isSuspended', 'reportCount', 'verificationStatus', 'sparkScore', 'subscriptionTier', 'zyloveScoreTier', 'isAdmin',
+                                 'isFounder', 'founderCohort', 'founderNumber', 'founderBadgeAssignedAt',
+                                 'trialStartedAt', 'trialEndsAt', 'trialExpired',
+                                 'legalName', 'displayNameUpdatedAt', 'playDisplayNameUpdatedAt'])
+                    && (resource.data.get('identityLockedAt', null) == null
+                        || !request.resource.data.diff(resource.data).affectedKeys()
+                            .hasAny(['birthday', 'genderIdentity', 'matchableAs', 'identityLockedAt']))
+                    && (resource.data.get('displayName', null) == null
+                        || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['displayName']))
+                    && (resource.data.get('playDisplayName', null) == null
+                        || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['playDisplayName']));
+      allow delete: if isUser(uid);
+
+      // Private identity — owner-only. users/{uid}/private/identity holds the
+      // legal name: created once at onboarding, never changed or deleted by
+      // the client.
+      match /private/{doc} {
+        allow read, create: if isSignedIn() && request.auth.uid == uid;
+        allow update, delete: if false;
+      }
+
+      // Spark profile subcollection
+      match /sparkProfile/{doc} {
+        allow read: if isSignedIn()
+                    && get(/databases/$(database)/documents/users/$(uid)).data.get('isSuspended', false) != true;
+        allow write: if isUser(uid) && isSignedIn();
+      }
+
+      // Play profile subcollection
+      match /playProfile/{doc} {
+        allow read: if isSignedIn()
+                    && get(/databases/$(database)/documents/users/$(uid)).data.get('isSuspended', false) != true;
+        allow write: if isUser(uid) && isSignedIn();
+      }
+
+      // Visibility settings — own only
+      match /settings/{doc} {
+        allow read, write: if isUser(uid) && isSignedIn();
+      }
+
+      // Saved "How's my profile?" reviews — written by zylove-web's
+      // reviewProfile / reviewPlayProfile. Owner reads, server writes.
+      match /profileReviews/{mode}/reviews/{reviewId} {
+        allow read: if isUser(uid) && isSignedIn();
+        allow write: if false;
+      }
+
+      // Seeking preferences — own only
+      match /seekingPreferences/{doc} {
+        allow read, write: if isUser(uid) && isSignedIn();
+      }
+
+      // Like queue — own read only (who liked you); any signed-in user can
+      // write to any user's queue (the designed cross-user write pattern).
+      match /likeQueue/{doc} {
+        allow read: if isUser(uid) && isSignedIn();
+        // Self-only client writes (topPicks refresh, dismiss). Cross-user
+        // writes (Super Like, onLike mutual cleanup) go via Callables with
+        // admin SDK which bypass this rule.
+        allow write: if isSignedIn() && isUser(uid);
+      }
+
+      // Blocked users list — CF-only writes via blockUser Callable.
+      // Rule retained for legacy compat.
+      match /blockedUsers/{targetUid} {
+        allow read: if isUser(uid) && isSignedIn();
+        allow write: if false; // CF-only via blockUser Callable
+      }
+
+      // Per-user match index — tracks lastReadAt / unread counts per match.
+      // Self-only read/write.
+      match /matches/{matchId} {
+        allow read, write: if isUser(uid) && isSignedIn();
+      }
+
+      // Free-tier state — weekly Spark, boost, etc. Self-only.
+      match /freeTierState/{doc} {
+        allow read, write: if isUser(uid) && isSignedIn();
+      }
+
+      // Profile view log — self reads own views. Any signed-in user writes
+      // a view entry (mirrors likeQueue / blockedUsers cross-user pattern —
+      // onProfileView Cloud Function also writes these via admin SDK).
+      match /profileViews/{viewerUid} {
+        allow read: if isUser(uid) && isSignedIn();
+        allow write: if false; // CF-only via onProfileView Callable
+      }
+
+      // Legal audit trail — ToS / Privacy / Play-mode consents. Owner-write
+      // (own acceptance), owner-read, no deletes (audit cannot be self-wiped).
+      // docId pinned to 'main' | 'play' to prevent arbitrary-key writes.
+      // logAcceptanceIP Cloud Function (admin SDK) bypasses rules to append
+      // server-captured IP + timestamp.
+      match /legalAcceptance/{docId} {
+        allow create, update: if isUser(uid) && isSignedIn()
+                              && (docId == 'main' || docId == 'play');
+        allow read:           if isUser(uid) && isSignedIn();
+        allow delete:         if false;
+      }
+
+      // Zylove score — owner read only; CF-only writes
+      match /zyloveScore/{doc} {
+        allow read: if isUser(uid) && isSignedIn();
+        allow write: if false;
+      }
+    }
+
+    // ─── Pairs ──────────────────────────────────────────────────────────────
+    // Compatibility scoring docs written by client (clientOnTap) and Cloud
+    // Functions. Both participants can read/write their pair. Not blocked by
+    // isNotSuspended — that's checked on upstream user reads.
+
+    match /pairs/{pairId} {
+      allow read, write: if isSignedIn() && isPairParticipant(pairId);
+    }
+
+    // ─── Matches ────────────────────────────────────────────────────────────
+    // Only the two participants can read or write a match doc
+
+    match /matches/{matchId} {
+      // Read/update/delete check the EXISTING doc's users[] — validator-
+      // compatible with query.where('users', 'array-contains', uid).
+      // Create checks the NEW doc's users[] since resource is null on create.
+      allow read: if isSignedIn()
+                  && resource.data.get('isSuspended', false) != true
+                  && request.auth.uid in resource.data.get('users', []);
+      // Photo consent can only become 'accepted' through the
+      // acceptPhotoConsent Cloud Function (zylove-web), which checks the
+      // other person really asked. Clients may request, decline and pause.
+      allow create: if isSignedIn()
+                    && request.auth.uid in request.resource.data.users
+                    && request.resource.data.get('photoConsent', {}).get('status', '') != 'accepted';
+      allow update: if isSignedIn()
+                    && request.auth.uid in resource.data.get('users', [])
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['photoConsent'])
+                        || request.resource.data.get('photoConsent', {}).get('status', '') != 'accepted'
+                        || resource.data.get('photoConsent', {}).get('status', '') == 'accepted');
+      allow delete: if isSignedIn()
+                    && request.auth.uid in resource.data.get('users', []);
+
+      // Messages — both participants can read/write.
+      // Read rule additionally enforces self-destruct expiry: after expiresAt
+      // passes, only the sender keeps read access (so their UI can render the
+      // "📸 Photo destructed" terminal state from destructedAt). The recipient
+      // gets denied — defense in depth alongside the sweep nulling ciphertext.
+      match /messages/{messageId} {
+        allow read: if isSignedIn()
+                    && request.auth.uid in get(/databases/$(database)/documents/matches/$(matchId)).data.users
+                    && (resource.data.get('expiresAt', null) == null
+                        || resource.data.expiresAt > request.time
+                        || resource.data.senderId == request.auth.uid);
+        allow create: if isSignedIn()
+                      && request.auth.uid in get(/databases/$(database)/documents/matches/$(matchId)).data.users
+                      && request.resource.data.senderId == request.auth.uid;
+        allow update: if isSignedIn()
+                      && request.auth.uid in get(/databases/$(database)/documents/matches/$(matchId)).data.users
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['status', 'deletedFor', 'viewedBy', 'viewedAt', 'photoRevoked']);
+        allow delete: if false;
+      }
+
+      // Photo consent subcollection — per-match consent state for
+      // self-destruct photo sharing. Participants-only.
+      match /photoConsent/{doc} {
+        allow read, write: if isSignedIn()
+                           && isMatchParticipant(matchId);
+      }
+
+      // Typing indicators — matches/{matchId}/typing/{uid} exists while that
+      // participant is typing. Participants read both; each writes only their own.
+      match /typing/{typingUid} {
+        allow read: if isSignedIn()
+                    && isMatchParticipant(matchId);
+        allow write: if isSignedIn()
+                     && request.auth.uid == typingUid
+                     && isMatchParticipant(matchId);
+      }
+    }
+
+    // ─── Swipes ─────────────────────────────────────────────────────────────
+    // Users can create their own swipes, read none (server-side only)
+
+    match /swipes/{swipeId} {
+      // Write path moved to recordSwipe + sendSuperLike Callables.
+      // Rule retained for legacy compat — suspension enforced server-side.
+      allow create: if isSignedIn()
+                    && request.resource.data.swiperId == request.auth.uid;
+      allow read, update, delete: if false; // Cloud Functions only
+    }
+
+    // ─── Score Events ────────────────────────────────────────────────────────
+    // Written by Cloud Functions and unmatch flow
+    // Users can read their own score events only
+
+    match /scoreEvents/{eventId} {
+      allow read: if isSignedIn()
+                  && resource.data.uid == request.auth.uid;
+      // Write path moved to submitUnmatch Callable. Rule retained for
+      // legacy compat — suspension enforced server-side.
+      allow create: if isSignedIn()
+                    && request.resource.data.reason.matches('unmatch_.*');
+      allow update, delete: if false; // Cloud Functions only
+    }
+
+    // ─── Unmatch Reasons ────────────────────────────────────────────────────
+    // Write only — no one reads these except admins via Cloud Functions
+
+    match /unmatchReasons/{docId} {
+      // Write path moved to submitUnmatch Callable. Rule retained for
+      // legacy compat — suspension enforced server-side.
+      allow create: if isSignedIn()
+                    && request.resource.data.reporterUid == request.auth.uid;
+      allow read, update, delete: if false;
+    }
+
+    // ─── Banned phones ──────────────────────────────────────────────────────
+    // Hashed phone numbers of reported users (reportAndBan /
+    // onBeforeSignIn in zylove-web). Server only.
+    match /bannedPhones/{phoneHash} {
+      allow read, write: if false;
+    }
+
+    // ─── Review Queue ────────────────────────────────────────────────────────
+    // Write only — safety team reads via admin SDK
+
+    match /reviewQueue/{docId} {
+      // Write path moved to submitUnmatch Callable. Rule retained for
+      // legacy compat — suspension enforced server-side.
+      allow create: if isSignedIn()
+                    && request.resource.data.reporterUid == request.auth.uid;
+      allow read, update, delete: if false;
+    }
+
+    // ─── Reports ────────────────────────────────────────────────────────────
+    // Created ONLY by the reportUser Cloud Function (admin SDK bypass). The
+    // rule here denies all client writes; admin SDK always bypasses rules.
+
+    match /reports/{reportId} {
+      allow read, write: if false;
+    }
+
+    // ─── Reviews ────────────────────────────────────────────────────────────
+    // Post-conversation reviews (Zylove Score input). CF-only writes; the
+    // reviewee can read reviews written about them (needed for dispute flow
+    // on the Zylove Score dashboard).
+
+    match /reviews/{reviewId} {
+      allow read: if isSignedIn() && resource.data.revieweeUid == request.auth.uid;
+      allow write: if false;
+    }
+
+    // ─── Deletion Requests ──────────────────────────────────────────────────
+    // Created ONLY by the requestAccountDeletion Callable. Admin SDK bypass.
+
+    match /deletionRequests/{uid} {
+      allow read, write: if false;
+    }
+
+    // ─── Popup Triggers ─────────────────────────────────────────────────────
+    // Created by onCompatibilityPopup Cloud Function (admin SDK). Client
+    // subscribes to its own trigger doc and marks it seen.
+
+    match /popupTriggers/{uid} {
+      allow read, update: if isUser(uid) && isSignedIn();
+      allow create, delete: if false; // Admin SDK only
+    }
+
+    // ─── Deleted Accounts ───────────────────────────────────────────────────
+    // Recovery records keyed by phone number. Only Cloud Functions (admin
+    // SDK) read/write these during delete/restore flows.
+
+    match /deletedAccounts/{phoneNumber} {
+      allow read, write: if false;
+    }
+
+    // ─── Blocks (legacy top-level collection — prefer users/{uid}/blockedUsers) ─
+
+    match /blocks/{blockId} {
+      allow create: if isSignedIn()
+                    && request.resource.data.blockerUid == request.auth.uid;
+      allow read: if isSignedIn()
+                  && (resource.data.blockerUid == request.auth.uid
+                   || resource.data.blockedUid == request.auth.uid);
+      allow delete: if isSignedIn()
+                    && resource.data.blockerUid == request.auth.uid;
+      allow update: if false;
+    }
+
+    // ─── Notifications ───────────────────────────────────────────────────────
+    // Users can read and update their own notifications only
+
+    match /notifications/{notificationId} {
+      allow read, update: if isSignedIn()
+                          && resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn(); // Cloud Functions create these
+      allow delete: if isSignedIn()
+                    && resource.data.uid == request.auth.uid;
+    }
+
+    // ─── FCM Tokens ──────────────────────────────────────────────────────────
+
+    match /fcmTokens/{uid} {
+      allow read, write: if isUser(uid) && isSignedIn();
+    }
+
+    // ─── App Config (read-only for all signed-in users) ──────────────────────
+
+    match /appConfig/{doc} {
+      allow read: if isSignedIn();
+      allow write: if false; // Admin SDK only
+    }
+
+    match /config/{doc} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // ─── Public stats (landing page) ─────────────────────────────────────────
+    // Non-sensitive numbers shown to signed-out visitors, e.g. the founding
+    // circle counter (publicStats/founding). Written by Cloud Functions only.
+
+    match /publicStats/{doc} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ─── Public web forms (zylove-web /join and /contact) ────────────────────
+    // Signed-out visitors may create entries only: fixed fields, size limits,
+    // server timestamp. No client reads, edits or deletes; an existing
+    // waitlist/application doc can't be overwritten.
+
+    match /waitlist/{email} {
+      allow create: if request.resource.data.keys().hasOnly(['email', 'source', 'createdAt'])
+                    && request.resource.data.email == email && email.size() <= 254
+                    && request.resource.data.createdAt == request.time;
+      allow read, update, delete: if false;
+    }
+
+    match /foundingApplications/{email} {
+      allow create: if request.resource.data.keys().hasOnly(['name', 'email', 'instagram', 'why', 'createdAt'])
+                    && request.resource.data.email == email
+                    && request.resource.data.name is string && request.resource.data.name.size() <= 100
+                    && request.resource.data.instagram.size() <= 100
+                    && request.resource.data.why.size() <= 1000
+                    && request.resource.data.createdAt == request.time;
+      allow read, update, delete: if false;
+    }
+
+    match /contactMessages/{id} {
+      allow create: if request.resource.data.keys().hasOnly(['name', 'email', 'topic', 'message', 'createdAt'])
+                    && request.resource.data.name.size() <= 100 && request.resource.data.topic.size() <= 100
+                    && request.resource.data.message.size() <= 1000
+                    && request.resource.data.createdAt == request.time;
+      allow read, update, delete: if false;
+    }
+
+    // ─── Deny everything else ────────────────────────────────────────────────
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+  }
+}
