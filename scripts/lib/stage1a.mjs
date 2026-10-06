@@ -113,7 +113,11 @@ export async function applyPlan({ db, auth, FieldValue, Timestamp }, plan) {
   if (plan.onRoot.length) batch.update(db.doc(`users/${uid}`), Object.fromEntries(plan.onRoot.map((f) => [f, FieldValue.delete()])))
   await batch.commit()
   if (plan.admin && !plan.deleted) {
-    const user = await auth.getUser(uid).catch(() => null)
+    // Only a missing auth user is skipped; anything else must fail loudly.
+    const user = await auth.getUser(uid).catch((err) => {
+      if (err?.code === 'auth/user-not-found') return null
+      throw err
+    })
     if (user) await auth.setCustomUserClaims(uid, { ...(user.customClaims ?? {}), admin: true })
   }
 }

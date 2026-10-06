@@ -18,7 +18,7 @@ import { MOVED_FIELDS, isBotUid, loadExisting, planUser, applyPlan } from './lib
 const require = createRequire(new URL('../functions/package.json', import.meta.url))
 const { initializeApp, applicationDefault } = require('firebase-admin/app')
 const { FieldValue, Timestamp, getFirestore } = require('firebase-admin/firestore')
-const { getAuth } = require('firebase-admin/auth')
+const { GoogleAuth } = require('google-auth-library')
 
 const apply = process.argv.includes('--apply')
 if (!apply && !process.argv.includes('--dry-run')) {
@@ -27,7 +27,24 @@ if (!apply && !process.argv.includes('--dry-run')) {
 }
 initializeApp({ credential: applicationDefault(), projectId: 'zylove' })
 const db = getFirestore()
-const deps = { db, auth: getAuth(), FieldValue, Timestamp }
+
+// Auth through the Identity Toolkit REST API with an explicit quota project:
+// firebase-admin's Auth calls fail under local user ADC ("requires a quota
+// project"). Same two calls the migration needs.
+const google = await new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] }).getClient()
+const toolkit = (method, data) =>
+  google.request({ url: `https://identitytoolkit.googleapis.com/v1/projects/zylove/accounts:${method}`, method: 'POST', headers: { 'x-goog-user-project': 'zylove' }, data })
+const auth = {
+  async getUser(uid) {
+    const user = (await toolkit('lookup', { localId: [uid] })).data.users?.[0]
+    if (!user) throw Object.assign(new Error(`no auth user ${uid}`), { code: 'auth/user-not-found' })
+    return { uid, customClaims: user.customAttributes ? JSON.parse(user.customAttributes) : undefined }
+  },
+  async setCustomUserClaims(uid, claims) {
+    await toolkit('update', { localId: uid, customAttributes: JSON.stringify(claims) })
+  },
+}
+const deps = { db, auth, FieldValue, Timestamp }
 
 const users = (await db.collection('users').get()).docs
 const bots = users.filter((d) => isBotUid(d.id))
