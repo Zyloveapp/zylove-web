@@ -5,16 +5,16 @@ import { db, storage } from './firebase'
 // Profile photos go through the existing onPhotoUpload Cloud Function
 // (Sightengine), which watches photos/{uid}/spark|play/. It writes its verdict
 // to the profile doc — users/{uid} for Spark, users/{uid}/playProfile/data for
-// Play — as a signed URL in photoURLs (passed), or flags it with an entry in
-// pendingPhotoURLs (Spark: the owner-only users/{uid}/private/account; Play:
-// playProfile/data). Clients never publish photo URLs themselves. The target
-// doc must already exist: the function only updates it.
+// Play — as the photo's Storage path in photoURLs (passed), or flags it with
+// an entry in pendingPhotoURLs on the owner-only users/{uid}/private/account
+// (both modes). Clients never publish photos themselves. The target doc must
+// already exist: the function only updates it.
 
 export type ModerationOutcome = 'approved' | 'pending' | 'timeout' | 'failed'
 
 export interface ModeratedPhoto {
   outcome: ModerationOutcome
-  url: string | null // the published URL when approved
+  url: string | null // the published photo (its Storage path) when approved
 }
 
 const VERDICT_TIMEOUT_MS = 30_000
@@ -29,11 +29,11 @@ function strings(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 }
 
-// Waits (live, up to 30s) for the function's verdict on one file. Its URL is a
-// signed URL, not the client's download URL, so it's matched by file name.
+// Waits (live, up to 30s) for the function's verdict on one file, matched by
+// its file name (older entries hold a URL rather than the path).
 function awaitVerdict(uid: string, mode: 'spark' | 'play', fileName: string): Promise<ModeratedPhoto> {
   const target = mode === 'play' ? doc(db, `users/${uid}/playProfile/data`) : doc(db, 'users', uid)
-  const pendingDoc = mode === 'play' ? null : doc(db, 'users', uid, 'private', 'account')
+  const pendingDoc = doc(db, 'users', uid, 'private', 'account')
   return new Promise((resolve) => {
     let settled = false
     const unsubscribes: (() => void)[] = []
@@ -58,12 +58,11 @@ function awaitVerdict(uid: string, mode: 'spark' | 'play', fileName: string): Pr
           const data = snap.data() ?? {}
           const approved = strings(data.photoURLs).find((u) => u.includes(fileName))
           if (approved) return finish({ outcome: 'approved', url: approved })
-          if (!pendingDoc) watchPending(data)
         },
         () => finish({ outcome: 'timeout', url: null }),
       ),
     )
-    if (pendingDoc) unsubscribes.push(onSnapshot(pendingDoc, (snap) => watchPending(snap.data() ?? {}), () => {}))
+    unsubscribes.push(onSnapshot(pendingDoc, (snap) => watchPending(snap.data() ?? {}), () => {}))
   })
 }
 

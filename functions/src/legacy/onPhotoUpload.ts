@@ -3,8 +3,8 @@
 // Storage-triggered photo moderation. Fires on any object finalize under
 // `photos/{uid}/spark/*` or `photos/{uid}/play/*`. Calls Sightengine to
 // screen for nudity / gore / offensive content against per-mode limits
-// (SPARK_LIMITS / PLAY_LIMITS), then either adds the URL to the user's
-// photoURLs (clean) or pendingPhotoURLs (flagged).
+// (SPARK_LIMITS / PLAY_LIMITS), then either adds the photo's Storage path to the
+// user's photoURLs (clean) or pendingPhotoURLs (flagged).
 //
 // PATH-AWARE: Spark photos write to the root user doc; Play photos write
 // to the playProfile/data subcollection. Discovery reads root; Play UI
@@ -66,16 +66,16 @@ export const onPhotoUpload = onObjectFinalized(
     // Play writes to the playProfile/data subcollection.
     const isPlayPhoto = filePath.match(/^photos\/[^/]+\/play\//)
 
-    // Get a long-lived signed URL for both Sightengine's fetch and the
-    // Firestore write. One URL, one getSignedUrl call — the URL carries a
-    // signature so <Image> tags can render it without auth, and Sightengine
-    // can fetch the bytes without needing bucket-public permissions.
+    // Server-side copies (scripts/migrate-stage1b.mjs moving photos to new
+    // names) were moderated as originals; the rules stop clients setting this.
+    if (event.data.metadata?.zyloveCopy === '1') return
+
+    // Firestore stores the Storage path, never a URL (F-021): viewers get
+    // short-lived signed URLs from getPhotoUrls (photoAccess.ts), which
+    // checks they may see the photo.
     const bucket = admin.storage().bucket(event.data.bucket)
     const file = bucket.file(filePath)
-    const [storageUrl] = await file.getSignedUrl({
-      action: 'read',
-      expires: '03-01-2500', // effectively permanent for stored URLs
-    })
+    const photoRef = filePath
 
     const db = admin.firestore()
     const userRef = db.collection('users').doc(uid)
@@ -87,17 +87,11 @@ export const onPhotoUpload = onObjectFinalized(
     // user doc (the admin photo-review tool queries users where('hasPendingPhotos','==',true)).
     // For Spark, photoDocRef === userRef so the flag is set in one write. For
     // Play, the entry goes on the playProfile subdoc and the flag goes on root.
-    // Stage 1a: Spark pending photos live in users/{uid}/private/account
-    // (owner-only), Play ones stay on playProfile/data; the review-queue flag
+    // Pending photos of both modes live in users/{uid}/private/account
+    // (owner-only; each entry carries its mode — F-031); the review-queue flag
     // is userInternal/{uid}.hasPendingPhotos (see ../userData.ts).
     async function flagPending(entry: Record<string, unknown>) {
-      if (isPlayPhoto) {
-        await photoDocRef.update({
-          pendingPhotoURLs: admin.firestore.FieldValue.arrayUnion(entry),
-        })
-      } else {
-        await accountRef(uid).set({ pendingPhotoURLs: admin.firestore.FieldValue.arrayUnion(entry) }, { merge: true })
-      }
+      await accountRef(uid).set({ pendingPhotoURLs: admin.firestore.FieldValue.arrayUnion(entry) }, { merge: true })
       await internalRef(uid).set({ hasPendingPhotos: true }, { merge: true })
     }
 
@@ -169,13 +163,13 @@ export const onPhotoUpload = onObjectFinalized(
 
       if (isFirstPhoto && !hasFace) {
         await flagPending({
-          url: storageUrl,
+          url: photoRef,
           mode: isPlayPhoto ? 'play' : 'spark',
           flaggedAt: admin.firestore.Timestamp.now(),
           reason: { noFace: true },
           approved: false,
         })
-        await notifyAdmins(userDoc.displayName ?? '', storageUrl)
+        await notifyAdmins(userDoc.displayName ?? '', photoRef)
         console.warn(`[moderation] No face detected in first photo for uid ${uid}`)
         return
       }
@@ -198,18 +192,18 @@ export const onPhotoUpload = onObjectFinalized(
       if (flagged) {
         // Add to pendingPhotoURLs — hidden from Discover until approved
         await flagPending({
-          url: storageUrl,
+          url: photoRef,
           mode: isPlayPhoto ? 'play' : 'spark',
           flaggedAt: admin.firestore.Timestamp.now(),
           reason: { ...scores, exceeded },
           approved: false,
         })
-        await notifyAdmins(userDoc.displayName ?? '', storageUrl)
+        await notifyAdmins(userDoc.displayName ?? '', photoRef)
         console.warn(`[moderation] Photo flagged for uid ${uid}: ${filePath}`)
       } else {
         // Clean — add to photoURLs, visible immediately
         await photoDocRef.update({
-          photoURLs: admin.firestore.FieldValue.arrayUnion(storageUrl),
+          photoURLs: admin.firestore.FieldValue.arrayUnion(photoRef),
         })
       }
     } catch (e: any) {
@@ -217,13 +211,13 @@ export const onPhotoUpload = onObjectFinalized(
       // Trust-safety review decides manually. This prevents Sightengine
       // outages or malformed responses from silently bypassing moderation.
       await flagPending({
-        url: storageUrl,
+        url: photoRef,
         mode: isPlayPhoto ? 'play' : 'spark',
         flaggedAt: admin.firestore.Timestamp.now(),
         reason: { error: e?.message ?? 'moderation_error' },
         approved: false,
       })
-      await notifyAdmins(userDoc.displayName ?? '', storageUrl)
+      await notifyAdmins(userDoc.displayName ?? '', photoRef)
       console.warn(
         `[moderation] Sightengine error for uid ${uid}: ${e?.message ?? e}`,
       )

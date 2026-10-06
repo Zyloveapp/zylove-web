@@ -7,6 +7,7 @@ import { actionErrorMessage, type DiscoverProfile } from '../../services/discove
 import { dismissSpark, likeBackSpark, loadSparkProfile, type SparkEntry } from '../../services/sparks'
 import { loadPlayProfile, parsePlayProfile } from '../../services/playProfile'
 import { playNameOf } from '../../services/displayNames'
+import StoredImg from '../StoredImg'
 
 interface SparkProfileViewProps {
   uid: string
@@ -124,7 +125,7 @@ export default function SparkProfileView({
               isFlame ? 'from-[#E03131]/60' : 'from-[#1B4FD8]/60'
             }`}
           >
-            {photo && <img src={photo} alt="" className="h-full w-full object-cover" />}
+            {photo && <StoredImg src={photo} alt="" className="h-full w-full object-cover" />}
           </div>
           <ProfileDetails profile={profile} mode={spark.mode} autoRevealScore anonymous={anonymous} />
         </div>

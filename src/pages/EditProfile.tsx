@@ -20,6 +20,7 @@ import { SPARK_PROMPT_BANK, type PromptAnswer } from '../types/dualProfile'
 import { InspirationPills } from '../components/onboarding/Inspirations'
 import { profileGenderLabel, promptQuestion } from '../components/discover/labels'
 import { goDeeperAnswerRows, goDeeperAnswers, goDeeperComplete } from '../components/profile/goDeeper'
+import StoredImg from '../components/StoredImg'
 
 const inputClass =
   'w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-white placeholder:text-white/30 focus:border-white/30 focus:outline-none'
@@ -280,7 +281,7 @@ export default function EditProfile() {
           <div className="grid grid-cols-3 gap-2">
             {photos.map((url, i) => (
               <div key={url} className="relative aspect-[3/4] overflow-hidden rounded-xl bg-white/5">
-                <img src={url} alt={`Photo ${i + 1}`} className="h-full w-full object-cover" />
+                <StoredImg src={url} alt={`Photo ${i + 1}`} className="h-full w-full object-cover" />
                 {/* Keep at least one photo — Discover hides profiles without one. */}
                 {photos.length > 1 && (
                   <button

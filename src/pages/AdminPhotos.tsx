@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import { flagReason, listPendingPhotos, reviewPendingPhoto, type PendingPhoto } from '../services/adminPhotos'
+import StoredImg from '../components/StoredImg'
+import { usePhotoUrl } from '../hooks/usePhotoUrl'
+
+// The thumbnail, linking to the full-size photo (a short-lived URL).
+function FullSizeLink({ photo }: { photo: string }) {
+  const { url } = usePhotoUrl(photo)
+  return (
+    <a href={url ?? undefined} target="_blank" rel="noreferrer">
+      <StoredImg src={photo} alt="" className="h-24 w-20 rounded object-cover" />
+    </a>
+  )
+}
 
 function submitted(ms: number | null): string {
   return ms === null ? '—' : new Date(ms).toLocaleString()
@@ -77,9 +89,7 @@ export default function AdminPhotos() {
               {photos.map((p) => (
                 <tr key={p.url} className="align-top">
                   <td className="px-3 py-2">
-                    <a href={p.url} target="_blank" rel="noreferrer">
-                      <img src={p.url} alt="" className="h-24 w-20 rounded object-cover" />
-                    </a>
+                    <FullSizeLink photo={p.url} />
                   </td>
                   <td className="px-3 py-2">
                     <p className="font-medium">{p.displayName || '—'}</p>

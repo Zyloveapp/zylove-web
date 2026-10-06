@@ -22,6 +22,7 @@ import {
   valueLabel,
   weekendLabel,
 } from '../discover/labels'
+import StoredImg from '../StoredImg'
 
 export function SectionHeading({ children }: { children: ReactNode }) {
   return <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-white/50">{children}</h3>
@@ -76,7 +77,7 @@ export function PhotoHero({ photos, name, glow }: { photos: string[]; name: stri
   return (
     <div>
       <div className={`relative aspect-[3/4] w-full overflow-hidden rounded-2xl bg-white/5 ${ring}`}>
-        <img src={photos[shown]} alt={`${name}, photo ${shown + 1}`} className="h-full w-full object-cover" />
+        <StoredImg src={photos[shown]} alt={`${name}, photo ${shown + 1}`} className="h-full w-full object-cover" />
         {count > 1 && (
           <>
             <button

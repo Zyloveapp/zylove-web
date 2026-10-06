@@ -7,9 +7,12 @@ import { SMS_SECRETS, sendSMS, smsEnabledFor } from './sms'
 import { storagePath } from './storagePath'
 import { accountRef, internalRef, isAdminAuth, loadAccount, loadSettings, userRef } from './userData'
 
-// Admin photo review (/admin/photos). onPhotoUpload parks flagged photos in
-// pendingPhotoURLs — on users/{uid}/private/account for Spark (owner-only), on
-// users/{uid}/playProfile/data for Play — and sets userInternal/{uid}.hasPendingPhotos.
+// Admin photo review (/admin/photos). onPhotoUpload parks flagged photos of
+// both modes in users/{uid}/private/account pendingPhotoURLs (owner-only; each
+// entry has its mode) and sets userInternal/{uid}.hasPendingPhotos. Accounts
+// not yet migrated may still hold Play ones on playProfile/data (readable by
+// other users — F-031) or Spark ones on the root doc; both are read too.
+// Entries' `url` is the photo's Storage path (older ones: a URL).
 // Other users' docs and Storage files are out of a client's reach, so the page
 // lists and decides through these admin-gated callables.
 
@@ -85,9 +88,9 @@ export const listPendingPhotos = onCall(
     const perUser = await Promise.all(
       uids.map(async (uid) => {
         const data = (await userRef(uid).get()).data() ?? {}
-        const [account, play] = await Promise.all([loadAccount(uid, data), userRef(uid).collection('playProfile').doc('data').get()])
+        const [account, play] = await Promise.all([accountRef(uid).get(), userRef(uid).collection('playProfile').doc('data').get()])
         const displayName = typeof data.displayName === 'string' ? data.displayName : ''
-        return [...pendingOf(account), ...pendingOf(play.data())].map(
+        return [...pendingOf(account.data()), ...pendingOf(data), ...pendingOf(play.data())].map(
           (entry): PendingPhoto => ({
             uid,
             displayName,
@@ -127,29 +130,26 @@ export const reviewPendingPhoto = onCall(
 
     const { mode, entry, user } = await db.runTransaction(async (tx) => {
       const [userSnap, accountSnap, playSnap] = await Promise.all([tx.get(rootRef), tx.get(acctRef), tx.get(playRef)])
-      // Spark pending lives in private/account; an unmigrated account still has it on the root.
-      const sparkOnRoot = accountSnap.data()?.pendingPhotoURLs === undefined && Array.isArray(userSnap.data()?.pendingPhotoURLs)
-      const sparkPending = pendingOf(sparkOnRoot ? userSnap.data() : accountSnap.data())
-      const playPending = pendingOf(playSnap.data())
-      const inSpark = sparkPending.find((p) => p.url === photoUrl)
-      const found = inSpark ?? playPending.find((p) => p.url === photoUrl)
-      if (!found) throw new HttpsError('not-found', 'That photo is no longer pending.')
-      // Where it sits decides where it goes, whatever the entry says.
-      const where: Mode = inSpark ? 'spark' : 'play'
-      const remaining = (where === 'spark' ? sparkPending : playPending).filter((p) => p.url !== photoUrl)
-      const otherQueue = where === 'spark' ? playPending : sparkPending
+      // The queues: private/account (both modes), plus the older homes.
+      const queues = [
+        { key: 'account' as const, entries: pendingOf(accountSnap.data()) },
+        { key: 'root' as const, entries: pendingOf(userSnap.data()) },
+        { key: 'play' as const, entries: pendingOf(playSnap.data()) },
+      ]
+      const source = queues.find((q) => q.entries.some((p) => p.url === photoUrl))
+      const found = source?.entries.find((p) => p.url === photoUrl)
+      if (!source || !found) throw new HttpsError('not-found', 'That photo is no longer pending.')
+      // Older homes decide the mode by where they sit; account entries carry it.
+      const where: Mode = source.key === 'root' ? 'spark' : source.key === 'play' ? 'play' : modeOf(found)
+      const remaining = source.entries.filter((p) => p.url !== photoUrl)
+      const othersLeft = queues.some((q) => q !== source && q.entries.length > 0)
 
-      const approved = action === 'approve' ? { photoURLs: FieldValue.arrayUnion(photoUrl) } : {}
-      const rejection =
-        action === 'reject' ? { photoRejectedAt: Timestamp.now(), photoRejectionReason: found.reason ?? null } : {}
-      if (where === 'spark') {
-        tx.set(acctRef, { pendingPhotoURLs: remaining, ...rejection }, { merge: true })
-        tx.update(rootRef, { ...approved, ...(sparkOnRoot && { pendingPhotoURLs: FieldValue.delete() }) })
-      } else {
-        tx.update(playRef, { pendingPhotoURLs: remaining, ...approved })
-        if (action === 'reject') tx.set(acctRef, rejection, { merge: true })
-      }
-      if (remaining.length === 0 && otherQueue.length === 0) {
+      // Approve: onto the profile of the photo's mode. Reject: stamped on the account.
+      if (action === 'approve') tx.update(where === 'spark' ? rootRef : playRef, { photoURLs: FieldValue.arrayUnion(photoUrl) })
+      else tx.set(acctRef, { photoRejectedAt: Timestamp.now(), photoRejectionReason: found.reason ?? null }, { merge: true })
+      if (source.key === 'account') tx.set(acctRef, { pendingPhotoURLs: remaining }, { merge: true })
+      else tx.update(source.key === 'root' ? rootRef : playRef, { pendingPhotoURLs: remaining.length ? remaining : FieldValue.delete() })
+      if (remaining.length === 0 && !othersLeft) {
         tx.set(internalRef(targetUid), { hasPendingPhotos: false }, { merge: true })
         if (userSnap.data()?.hasPendingPhotos !== undefined) tx.update(rootRef, { hasPendingPhotos: FieldValue.delete() })
       }

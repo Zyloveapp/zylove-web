@@ -33,6 +33,7 @@ import {
 import { HeightPicker } from './ui'
 import { InspirationPills, InspirationToggle } from './Inspirations'
 import { MAX_PLAY_NAME, formatNameChangeDate } from '../../services/displayNames'
+import StoredImg from '../StoredImg'
 
 // The Play steps, shared by the Play-only path in /onboarding and by
 // /play-onboarding (mode-pill setup and Play edits).
@@ -760,7 +761,7 @@ export function PlayReviewStep({
     <>
       <Heading title="You're ready. 🔥" />
       <div className="space-y-5">
-        {photoUrl && <img src={photoUrl} alt="Your main Play photo" className="aspect-[3/4] w-full rounded-2xl object-cover" />}
+        {photoUrl && <StoredImg src={photoUrl} alt="Your main Play photo" className="aspect-[3/4] w-full rounded-2xl object-cover" />}
         {spice && (
           <span className="inline-block rounded-full border border-[#E03131]/40 bg-[#E03131]/20 px-3 py-1 text-sm text-red-400">
             {spice.emoji} {spice.label}

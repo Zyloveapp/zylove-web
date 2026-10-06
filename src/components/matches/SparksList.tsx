@@ -9,6 +9,7 @@ import { relativeTime } from '../../services/matches'
 import type { Mode } from '../../store/modeStore'
 import { playNameOf } from '../../services/displayNames'
 import { usePlayIdentity } from './usePlayIdentity'
+import StoredImg from '../StoredImg'
 
 function expiresIn(expiresAt: number): string {
   const ms = expiresAt - Date.now()
@@ -56,7 +57,7 @@ function Card({
         className="flex w-full items-stretch gap-4 rounded-2xl border border-white/10 bg-white/[0.04] p-3 text-left transition-colors hover:bg-white/[0.07]"
       >
         <span className={`relative h-36 w-28 shrink-0 overflow-hidden rounded-xl bg-gradient-to-br to-white/10 ${placeholderTint(mode)}`}>
-          {photo && <img src={photo} alt="" className="h-full w-full object-cover" />}
+          {photo && <StoredImg src={photo} alt="" className="h-full w-full object-cover" />}
         </span>
         <span className="flex min-w-0 flex-1 flex-col justify-between py-1">
           <span className="min-w-0">{children}</span>
@@ -189,7 +190,7 @@ export function SentList({ sent, mode }: { sent: SentSpark[]; mode: Mode }) {
       {sent.map((s) => (
         <li key={s.uid} className="flex items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.04] p-3">
           <span className={`relative h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gradient-to-br to-white/10 ${placeholderTint(mode)}`}>
-            {s.photoURL && <img src={s.photoURL} alt="" className="h-full w-full object-cover" />}
+            {s.photoURL && <StoredImg src={s.photoURL} alt="" className="h-full w-full object-cover" />}
           </span>
           <span className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="flex min-w-0 items-center gap-2">

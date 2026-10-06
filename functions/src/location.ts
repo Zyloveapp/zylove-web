@@ -5,6 +5,7 @@ import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase
 import { distanceMiles, getNearestCity } from './cities'
 import { marketFor } from './trial'
 import { accountRef, identityRef, internalRef, locationRef, userRef } from './userData'
+import { takeRateLimit } from './rateLimits'
 
 // Locations, server-side (Stage 1a). Nobody reads another user's coordinates:
 // the browser's position goes to setLocation, which snaps it and keeps it in
@@ -139,18 +140,6 @@ function coordsFrom(loc: DocumentData | undefined, root: DocumentData | undefine
   return null
 }
 
-// Calls per caller, in userInternal (a sliding window of timestamps).
-async function takeDistanceCall(uid: string): Promise<void> {
-  const ref = internalRef(uid)
-  await getFirestore().runTransaction(async (tx) => {
-    const now = Date.now()
-    const raw: unknown = (await tx.get(ref)).data()?.distanceCalls
-    const recent = (Array.isArray(raw) ? raw : []).filter((t): t is number => typeof t === 'number' && now - t < CALL_WINDOW_MS)
-    if (recent.length >= MAX_CALLS_PER_WINDOW) throw new HttpsError('resource-exhausted', 'Too many requests. Try again in a few minutes.')
-    tx.set(ref, { distanceCalls: [...recent, now] }, { merge: true })
-  })
-}
-
 // How far the caller is from each of `uids` (up to MAX_UIDS). Anyone without
 // a saved location — or the caller, if they have none — is left out.
 export const getDistances = onCall(
@@ -163,7 +152,7 @@ export const getDistances = onCall(
       throw new HttpsError('invalid-argument', `uids must be up to ${MAX_UIDS} user ids`)
     }
     const uids = [...new Set(raw as string[])].filter((u) => u !== uid)
-    await takeDistanceCall(uid)
+    await takeRateLimit(uid, 'distances', { max: MAX_CALLS_PER_WINDOW, windowMs: CALL_WINDOW_MS })
     const db = getFirestore()
 
     const [myLoc, myRoot] = await Promise.all([locationRef(uid).get(), userRef(uid).get()])

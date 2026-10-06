@@ -1,5 +1,6 @@
 import { useRef, useState, type ChangeEvent } from 'react'
 import { MAX_PHOTO_BYTES, MAX_PHOTOS, releasePhotoPreview, type PhotoDraft } from './types'
+import StoredImg from '../StoredImg'
 
 interface PhotosStepProps {
   photos: PhotoDraft[]
@@ -93,7 +94,7 @@ export default function PhotosStep({
         {photos.map((p, i) => (
           <div key={p.id} className={`relative aspect-[3/4] overflow-hidden rounded-lg ${s.tile}`}>
             <button type="button" onClick={() => makePrimary(p.id)} className="h-full w-full">
-              <img src={p.previewUrl} alt={`Photo ${i + 1}`} className="h-full w-full object-cover" />
+              <StoredImg src={p.previewUrl} alt={`Photo ${i + 1}`} className="h-full w-full object-cover" />
             </button>
             {i === 0 && (
               <span className={`absolute left-1 top-1 rounded px-1.5 py-0.5 text-xs text-white ${s.badge}`}>

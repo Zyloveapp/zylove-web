@@ -611,7 +611,7 @@ export default function Onboarding() {
   }
 
   async function acceptTerms() {
-    await recordLegalAcceptance(uid)
+    await recordLegalAcceptance()
     update({ termsAccepted: true })
     next()
   }

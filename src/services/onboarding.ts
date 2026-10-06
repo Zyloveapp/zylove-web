@@ -3,7 +3,6 @@ import {
   doc,
   getDoc,
   serverTimestamp,
-  setDoc,
   writeBatch,
   type FieldValue,
 } from 'firebase/firestore'
@@ -41,13 +40,11 @@ import { addIdentity, loadIdentity } from './privateIdentity'
 export const CONSENT_IDS = ['age', 'terms', 'privacy', 'matching', 'conduct', 'safety'] as const
 export type ConsentId = (typeof CONSENT_IDS)[number]
 
-export async function recordLegalAcceptance(uid: string): Promise<void> {
-  await setDoc(doc(db, `users/${uid}/legalAcceptance/main`), {
-    uid,
-    acceptedAt: serverTimestamp(),
-    mode: 'main',
-    consentsAccepted: [...CONSENT_IDS],
-  })
+// Recorded server-side (functions/src/legal.ts): time, IP, user agent and the
+// document versions. Throws if the server can't record it — onboarding
+// doesn't move on without a record.
+export async function recordLegalAcceptance(): Promise<void> {
+  await httpsCallable(functions, 'recordTermsAcceptance')({ consents: [...CONSENT_IDS] })
 }
 
 // ─── Document shapes ─────────────────────────────────────────────────────────

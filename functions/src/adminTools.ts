@@ -175,7 +175,7 @@ export const adminPurgeAccount = onCall(
     await deleteAll([...pairsA.docs, ...pairsB.docs, ...swiper.docs, ...swiped.docs])
     // With their messages (onNightlyPurge leaves those behind).
     for (const m of matches.docs) await db.recursiveDelete(m.ref)
-    for (const path of [`popupTriggers/${uid}`, `deletionRequests/${uid}`, `founderRecords/${uid}`, `keyBackups/${uid}`, `userInternal/${uid}`, `userLocations/${uid}`]) {
+    for (const path of [`popupTriggers/${uid}`, `deletionRequests/${uid}`, `founderRecords/${uid}`, `keyBackups/${uid}`, `userInternal/${uid}`, `userLocations/${uid}`, `rateLimits/${uid}`]) {
       await db.doc(path).delete().catch(() => {})
     }
     await db.recursiveDelete(db.doc(`founderMessages/${uid}`))

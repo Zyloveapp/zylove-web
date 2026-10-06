@@ -30,6 +30,7 @@ import {
   SceneStep,
   SpiceStep,
 } from '../components/onboarding/PlaySteps'
+import StoredImg from '../components/StoredImg'
 
 type SectionId =
   | 'photos'
@@ -257,7 +258,7 @@ export default function EditPlayProfile() {
           <div className="grid grid-cols-3 gap-2">
             {photos.map((url) => (
               <div key={url} className="relative aspect-[3/4] overflow-hidden rounded-xl">
-                <img src={url} alt="" className="h-full w-full object-cover" />
+                <StoredImg src={url} alt="" className="h-full w-full object-cover" />
                 <button
                   type="button"
                   onClick={() => void deletePhoto(url)}

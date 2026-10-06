@@ -61,6 +61,7 @@ import { fetchPublicUserDoc } from '../../services/publicUserDoc'
 import { usePlayIdentity } from '../matches/usePlayIdentity'
 import { useDistanceMiles } from '../DistanceLabel'
 import { friendlyError } from '../../services/errors'
+import StoredImg from '../StoredImg'
 
 function messageTime(ms: number | null): string {
   if (ms === null) return 'Sending…'
@@ -628,7 +629,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
           className="flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left transition-opacity hover:opacity-80"
         >
           {match.photoURL ? (
-            <img src={match.photoURL} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />
+            <StoredImg src={match.photoURL} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />
           ) : (
             <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/10 font-semibold text-white/70">
               {match.name.charAt(0).toUpperCase()}

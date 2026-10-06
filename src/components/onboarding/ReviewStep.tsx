@@ -7,6 +7,7 @@ import {
   parseBirthday,
   type OnboardingDraft,
 } from './types'
+import StoredImg from '../StoredImg'
 
 interface ReviewStepProps {
   draft: OnboardingDraft
@@ -43,7 +44,7 @@ export default function ReviewStep({ draft, saving, progress, refresh = false, e
 
       <div className="grid grid-cols-3 gap-2">
         {draft.photos.map((p, i) => (
-          <img
+          <StoredImg
             key={p.id}
             src={p.previewUrl}
             alt={`Photo ${i + 1}`}

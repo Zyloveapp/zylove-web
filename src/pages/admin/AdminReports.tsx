@@ -9,6 +9,7 @@ import {
   type ReportedUser,
 } from '../../services/adminReports'
 import { REVIEW_CATEGORY_DEFS } from '../../types/reviewCategories'
+import StoredImg from '../../components/StoredImg'
 
 // /admin/reports: everyone reported, urgent first, with the moderation
 // actions; and a "good actors" tab for thank-you notes. Reporter identities
@@ -150,7 +151,7 @@ export default function AdminReports() {
 
 function Avatar({ url }: { url: string | null }) {
   return url ? (
-    <img src={url} alt="" className="h-11 w-11 shrink-0 rounded-full object-cover" />
+    <StoredImg src={url} alt="" className="h-11 w-11 shrink-0 rounded-full object-cover" />
   ) : (
     <span className="h-11 w-11 shrink-0 rounded-full bg-white/10" aria-hidden />
   )

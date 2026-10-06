@@ -1820,6 +1820,8 @@ export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate, unmatc
 export { markChatPhotoViewed, sweepChatPhotos } from './photos'
 export { checkTrialStatus, onMarketOpened } from './trial'
 export { mirrorPlan } from './userData'
+export { recordTermsAcceptance } from './legal'
+export { getPhotoUrls } from './photoAccess'
 export { getDistances, grantSmsConsent, recordActivity, refreshAges, setLocation } from './location'
 export { createCheckoutSession, createPortalSession, stripeWebhook } from './stripe'
 export {

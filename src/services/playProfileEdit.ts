@@ -2,6 +2,7 @@ import { arrayRemove, doc, serverTimestamp, updateDoc, writeBatch } from 'fireba
 import { deleteObject, ref } from 'firebase/storage'
 import { db, storage } from './firebase'
 import { answeredGoDeeper, answeredPrompts, descriptorFields, type PlayDraft } from './playOnboarding'
+import { isPhotoRef } from './photoUrls'
 
 // The Edit Play profile page (/edit-play-profile): section-by-section edits
 // of a saved Play profile. Only changed fields are written — to
@@ -68,6 +69,8 @@ export async function savePlayEdits(uid: string, before: PlayDraft, after: PlayD
 // Storage path of a published photo: signed URL (storage.googleapis.com/
 // {bucket}/{path}) or Firebase download URL (…/o/{path}).
 function storagePathOf(url: string): string | null {
+  // Stored since Stage 1b: the path itself.
+  if (isPhotoRef(url)) return url
   try {
     const u = new URL(url)
     const firebase = /\/o\/(.+)$/.exec(u.pathname)

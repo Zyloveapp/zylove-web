@@ -1,0 +1,138 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isUser(uid) {
+      return request.auth.uid == uid;
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    function isUnderSizeLimit() {
+      // 10MB max per photo
+      return request.resource.size <= 10 * 1024 * 1024;
+    }
+
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    // Set only by server-side copies (scripts/migrate-stage1b.mjs), which
+    // onPhotoUpload doesn't moderate again — so clients may never set it.
+    function noServerMetadata() {
+      return request.resource.metadata == null
+          || !('zyloveCopy' in request.resource.metadata);
+    }
+
+    // ─── Profile photos (mobile-era path) ─────────────────────────────────────
+    // Path: users/{uid}/photos/{filename}
+    // Owner and admins read; other users never read files directly (F-021).
+
+    match /users/{uid}/photos/{filename} {
+      allow read:   if isSignedIn() && (isUser(uid) || isAdmin());
+      allow create: if isUser(uid)
+                    && isSignedIn()
+                    && isImage()
+                    && isUnderSizeLimit();
+      allow update: if isUser(uid)
+                    && isSignedIn()
+                    && isImage()
+                    && isUnderSizeLimit();
+      allow delete: if isUser(uid) && isSignedIn();
+    }
+
+    // ─── Selfie verification photos ──────────────────────────────────────────
+    // Path: users/{uid}/verification/{filename}
+    // Only the user can write. No one can read (admin SDK only).
+
+    match /users/{uid}/verification/{filename} {
+      allow read:   if false; // Cloud Functions + admin SDK only
+      allow create: if isUser(uid)
+                    && isSignedIn()
+                    && isImage()
+                    && isUnderSizeLimit();
+      allow update, delete: if false;
+    }
+
+    // ─── Consent photos ──────────────────────────────────────────────────────
+    // Path: users/{uid}/consent/{filename}
+    // Write once — no updates or deletes client-side.
+
+    match /users/{uid}/consent/{filename} {
+      allow read:   if false; // Admin SDK only
+      allow create: if isUser(uid)
+                    && isSignedIn()
+                    && isImage()
+                    && isUnderSizeLimit();
+      allow update, delete: if false;
+    }
+
+    // ─── Profile photos (top-level path used by app) ─────────────────────────
+    // Path: photos/{uid}/{spark|play}/{filename}
+    // The upload path of onboarding and the profile editors, watched by
+    // onPhotoUpload (moderation). Only the owner and admins read the files;
+    // everyone else sees a photo through a short-lived signed URL from
+    // getPhotoUrls, which checks they may (F-021). No updates: replacing a
+    // moderated photo's bytes would skip its moderation.
+
+    match /photos/{uid}/{mode}/{filename} {
+      allow read:   if isSignedIn() && (isUser(uid) || isAdmin());
+      // resource == null: a new file only (Storage treats overwriting one as
+      // a create).
+      allow create: if isUser(uid) && isSignedIn() && isImage() && isUnderSizeLimit()
+                    && (mode == 'spark' || mode == 'play')
+                    && resource == null
+                    && noServerMetadata();
+      allow update: if false;
+      allow delete: if isUser(uid) && isSignedIn();
+    }
+
+    // ─── Chat photos ─────────────────────────────────────────────────────────
+    // Path: chat-photos/{matchId}/{filename}
+    // Read/write gated on caller being a participant in the match doc.
+    // firestore.get() validates membership server-side — adds one Firestore
+    // read per access but eliminates matchId-enumeration risk.
+
+    match /chat-photos/{matchId}/{filename} {
+      allow read: if isSignedIn() &&
+        firestore.get(
+          /databases/(default)/documents/matches/$(matchId)
+        ).data.keys().hasAny(['users']) &&
+        request.auth.uid in firestore.get(
+          /databases/(default)/documents/matches/$(matchId)
+        ).data.users;
+      allow create: if isSignedIn()
+        && (isImage() || request.resource.contentType == 'image/x-zylove-encrypted')
+        && isUnderSizeLimit() &&
+        request.auth.uid in firestore.get(
+          /databases/(default)/documents/matches/$(matchId)
+        ).data.users;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ─── Profile review PDFs ─────────────────────────────────────────────────
+    // Path: reviews/{uid}/{mode}/{reviewId}.pdf — generated server-side by
+    // zylove-web's review functions. Only the owner can read; no client writes.
+
+    match /reviews/{uid}/{mode}/{filename} {
+      allow read: if isSignedIn() && isUser(uid);
+      allow write: if false;
+    }
+
+    // ─── Deny everything else ─────────────────────────────────────────────────
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+  }
+}

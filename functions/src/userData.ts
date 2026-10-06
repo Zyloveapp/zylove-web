@@ -155,6 +155,7 @@ export async function clearPrivateData(uid: string): Promise<void> {
     identityRef(uid).delete(),
     internalRef(uid).delete(),
     locationRef(uid).delete(),
+    db().doc(`rateLimits/${uid}`).delete(),
   ])
 }
 

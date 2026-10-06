@@ -2,6 +2,7 @@ import { relativeTime, type MatchEntry } from '../../services/matches'
 import { UserTierBadge } from '../TierBadge'
 import type { ChatPreview } from '../../services/chatPreview'
 import { usePlayIdentity } from './usePlayIdentity'
+import StoredImg from '../StoredImg'
 
 function initials(name: string): string {
   return name
@@ -66,7 +67,7 @@ export default function MatchRow({ match, unread, preview, active, onSelect, onO
         className="relative shrink-0 rounded-full"
       >
         {photoURL ? (
-          <img src={photoURL} alt="" className="h-12 w-12 rounded-full object-cover" />
+          <StoredImg src={photoURL} alt="" className="h-12 w-12 rounded-full object-cover" />
         ) : (
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-sm font-semibold text-white/70">
             {initials(name)}

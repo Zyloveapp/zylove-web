@@ -69,12 +69,29 @@ service cloud.firestore {
       ];
     }
 
+    // Published photos (photoURLs) are added only by Cloud Functions after
+    // moderation (onPhotoUpload, reviewPendingPhoto, mirrorPlayOnlyPhotos):
+    // clients may remove or reorder them, never add (getPhotoUrls hands a
+    // photo out to others only while it's published). The one exception: a
+    // Play-only account shows its own Play photos on the root doc.
+    function photosOnlyShrink(before, after) {
+      return after.get('photoURLs', []).toSet()
+                  .difference(before.get('photoURLs', []).toSet()).size() == 0;
+    }
+    function rootPhotosAllowed(uid) {
+      return photosOnlyShrink(resource.data, request.resource.data)
+          || request.resource.data.get('photoURLs', []).toSet()
+                 .difference(resource.data.get('photoURLs', []).toSet())
+                 .hasOnly(get(/databases/$(database)/documents/users/$(uid)/playProfile/data).data.get('photoURLs', []));
+    }
+
     match /users/{uid} {
       allow read: if isSignedIn()
                   && (resource == null
                       || resource.data.get('isSuspended', false) == false);
       allow create: if isUser(uid) && isSignedIn()
-                    && !request.resource.data.keys().hasAny(serverOnlyUserFields());
+                    && !request.resource.data.keys().hasAny(serverOnlyUserFields())
+                    && request.resource.data.get('photoURLs', []).size() == 0;
       // Identity-lock fields (age, genderIdentity, matchableAs,
       // identityLockedAt): blocked AFTER identityLockedAt is set. First
       // write (when field is still null) is permitted — that's the slide-2
@@ -84,6 +101,7 @@ service cloud.firestore {
       // directly by onboarding; after that only updateDisplayName changes them.
       allow update: if isUser(uid) && isSignedIn()
                     && !request.resource.data.diff(resource.data).affectedKeys().hasAny(serverOnlyUserFields())
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['photoURLs']) || rootPhotosAllowed(uid))
                     && (resource.data.get('identityLockedAt', null) == null
                         || !request.resource.data.diff(resource.data).affectedKeys()
                             .hasAny(['age', 'genderIdentity', 'matchableAs', 'identityLockedAt']))
@@ -155,11 +173,18 @@ service cloud.firestore {
         allow write: if isUser(uid) && isSignedIn();
       }
 
-      // Play profile subcollection
+      // Play profile subcollection. Photos as on the root doc: clients only
+      // remove or reorder them; pending photos live in private/account (F-031).
       match /playProfile/{doc} {
         allow read: if isSignedIn()
                     && get(/databases/$(database)/documents/users/$(uid)).data.get('isSuspended', false) != true;
-        allow write: if isUser(uid) && isSignedIn();
+        allow create: if isUser(uid) && isSignedIn()
+                      && request.resource.data.get('photoURLs', []).size() == 0
+                      && !('pendingPhotoURLs' in request.resource.data);
+        allow update: if isUser(uid) && isSignedIn()
+                      && photosOnlyShrink(resource.data, request.resource.data)
+                      && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['pendingPhotoURLs']);
+        allow delete: if isUser(uid) && isSignedIn();
       }
 
       // Visibility settings — own only
@@ -215,16 +240,13 @@ service cloud.firestore {
         allow write: if false; // CF-only via onProfileView Callable
       }
 
-      // Legal audit trail — ToS / Privacy / Play-mode consents. Owner-write
-      // (own acceptance), owner-read, no deletes (audit cannot be self-wiped).
-      // docId pinned to 'main' | 'play' to prevent arbitrary-key writes.
-      // logAcceptanceIP Cloud Function (admin SDK) bypasses rules to append
-      // server-captured IP + timestamp.
+      // Legal audit trail — terms acceptance, written only by zylove-web's
+      // recordTermsAcceptance (server time, IP, user agent, document
+      // versions). Owner-read; no client writes, so a record can't be forged
+      // or wiped.
       match /legalAcceptance/{docId} {
-        allow create, update: if isUser(uid) && isSignedIn()
-                              && (docId == 'main' || docId == 'play');
-        allow read:           if isUser(uid) && isSignedIn();
-        allow delete:         if false;
+        allow read:  if isUser(uid) && isSignedIn();
+        allow write: if false;
       }
 
       // Zylove score — owner read only; CF-only writes

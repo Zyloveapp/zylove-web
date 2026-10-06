@@ -1,6 +1,7 @@
 import type { MatchEntry } from '../../services/matches'
 import type { Mode } from '../../store/modeStore'
 import { usePlayIdentity } from './usePlayIdentity'
+import StoredImg from '../StoredImg'
 
 interface IgnitedRowProps {
   // No heading when null (Spark: new links just lead the list).
@@ -41,7 +42,7 @@ function IgnitedItem({ match: m, ring, active, onSelect }: { match: MatchEntry; 
     <li className="shrink-0">
       <button type="button" onClick={onSelect} aria-current={active} className="flex w-16 flex-col items-center gap-1.5">
         {photoURL ? (
-          <img
+          <StoredImg
             src={photoURL}
             alt=""
             className={`h-14 w-14 rounded-full object-cover ring-2 ring-offset-2 ring-offset-gray-950 ${ring}`}

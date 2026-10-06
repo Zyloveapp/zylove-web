@@ -6,6 +6,7 @@ import { loadIdentity } from './privateIdentity'
 import { displayAge, type DiscoverProfile } from './discover'
 import type { SparkBioRequest } from './bio'
 import type { PromptAnswer } from '../types/dualProfile'
+import { isPhotoRef } from './photoUrls'
 
 export const MAX_PROFILE_PHOTOS = 9
 export const MAX_PROMPTS = 5
@@ -157,13 +158,15 @@ export async function removeProfilePhoto(uid: string, url: string): Promise<void
   await updateDoc(doc(db, 'users', uid), { photoURLs: arrayRemove(url), profileUpdatedAt: serverTimestamp() })
   // Best effort: the file may live under a path this client can't delete.
   const path = storagePathOf(url)
-  if (path) await deleteObject(ref(storage, path)).catch(() => {})
+  if (path?.startsWith(`photos/${uid}/spark/`)) await deleteObject(ref(storage, path)).catch(() => {})
 }
 
 // Storage path from either URL shape a photo can have: a Firebase download URL
 // (…/o/{encoded path}) or the signed URL onPhotoUpload publishes
 // (storage.googleapis.com/{bucket}/{path}).
 function storagePathOf(url: string): string | null {
+  // Stored since Stage 1b: the path itself.
+  if (isPhotoRef(url)) return url
   try {
     const u = new URL(url)
     const firebase = /\/o\/(.+)$/.exec(u.pathname)

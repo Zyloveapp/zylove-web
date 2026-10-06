@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import StoredImg from '../StoredImg'
 
 export default function PhotoGallery({ photos, name }: { photos: string[]; name: string }) {
   const [index, setIndex] = useState(0)
@@ -14,7 +15,7 @@ export default function PhotoGallery({ photos, name }: { photos: string[]; name:
         aria-label={count > 1 ? 'Next photo' : undefined}
         className="relative block aspect-[2/3] w-full overflow-hidden rounded-2xl bg-white/5"
       >
-        <img src={photos[index]} alt={`${name}, photo ${index + 1}`} className="h-full w-full object-cover" />
+        <StoredImg src={photos[index]} alt={`${name}, photo ${index + 1}`} className="h-full w-full object-cover" />
         {count > 1 && (
           <span className="absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-xs font-medium text-white">
             {index + 1} / {count}

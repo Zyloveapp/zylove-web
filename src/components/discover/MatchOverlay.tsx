@@ -5,6 +5,7 @@ import type { Mode } from '../../store/modeStore'
 import { fetchCompatibility, fetchMyProfile, fetchPlayArchetype, type ArchetypeMatch } from '../../services/discover'
 import { loadPlayProfile } from '../../services/playProfile'
 import SparkleIcon from '../icons/SparkleIcon'
+import StoredImg from '../StoredImg'
 
 // First wave: 16 sparkles as the photos meet. Second wave, 300ms later:
 // smaller and shorter, on the angles between the first.
@@ -37,7 +38,7 @@ function Avatar({ photo, name, className }: { photo: string | null; name: string
   return (
     <span className={`shrink-0 ${className}`}>
       {photo ? (
-        <img src={photo} alt="" className={`${base} block object-cover`} />
+        <StoredImg src={photo} alt="" className={`${base} block object-cover`} />
       ) : (
         <span className={`${base} flex items-center justify-center bg-white/10 text-4xl font-semibold text-white/70`}>
           {name.charAt(0).toUpperCase() || '✦'}
@@ -208,7 +209,7 @@ function PlayAvatar({ photo, name, className }: { photo: string | null; name: st
   return (
     <span className={`shrink-0 ${className}`}>
       {photo ? (
-        <img src={photo} alt="" className={`${base} block object-cover`} />
+        <StoredImg src={photo} alt="" className={`${base} block object-cover`} />
       ) : (
         <span className={`${base} flex items-center justify-center bg-white/10 text-4xl font-semibold text-white/70`}>
           {name.charAt(0).toUpperCase() || '🔥'}
