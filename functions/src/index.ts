@@ -2064,3 +2064,5 @@ export { onTap } from './legacy/onTap'
 export { onLike } from './legacy/onLike'
 export { recordSwipe } from './legacy/recordSwipe'
 export { blockUser, unblockUser } from './legacy/trustSafety'
+// Batch (d): demo-mode bot chat replies.
+export { onBotMessage } from './legacy/onBotMessage'
