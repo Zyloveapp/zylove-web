@@ -145,7 +145,7 @@ export async function planStage2(db) {
     if (d.mode === undefined) patch.mode = 'spark'
     if (d.mode === 'play') {
       const p = await playProfileOf(q.id)
-      patch.likerProfile = {
+      const rebuilt = {
         displayName: p?.playDisplayName ?? '',
         age: d.likerProfile?.age ?? 0,
         photoURL: strings(p?.photoURLs)[0] ?? null,
@@ -155,6 +155,8 @@ export async function planStage2(db) {
         playInterestTags: strings(p?.playInterestTags),
         verificationStatus: d.likerProfile?.verificationStatus ?? 'unverified',
       }
+      // Only when it differs (a second run finds nothing to do).
+      if (JSON.stringify(rebuilt) !== JSON.stringify(d.likerProfile)) patch.likerProfile = rebuilt
     }
     if (Object.keys(patch).length) {
       plan.likes.push({ path: q.ref.path, patch })
