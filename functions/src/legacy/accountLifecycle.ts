@@ -3,6 +3,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { UserDoc } from "./types";
 import { normalizeE164 } from "./utils/phone";
+import { ROOT_SCRUB, clearPrivateData, deletionView, identityRef, internalRef } from "../userData";
 
 
 
@@ -39,6 +40,8 @@ const auth = admin.auth();
     db.collection("pairs").where("userB", "==", uid).get(),
   ]);
   const previousPairIds = [...asA.docs, ...asB.docs].map((d) => d.id);
+  // Birthday, plan and report count live off the public doc now.
+  const priv = await deletionView(uid, user as any);
 
   // Capture recovery data — every field needed to restore identity lock +
   // policy state. Behavior score intentionally NOT captured; restored
@@ -51,7 +54,7 @@ const auth = admin.auth();
     deletedAt: admin.firestore.Timestamp.now(),
 
     // Identity (locked on restore — immutability contract)
-    birthday:           (user as any).birthday ?? null,
+    birthday:           priv.birthday,
     genderIdentity:     (user as any).genderIdentity ?? null,
     matchableAs:        (user as any).matchableAs ?? [],
     identityLockedAt:   (user as any).identityLockedAt ?? null,
@@ -66,8 +69,8 @@ const auth = admin.auth();
 
     // Policy state
     isFounder: (user as any).isFounder ?? false,
-    subscriptionTier: (user as any).subscriptionTier ?? "free",
-    reportCount:      (user as any).reportCount ?? 0,
+    subscriptionTier: priv.subscriptionTier,
+    reportCount:      priv.reportCount,
 
     // Ban flag (set manually via admin SDK for bad actors)
     banned: false,
@@ -90,9 +93,10 @@ const auth = admin.auth();
     photoURLs: [],
     visible: false,
     isVisible: false,
-    geohash: "",
     locationLabel: "",
+    ...ROOT_SCRUB,
   });
+  await clearPrivateData(uid);
 
   // Delete Firebase Auth user last
   await auth.deleteUser(uid);
@@ -218,12 +222,12 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
   const now = admin.firestore.Timestamp.now();
   const previousUid = recovery.previousUid;
 
+  // The phone number stays in Auth; birthday goes to private/identity and
+  // the plan to userInternal — none of it on the public doc.
   const restoredUser: Record<string, any> = {
     uid: newUid,
-    phoneNumber,
 
     // Identity — restored and locked (immutability contract)
-    birthday:           recovery.birthday,
     genderIdentity:     recovery.genderIdentity,
     matchableAs:        recovery.matchableAs ?? [],
     identityLockedAt:   recovery.identityLockedAt ?? now,
@@ -238,16 +242,9 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
 
     // Policy state
     isFounder: recovery.isFounder ?? false,
-    subscriptionTier: recovery.isFounder
-      ? "elite"
-      : (recovery.subscriptionTier ?? "free"),
-    // Note: non-founding paid tier is trusted here. RevenueCat
-    // entitlement check on next app open will downgrade if the paid
-    // period expired. We don't force-downgrade on restore.
 
     // Behavior score — explicit reset to neutral
     behaviorScore: 50,
-    reportCount:   0,
 
     // Lineage
     previousUid,
@@ -263,7 +260,6 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
     isVisible:   true,
 
     // Geo — user will re-grant location on next app open
-    geohash:       "",
     locationLabel: "",
   };
 
@@ -271,6 +267,11 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
 
   // Write new user doc
   batch.set(db.collection("users").doc(newUid), restoredUser);
+  batch.set(identityRef(newUid), { birthday: recovery.birthday ?? null });
+  batch.set(internalRef(newUid), {
+    subscriptionTier: recovery.isFounder ? "elite" : (recovery.subscriptionTier ?? "free"),
+    reportCount: 0,
+  }, { merge: true });
 
   // Re-link pair docs from previousUid to newUid. Handles userA/userB AND
   // the users[] array introduced in Commit C (match rule relies on it).
@@ -357,10 +358,8 @@ export const softBlockOnboarding = onCall(LEGACY_RUNTIME, async (request) => {
 
   const prefillUser: Record<string, any> = {
     uid: newUid,
-    phoneNumber,
 
     // Identity — locked from recovery (immutability contract)
-    birthday:           recovery.birthday,
     genderIdentity:     recovery.genderIdentity,
     matchableAs:        recovery.matchableAs ?? [],
     identityLockedAt:   now,
@@ -373,9 +372,7 @@ export const softBlockOnboarding = onCall(LEGACY_RUNTIME, async (request) => {
     bio:              "",
     mode:             "spark",
     isFounder: false,
-    subscriptionTier: "free",
     behaviorScore:    50,
-    reportCount:      0,
 
     // Lineage — for audit trail
     previousUid:            recovery.previousUid,
@@ -392,6 +389,8 @@ export const softBlockOnboarding = onCall(LEGACY_RUNTIME, async (request) => {
 
   const batch = db.batch();
   batch.set(db.collection("users").doc(newUid), prefillUser);
+  batch.set(identityRef(newUid), { birthday: recovery.birthday ?? null });
+  batch.set(internalRef(newUid), { subscriptionTier: "free", reportCount: 0 }, { merge: true });
   batch.delete(recoveryRef);
   await batch.commit();
 

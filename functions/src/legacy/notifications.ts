@@ -11,6 +11,7 @@
 // declined users persist `null` and are filtered out client-side.
 
 import * as admin from 'firebase-admin'
+import { loadInternal } from '../userData'
 
 // Lazy db getter — admin.initializeApp() runs in index.ts, but this module
 // is imported transitively before that line executes. Calling
@@ -69,8 +70,7 @@ export async function sendPush(
 }
 
 export async function getToken(uid: string): Promise<string | null> {
-  const snap = await db().doc(`users/${uid}`).get()
-  const token = snap.data()?.expoPushToken
+  const token = (await loadInternal(uid)).expoPushToken
   return token && typeof token === 'string' && token.startsWith('ExponentPushToken')
     ? token
     : null

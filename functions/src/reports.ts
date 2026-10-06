@@ -25,6 +25,7 @@ import { REVIEW_TONE } from './shared/reviewCategories'
 import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
 import { phoneHash, wereMatched } from './trust'
 import { softDeleteAccount } from './adminActivity'
+import { adminUids, isAdminAuth, isAdminUid } from './userData'
 
 const BOT_PREFIXES = ['zbot-', 'seed-']
 const URGENT = new Set(['felt_unsafe', 'aggressive'])
@@ -194,10 +195,10 @@ export const reportAndBan = onCall(
 
 // ─── Admin ───────────────────────────────────────────────────────────────────
 
-async function requireAdmin(uid: string | undefined): Promise<string> {
-  if (!uid) throw new HttpsError('unauthenticated', 'Login required')
-  if ((await db().doc(`users/${uid}`).get()).data()?.isAdmin !== true) throw new HttpsError('permission-denied', 'Admins only.')
-  return uid
+function requireAdmin(auth: { uid: string; token?: Record<string, unknown> } | undefined): string {
+  if (!auth) throw new HttpsError('unauthenticated', 'Login required')
+  if (!isAdminAuth(auth)) throw new HttpsError('permission-denied', 'Admins only.')
+  return auth.uid
 }
 
 export type AccountStatus = 'active' | 'suspended' | 'banned' | 'deleted'
@@ -286,7 +287,7 @@ export const adminGetReports = onCall(
   async (
     request,
   ): Promise<{ urgent: number; pending: number; reported?: ReportedUser[]; goodActors?: GoodActor[] }> => {
-    await requireAdmin(request.auth?.uid)
+    requireAdmin(request.auth)
     const summaryOnly = (request.data as Record<string, unknown> | null)?.summaryOnly === true
     const snap = await db().collection('reports').get()
 
@@ -312,6 +313,7 @@ export const adminGetReports = onCall(
     const userDocs = uids.length ? await db().getAll(...uids.map((u) => db().doc(`users/${u}`))) : []
     const users = new Map(userDocs.map((s) => [s.id, s.data()]))
     const joined = await joinDates(uids)
+    const admins = await adminUids()
 
     const reported: ReportedUser[] = uids.map((uid) => {
       const list = byUser.get(uid) ?? []
@@ -336,7 +338,7 @@ export const adminGetReports = onCall(
         categories: [...counts].map(([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count),
         lastReportedAt: reportTimes.length ? Math.max(...reportTimes) : null,
         lastWarnedAt: millis(user?.lastWarnedAt),
-        isAdmin: user?.isAdmin === true,
+        isAdmin: admins.has(uid),
         reports: list
           .map((r) => ({
             key: createHash('sha256').update(String(r._id)).digest('hex').slice(0, 12),
@@ -432,7 +434,7 @@ export async function liftSuspension(uid: string): Promise<void> {
 export const adminModerate = onCall(
   { timeoutSeconds: 120, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
   async (request): Promise<{ ok: true; resolved?: number; texted?: boolean; phoneBanned?: boolean }> => {
-    const adminUid = await requireAdmin(request.auth?.uid)
+    const adminUid = requireAdmin(request.auth)
     const data = (request.data ?? {}) as Record<string, unknown>
     const uid = str(data, 'uid')
     const action = data.action as ModerateAction
@@ -444,7 +446,7 @@ export const adminModerate = onCall(
 
     const ref = db().doc(`users/${uid}`)
     const user = (await ref.get()).data()
-    if (user?.isAdmin === true && action !== 'thank' && action !== 'clear') {
+    if ((await isAdminUid(uid)) && action !== 'thank' && action !== 'clear') {
       throw new HttpsError('failed-precondition', 'Not on an admin account.')
     }
     const log = (details: Record<string, unknown> = {}) =>

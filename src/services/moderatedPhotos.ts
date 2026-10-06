@@ -5,9 +5,10 @@ import { db, storage } from './firebase'
 // Profile photos go through the existing onPhotoUpload Cloud Function
 // (Sightengine), which watches photos/{uid}/spark|play/. It writes its verdict
 // to the profile doc — users/{uid} for Spark, users/{uid}/playProfile/data for
-// Play — as a signed URL in photoURLs (passed) or an entry in pendingPhotoURLs
-// (flagged). Clients never publish photo URLs themselves. The target doc must
-// already exist: the function only updates it.
+// Play — as a signed URL in photoURLs (passed), or flags it with an entry in
+// pendingPhotoURLs (Spark: the owner-only users/{uid}/private/account; Play:
+// playProfile/data). Clients never publish photo URLs themselves. The target
+// doc must already exist: the function only updates it.
 
 export type ModerationOutcome = 'approved' | 'pending' | 'timeout' | 'failed'
 
@@ -32,29 +33,37 @@ function strings(v: unknown): string[] {
 // signed URL, not the client's download URL, so it's matched by file name.
 function awaitVerdict(uid: string, mode: 'spark' | 'play', fileName: string): Promise<ModeratedPhoto> {
   const target = mode === 'play' ? doc(db, `users/${uid}/playProfile/data`) : doc(db, 'users', uid)
+  const pendingDoc = mode === 'play' ? null : doc(db, 'users', uid, 'private', 'account')
   return new Promise((resolve) => {
     let settled = false
+    const unsubscribes: (() => void)[] = []
     const finish = (result: ModeratedPhoto) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      unsubscribe()
+      unsubscribes.forEach((off) => off())
       resolve(result)
     }
     const timer = setTimeout(() => finish({ outcome: 'timeout', url: null }), VERDICT_TIMEOUT_MS)
-    const unsubscribe = onSnapshot(
-      target,
-      (snap) => {
-        const data = snap.data() ?? {}
-        const approved = strings(data.photoURLs).find((u) => u.includes(fileName))
-        if (approved) return finish({ outcome: 'approved', url: approved })
-        const pending: unknown = data.pendingPhotoURLs
-        if (Array.isArray(pending) && pending.some((p) => typeof p?.url === 'string' && p.url.includes(fileName))) {
-          finish({ outcome: 'pending', url: null })
-        }
-      },
-      () => finish({ outcome: 'timeout', url: null }),
+    const watchPending = (data: Record<string, unknown>) => {
+      const pending: unknown = data.pendingPhotoURLs
+      if (Array.isArray(pending) && pending.some((p) => typeof p?.url === 'string' && p.url.includes(fileName))) {
+        finish({ outcome: 'pending', url: null })
+      }
+    }
+    unsubscribes.push(
+      onSnapshot(
+        target,
+        (snap) => {
+          const data = snap.data() ?? {}
+          const approved = strings(data.photoURLs).find((u) => u.includes(fileName))
+          if (approved) return finish({ outcome: 'approved', url: approved })
+          if (!pendingDoc) watchPending(data)
+        },
+        () => finish({ outcome: 'timeout', url: null }),
+      ),
     )
+    if (pendingDoc) unsubscribes.push(onSnapshot(pendingDoc, (snap) => watchPending(snap.data() ?? {}), () => {}))
   })
 }
 

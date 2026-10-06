@@ -22,6 +22,7 @@ import { onObjectFinalized } from 'firebase-functions/v2/storage'
 import { defineSecret } from 'firebase-functions/params'
 import { sendPush } from './notifications'
 import { LEGACY_RUNTIME } from './legacyOptions'
+import { accountRef, internalRef } from '../userData'
 
 // Sightengine score limits per mode (flag when a score is above its limit).
 // nudity-2.1 categories + gore-2.0 / offensive probabilities.
@@ -86,27 +87,27 @@ export const onPhotoUpload = onObjectFinalized(
     // user doc (the admin photo-review tool queries users where('hasPendingPhotos','==',true)).
     // For Spark, photoDocRef === userRef so the flag is set in one write. For
     // Play, the entry goes on the playProfile subdoc and the flag goes on root.
+    // Stage 1a: Spark pending photos live in users/{uid}/private/account
+    // (owner-only), Play ones stay on playProfile/data; the review-queue flag
+    // is userInternal/{uid}.hasPendingPhotos (see ../userData.ts).
     async function flagPending(entry: Record<string, unknown>) {
       if (isPlayPhoto) {
         await photoDocRef.update({
           pendingPhotoURLs: admin.firestore.FieldValue.arrayUnion(entry),
         })
-        await userRef.update({ hasPendingPhotos: true })
       } else {
-        await photoDocRef.update({
-          pendingPhotoURLs: admin.firestore.FieldValue.arrayUnion(entry),
-          hasPendingPhotos: true,
-        })
+        await accountRef(uid).set({ pendingPhotoURLs: admin.firestore.FieldValue.arrayUnion(entry) }, { merge: true })
       }
+      await internalRef(uid).set({ hasPendingPhotos: true }, { merge: true })
     }
 
     // Push-notify all admins so flagged uploads don't sit unseen in the
     // review queue. Uses shared sendPush helper which swallows fetch errors.
     async function notifyAdmins(displayName: string, photoUrl: string) {
       try {
-        const adminSnap = await db.collection('users')
-          .where('isAdmin', '==', true)
-          .where('expoPushToken', '!=', null)
+        // Admins: userInternal/{uid}.admin (mirror of the auth claim).
+        const adminSnap = await db.collection('userInternal')
+          .where('admin', '==', true)
           .get()
 
         if (adminSnap.empty) return

@@ -6,6 +6,7 @@ import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { loadPlayName } from './playName'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
+import { internalRef, loadAccount, loadSettings, userRef } from './userData'
 
 const twilioAccountSid = defineSecret('TWILIO_ACCOUNT_SID')
 const twilioAuthToken = defineSecret('TWILIO_AUTH_TOKEN')
@@ -55,7 +56,7 @@ export async function lookupLineType(phoneNumber: string): Promise<string | null
 export type SmsPreference = 'newSpark' | 'newMessage' | 'newMatch' | 'quietNudge' | 'billing' | 'founder' | 'account'
 export type SmsMode = 'spark' | 'play'
 
-// users/{uid}.smsNotificationsEnabled = { spark, play } — one master switch
+// private/settings smsNotificationsEnabled = { spark, play } — one master switch
 // per mode. Accounts from before the split hold a single boolean, which
 // counts for both modes (Settings migrates it on the next change).
 export function smsEnabledFor(enabled: unknown, mode: SmsMode): boolean {
@@ -63,7 +64,7 @@ export function smsEnabledFor(enabled: unknown, mode: SmsMode): boolean {
   return typeof enabled === 'object' && enabled !== null && (enabled as Record<string, unknown>)[mode] === true
 }
 
-// users/{uid}.smsNotifications = {
+// private/settings smsNotifications = {
 //   spark: { newSpark, newMessage, newMatch },
 //   play:  { newFlame, newMessage, newMatch },
 //   quietNudge,
@@ -140,7 +141,7 @@ function localMinutes(timeZone: string, now: Date): number | null {
   }
 }
 
-// users/{uid}.smsQuietHours = { enabled, from: 'HH:MM', until: 'HH:MM', timezone }.
+// private/settings smsQuietHours = { enabled, from: 'HH:MM', until: 'HH:MM', timezone }.
 // The window includes `from` and excludes `until`; one that crosses midnight
 // (21:00 → 08:00) wraps. Anything malformed means no quiet hours.
 export function inQuietHours(quiet: unknown, now = new Date()): boolean {
@@ -163,15 +164,17 @@ export interface SmsTarget {
 
 // The user's phone number if they've turned SMS on and this kind of text is
 // enabled, else null. The number comes from Firebase Auth (phone sign-in),
-// falling back to the one recorded at consent.
+// falling back to the one recorded at consent (private/account). Preferences
+// live in private/settings (userData.ts).
 export async function smsTarget(uid: string, preference: SmsPreference, mode: SmsMode = 'spark'): Promise<SmsTarget | null> {
   try {
-    const snap = await getFirestore().doc(`users/${uid}`).get()
-    const user = snap.data()
-    if (!user || !smsEnabledFor(user.smsNotificationsEnabled, mode) || !smsPreferenceOn(user.smsNotifications, preference, mode)) {
+    const user = (await userRef(uid).get()).data()
+    if (!user) return null
+    const settings = await loadSettings(uid, user)
+    if (!smsEnabledFor(settings.smsNotificationsEnabled, mode) || !smsPreferenceOn(settings.smsNotifications, preference, mode)) {
       return null
     }
-    if (inQuietHours(user.smsQuietHours)) {
+    if (inQuietHours(settings.smsQuietHours)) {
       logger.info('Skipped — quiet hours', { preference, mode })
       return null
     }
@@ -179,7 +182,7 @@ export async function smsTarget(uid: string, preference: SmsPreference, mode: Sm
       .getUser(uid)
       .then((u) => u.phoneNumber ?? null)
       .catch(() => null)
-    const consentPhone: unknown = user.smsConsent?.phone
+    const consentPhone: unknown = (await loadAccount(uid, user)).smsConsent?.phone
     const phone = authPhone ?? (typeof consentPhone === 'string' ? consentPhone : null)
     return phone ? { uid, phone, user } : null
   } catch (err) {
@@ -191,15 +194,15 @@ export async function smsTarget(uid: string, preference: SmsPreference, mode: Sm
 const SPARK_SMS_COOLDOWN_MS = 4 * 60 * 60 * 1000
 
 // At most one Spark text per user every 4 hours. Claims the slot
-// (users/{uid}.lastSparkSmsAt) in a transaction so a burst of likes sends one.
+// (userInternal/{uid}.lastSparkSmsAt) in a transaction so a burst of likes sends one.
 export async function claimSparkSmsSlot(uid: string): Promise<boolean> {
-  const ref = getFirestore().doc(`users/${uid}`)
+  const ref = internalRef(uid)
   try {
     return await getFirestore().runTransaction(async (tx) => {
       const last: unknown = (await tx.get(ref)).data()?.lastSparkSmsAt
       const lastMs = last instanceof Timestamp ? last.toMillis() : typeof last === 'number' ? last : null
       if (lastMs !== null && Date.now() - lastMs < SPARK_SMS_COOLDOWN_MS) return false
-      tx.update(ref, { lastSparkSmsAt: FieldValue.serverTimestamp() })
+      tx.set(ref, { lastSparkSmsAt: FieldValue.serverTimestamp() }, { merge: true })
       return true
     })
   } catch (err) {

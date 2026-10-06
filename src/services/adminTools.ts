@@ -2,7 +2,7 @@ import { httpsCallable } from 'firebase/functions'
 import { functions } from './firebase'
 
 // Admin dashboards (functions/src/adminTools.ts). Every call is checked
-// server-side for users/{uid}.isAdmin.
+// server-side for the admin auth claim.
 
 // grace: asked to delete, can still cancel · deleted: soft-deleted,
 // restorable for 90 days · record: data purged, recovery record left.

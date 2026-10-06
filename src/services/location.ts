@@ -1,14 +1,20 @@
-import { doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore'
-import { db } from './firebase'
+import { getDoc } from 'firebase/firestore'
+import { FirebaseError } from 'firebase/app'
+import { httpsCallable } from 'firebase/functions'
+import { functions } from './firebase'
+import { accountDoc } from './subscription'
+import { clearDistances } from './distances'
 
 export interface LatLng {
   lat: number
   lng: number
 }
 
-// users/{uid} is readable by every signed-in user, so coordinates are stored
-// snapped to a coarse grid (~3 miles) rather than as raw GPS. Plenty for
-// "~X mi away" and the Austin sort; not enough to place someone's home.
+// Locations are server-side (functions/src/location.ts): setLocation snaps the
+// browser's position to a ~3-mile grid and keeps it where no other user can
+// read it; the owner gets a summary in private/account ({ lat, lng, label,
+// marketCityId }). Other people's distances come from getDistances.
+// The same grid as the server, so an unmoved position isn't re-sent.
 const GRID_DEG = 0.05
 
 function snap(v: number): number {
@@ -54,41 +60,30 @@ export function requestLocation(): Promise<LatLng | null> {
   return pending
 }
 
-// "Austin, TX" style label from OpenStreetMap's free reverse geocoder, or
-// null on any failure.
-async function reverseGeocode({ lat, lng }: LatLng): Promise<string | null> {
-  try {
-    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=10&addressdetails=1`
-    // Bounded: the save waits on this.
-    const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5000) })
-    if (!res.ok) return null
-    const data: unknown = await res.json()
-    const address = (data as { address?: Record<string, string> }).address ?? {}
-    const city = address.city ?? address.town ?? address.village ?? address.municipality ?? address.county
-    // ISO3166-2-lvl4 is "US-TX"; fall back to the full state name.
-    const code = address['ISO3166-2-lvl4']
-    const state = code?.includes('-') ? code.split('-')[1] : address.state
-    return city ? (state ? `${city}, ${state}` : city) : (state ?? null)
-  } catch {
-    return null
+// The saved-location summary from private/account, or null.
+export async function savedLocation(uid: string): Promise<{ lat: number; lng: number; label: string | null; marketCityId: string | null } | null> {
+  const loc = (await getDoc(accountDoc(uid)).catch(() => null))?.data()?.location
+  if (typeof loc?.lat !== 'number' || typeof loc?.lng !== 'number') return null
+  return {
+    lat: loc.lat,
+    lng: loc.lng,
+    label: typeof loc.label === 'string' ? loc.label : null,
+    marketCityId: typeof loc.marketCityId === 'string' ? loc.marketCityId : null,
   }
 }
 
-// Saves a snapped location (and label) on an existing users/{uid} doc. A
-// missing doc is left alone: onboarding creates it, and writing here first
-// would make onboarding treat a new user as an existing one.
-export async function saveUserLocation(uid: string, location: LatLng): Promise<void> {
-  const ref = doc(db, 'users', uid)
-  const snapshot = await getDoc(ref)
-  if (!snapshot.exists()) return
-  const snapped = { lat: snap(location.lat), lng: snap(location.lng) }
-  const label = await reverseGeocode(snapped)
-  await updateDoc(ref, {
-    locationLat: snapped.lat,
-    locationLng: snapped.lng,
-    ...(label && { locationLabel: label }),
-    locationUpdatedAt: serverTimestamp(),
-  })
+export class LocationLimitError extends Error {}
+
+// Saves the location server-side. Throws LocationLimitError (message: "You
+// can update your location again tomorrow") past the daily limit on moves.
+export async function saveUserLocation(location: LatLng): Promise<void> {
+  try {
+    await httpsCallable(functions, 'setLocation')({ lat: location.lat, lng: location.lng })
+    clearDistances()
+  } catch (err) {
+    if (err instanceof FirebaseError && err.code === 'functions/resource-exhausted') throw new LocationLimitError(err.message)
+    throw err
+  }
 }
 
 // Whether the browser has already granted geolocation, without asking.
@@ -105,21 +100,16 @@ async function locationGranted(): Promise<boolean> {
 
 // Every app load: if location is already granted, quietly take the current
 // position and save it — never a prompt (LocationGate does the asking).
-// When the snapped position hasn't moved, only locationUpdatedAt is touched,
-// so there's no reverse-geocode call or label rewrite on a normal visit.
-// Fire and forget; never throws.
+// When the snapped position hasn't moved nothing is sent. Fire and forget;
+// never throws (past the daily limit the move simply waits).
 export async function refreshLocationSilently(uid: string): Promise<void> {
   try {
     if (!(await locationGranted())) return
     const location = await requestLocation()
     if (!location) return
-    const ref = doc(db, 'users', uid)
-    const data = (await getDoc(ref)).data()
-    if (!data) return
-    const unmoved =
-      data.locationLat === snap(location.lat) && data.locationLng === snap(location.lng) && typeof data.locationLabel === 'string'
-    if (unmoved) await updateDoc(ref, { locationUpdatedAt: serverTimestamp() })
-    else await saveUserLocation(uid, location)
+    const saved = await savedLocation(uid)
+    if (saved && saved.lat === snap(location.lat) && saved.lng === snap(location.lng) && saved.label) return
+    await saveUserLocation(location)
   } catch (err) {
     // Location is a nice-to-have; never surface failures to the user.
     console.warn('[location] silent refresh failed', err)
@@ -133,14 +123,6 @@ export function getDistanceMiles(lat1: number, lng1: number, lat2: number, lng2:
   const dLng = toRad(lng2 - lng1)
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
   return 3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
-// A profile's snapped coordinates (locationLat/locationLng), or null. The
-// mobile app's _location map is raw GPS and is never read here.
-export function coordsOf(p: object | null | undefined): LatLng | null {
-  const d = (p ?? {}) as Record<string, unknown>
-  if (typeof d.locationLat === 'number' && typeof d.locationLng === 'number') return { lat: d.locationLat, lng: d.locationLng }
-  return null
 }
 
 // "Less than a mile away", "1 mile away", "12 miles away". Both ends are

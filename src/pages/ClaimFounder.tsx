@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
-import { doc, getDoc } from 'firebase/firestore'
-import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
-import { cityById, getNearestCity, type ZyloveCity } from '../config/cities'
+import { cityById, type ZyloveCity } from '../config/cities'
+import { loadAccountView, marketOf } from '../services/subscription'
 import { bucketFor, claimFounderBadge, spotOpen } from '../services/founders'
 import { clearAfterLogin } from '../services/afterLogin'
 import { FounderBenefits } from '../components/FounderInvite'
@@ -48,13 +47,12 @@ export default function ClaimFounder() {
     }
     void (async () => {
       try {
-        const user = (await getDoc(doc(db, 'users', uid))).data()
+        const user = await loadAccountView(uid)
         if (cancelled) return
         if (user?.isFounder === true) return setView({ kind: 'founder' })
-        const lat = user?.locationLat
-        const lng = user?.locationLng
         // No saved location: the claim asks for one.
-        if (typeof lat === 'number' && typeof lng === 'number' && getNearestCity(lat, lng)?.id !== city.id) {
+        const market = user ? marketOf(user) : null
+        if (typeof user?.locationLat === 'number' && market?.id !== city.id) {
           return setView({ kind: 'elsewhere', city })
         }
         const open = await spotOpen(city.id, bucketFor(user?.genderIdentity))

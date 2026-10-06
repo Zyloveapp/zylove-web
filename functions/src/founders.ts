@@ -26,6 +26,7 @@ import { logger } from 'firebase-functions'
 import { FieldPath, FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, getNearestCity } from './cities'
 import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
+import { internalRef, loadLocation } from './userData'
 
 // Per half (women / men); a city's circle is twice this.
 export const DEFAULT_FOUNDER_TARGET = 50
@@ -40,15 +41,6 @@ export type FounderResult =
 // The transaction also says whether this claim was the one that filled the city.
 type Claim = FounderResult & { closedCity?: boolean }
 
-function parseCoords(data: unknown): { lat: number; lng: number } {
-  const d = typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : {}
-  const lat = d.locationLat
-  const lng = d.locationLng
-  if (typeof lat !== 'number' || typeof lng !== 'number' || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-    throw new HttpsError('invalid-argument', 'locationLat and locationLng required')
-  }
-  return { lat, lng }
-}
 
 export type Bucket = 'women' | 'men'
 
@@ -102,14 +94,16 @@ async function announceCityLive(cityId: string, cityName: string): Promise<void>
   }
 }
 
-// Location is self-reported (browser geolocation, snapped to ~3 miles), so
-// this is a launch-period gate, not proof of residence.
+// Location is self-reported (browser geolocation via setLocation, snapped to
+// ~3 miles), so this is a launch-period gate, not proof of residence. It's the
+// stored location (userLocations), never coordinates sent with the call.
 export const assignFounderBadge = onCall(
   { timeoutSeconds: 60, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
   async (request): Promise<FounderResult> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
-    const { lat, lng } = parseCoords(request.data)
-    return claimFounderSpot(request.auth.uid, lat, lng, 'assignFounderBadge')
+    const loc = await loadLocation(request.auth.uid)
+    if (!loc) return { eligible: false, reason: 'outside_coverage' }
+    return claimFounderSpot(request.auth.uid, loc.lat, loc.lng, 'assignFounderBadge')
   },
 )
 
@@ -208,12 +202,13 @@ export async function claimFounderSpot(uid: string, lat: number, lng: number, so
       founderBadge: `${city.badgeName ?? city.name} Founder`,
       founderNumber: cohortNumber,
       founderBadgeAssignedAt: FieldValue.serverTimestamp(),
-      // Same perk as a founder code (redeemFounderCode).
-      subscriptionTier: 'elite',
       founderStatus: 'active',
       founderStatusAcceptedAt: FieldValue.serverTimestamp(),
       founderLastActiveAt: FieldValue.serverTimestamp(),
     })
+
+    // Elite, as a founder code gave (plan fields live in userInternal).
+    tx.set(internalRef(uid), { subscriptionTier: 'elite' }, { merge: true })
 
     // Austin's legacy counters (founder codes count here too).
     if (isAustin) {

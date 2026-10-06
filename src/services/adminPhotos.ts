@@ -1,6 +1,5 @@
-import { doc, getDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
-import { db, functions } from './firebase'
+import { auth, functions } from './firebase'
 
 // Admin photo review. Listing and decisions go through admin-gated callables
 // (listPendingPhotos / reviewPendingPhoto): other users' docs and Storage
@@ -15,9 +14,23 @@ export interface PendingPhoto {
   reason: unknown
 }
 
-export async function isAdmin(uid: string): Promise<boolean> {
-  const snap = await getDoc(doc(db, 'users', uid))
-  return snap.data()?.isAdmin === true
+// Admins carry the `admin` auth claim. The first check in a session refreshes
+// the token so a newly granted claim shows up without signing out.
+let adminCheck: { uid: string; result: Promise<boolean> } | null = null
+
+export function isAdmin(uid: string): Promise<boolean> {
+  const user = auth.currentUser
+  if (!user || user.uid !== uid) return Promise.resolve(false)
+  if (adminCheck?.uid !== uid) {
+    adminCheck = {
+      uid,
+      result: user
+        .getIdTokenResult(true)
+        .then((t) => t.claims.admin === true)
+        .catch(() => false),
+    }
+  }
+  return adminCheck.result
 }
 
 export async function listPendingPhotos(): Promise<PendingPhoto[]> {

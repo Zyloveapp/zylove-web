@@ -8,6 +8,7 @@
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { LEGACY_RUNTIME } from "./legacyOptions";
+import { internalRef } from "../userData";
 
 const REPORT_TIERS = {
   spam: 1, fake_profile: 1, low_effort: 1, misleading_photos: 1, inappropriate_username: 1,
@@ -59,10 +60,10 @@ export const reportUser = onCall(LEGACY_RUNTIME, async (request) => {
 
   const batch = db.batch();
   batch.set(db.collection("reports").doc(reportId), record);
-  batch.update(db.collection("users").doc(targetUid), {
+  batch.set(internalRef(targetUid), {
     reportCount: admin.firestore.FieldValue.increment(1),
     [`reportTier${tier}Count`]: admin.firestore.FieldValue.increment(1),
-  });
+  }, { merge: true });
   if (tier === 3) {
     batch.update(db.collection("users").doc(targetUid), {
       isSuspended: true,

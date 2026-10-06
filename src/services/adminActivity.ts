@@ -1,9 +1,8 @@
-import { doc, updateDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
-import { db, functions } from './firebase'
+import { functions } from './firebase'
 
 // Admin activity dashboard (functions/src/adminActivity.ts). Every call is
-// checked server-side for users/{uid}.isAdmin.
+// checked server-side for the admin auth claim.
 
 export type Tier = 'founder' | 'elite' | 'spark_plus' | 'trial' | 'prelaunch' | 'free'
 export type Mode = 'spark' | 'play' | 'both' | 'none'
@@ -67,8 +66,8 @@ export async function runUserAction(uid: string, action: UserAction): Promise<Ac
 }
 
 // ─── Activity tracking ───────────────────────────────────────────────────────
-// users/{uid}.lastActive (epoch ms, as web onboarding writes it) on app
-// load, at most once an hour per browser — what "Active today" counts.
+// lastActive (server-side, userInternal; epoch ms) on app load, at most once
+// an hour per browser — what "Active today" counts.
 
 const ACTIVE_THROTTLE_MS = 60 * 60 * 1000
 
@@ -77,7 +76,7 @@ export async function touchLastActive(uid: string): Promise<void> {
   try {
     const last = Number(localStorage.getItem(key))
     if (last > 0 && Date.now() - last < ACTIVE_THROTTLE_MS) return
-    await updateDoc(doc(db, 'users', uid), { lastActive: Date.now() })
+    await httpsCallable(functions, 'recordActivity')({})
     localStorage.setItem(key, String(Date.now()))
   } catch {
     // Not onboarded yet (no doc) or storage blocked: next load tries again.

@@ -1,8 +1,8 @@
-import { doc, getDoc, onSnapshot, serverTimestamp, updateDoc, type Unsubscribe } from 'firebase/firestore'
-import { db } from './firebase'
+import { serverTimestamp, type Unsubscribe } from 'firebase/firestore'
+import { loadSettingsView, saveSettings, subscribeSettingsView } from './privateSettings'
 
 // Opt-in AI photo coaching for the profile reviews, per mode, at
-// users/{uid}.photoAnalysisConsent: { spark, play, acknowledgedAt }. Both
+// private/settings photoAnalysisConsent: { spark, play, acknowledgedAt }. Both
 // default off; the reviews only send photos when their mode's flag is true.
 
 export type PhotoConsentMode = 'spark' | 'play'
@@ -19,10 +19,10 @@ export function subscribePhotoConsent(
   onChange: (consent: PhotoConsent) => void,
   onError: () => void,
 ): Unsubscribe {
-  return onSnapshot(
-    doc(db, 'users', uid),
-    (snap) => {
-      const c = snap.data()?.photoAnalysisConsent
+  return subscribeSettingsView(
+    uid,
+    (d) => {
+      const c = d.photoAnalysisConsent
       onChange({
         spark: c?.spark === true,
         play: c?.play === true,
@@ -36,7 +36,7 @@ export function subscribePhotoConsent(
 // The saved choice for one mode: true / false, or null if they've never
 // been asked (the review sheet asks before generating).
 export async function getPhotoConsentChoice(uid: string, mode: PhotoConsentMode): Promise<boolean | null> {
-  const choice: unknown = (await getDoc(doc(db, 'users', uid))).data()?.photoAnalysisConsent?.[mode]
+  const choice: unknown = (await loadSettingsView(uid)).photoAnalysisConsent?.[mode]
   return typeof choice === 'boolean' ? choice : null
 }
 
@@ -47,9 +47,11 @@ export async function setPhotoConsent(
   enabled: boolean,
   { acknowledge = false } = {},
 ): Promise<void> {
-  await updateDoc(doc(db, 'users', uid), {
-    [`photoAnalysisConsent.${mode}`]: enabled,
-    [`photoAnalysisConsent.${mode}UpdatedAt`]: serverTimestamp(),
-    ...(acknowledge && { 'photoAnalysisConsent.acknowledgedAt': serverTimestamp() }),
+  await saveSettings(uid, {
+    photoAnalysisConsent: {
+      [mode]: enabled,
+      [`${mode}UpdatedAt`]: serverTimestamp(),
+      ...(acknowledge && { acknowledgedAt: serverTimestamp() }),
+    },
   })
 }

@@ -18,8 +18,8 @@ import { ZYLOVE_CITIES, getNearestCity, type ZyloveCity } from './cities'
 //   exempt   founders, the always-Elite identities, paying subscribers:
 //            never on a clock, never expire.
 //
-// trialStartedAt / trialEndsAt / trialExpired are server-only (Firestore
-// rules block client writes) and stored as Timestamps.
+// trialStartedAt / trialEndsAt / trialExpired live in userInternal/{uid}
+// (server-only) as Timestamps, mirrored read-only to private/account.
 
 export const TRIAL_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -43,20 +43,25 @@ export function hasPaidSubscription(user: DocumentData | undefined): boolean {
 }
 
 // Never on a trial clock: founders, always-Elite identities, paying members.
+// `user` is the root doc merged with userInternal (planView), since the plan
+// fields live in userInternal.
 export function trialExempt(user: DocumentData): boolean {
   return user.isFounder === true || hasEliteIdentity(user) || hasPaidSubscription(user)
 }
 
-// The user's launch market, from their saved location.
-// TODO: locationLat/locationLng are client-written, so a user can move their
-// saved location to a pre-launch city and stay off the clock. Future fix:
-// lock the market server-side the first time a location is saved (e.g. a
-// server-only marketCityId) and use that here instead of live coordinates.
-export function marketFor(user: DocumentData): ZyloveCity | null {
-  const lat: unknown = user.locationLat
-  const lng: unknown = user.locationLng
-  if (typeof lat !== 'number' || typeof lng !== 'number') return null
-  return getNearestCity(lat, lng)
+// Root doc (identity, founder) with the plan from userInternal on top.
+export function planView(root: DocumentData | undefined, internal: DocumentData | undefined): DocumentData {
+  return { ...(root ?? {}), ...(internal ?? {}) }
+}
+
+// The user's launch market: userLocations/{uid}.marketCityId, locked the first
+// time they save a location (setLocation), so moving their location later
+// can't take them off a market's trial clock. Older records without it fall
+// back to the nearest city.
+export function marketFor(loc: { lat: number; lng: number; marketCityId: string | null } | null): ZyloveCity | null {
+  if (!loc) return null
+  if (loc.marketCityId) return ZYLOVE_CITIES.find((c) => c.id === loc.marketCityId) ?? null
+  return getNearestCity(loc.lat, loc.lng)
 }
 
 export function cityOpen(config: DocumentData | undefined): boolean {
@@ -105,29 +110,19 @@ export const onMarketOpened = onDocumentWritten(
     if (!(stamped instanceof Timestamp)) await db.doc(`config/${docId}`).update({ discoveryOpenedAt: openedAt })
     await db.doc(`publicStats/${docId}`).set({ discoveryOpen: true, discoveryOpenedAt: openedAt }, { merge: true })
 
-    // Whole collection, read once: no index answers "near this city".
-    // TODO: this scans every user, which won't hold up at scale. Before then,
-    // switch to a market-indexed query — e.g. a server-written marketCityId on
-    // users/{uid} (the same field the location-spoofing fix above needs) and
-    // where('marketCityId', '==', city.id), paged.
-    const users = await db
-      .collection('users')
-      .select('locationLat', 'locationLng', 'genderIdentity', 'isFounder', 'subscriptionStatus', 'trialStartedAt', 'onboardingComplete')
-      .get()
-    const starting = users.docs.filter((d) => {
-      const u = d.data()
-      return (
-        !isBotUid(d.id) &&
-        u.onboardingComplete === true &&
-        u.trialStartedAt === undefined &&
-        !trialExempt(u) &&
-        marketFor(u)?.id === city.id
-      )
-    })
+    // Everyone whose locked market is this city (single-field query).
+    const inMarket = await db.collection('userLocations').where('marketCityId', '==', city.id).select().get()
+    const starting: string[] = []
+    for (const d of inMarket.docs) {
+      if (isBotUid(d.id)) continue
+      const [root, internal] = await Promise.all([db.doc(`users/${d.id}`).get(), db.doc(`userInternal/${d.id}`).get()])
+      const u = planView(root.data(), internal.data())
+      if (root.data()?.onboardingComplete === true && u.trialStartedAt === undefined && !trialExempt(u)) starting.push(d.id)
+    }
     const trial = newTrial()
     for (let i = 0; i < starting.length; i += 450) {
       const batch = db.batch()
-      for (const d of starting.slice(i, i + 450)) batch.update(d.ref, trial)
+      for (const uid of starting.slice(i, i + 450)) batch.set(db.doc(`userInternal/${uid}`), trial, { merge: true })
       await batch.commit()
     }
     logger.info('onMarketOpened', { city: city.id, trialsStarted: starting.length })
@@ -144,12 +139,13 @@ export const checkTrialStatus = onSchedule(
   { schedule: '0 3 * * *', timeZone: 'America/Chicago', timeoutSeconds: 300, memory: '256MiB' },
   async () => {
     const db = getFirestore()
-    const ended = await db.collection('users').where('trialEndsAt', '<', Timestamp.now()).get()
-    const expiring = ended.docs.filter((d) => {
-      const u = d.data()
+    const ended = await db.collection('userInternal').where('trialEndsAt', '<', Timestamp.now()).get()
+    const expiring = []
+    for (const d of ended.docs) {
+      const u = planView((await db.doc(`users/${d.id}`).get()).data(), d.data())
       const paidTier = u.subscriptionTier === 'spark_plus' || u.subscriptionTier === 'elite'
-      return u.trialStartedAt != null && u.trialExpired !== true && !trialExempt(u) && !paidTier
-    })
+      if (u.trialStartedAt != null && u.trialExpired !== true && !trialExempt(u) && !paidTier) expiring.push(d)
+    }
     for (let i = 0; i < expiring.length; i += 450) {
       const batch = db.batch()
       for (const d of expiring.slice(i, i + 450)) batch.update(d.ref, { trialExpired: true })

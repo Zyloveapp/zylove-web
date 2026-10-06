@@ -4,9 +4,9 @@ import { FirebaseError } from 'firebase/app'
 import { db, functions } from './firebase'
 import { photoProgress, uploadModeratedPhotos, type SaveProgress } from './moderatedPhotos'
 import { keysReady, resolveKeypair } from './keys'
-import { getUserTier, isAlwaysElite } from './subscription'
+import { getUserTier, isAlwaysElite, loadAccountView } from './subscription'
 import { changeDisplayName } from './displayNames'
-import { addLegalName } from './privateIdentity'
+import { addIdentity } from './privateIdentity'
 import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
 import {
   PLAY_PROMPT_BANK,
@@ -315,7 +315,6 @@ export async function savePlayOnlyOnboarding(
       uid,
       ...(!renamingSpark && { displayName: sparkName }),
       age,
-      ...(!identityLocked && birthday && { birthday: birthday.iso }),
       ...(!identityLocked && { genderIdentity }),
       ...(!identityLocked && genderIdentity === 'self_describe' && selfDescribe && { genderSelfDescribe: selfDescribe }),
       ...(!identityLocked &&
@@ -335,7 +334,6 @@ export async function savePlayOnlyOnboarding(
       mode: 'play',
       sparkVisibility: 'hidden',
       playVisibility: 'active',
-      aiPhotoScanningConsent: true,
       openToCrossover: false,
       // Mirrors mobile's Play onboarding: mobile Discover and profile cards
       // read these Play fields from the root doc.
@@ -347,10 +345,9 @@ export async function savePlayOnlyOnboarding(
       playPromptAnswers: prompts,
       ...descriptorFields(play),
       playGoDeeper: answeredGoDeeper(play),
-      lastActive: now,
       profileUpdatedAt: serverTimestamp(),
       ...((keys.changed || !existing.exists()) && { publicKey: keys.publicKey }),
-      ...(!existing.exists() && { photoURLs: [], geohash: '', locationLabel: '', phoneVerified: false, createdAt: now }),
+      ...(!existing.exists() && { photoURLs: [], locationLabel: '', phoneVerified: false, createdAt: now }),
     },
     { merge: true },
   )
@@ -378,8 +375,9 @@ export async function savePlayOnlyOnboarding(
     },
     { merge: true },
   )
-  // Owner-only and set once (users/{uid}/private/identity).
-  await addLegalName(batch, uid, d.legalName)
+  // Owner-only (users/{uid}/private/identity): legal name once, birthday
+  // until identity is locked.
+  await addIdentity(batch, uid, d.legalName, !identityLocked && birthday ? birthday.iso : null)
   await batch.commit()
 
   // Server sets the trust/trial fields clients can't write (isSuspended,
@@ -407,7 +405,7 @@ export async function savePlayOnlyOnboarding(
 // (pre-launch, Play is simply free). Read after initUserDefaults has run, so
 // the trial fields reflect the server's decision.
 export async function needsPlayTrialWelcome(uid: string): Promise<boolean> {
-  const data = (await getDoc(doc(db, 'users', uid))).data()
+  const data = await loadAccountView(uid)
   if (!data) return false
   return !isAlwaysElite(data) && data.subscriptionTier !== 'elite' && getUserTier(data) === 'trial'
 }

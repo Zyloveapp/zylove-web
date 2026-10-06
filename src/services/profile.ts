@@ -2,6 +2,7 @@ import { arrayRemove, deleteField, doc, getDoc, serverTimestamp, updateDoc, writ
 import { deleteObject, ref } from 'firebase/storage'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions, storage } from './firebase'
+import { loadIdentity } from './privateIdentity'
 import { displayAge, type DiscoverProfile } from './discover'
 import type { SparkBioRequest } from './bio'
 import type { PromptAnswer } from '../types/dualProfile'
@@ -53,7 +54,9 @@ export async function loadOwnProfile(uid: string): Promise<OwnProfile | null> {
     getDoc(doc(db, `users/${uid}/seekingPreferences/prefs`)).catch(() => null),
   ])
   if (!root.exists()) return null
-  const profile = { ...(root.data() as DiscoverProfile), uid }
+  // The birthday is private (private/identity); only its owner gets it here.
+  const { birthday } = await loadIdentity(uid, root.data().birthday)
+  const profile = { ...(root.data() as DiscoverProfile), uid, birthday: birthday ?? undefined }
   const sp = spark?.data() ?? {}
 
   // Mobile's editor saves the bio only to sparkProfile/data, so it wins.

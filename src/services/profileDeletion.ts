@@ -1,4 +1,4 @@
-import { deleteDoc, deleteField, doc, getDoc, updateDoc, writeBatch } from 'firebase/firestore'
+import { deleteDoc, deleteField, doc, getDoc, setDoc, updateDoc, writeBatch } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 
@@ -42,7 +42,6 @@ export async function deleteSparkProfile(uid: string): Promise<{ playRemains: bo
     // Explore reads root photoURLs; a Play-only account shows its Play photos
     // there (mirrorPlayOnlyPhotos only syncs when the Play profile changes).
     photoURLs: remainingPlayPhotos ?? [],
-    pendingPhotoURLs: [],
     promptAnswers: [],
     personalityTraits: [],
     relationshipValues: [],
@@ -60,6 +59,9 @@ export async function deleteSparkProfile(uid: string): Promise<{ playRemains: bo
   })
   batch.delete(doc(db, `users/${uid}/sparkProfile/data`))
   await batch.commit()
+  // Spark photos still in review go too (the rules let the owner only empty
+  // this list). Best effort: the profile is already gone either way.
+  await setDoc(doc(db, 'users', uid, 'private', 'account'), { pendingPhotoURLs: [] }, { merge: true }).catch(() => {})
   await deletePhotoFolder('spark')
   return { playRemains }
 }

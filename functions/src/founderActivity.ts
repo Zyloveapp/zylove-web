@@ -20,7 +20,8 @@ import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, distanceMiles } from './cities'
 import { SMS_SECRETS } from './sms'
 import { bucketFor, num, refreshCityMembers, textFounder, type Bucket, type FounderStatus } from './founders'
-import { CLEAR_TRIAL, cityOpen, hasEliteIdentity, hasPaidSubscription, newTrial } from './trial'
+import { CLEAR_TRIAL, cityOpen, hasEliteIdentity, hasPaidSubscription, newTrial, planView } from './trial'
+import { internalRef, loadInternal } from './userData'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const LAUNCH_WINDOW_DAYS = 90
@@ -95,6 +96,7 @@ export async function revokeFounderStatus(uid: string): Promise<{ cityId: string
   const db = getFirestore()
   const recordRef = db.doc(`founderRecords/${uid}`)
   const userRef = db.doc(`users/${uid}`)
+  const planRef = internalRef(uid)
   const launchRef = db.doc('config/launch')
 
   const opened = await db.runTransaction(async (tx) => {
@@ -102,8 +104,9 @@ export async function revokeFounderStatus(uid: string): Promise<{ cityId: string
     if (!record || (record.status !== 'active' && record.status !== 'pending_revocation')) return null
     const cityRef = db.doc(`config/city_${record.cityId}`)
     const isAustin = record.cityId === 'austin'
-    const [userSnap, citySnap, launchSnap] = await Promise.all([
+    const [userSnap, planSnap, citySnap, launchSnap] = await Promise.all([
       tx.get(userRef),
+      tx.get(planRef),
       tx.get(cityRef),
       isAustin ? tx.get(launchRef) : Promise.resolve(null),
     ])
@@ -128,12 +131,8 @@ export async function revokeFounderStatus(uid: string): Promise<{ cityId: string
       const plan = hasEliteIdentity(user)
         ? { subscriptionTier: 'elite' }
         : { subscriptionTier: 'free', ...(cityOpen(citySnap.data()) ? newTrial() : CLEAR_TRIAL) }
-      tx.update(userRef, {
-        isFounder: false,
-        founderStatus: 'revoked',
-        founderRevokedAt: FieldValue.serverTimestamp(),
-        ...(!hasPaidSubscription(user) && plan),
-      })
+      tx.update(userRef, { isFounder: false, founderStatus: 'revoked', founderRevokedAt: FieldValue.serverTimestamp() })
+      if (!hasPaidSubscription(planView(user, planSnap.data()))) tx.set(planRef, plan, { merge: true })
     }
     return { cityId: record.cityId, bucket }
   })
@@ -149,26 +148,36 @@ export async function revokeFounderStatus(uid: string): Promise<{ cityId: string
 
 // Texts up to min(3 × spots, 10) people within the city's radius, in the
 // half that opened, who aren't founders and haven't had a claim text in the
-// last day. Bots and the people just revoked are skipped. Reads every
-// unsuspended user, which is fine at launch scale.
+// last day. Bots and the people just revoked are skipped; textFounder skips
+// anyone without SMS consent. Reads every unsuspended user and every saved
+// location, which is fine at launch scale.
 async function textOpenSpot(cityId: string, bucket: Bucket, spots: number, skip: Set<string>): Promise<number> {
   const city = ZYLOVE_CITIES.find((c) => c.id === cityId)
   if (!city || spots <= 0) return 0
   const db = getFirestore()
-  const snap = await db
-    .collection('users')
-    .where('isSuspended', '==', false)
-    .select('locationLat', 'locationLng', 'genderIdentity', 'isFounder', 'smsConsent', 'claimSMSSentAt')
-    .get()
+  const [snap, locSnap, sentSnap] = await Promise.all([
+    db
+      .collection('users')
+      .where('isSuspended', '==', false)
+      .select('locationLat', 'locationLng', 'genderIdentity', 'isFounder', 'claimSMSSentAt')
+      .get(),
+    db.collection('userLocations').select('lat', 'lng').get(),
+    db.collection('userInternal').where('claimSMSSentAt', '!=', null).select('claimSMSSentAt').get(),
+  ])
+  const locs = new Map(locSnap.docs.map((d) => [d.id, d.data()]))
+  const sentAt = new Map(sentSnap.docs.map((d) => [d.id, d.data().claimSMSSentAt as unknown]))
   const now = Date.now()
   const candidates = snap.docs.filter((d) => {
     const u = d.data()
     if (d.id.startsWith(BOT_PREFIX) || skip.has(d.id) || u.isFounder === true) return false
-    if (typeof u.smsConsent !== 'object' || u.smsConsent === null) return false
-    if (typeof u.locationLat !== 'number' || typeof u.locationLng !== 'number') return false
-    if (distanceMiles(u.locationLat, u.locationLng, city.lat, city.lng) > city.radiusMiles) return false
+    // userLocations, or the root doc's old copy for accounts not migrated.
+    const loc = locs.get(d.id)
+    const lat: unknown = loc?.lat ?? u.locationLat
+    const lng: unknown = loc?.lng ?? u.locationLng
+    if (typeof lat !== 'number' || typeof lng !== 'number') return false
+    if (distanceMiles(lat, lng, city.lat, city.lng) > city.radiusMiles) return false
     if (bucketFor(u.genderIdentity) !== bucket) return false
-    const last = millis(u.claimSMSSentAt)
+    const last = millis(sentAt.get(d.id) ?? u.claimSMSSentAt)
     return last === null || now - last >= CLAIM_SMS_COOLDOWN_MS
   })
   // Shuffled: nobody is always first in line.
@@ -184,7 +193,7 @@ async function textOpenSpot(cityId: string, bucket: Bucket, spots: number, skip:
     if (sent >= limit) break
     if (!(await textFounder(d.id, body))) continue
     sent++
-    await d.ref.update({ claimSMSSentAt: FieldValue.serverTimestamp() })
+    await internalRef(d.id).set({ claimSMSSentAt: FieldValue.serverTimestamp() }, { merge: true })
   }
   logger.info('textOpenSpot', { cityId, bucket, spots, candidates: candidates.length, sent })
   return sent
@@ -212,14 +221,10 @@ async function checkOne(record: FounderRecord, cityClosed: boolean, now: number)
     // The city never filled: thank them with Spark+ for good. Their spot
     // isn't handed back (counters unchanged); they just stop counting as
     // members.
-    const user = (await userRef.get()).data()
+    const plan = await loadInternal(record.uid)
     await recordRef.update({ status: 'converted' satisfies FounderStatus, convertedAt: FieldValue.serverTimestamp() })
-    await userRef.update({
-      isFounder: false,
-      founderStatus: 'converted',
-      founderConvertedAt: FieldValue.serverTimestamp(),
-      ...(!hasPaidSubscription(user) && { subscriptionTier: 'spark_plus' }),
-    })
+    await userRef.update({ isFounder: false, founderStatus: 'converted', founderConvertedAt: FieldValue.serverTimestamp() })
+    if (!hasPaidSubscription(plan)) await internalRef(record.uid).set({ subscriptionTier: 'spark_plus' }, { merge: true })
     await textFounder(
       record.uid,
       `✦ Zylove is still growing in ${record.cityName}. Thank you for being here from the start — your Spark+ access is yours forever. ${APP_URL}`,

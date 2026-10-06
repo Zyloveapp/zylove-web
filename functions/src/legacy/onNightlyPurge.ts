@@ -12,6 +12,7 @@
 import * as admin from 'firebase-admin'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { LEGACY_RUNTIME } from './legacyOptions'
+import { ROOT_SCRUB, clearPrivateData } from '../userData'
 
 
 
@@ -60,6 +61,7 @@ const auth = admin.auth()
           'matchIndex',
           'profileViews',
           'matches',
+          'private',
         ]
 
         for (const sub of subcollections) {
@@ -109,6 +111,7 @@ const auth = admin.auth()
         if (delReqSnap.exists) await delReqSnap.ref.delete()
 
         // ── Delete Firestore user doc ────────────────────────────────────
+        await clearPrivateData(uid)
         await db.collection('users').doc(uid).delete()
 
         // ── Delete Firebase Storage photos ───────────────────────────────
@@ -261,10 +264,11 @@ export const processGraceExpiredDeletions = onSchedule(
           displayName:   '[deleted]',
           bio:           '',
           photoURLs:     [],
-          geohash:       '',
           locationLabel: '',
           isSuspended:   true,
+          ...ROOT_SCRUB,
         })
+        await clearPrivateData(uid)
 
         // Delete the Firebase Auth user. Idempotent — swallow user-not-found.
         await auth.deleteUser(uid).catch(() => {})

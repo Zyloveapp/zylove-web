@@ -1,17 +1,19 @@
 // Stripe subscriptions: Checkout for new subscribers, the Customer Portal for
-// managing one, and a webhook that keeps users/{uid} in step with Stripe.
+// managing one, and a webhook that keeps userInternal/{uid} (server-only;
+// mirrored to the user's private/account) in step with Stripe.
 //
-// users/{uid}.stripeCustomerId is client-writable (rules only lock the tier
-// and trial fields), so it is never trusted on its own: a customer belongs to
+// The stored stripeCustomerId is still never trusted on its own (older
+// accounts' copy sat on the client-writable root doc): a customer belongs to
 // a user only if the customer's Stripe metadata.uid — set here, server-side —
 // says so. The webhook finds the user the same way.
 
 import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https'
 import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
-import { FieldValue, getFirestore } from 'firebase-admin/firestore'
+import { FieldValue } from 'firebase-admin/firestore'
 import Stripe = require('stripe')
 import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
+import { internalRef, loadInternal } from './userData'
 
 const stripeSecretKey = defineSecret('STRIPE_SECRET_KEY')
 const stripeWebhookSecret = defineSecret('STRIPE_WEBHOOK_SECRET')
@@ -46,9 +48,8 @@ function idOf(v: string | { id: string } | null | undefined): string | null {
   return typeof v === 'string' ? v : v.id
 }
 
-function userRef(uid: string) {
-  return getFirestore().collection('users').doc(uid)
-}
+// Billing state lives in userInternal (server-only).
+const billingRef = internalRef
 
 // The customer's uid from Stripe metadata, or null if it isn't one of ours.
 async function uidForCustomer(customerId: string): Promise<string | null> {
@@ -61,7 +62,7 @@ async function uidForCustomer(customerId: string): Promise<string | null> {
 // The caller's Stripe customer id if users/{uid}.stripeCustomerId points at a
 // live customer whose metadata names this uid; null otherwise.
 async function verifiedCustomerId(uid: string): Promise<string | null> {
-  const stored: unknown = (await userRef(uid).get()).data()?.stripeCustomerId
+  const stored: unknown = (await loadInternal(uid)).stripeCustomerId
   if (typeof stored !== 'string' || !stored.startsWith('cus_')) return null
   try {
     return (await uidForCustomer(stored)) === uid ? stored : null
@@ -100,7 +101,7 @@ export const createCheckoutSession = onCall(
         { idempotencyKey: `zylove-customer-${uid}` },
       )
       customerId = customer.id
-      await userRef(uid).set({ stripeCustomerId: customerId }, { merge: true })
+      await billingRef(uid).set({ stripeCustomerId: customerId }, { merge: true })
     }
 
     const session = await stripe().checkout.sessions.create({
@@ -143,8 +144,8 @@ async function applySubscription(sub: Stripe.Subscription, deleted: boolean): Pr
   const uid = customerId ? await uidForCustomer(customerId) : null
   if (!uid) return void logger.warn('Subscription event for unknown customer', { subscription: sub.id })
 
-  const ref = userRef(uid)
-  const onFile: unknown = (await ref.get()).data()?.stripeSubscriptionId
+  const ref = billingRef(uid)
+  const onFile: unknown = (await loadInternal(uid)).stripeSubscriptionId
   if (typeof onFile === 'string' && onFile && onFile !== sub.id) {
     return void logger.info('Ignoring event for replaced subscription', { subscription: sub.id })
   }
@@ -206,7 +207,7 @@ async function onCheckoutCompleted(session: Stripe.Checkout.Session): Promise<vo
   if (!uid || (tier !== 'spark_plus' && tier !== 'elite') || !subscriptionId) {
     return void logger.error('Checkout session missing uid, tier or subscription', { session: session.id })
   }
-  await userRef(uid).set(
+  await billingRef(uid).set(
     {
       subscriptionTier: tier,
       stripeSubscriptionId: subscriptionId,
@@ -223,7 +224,7 @@ async function onPaymentFailed(invoice: Stripe.Invoice): Promise<void> {
   const customerId = idOf(invoice.customer)
   const uid = customerId ? await uidForCustomer(customerId) : null
   if (!uid) return void logger.warn('Payment failed for unknown customer', { invoice: invoice.id })
-  await userRef(uid).set({ subscriptionStatus: 'past_due', subscriptionUpdatedAt: FieldValue.serverTimestamp() }, { merge: true })
+  await billingRef(uid).set({ subscriptionStatus: 'past_due', subscriptionUpdatedAt: FieldValue.serverTimestamp() }, { merge: true })
 
   // One text per invoice (Stripe retries several times), only for people with
   // texts on in either mode, and never in their quiet hours.

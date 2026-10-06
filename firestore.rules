@@ -32,57 +32,120 @@ service cloud.firestore {
     }
 
     // ─── Users ──────────────────────────────────────────────────────────────
-    // Own profile: full read/write (minus trust/safety fields)
-    // Other profiles: read only (discovery, matching); suspended targets hidden
-    // Trust/safety fields (isSuspended, reportCount, verificationStatus,
-    // sparkScore, subscriptionTier) are written ONLY by Cloud Functions
-    // via admin SDK — any client attempt is blocked.
+    // users/{uid} is the public profile: every signed-in user can read it
+    // (Explore, profiles, chat), so it holds profile fields only. Everything
+    // else lives where other users can't read it (functions/src/userData.ts):
+    //   userInternal/{uid}          plan, payments, trust and safety, counters
+    //                               (server-only: default deny below)
+    //   userLocations/{uid}         snapped coordinates, market (server-only)
+    //   users/{uid}/private/account owner reads; server writes
+    //   users/{uid}/private/settings owner reads and writes (allow-listed keys)
+    //   users/{uid}/private/identity owner; legal name once, birthday until locked
+    // The client may never write any of those fields here (serverOnlyUserFields).
+
+    function serverOnlyUserFields() {
+      return [
+        // Trust and safety, verification, admin
+        'isSuspended', 'reportCount', 'reportTier1Count', 'reportTier2Count', 'reportTier3Count',
+        'verificationStatus', 'sparkScore', 'zyloveScore', 'zylovScore', 'zyloveScoreTier', 'isAdmin',
+        // Founder badge
+        'isFounder', 'founderCohort', 'founderNumber', 'founderBadgeAssignedAt',
+        // Plan and payments
+        'subscriptionTier', 'subscriptionStatus', 'subscriptionSource', 'subscriptionGrantedAt', 'subscriptionUpdatedAt',
+        'stripeCustomerId', 'stripeSubscriptionId',
+        'trialStartedAt', 'trialEndsAt', 'trialExpired',
+        // Names: legal name is private; the name-change timestamps are
+        // server-only (updateDisplayName enforces the 30-day limit with them)
+        'legalName', 'displayNameUpdatedAt', 'playDisplayNameUpdatedAt',
+        // Private: phone, birthday, location, settings
+        'phoneNumber', 'smsConsent', 'birthday',
+        'locationLat', 'locationLng', 'locationUpdatedAt', 'geohash', '_location',
+        'smsNotifications', 'smsNotificationsEnabled', 'smsQuietHours',
+        'photoAnalysisConsent', 'aiPhotoScanningConsent', 'photoScanningConsent', 'photoScanningConsentAt',
+        // Moderation and internal state
+        'pendingPhotoURLs', 'photoRejectedAt', 'photoRejectionReason', 'hasPendingPhotos',
+        'expoPushToken', 'bioGenerations', 'goDeeperGenerations', 'profileReviews',
+        'lastSparkSmsAt', 'claimSMSSentAt', 'likesReceivedCount', 'lastActive'
+      ];
+    }
 
     match /users/{uid} {
       allow read: if isSignedIn()
                   && (resource == null
                       || resource.data.get('isSuspended', false) == false);
       allow create: if isUser(uid) && isSignedIn()
-                    && !request.resource.data.keys().hasAny([
-                        'isSuspended', 'reportCount', 'verificationStatus',
-                        'sparkScore', 'subscriptionTier', 'zyloveScoreTier', 'isAdmin',
-                        'isFounder', 'founderCohort', 'founderNumber', 'founderBadgeAssignedAt',
-                        'trialStartedAt', 'trialEndsAt', 'trialExpired',
-                        'legalName', 'displayNameUpdatedAt', 'playDisplayNameUpdatedAt'
-                      ]);
-      // Trust/safety, founder-badge and trial fields: always blocked client-side
-      // (Cloud Functions only: redeemFounderCode, assignFounderBadge,
-      // initUserDefaults / checkTrialStatus in zylove-web).
-      // legalName lives only in the owner-only private/identity doc, never
-      // here. The name-change timestamps are server-only (zylove-web's
-      // updateDisplayName enforces the 30-day limit with them).
-      // Identity-lock fields (birthday, genderIdentity, matchableAs,
+                    && !request.resource.data.keys().hasAny(serverOnlyUserFields());
+      // Identity-lock fields (age, genderIdentity, matchableAs,
       // identityLockedAt): blocked AFTER identityLockedAt is set. First
       // write (when field is still null) is permitted — that's the slide-2
-      // confirm or the retroactive ensureIdentityLock write.
+      // confirm or the retroactive ensureIdentityLock write. Age then
+      // follows the private birthday server-side (refreshAges).
       // Public names (displayName, playDisplayName): the first one is set
       // directly by onboarding; after that only updateDisplayName changes them.
       allow update: if isUser(uid) && isSignedIn()
-                    && !request.resource.data.diff(resource.data).affectedKeys()
-                        .hasAny(['isSuspended', 'reportCount', 'verificationStatus', 'sparkScore', 'subscriptionTier', 'zyloveScoreTier', 'isAdmin',
-                                 'isFounder', 'founderCohort', 'founderNumber', 'founderBadgeAssignedAt',
-                                 'trialStartedAt', 'trialEndsAt', 'trialExpired',
-                                 'legalName', 'displayNameUpdatedAt', 'playDisplayNameUpdatedAt'])
+                    && !request.resource.data.diff(resource.data).affectedKeys().hasAny(serverOnlyUserFields())
                     && (resource.data.get('identityLockedAt', null) == null
                         || !request.resource.data.diff(resource.data).affectedKeys()
-                            .hasAny(['birthday', 'genderIdentity', 'matchableAs', 'identityLockedAt']))
+                            .hasAny(['age', 'genderIdentity', 'matchableAs', 'identityLockedAt']))
                     && (resource.data.get('displayName', null) == null
                         || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['displayName']))
                     && (resource.data.get('playDisplayName', null) == null
                         || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['playDisplayName']));
       allow delete: if isUser(uid);
 
-      // Private identity — owner-only. users/{uid}/private/identity holds the
-      // legal name: created once at onboarding, never changed or deleted by
-      // the client.
-      match /private/{doc} {
-        allow read, create: if isSignedIn() && request.auth.uid == uid;
-        allow update, delete: if false;
+      // Plan mirror, SMS consent (with the verified phone), Spark photos in
+      // review and the saved-location summary. Written by Cloud Functions;
+      // the owner may only empty their Spark photo-review queue.
+      match /private/account {
+        allow read: if isSignedIn() && isUser(uid);
+        allow update: if isSignedIn() && isUser(uid)
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pendingPhotoURLs'])
+                      && request.resource.data.pendingPhotoURLs is list
+                      && request.resource.data.pendingPhotoURLs.size() == 0;
+        allow create, delete: if false;
+      }
+
+      // The owner's preferences: texts and AI photo coaching. These keys only.
+      function settingsKeys() {
+        return ['smsNotificationsEnabled', 'smsNotifications', 'smsQuietHours', 'photoAnalysisConsent'];
+      }
+      function validSettings(d) {
+        return d.keys().hasOnly(settingsKeys())
+            && (!('smsNotificationsEnabled' in d) || d.smsNotificationsEnabled is map || d.smsNotificationsEnabled is bool)
+            && (!('smsNotifications' in d) || d.smsNotifications is map)
+            && (!('smsQuietHours' in d) || d.smsQuietHours is map)
+            && (!('photoAnalysisConsent' in d) || d.photoAnalysisConsent is map);
+      }
+      match /private/settings {
+        allow read: if isSignedIn() && isUser(uid);
+        allow create, update: if isSignedIn() && isUser(uid) && validSettings(request.resource.data);
+        allow delete: if false;
+      }
+
+      // Legal name (set once, never changed) and birthday (changeable until
+      // users/{uid}.identityLockedAt is set; a profile that doesn't exist yet
+      // is unlocked — onboarding writes both in one batch).
+      function identityUnlocked() {
+        return !exists(/databases/$(database)/documents/users/$(uid))
+            || get(/databases/$(database)/documents/users/$(uid)).data.get('identityLockedAt', null) == null;
+      }
+      function validIdentity(d) {
+        return d.keys().hasOnly(['legalName', 'legalNameSetAt', 'birthday'])
+            && (!('legalName' in d) || (d.legalName is string && d.legalName.size() <= 100))
+            && (!('birthday' in d) || (d.birthday is string && d.birthday.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')));
+      }
+      match /private/identity {
+        allow read: if isSignedIn() && isUser(uid);
+        allow create: if isSignedIn() && isUser(uid)
+                      && validIdentity(request.resource.data)
+                      && (!('birthday' in request.resource.data) || identityUnlocked());
+        allow update: if isSignedIn() && isUser(uid)
+                      && validIdentity(request.resource.data)
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['legalName', 'legalNameSetAt'])
+                          || !('legalName' in resource.data))
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['birthday'])
+                          || identityUnlocked());
+        allow delete: if false;
       }
 
       // Spark profile subcollection

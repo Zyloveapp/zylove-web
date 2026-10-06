@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '../../services/firebase'
 import { useAuthStore } from '../../store/authStore'
+import { marketOf, subscribeAccountView } from '../../services/subscription'
 import { MODE_ACCENT, useModeStore } from '../../store/modeStore'
 import { BANNER_DISMISSED_KEY as DISMISSED_KEY, BANNER_RESET_EVENT } from '../../services/playSession'
 import { FOUNDER_CAPACITY, cityConfigPath, cityStatsPath, getNearestCity, type ZyloveCity } from '../../config/cities'
@@ -62,14 +63,13 @@ export default function LaunchBanner() {
 
   useEffect(() => {
     if (!uid) return
-    return onSnapshot(
-      doc(db, 'users', uid),
-      (snap) => {
-        const d = snap.data()
-        const lat = d?.locationLat
-        const lng = d?.locationLng
+    return subscribeAccountView(
+      uid,
+      (d) => {
+        const lat = d.locationLat
+        const lng = d.locationLng
         if (typeof lat !== 'number' || typeof lng !== 'number') return setArea(null)
-        const city = getNearestCity(lat, lng)
+        const city = marketOf(d)
         const nearby = city ? null : getNearestCity(lat, lng, NEARBY_CITY_MILES)
         // Same answer as before: keep the state so the banner doesn't remount
         // on every unrelated write to the user doc.

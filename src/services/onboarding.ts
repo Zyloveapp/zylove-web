@@ -34,7 +34,7 @@ import {
 } from '../components/onboarding/types'
 import { loadOwnProfile } from './profile'
 import { changeDisplayName } from './displayNames'
-import { addLegalName, loadLegalName } from './privateIdentity'
+import { addIdentity, loadIdentity } from './privateIdentity'
 
 // ─── Legal acceptance ────────────────────────────────────────────────────────
 
@@ -52,9 +52,17 @@ export async function recordLegalAcceptance(uid: string): Promise<void> {
 
 // ─── Document shapes ─────────────────────────────────────────────────────────
 
-// Trust/safety fields. Firestore rules reject any client create or update that
-// includes them — only Cloud Functions (admin SDK) may set them.
-type ServerOnlyField = 'isSuspended' | 'reportCount' | 'verificationStatus' | 'subscriptionTier'
+// Server-only or private fields. Firestore rules reject any client create or
+// update of users/{uid} that includes them — Cloud Functions set them, or
+// they live in the user's private docs (services/privateIdentity.ts …).
+type ServerOnlyField =
+  | 'isSuspended'
+  | 'reportCount'
+  | 'verificationStatus'
+  | 'subscriptionTier'
+  | 'geohash'
+  | 'lastActive'
+  | 'birthday'
 
 interface GoDeeperFields {
   conflictStyle?: ConflictStyle
@@ -70,7 +78,6 @@ interface OnboardingMetaFields {
   onboardingComplete: true
   profileUpdatedAt: FieldValue
   mode: 'spark' | 'play'
-  aiPhotoScanningConsent: boolean
 }
 
 type RootProfileDoc = Omit<DatingProfile, ServerOnlyField> & GoDeeperFields & OnboardingMetaFields
@@ -201,7 +208,6 @@ export async function saveSparkOnboarding(
     uid,
     displayName: renaming ? priorName : newName,
     age,
-    ...(!identityLocked && birthday && { birthday: birthday.iso }),
     ...(!identityLocked && { genderIdentity }),
     attractedTo: d.attractedTo,
     relationshipStatus,
@@ -220,7 +226,6 @@ export async function saveSparkOnboarding(
     radiusMiles: d.radiusMiles,
     ageMin: d.ageMin,
     ageMax: d.ageMax,
-    lastActive: now,
   } satisfies Partial<RootProfileDoc>
 
   const optional: Partial<OptionalRootFields> = {
@@ -257,7 +262,6 @@ export async function saveSparkOnboarding(
     onboardingComplete: true,
     profileUpdatedAt: serverTimestamp(),
     mode: intent === 'play' ? 'play' : 'spark',
-    aiPhotoScanningConsent: true,
   }
 
   // First onboarding only; a refresh leaves the original answers alone.
@@ -294,7 +298,6 @@ export async function saveSparkOnboarding(
     if (!birthday) throw new Error('Onboarding incomplete: birthday')
     const profile: RootProfileDoc = {
       ...coreFields,
-      birthday: birthday.iso,
       genderIdentity,
       ...optional,
       ...matchable,
@@ -304,7 +307,6 @@ export async function saveSparkOnboarding(
       seekingBodyTypes: [],
       seekingTraits: [],
       dealbreakers: [],
-      geohash: '',
       locationLabel: '',
       phoneVerified: false,
       publicKey: keys.publicKey,
@@ -363,8 +365,9 @@ export async function saveSparkOnboarding(
     _lastUpdated: now,
   }
   batch.set(doc(db, `users/${uid}/seekingPreferences/prefs`), seeking)
-  // Owner-only and set once (users/{uid}/private/identity).
-  await addLegalName(batch, uid, d.legalName)
+  // Owner-only (users/{uid}/private/identity): legal name once, birthday
+  // until identity is locked.
+  await addIdentity(batch, uid, d.legalName, !identityLocked && birthday ? birthday.iso : null)
 
   await batch.commit()
 
@@ -429,13 +432,13 @@ export interface RefreshDraft {
 // Rebuilds an onboarding draft from the saved profile for "Reimagine my
 // profile". Terms count as accepted; photos are kept as their stored URLs.
 export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null> {
-  const [own, seekingSnap, legalName] = await Promise.all([
+  const [own, seekingSnap] = await Promise.all([
     loadOwnProfile(uid),
     getDoc(doc(db, `users/${uid}/seekingPreferences/prefs`)).catch(() => null),
-    loadLegalName(uid).catch(() => null),
   ])
   if (!own) return null
   const p = own.profile as Record<string, unknown>
+  const { legalName, birthday } = await loadIdentity(uid, p.birthday)
   const s = seekingSnap?.data() ?? {}
   const prompts = own.prompts.slice(0, PROMPT_COUNT)
   const rawGender: unknown = Array.isArray(p.genderIdentity) ? p.genderIdentity[0] : p.genderIdentity
@@ -448,7 +451,7 @@ export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null
     termsAccepted: true,
     legalName: legalName ?? '',
     displayName: str(p.displayName) ?? '',
-    birthdayRaw: isoToBirthdayRaw(p.birthday),
+    birthdayRaw: isoToBirthdayRaw(birthday),
     photos: arr(p.photoURLs).map((url) => ({ id: crypto.randomUUID(), file: null, previewUrl: url })),
     genderIdentity: str(rawGender),
     genderSelfDescribe: str(p.genderSelfDescribe) ?? '',

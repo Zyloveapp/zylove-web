@@ -1,6 +1,6 @@
-import { doc, onSnapshot, type Unsubscribe } from 'firebase/firestore'
+import { doc, getDoc, onSnapshot, type DocumentData, type Unsubscribe } from 'firebase/firestore'
 import { db } from './firebase'
-import { getNearestCity, type ZyloveCity } from '../config/cities'
+import { cityById, getNearestCity, type ZyloveCity } from '../config/cities'
 
 // Web tier logic. Women and other non-male identities, and founders, are
 // Elite for life. Everyone else is free while the network builds in their
@@ -29,9 +29,13 @@ export interface TierFields {
   isFounder?: unknown
   // Stripe state, written by the stripeWebhook function.
   subscriptionStatus?: unknown
-  // The saved location, which decides the user's market.
+  // The user's market (locked server-side at their first saved location);
+  // older accounts: the saved coordinates, which decide it.
+  marketCityId?: unknown
   locationLat?: unknown
   locationLng?: unknown
+  // There's a Stripe customer to manage (Settings → Membership).
+  hasBillingAccount?: unknown
 }
 
 // Stored as 'nonbinary'; 'non_binary' accepted too.
@@ -118,6 +122,8 @@ export const TRIAL_DAYS = 30
 // The launch city covering the user's saved location, or null (outside
 // every launch city, or no location yet).
 export function marketOf(user: TierFields): ZyloveCity | null {
+  const locked = cityById(user.marketCityId)
+  if (locked) return locked
   return typeof user.locationLat === 'number' && typeof user.locationLng === 'number'
     ? getNearestCity(user.locationLat, user.locationLng)
     : null
@@ -134,11 +140,83 @@ export function trialDaysLine(daysLeft: number): string {
   return `${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} left in your free trial.`
 }
 
-export function subscribeTierFields(uid: string, onChange: (fields: TierFields) => void, onError: () => void): Unsubscribe {
-  return onSnapshot(
+// ─── The user's own account view ─────────────────────────────────────────────
+
+// The plan lives server-side (userInternal), mirrored read-only to
+// users/{uid}/private/account along with the saved location's summary. The
+// public doc keeps identity and founder fields. Accounts from before the move
+// still have the old copies on the public doc; those count until migrated.
+const PLAN_KEYS = ['subscriptionTier', 'subscriptionStatus', 'trialStartedAt', 'trialEndsAt', 'trialExpired'] as const
+
+export const accountDoc = (uid: string) => doc(db, 'users', uid, 'private', 'account')
+
+export function accountView(root: DocumentData | undefined, account: DocumentData | undefined): DocumentData {
+  const view: DocumentData = { ...(root ?? {}) }
+  for (const k of PLAN_KEYS) if (account?.[k] !== undefined) view[k] = account[k]
+  view.hasBillingAccount =
+    typeof account?.hasBillingAccount === 'boolean'
+      ? account.hasBillingAccount
+      : typeof root?.stripeCustomerId === 'string' && root.stripeCustomerId !== ''
+  const loc = account?.location
+  if (loc && typeof loc === 'object') {
+    view.marketCityId = loc.marketCityId ?? null
+    if (typeof loc.lat === 'number' && typeof loc.lng === 'number') {
+      view.locationLat = loc.lat
+      view.locationLng = loc.lng
+    }
+    if (typeof loc.label === 'string' && loc.label) view.locationLabel = loc.label
+  }
+  return view
+}
+
+// One read of the account view (public doc + private/account).
+export async function loadAccountView(uid: string): Promise<DocumentData | undefined> {
+  const [root, account] = await Promise.all([getDoc(doc(db, 'users', uid)), getDoc(accountDoc(uid)).catch(() => null)])
+  return root.exists() ? accountView(root.data(), account?.data()) : undefined
+}
+
+// Live account view. An unreadable private/account counts as empty (the
+// public doc's older copies stand in); an unreadable public doc is an error.
+export function subscribeAccountView(uid: string, onChange: (view: DocumentData) => void, onError: () => void): Unsubscribe {
+  let root: DocumentData | undefined
+  let account: DocumentData | undefined
+  let rootSeen = false
+  let accountSeen = false
+  const emit = () => {
+    if (rootSeen && accountSeen) onChange(accountView(root, account))
+  }
+  const offRoot = onSnapshot(
     doc(db, 'users', uid),
     (snap) => {
-      const d = snap.data() ?? {}
+      root = snap.data()
+      rootSeen = true
+      emit()
+    },
+    onError,
+  )
+  const offAccount = onSnapshot(
+    accountDoc(uid),
+    (snap) => {
+      account = snap.data()
+      accountSeen = true
+      emit()
+    },
+    () => {
+      account = undefined
+      accountSeen = true
+      emit()
+    },
+  )
+  return () => {
+    offRoot()
+    offAccount()
+  }
+}
+
+export function subscribeTierFields(uid: string, onChange: (fields: TierFields) => void, onError: () => void): Unsubscribe {
+  return subscribeAccountView(
+    uid,
+    (d) =>
       onChange({
         subscriptionTier: d.subscriptionTier,
         trialStartedAt: d.trialStartedAt,
@@ -147,10 +225,11 @@ export function subscribeTierFields(uid: string, onChange: (fields: TierFields) 
         genderIdentity: d.genderIdentity,
         isFounder: d.isFounder,
         subscriptionStatus: d.subscriptionStatus,
+        marketCityId: d.marketCityId,
         locationLat: d.locationLat,
         locationLng: d.locationLng,
-      })
-    },
+        hasBillingAccount: d.hasBillingAccount,
+      }),
     onError,
   )
 }

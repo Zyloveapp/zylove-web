@@ -254,7 +254,7 @@ function PrivacySection({ uid }: { uid: string }) {
   )
 }
 
-// Only rendered for users/{uid}.isAdmin === true.
+// Only rendered for admins (the admin auth claim).
 function AdminSection({ uid }: { uid: string }) {
   const navigate = useNavigate()
   const [admin, setAdmin] = useState<{ uid: string; value: boolean } | null>(null)
@@ -458,7 +458,7 @@ export default function Settings() {
 
   async function acceptConsent() {
     if (!phone) return
-    await run(() => grantSmsConsent(uid, phone, mode))
+    await run(() => grantSmsConsent(uid, mode))
     setConsentOpen(false)
   }
 

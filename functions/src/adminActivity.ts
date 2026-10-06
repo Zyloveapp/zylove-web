@@ -5,7 +5,7 @@
 // users this wants stored counters instead of full reads.
 //
 // adminUserAction runs the table's row actions (make founder, suspend,
-// delete). Both check users/{uid}.isAdmin.
+// delete). Both require the admin auth claim.
 
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { logger } from 'firebase-functions'
@@ -15,6 +15,7 @@ import { getNearestCity } from './cities'
 import { claimFounderSpot, type FounderResult } from './founders'
 import { revokeFounderStatus } from './founderActivity'
 import { SMS_SECRETS } from './sms'
+import { ROOT_SCRUB, clearPrivateData, deletionView, isAdminAuth, loadLocation } from './userData'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const PAGE_SIZE = 25
@@ -24,11 +25,10 @@ const BOT_PREFIX = 'zbot-'
 // Same list as initUserDefaults / subscription.ts: complimentary Elite.
 const ELITE_IDENTITIES = new Set(['woman', 'trans_woman', 'nonbinary', 'non_binary', 'genderfluid', 'agender', 'self_describe'])
 
-async function requireAdmin(uid: string | undefined): Promise<string> {
-  if (!uid) throw new HttpsError('unauthenticated', 'Login required')
-  const snap = await getFirestore().doc(`users/${uid}`).get()
-  if (snap.data()?.isAdmin !== true) throw new HttpsError('permission-denied', 'Admins only.')
-  return uid
+function requireAdmin(auth: { uid: string; token?: Record<string, unknown> } | undefined): string {
+  if (!auth) throw new HttpsError('unauthenticated', 'Login required')
+  if (!isAdminAuth(auth)) throw new HttpsError('permission-denied', 'Admins only.')
+  return auth.uid
 }
 
 // createdAt / lastActive are a Timestamp (mobile) or epoch ms (web).
@@ -125,13 +125,15 @@ function cityOf(u: DocumentData): string {
 export const adminGetActivity = onCall(
   { timeoutSeconds: 120, memory: '512MiB', invoker: 'public' },
   async (request): Promise<ActivityResponse> => {
-    await requireAdmin(request.auth?.uid)
+    requireAdmin(request.auth)
     const req = (request.data ?? {}) as ActivityRequest
     const db = getFirestore()
     const now = Date.now()
 
-    const [users, sparkDocs, playDocs, messages, matches, signals] = await Promise.all([
+    const [users, internals, locations, sparkDocs, playDocs, messages, matches, signals] = await Promise.all([
       db.collection('users').get(),
+      db.collection('userInternal').get(),
+      db.collection('userLocations').get(),
       db.collectionGroup('sparkProfile').select().get(),
       db.collectionGroup('playProfile').select().get(),
       db.collectionGroup('messages').select('senderId', 'sentAt', 'messageType', 'nonce').get(),
@@ -180,9 +182,19 @@ export const adminGetActivity = onCall(
     const signupsByDay = new Map<string, number>()
     const geo = new Map<string, { users: number; founders: number; sparkPlus: number; lastSignupAt: number | null }>()
 
+    // Root doc + userInternal (plan, lastActive) + userLocations (coordinates),
+    // in the shape the helpers above read. Root copies still count for
+    // accounts not yet migrated.
+    const internalOf = new Map(internals.docs.map((d) => [d.id, d.data()]))
+    const locationOf = new Map(locations.docs.map((d) => [d.id, d.data()]))
     for (const doc of users.docs) {
       if (doc.id.startsWith(BOT_PREFIX)) continue
-      const u = doc.data()
+      const loc = locationOf.get(doc.id)
+      const u: DocumentData = {
+        ...doc.data(),
+        ...internalOf.get(doc.id),
+        ...(typeof loc?.lat === 'number' && { locationLat: loc.lat, locationLng: loc.lng }),
+      }
       const joinedAt = ms(u.createdAt)
       const lastActiveAt = ms(u.lastActive)
       const tier = tierOf(u, now)
@@ -302,7 +314,7 @@ const ACTIONS: readonly UserAction[] = ['make_founder', 'suspend', 'unsuspend', 
 export const adminUserAction = onCall(
   { timeoutSeconds: 120, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
   async (request): Promise<{ ok: true; founder?: FounderResult }> => {
-    const adminUid = await requireAdmin(request.auth?.uid)
+    const adminUid = requireAdmin(request.auth)
     const { uid, action } = (request.data ?? {}) as { uid?: unknown; action?: unknown }
     if (typeof uid !== 'string' || !uid || uid.includes('/')) throw new HttpsError('invalid-argument', 'uid required')
     if (!ACTIONS.includes(action as UserAction)) throw new HttpsError('invalid-argument', 'unknown action')
@@ -313,15 +325,16 @@ export const adminUserAction = onCall(
     const ref = db.doc(`users/${uid}`)
     const user = (await ref.get()).data()
     if (!user) throw new HttpsError('not-found', 'No such user.')
-    if (user.isAdmin === true && action !== 'make_founder') throw new HttpsError('failed-precondition', 'Not on an admin account.')
+    if ((await getAuth().getUser(uid).catch(() => null))?.customClaims?.admin === true && action !== 'make_founder') {
+      throw new HttpsError('failed-precondition', 'Not on an admin account.')
+    }
     const log = (details: Record<string, unknown> = {}) =>
       db.collection('adminActions').add({ action, uid, adminUid, at: FieldValue.serverTimestamp(), ...details })
 
     if (action === 'make_founder') {
-      if (typeof user.locationLat !== 'number' || typeof user.locationLng !== 'number') {
-        return { ok: true, founder: { eligible: false, reason: 'outside_coverage' } }
-      }
-      const founder = await claimFounderSpot(uid, user.locationLat, user.locationLng, 'adminMakeFounder')
+      const loc = await loadLocation(uid, user)
+      if (!loc) return { ok: true, founder: { eligible: false, reason: 'outside_coverage' } }
+      const founder = await claimFounderSpot(uid, loc.lat, loc.lng, 'adminMakeFounder')
       await log({ result: founder.eligible ? 'assigned' : founder.reason })
       return { ok: true, founder }
     }
@@ -364,6 +377,7 @@ export async function softDeleteAccount(
     .then((a) => a.phoneNumber ?? null)
     .catch(() => null)
   const now = Timestamp.now()
+  const priv = await deletionView(uid, user)
   if (phone) {
     const [asA, asB] = await Promise.all([
       db.collection('pairs').where('userA', '==', uid).get(),
@@ -373,7 +387,7 @@ export async function softDeleteAccount(
       phoneNumber: phone,
       previousUid: uid,
       deletedAt: now,
-      birthday: user.birthday ?? null,
+      birthday: priv.birthday,
       genderIdentity: user.genderIdentity ?? null,
       matchableAs: user.matchableAs ?? [],
       identityLockedAt: user.identityLockedAt ?? null,
@@ -384,8 +398,8 @@ export async function softDeleteAccount(
       bio: user.bio ?? '',
       mode: user.mode ?? 'spark',
       isFounder: false,
-      subscriptionTier: user.subscriptionTier ?? 'free',
-      reportCount: user.reportCount ?? 0,
+      subscriptionTier: priv.subscriptionTier,
+      reportCount: priv.reportCount,
       banned,
       previousPairIds: [...asA.docs, ...asB.docs].map((d) => d.id),
       deletedByAdmin: adminUid,
@@ -401,9 +415,10 @@ export async function softDeleteAccount(
     photoURLs: [],
     visible: false,
     isVisible: false,
-    geohash: '',
     locationLabel: '',
+    ...ROOT_SCRUB,
   })
+  await clearPrivateData(uid)
   await getAuth()
     .deleteUser(uid)
     .catch((err: { code?: string }) => {

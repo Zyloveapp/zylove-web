@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { doc, onSnapshot } from 'firebase/firestore'
-import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
-import { coordsOf, lastLocationDenied, requestLocation, saveUserLocation } from '../services/location'
+import { LocationLimitError, lastLocationDenied, requestLocation, saveUserLocation } from '../services/location'
+import { subscribeAccountView } from '../services/subscription'
+import { isAdmin as checkAdmin } from '../services/adminPhotos'
 
 type Permission = 'checking' | 'granted' | 'prompt' | 'denied'
 // What's shown: the feed, a spinner, or the ask.
@@ -51,8 +51,8 @@ function isPrivateBrowser(): boolean {
 }
 
 // Explore needs a location to build the feed. Children render only when
-// BOTH the browser allows geolocation AND users/{uid} has coordinates saved
-// (locationLat/locationLng); otherwise a full-page ask in
+// BOTH the browser allows geolocation AND a location is saved (the summary in
+// private/account; older accounts: coordinates on users/{uid}); otherwise a full-page ask in
 // their place (only Explore uses this, so nav, chat and settings stay
 // reachable). Both are watched live: revoking the permission or losing the
 // saved location brings the gate back. Permission already granted but
@@ -60,13 +60,14 @@ function isPrivateBrowser(): boolean {
 export default function LocationGate({ children }: { children: ReactNode }) {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const [permission, setPermission] = useState<Permission>(() => (grantedThisSession() ? 'granted' : 'checking'))
-  // Whether users/{uid} has coordinates; null until the doc has loaded.
+  // Whether a location is saved; null until the docs have loaded.
   const [saved, setSaved] = useState<{ uid: string; value: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
   // "Try again" from the blocked view didn't get a location either.
   const [stillBlocked, setStillBlocked] = useState(false)
-  const [saveError, setSaveError] = useState(false)
-  // Admins (users/{uid}.isAdmin) get a small link to preview the gate.
+  // Why the last save failed: 'failed', or the server's limit message.
+  const [saveError, setSaveError] = useState<string | false>(false)
+  // Admins (the admin auth claim) get a small link to preview the gate.
   const [isAdmin, setIsAdmin] = useState(false)
   const [preview, setPreview] = useState<'prompt' | 'denied' | 'private' | null>(null)
   const [privateBrowser] = useState(isPrivateBrowser)
@@ -76,13 +77,10 @@ export default function LocationGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!uid) return
-    return onSnapshot(
-      doc(db, 'users', uid),
-      (snap) => {
-        const d = snap.data()
-        setIsAdmin(d?.isAdmin === true)
-        setSaved({ uid, value: coordsOf(d) !== null })
-      },
+    void checkAdmin(uid).then(setIsAdmin)
+    return subscribeAccountView(
+      uid,
+      (d) => setSaved({ uid, value: typeof d.locationLat === 'number' && typeof d.locationLng === 'number' }),
       // Can't read the doc: don't lock Explore over it.
       () => setSaved({ uid, value: true }),
     )
@@ -118,8 +116,8 @@ export default function LocationGate({ children }: { children: ReactNode }) {
 
   const hasSaved = saved?.uid === uid ? saved.value : null
 
-  // Gets a position and saves it. The gate opens when the saved
-  // coordinates show up on the user doc, not before.
+  // Gets a position and saves it. The gate opens when the saved location
+  // shows up in private/account, not before.
   async function locate(): Promise<void> {
     const retry = permission === 'denied'
     setBusy(true)
@@ -129,7 +127,7 @@ export default function LocationGate({ children }: { children: ReactNode }) {
     if (!location) {
       // No position but not refused (timed out, no fix — common on Macs
       // locating over Wi-Fi): retry, not "blocked".
-      if (permission === 'granted' || !lastLocationDenied()) setSaveError(true)
+      if (permission === 'granted' || !lastLocationDenied()) setSaveError('failed')
       else {
         setPermission('denied')
         setStillBlocked(retry)
@@ -140,10 +138,10 @@ export default function LocationGate({ children }: { children: ReactNode }) {
     markGranted()
     setPermission('granted')
     try {
-      if (uid) await saveUserLocation(uid, location)
+      if (uid) await saveUserLocation(location)
     } catch (err) {
       console.warn('[location] save failed', err)
-      setSaveError(true)
+      setSaveError(err instanceof LocationLimitError ? err.message : 'failed')
     }
     setBusy(false)
   }
@@ -249,7 +247,9 @@ export default function LocationGate({ children }: { children: ReactNode }) {
       </p>
 
       {saveError && !denied && (
-        <p className="mt-4 max-w-xs text-sm text-red-400">Couldn't get your location. Check your connection and try again.</p>
+        <p className="mt-4 max-w-xs text-sm text-red-400">
+          {saveError === 'failed' ? "Couldn't get your location. Check your connection and try again." : saveError}
+        </p>
       )}
 
       {!denied && (

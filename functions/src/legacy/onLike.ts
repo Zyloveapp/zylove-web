@@ -7,6 +7,7 @@ import { calculateSparkScore, calculatePlayScore } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { getToken, sendPush } from "./notifications";
 import { LEGACY_RUNTIME } from "./legacyOptions";
+import { internalRef } from "../userData";
 
 export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
@@ -94,7 +95,7 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   // Skip stat write for bot profiles — avoids creating stub docs
   const isBotTarget = likedId.startsWith("seed-");
   if (!isBotTarget) {
-    await likedRef.set(
+    await internalRef(likedId).set(
       { likesReceivedCount: admin.firestore.FieldValue.increment(1) },
       { merge: true },
     );

@@ -647,7 +647,7 @@ export default function Onboarding() {
     const phone = user?.phoneNumber
     if (!invite || !phone) return showInvite()
     setInviteBusy(true)
-    await grantSmsConsent(uid, phone, invite.mode).catch(() => {})
+    await grantSmsConsent(uid, invite.mode).catch(() => {})
     setInviteBusy(false)
     showInvite()
   }

@@ -13,6 +13,7 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type WriteBatch } from 'firebase-admin/firestore'
+import { isAdminAuth } from './userData'
 import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
 
 const MAX_BODY = 1000
@@ -54,10 +55,10 @@ function isActiveFounder(id: string, user: DocumentData): boolean {
   return !id.startsWith(BOT_PREFIX) && user.isFounder === true && !FORMER_STATUSES.has(String(user.founderStatus))
 }
 
-async function requireAdmin(uid: string | undefined): Promise<string> {
-  if (!uid) throw new HttpsError('unauthenticated', 'Login required')
-  if ((await db().doc(`users/${uid}`).get()).data()?.isAdmin !== true) throw new HttpsError('permission-denied', 'Admins only')
-  return uid
+function requireAdmin(auth: { uid: string; token?: Record<string, unknown> } | undefined): string {
+  if (!auth) throw new HttpsError('unauthenticated', 'Login required')
+  if (!isAdminAuth(auth)) throw new HttpsError('permission-denied', 'Admins only')
+  return auth.uid
 }
 
 async function activeFounders(): Promise<{ id: string; data: DocumentData }[]> {
@@ -125,7 +126,7 @@ export const sendFounderMessage = onCall(
     const body = parseBody(request.data)
     const user = (await db().doc(`users/${uid}`).get()).data()
     // The admin is the recipient: their own founder badge doesn't give them a thread.
-    if (user?.isAdmin === true) throw new HttpsError('failed-precondition', "You can't send a message to yourself.")
+    if (isAdminAuth(request.auth)) throw new HttpsError('failed-precondition', "You can't send a message to yourself.")
     if (!user || !isActiveFounder(uid, user)) throw new HttpsError('permission-denied', 'Founders only')
 
     const name = displayName(user)
@@ -188,7 +189,7 @@ export const sendFounderMessage = onCall(
 export const replyToFounder = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
   async (request): Promise<{ success: true }> => {
-    const adminUid = await requireAdmin(request.auth?.uid)
+    const adminUid = requireAdmin(request.auth)
     const data = (request.data ?? {}) as Record<string, unknown>
     const founderUid = parseUid(data.founderUid)
     const body = parseBody(data)
@@ -210,7 +211,7 @@ export const replyToFounder = onCall(
 export const broadcastToFounders = onCall(
   { timeoutSeconds: 300, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
   async (request): Promise<{ sent: number; failed: number; texted: number; total: number }> => {
-    const adminUid = await requireAdmin(request.auth?.uid)
+    const adminUid = requireAdmin(request.auth)
     const body = parseBody(request.data)
     const founders = (await activeFounders()).filter((f) => f.id !== adminUid)
 
@@ -279,7 +280,7 @@ export interface FounderThreadSummary {
 export const getFounderThreads = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ threads: FounderThreadSummary[]; founderCount: number }> => {
-    const adminUid = await requireAdmin(request.auth?.uid)
+    const adminUid = requireAdmin(request.auth)
     const [snap, founders] = await Promise.all([
       db().collection('founderMessages').orderBy('lastMessageAt', 'desc').get(),
       activeFounders(),
@@ -320,7 +321,7 @@ export const getFounderThread = onCall(
     const caller = request.auth.uid
     const asked = (request.data as Record<string, unknown> | null)?.founderUid
     const founderUid = asked === undefined || asked === null ? caller : parseUid(asked)
-    if (founderUid !== caller) await requireAdmin(caller)
+    if (founderUid !== caller) requireAdmin(request.auth)
 
     const snap = await db().collection(`founderMessages/${founderUid}/thread`).orderBy('createdAt', 'asc').get()
     if (founderUid !== caller) {

@@ -5,10 +5,11 @@ import { getStorage } from 'firebase-admin/storage'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { SMS_SECRETS, sendSMS, smsEnabledFor } from './sms'
 import { storagePath } from './storagePath'
+import { accountRef, internalRef, isAdminAuth, loadAccount, loadSettings, userRef } from './userData'
 
-// Admin photo review (/admin/photos). onPhotoUpload (mobile codebase) parks
-// flagged photos in pendingPhotoURLs — on users/{uid} for Spark, on
-// users/{uid}/playProfile/data for Play — and sets users/{uid}.hasPendingPhotos.
+// Admin photo review (/admin/photos). onPhotoUpload parks flagged photos in
+// pendingPhotoURLs — on users/{uid}/private/account for Spark (owner-only), on
+// users/{uid}/playProfile/data for Play — and sets userInternal/{uid}.hasPendingPhotos.
 // Other users' docs and Storage files are out of a client's reach, so the page
 // lists and decides through these admin-gated callables.
 
@@ -34,11 +35,10 @@ const MAX_USERS = 200
 const APPROVED_SMS = '✦ Your photo has been approved on Zylove.'
 const REJECTED_SMS = 'Your photo was not approved. Please upload a different photo.'
 
-async function requireAdmin(uid: string | undefined): Promise<string> {
-  if (!uid) throw new HttpsError('unauthenticated', 'Sign in first.')
-  const snap = await getFirestore().doc(`users/${uid}`).get()
-  if (snap.data()?.isAdmin !== true) throw new HttpsError('permission-denied', 'Admins only.')
-  return uid
+function requireAdmin(auth: { uid: string; token?: Record<string, unknown> } | undefined): string {
+  if (!auth) throw new HttpsError('unauthenticated', 'Sign in first.')
+  if (!isAdminAuth(auth)) throw new HttpsError('permission-denied', 'Admins only.')
+  return auth.uid
 }
 
 function pendingOf(data: DocumentData | undefined): PendingEntry[] {
@@ -60,12 +60,12 @@ function millis(v: unknown): number | null {
 // turned SMS on. sendSMS skips quietly while Twilio isn't configured.
 async function textUser(uid: string, user: DocumentData | undefined, mode: Mode, body: string): Promise<void> {
   // The photo's mode decides which master switch applies.
-  if (!smsEnabledFor(user?.smsNotificationsEnabled, mode)) return
+  if (!smsEnabledFor((await loadSettings(uid, user)).smsNotificationsEnabled, mode)) return
   const authPhone = await getAuth()
     .getUser(uid)
     .then((u) => u.phoneNumber ?? null)
     .catch(() => null)
-  const consentPhone: unknown = user?.smsConsent?.phone
+  const consentPhone: unknown = (await loadAccount(uid, user)).smsConsent?.phone
   const phone = authPhone ?? (typeof consentPhone === 'string' ? consentPhone : null)
   if (phone) await sendSMS(phone, body)
 }
@@ -73,18 +73,23 @@ async function textUser(uid: string, user: DocumentData | undefined, mode: Mode,
 export const listPendingPhotos = onCall(
   { timeoutSeconds: 60, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ photos: PendingPhoto[] }> => {
-    await requireAdmin(request.auth?.uid)
+    requireAdmin(request.auth)
     const db = getFirestore()
-    const users = await db.collection('users').where('hasPendingPhotos', '==', true).limit(MAX_USERS).get()
+    // Flagged in userInternal; the root-doc flag covers accounts not yet migrated.
+    const [flagged, legacy] = await Promise.all([
+      db.collection('userInternal').where('hasPendingPhotos', '==', true).limit(MAX_USERS).get(),
+      db.collection('users').where('hasPendingPhotos', '==', true).limit(MAX_USERS).get(),
+    ])
+    const uids = [...new Set([...flagged.docs, ...legacy.docs].map((d) => d.id))]
 
     const perUser = await Promise.all(
-      users.docs.map(async (userDoc) => {
-        const data = userDoc.data()
-        const play = await userDoc.ref.collection('playProfile').doc('data').get()
+      uids.map(async (uid) => {
+        const data = (await userRef(uid).get()).data() ?? {}
+        const [account, play] = await Promise.all([loadAccount(uid, data), userRef(uid).collection('playProfile').doc('data').get()])
         const displayName = typeof data.displayName === 'string' ? data.displayName : ''
-        return [...pendingOf(data), ...pendingOf(play.data())].map(
+        return [...pendingOf(account), ...pendingOf(play.data())].map(
           (entry): PendingPhoto => ({
-            uid: userDoc.id,
+            uid,
             displayName,
             mode: modeOf(entry),
             url: entry.url,
@@ -108,7 +113,7 @@ export const listPendingPhotos = onCall(
 export const reviewPendingPhoto = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: SMS_SECRETS, invoker: 'public' },
   async (request): Promise<{ status: 'approved' | 'rejected' }> => {
-    const adminUid = await requireAdmin(request.auth?.uid)
+    const adminUid = requireAdmin(request.auth)
     const { targetUid, photoUrl, action } = (request.data ?? {}) as Record<string, unknown>
     if (typeof targetUid !== 'string' || !targetUid || typeof photoUrl !== 'string' || !photoUrl) {
       throw new HttpsError('invalid-argument', 'targetUid and photoUrl are required.')
@@ -116,12 +121,15 @@ export const reviewPendingPhoto = onCall(
     if (action !== 'approve' && action !== 'reject') throw new HttpsError('invalid-argument', 'Unknown action.')
 
     const db = getFirestore()
-    const userRef = db.doc(`users/${targetUid}`)
-    const playRef = userRef.collection('playProfile').doc('data')
+    const rootRef = userRef(targetUid)
+    const acctRef = accountRef(targetUid)
+    const playRef = rootRef.collection('playProfile').doc('data')
 
     const { mode, entry, user } = await db.runTransaction(async (tx) => {
-      const [userSnap, playSnap] = await Promise.all([tx.get(userRef), tx.get(playRef)])
-      const sparkPending = pendingOf(userSnap.data())
+      const [userSnap, accountSnap, playSnap] = await Promise.all([tx.get(rootRef), tx.get(acctRef), tx.get(playRef)])
+      // Spark pending lives in private/account; an unmigrated account still has it on the root.
+      const sparkOnRoot = accountSnap.data()?.pendingPhotoURLs === undefined && Array.isArray(userSnap.data()?.pendingPhotoURLs)
+      const sparkPending = pendingOf(sparkOnRoot ? userSnap.data() : accountSnap.data())
       const playPending = pendingOf(playSnap.data())
       const inSpark = sparkPending.find((p) => p.url === photoUrl)
       const found = inSpark ?? playPending.find((p) => p.url === photoUrl)
@@ -131,22 +139,19 @@ export const reviewPendingPhoto = onCall(
       const remaining = (where === 'spark' ? sparkPending : playPending).filter((p) => p.url !== photoUrl)
       const otherQueue = where === 'spark' ? playPending : sparkPending
 
-      const photoDoc = {
-        pendingPhotoURLs: remaining,
-        ...(action === 'approve' && { photoURLs: FieldValue.arrayUnion(photoUrl) }),
-      }
-      const rootFields = {
-        ...(remaining.length === 0 && otherQueue.length === 0 && { hasPendingPhotos: false }),
-        ...(action === 'reject' && {
-          photoRejectedAt: Timestamp.now(),
-          photoRejectionReason: found.reason ?? null,
-        }),
-      }
+      const approved = action === 'approve' ? { photoURLs: FieldValue.arrayUnion(photoUrl) } : {}
+      const rejection =
+        action === 'reject' ? { photoRejectedAt: Timestamp.now(), photoRejectionReason: found.reason ?? null } : {}
       if (where === 'spark') {
-        tx.update(userRef, { ...photoDoc, ...rootFields })
+        tx.set(acctRef, { pendingPhotoURLs: remaining, ...rejection }, { merge: true })
+        tx.update(rootRef, { ...approved, ...(sparkOnRoot && { pendingPhotoURLs: FieldValue.delete() }) })
       } else {
-        tx.update(playRef, photoDoc)
-        if (Object.keys(rootFields).length > 0) tx.update(userRef, rootFields)
+        tx.update(playRef, { pendingPhotoURLs: remaining, ...approved })
+        if (action === 'reject') tx.set(acctRef, rejection, { merge: true })
+      }
+      if (remaining.length === 0 && otherQueue.length === 0) {
+        tx.set(internalRef(targetUid), { hasPendingPhotos: false }, { merge: true })
+        if (userSnap.data()?.hasPendingPhotos !== undefined) tx.update(rootRef, { hasPendingPhotos: FieldValue.delete() })
       }
       return { mode: where, entry: found, user: userSnap.data() }
     })

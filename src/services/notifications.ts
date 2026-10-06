@@ -1,9 +1,11 @@
-import { doc, onSnapshot, serverTimestamp, updateDoc, type Unsubscribe } from 'firebase/firestore'
-import { db } from './firebase'
+import { type Unsubscribe } from 'firebase/firestore'
+import { httpsCallable } from 'firebase/functions'
+import { functions } from './firebase'
+import { saveSettings, subscribeSettingsView } from './privateSettings'
 
 export type SmsMode = 'spark' | 'play'
 
-// users/{uid}.smsNotifications = {
+// private/settings smsNotifications = {
 //   spark: { newSpark, newMessage, newMatch },
 //   play:  { newFlame, newMessage, newMatch },
 //   quietNudge,   // both modes
@@ -78,7 +80,7 @@ export function sectionPreferences(p: SmsPreferences, mode: SmsMode): Record<str
   return mode === 'spark' ? p.spark : p.play
 }
 
-// users/{uid}.smsQuietHours. Times are 'HH:MM' (24h) in `timezone`, the
+// private/settings smsQuietHours. Times are 'HH:MM' (24h) in `timezone`, the
 // browser's zone when last saved; the server skips texts inside the window.
 export interface QuietHours {
   enabled: boolean
@@ -113,7 +115,7 @@ function parseQuietHours(v: unknown): QuietHours {
   }
 }
 
-// One master switch per mode: users/{uid}.smsNotificationsEnabled =
+// One master switch per mode: private/settings smsNotificationsEnabled =
 // { spark, play }. Older accounts hold one boolean, which counts for both
 // modes until the next change rewrites it as the object.
 export type SmsEnabled = Record<SmsMode, boolean>
@@ -134,10 +136,9 @@ export interface SmsSettings {
 }
 
 export function subscribeSmsSettings(uid: string, onChange: (s: SmsSettings) => void, onError: () => void): Unsubscribe {
-  return onSnapshot(
-    doc(db, 'users', uid),
-    (snap) => {
-      const d = snap.data() ?? {}
+  return subscribeSettingsView(
+    uid,
+    (d) => {
       const preferences = parsePreferences(d.smsNotifications)
       onChange({
         enabled: parseEnabled(d.smsNotificationsEnabled),
@@ -153,10 +154,11 @@ export function subscribeSmsSettings(uid: string, onChange: (s: SmsSettings) => 
 // First opt-in, from either mode's switch: records consent, turns that mode
 // on (the other stays off), and saves the default preferences and quiet
 // hours (on, 9pm–8am local), so texts respect the night from the start.
-export async function grantSmsConsent(uid: string, phone: string, mode: SmsMode): Promise<void> {
-  await updateDoc(doc(db, 'users', uid), {
+// Consent goes through the server, which records the verified sign-in phone.
+export async function grantSmsConsent(uid: string, mode: SmsMode): Promise<void> {
+  await httpsCallable(functions, 'grantSmsConsent')({})
+  await saveSettings(uid, {
     smsNotificationsEnabled: { spark: mode === 'spark', play: mode === 'play' },
-    smsConsent: { grantedAt: serverTimestamp(), phone },
     smsNotifications: DEFAULT_PREFERENCES,
     smsQuietHours: defaultQuietHours(),
   })
@@ -164,7 +166,7 @@ export async function grantSmsConsent(uid: string, phone: string, mode: SmsMode)
 
 // Saves the whole quiet-hours object, re-stamping the browser's timezone.
 export async function setQuietHours(uid: string, q: Omit<QuietHours, 'timezone'>): Promise<void> {
-  await updateDoc(doc(db, 'users', uid), { smsQuietHours: { ...q, timezone: browserTimezone() } })
+  await saveSettings(uid, { smsQuietHours: { ...q, timezone: browserTimezone() } })
 }
 
 // One mode's master switch. Writes the whole object, which also migrates an
@@ -172,14 +174,14 @@ export async function setQuietHours(uid: string, q: Omit<QuietHours, 'timezone'>
 // Turning off keeps the preferences for next time.
 export async function setSmsEnabled(uid: string, mode: SmsMode, enabled: boolean, current: SmsEnabled | null): Promise<void> {
   const next: SmsEnabled = { spark: current?.spark ?? false, play: current?.play ?? false, [mode]: enabled }
-  await updateDoc(doc(db, 'users', uid), { smsNotificationsEnabled: next })
+  await saveSettings(uid, { smsNotificationsEnabled: next })
 }
 
 // One toggle inside a mode section.
 export async function setSmsPreference(uid: string, mode: SmsMode, key: string, value: boolean): Promise<void> {
-  await updateDoc(doc(db, 'users', uid), { [`smsNotifications.${mode}.${key}`]: value })
+  await saveSettings(uid, { smsNotifications: { [mode]: { [key]: value } } })
 }
 
 export async function setQuietNudge(uid: string, value: boolean): Promise<void> {
-  await updateDoc(doc(db, 'users', uid), { 'smsNotifications.quietNudge': value })
+  await saveSettings(uid, { smsNotifications: { quietNudge: value } })
 }

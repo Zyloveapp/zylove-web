@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { doc, onSnapshot, type DocumentData } from 'firebase/firestore'
-import { db } from '../services/firebase'
+import { type DocumentData } from 'firebase/firestore'
 import {
   getDaysLeftInTrial,
   getSubscriptionStatus,
@@ -10,6 +9,7 @@ import {
   hasTrialEnded,
   marketOf,
   prelaunchLine,
+  subscribeAccountView,
   trialDaysLine,
 } from '../services/subscription'
 import { useModeStore, type Mode } from '../store/modeStore'
@@ -43,8 +43,7 @@ function membershipRow(user: DocumentData, mode: Mode): Row {
   const top = SUBLABEL_TOP[mode]
   if (user.isFounder === true) {
     const badge = typeof user.founderBadge === 'string' && user.founderBadge ? user.founderBadge : 'Founder'
-    const hasCustomer = typeof user.stripeCustomerId === 'string' && user.stripeCustomerId !== ''
-    return { label: `✦ ${badge} · Elite`, sublabel: top, border: 'cobalt', action: hasCustomer ? 'portal' : null }
+    return { label: `✦ ${badge} · Elite`, sublabel: top, border: 'cobalt', action: user.hasBillingAccount === true ? 'portal' : null }
   }
   if (hasEliteIdentity(user)) {
     return { label: '✦ Elite · Complimentary', sublabel: "You've got the best of Zylove. Nothing more to unlock.", border: 'cobalt', action: null }
@@ -104,9 +103,9 @@ export default function MembershipSection({ uid }: { uid: string }) {
 
   useEffect(() => {
     if (!uid) return
-    return onSnapshot(
-      doc(db, 'users', uid),
-      (snap) => setUser({ uid, data: snap.data() ?? {} }),
+    return subscribeAccountView(
+      uid,
+      (data) => setUser({ uid, data }),
       () => setUser(null),
     )
   }, [uid])

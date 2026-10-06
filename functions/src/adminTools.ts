@@ -1,7 +1,7 @@
 // Admin dashboards: the account-deletion queue and per-city founder stats.
 // Both read collections clients can't (deletedAccounts, deletionRequests are
 // rules-denied; city stats scan every user), so they're callables that check
-// users/{uid}.isAdmin.
+// the admin auth claim.
 //
 // Deletion lifecycle (mobile codebase: trustSafety.ts, accountLifecycle.ts,
 // onNightlyPurge.ts):
@@ -19,6 +19,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { getStorage } from 'firebase-admin/storage'
+import { isAdminAuth } from './userData'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, getNearestCity } from './cities'
 import { revokeFounderStatus } from './founderActivity'
@@ -28,11 +29,10 @@ const PURGE_AFTER_MS = 365 * DAY_MS // onNightlyPurge's TWELVE_MONTHS_MS
 const RECORD_KEPT_MS = 18 * 30 * DAY_MS // its 18-month recovery-doc sweep
 const BOT_PREFIX = 'zbot-'
 
-async function requireAdmin(uid: string | undefined): Promise<string> {
-  if (!uid) throw new HttpsError('unauthenticated', 'Login required')
-  const snap = await getFirestore().doc(`users/${uid}`).get()
-  if (snap.data()?.isAdmin !== true) throw new HttpsError('permission-denied', 'Admins only.')
-  return uid
+function requireAdmin(auth: { uid: string; token?: Record<string, unknown> } | undefined): string {
+  if (!auth) throw new HttpsError('unauthenticated', 'Login required')
+  if (!isAdminAuth(auth)) throw new HttpsError('permission-denied', 'Admins only.')
+  return auth.uid
 }
 
 function ms(v: unknown): number | null {
@@ -62,7 +62,7 @@ export interface PendingDeletion {
 export const adminListDeletions = onCall(
   { timeoutSeconds: 60, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ deletions: PendingDeletion[] }> => {
-    await requireAdmin(request.auth?.uid)
+    requireAdmin(request.auth)
     const db = getFirestore()
     const [records, deletedUsers, requests] = await Promise.all([
       db.collection('deletedAccounts').get(),
@@ -142,7 +142,7 @@ export const adminListDeletions = onCall(
 export const adminPurgeAccount = onCall(
   { timeoutSeconds: 300, memory: '512MiB', invoker: 'public' },
   async (request): Promise<{ purged: true; keptBannedRecord: boolean }> => {
-    const adminUid = await requireAdmin(request.auth?.uid)
+    const adminUid = requireAdmin(request.auth)
     const uid: unknown = request.data?.uid
     if (typeof uid !== 'string' || !uid || uid.includes('/')) throw new HttpsError('invalid-argument', 'uid required')
     if (uid === adminUid) throw new HttpsError('failed-precondition', "You can't purge your own account.")
@@ -175,7 +175,7 @@ export const adminPurgeAccount = onCall(
     await deleteAll([...pairsA.docs, ...pairsB.docs, ...swiper.docs, ...swiped.docs])
     // With their messages (onNightlyPurge leaves those behind).
     for (const m of matches.docs) await db.recursiveDelete(m.ref)
-    for (const path of [`popupTriggers/${uid}`, `deletionRequests/${uid}`, `founderRecords/${uid}`, `keyBackups/${uid}`]) {
+    for (const path of [`popupTriggers/${uid}`, `deletionRequests/${uid}`, `founderRecords/${uid}`, `keyBackups/${uid}`, `userInternal/${uid}`, `userLocations/${uid}`]) {
       await db.doc(path).delete().catch(() => {})
     }
     await db.recursiveDelete(db.doc(`founderMessages/${uid}`))
@@ -239,10 +239,10 @@ export interface CityStats {
 export const adminCityStats = onCall(
   { timeoutSeconds: 120, memory: '512MiB', invoker: 'public' },
   async (request): Promise<CityStats> => {
-    await requireAdmin(request.auth?.uid)
+    requireAdmin(request.auth)
     const db = getFirestore()
     const now = Date.now()
-    const [configs, users] = await Promise.all([
+    const [configs, users, internals, locations] = await Promise.all([
       db.getAll(...ZYLOVE_CITIES.map((c) => db.doc(`config/city_${c.id}`))),
       db
         .collection('users')
@@ -251,7 +251,21 @@ export const adminCityStats = onCall(
           'onboardingComplete', 'isFounder', 'founderCityId', 'founderBadgeAssignedAt',
         )
         .get(),
+      db.collection('userInternal').select('subscriptionTier', 'subscriptionStatus').get(),
+      db.collection('userLocations').select('lat', 'lng').get(),
     ])
+    // Plan from userInternal, coordinates from userLocations (root copies
+    // still count for accounts not yet migrated).
+    const internalOf = new Map(internals.docs.map((d) => [d.id, d.data()]))
+    const locationOf = new Map(locations.docs.map((d) => [d.id, d.data()]))
+    const view = (doc: FirebaseFirestore.QueryDocumentSnapshot) => {
+      const loc = locationOf.get(doc.id)
+      return {
+        ...doc.data(),
+        ...internalOf.get(doc.id),
+        ...(typeof loc?.lat === 'number' && { locationLat: loc.lat, locationLng: loc.lng }),
+      } as FirebaseFirestore.DocumentData
+    }
 
     const rows = new Map<string, CityRow>()
     ZYLOVE_CITIES.forEach((c, i) => {
@@ -277,7 +291,7 @@ export const adminCityStats = onCall(
     let outsideCities = 0
     for (const doc of users.docs) {
       if (doc.id.startsWith(BOT_PREFIX)) continue
-      const u = doc.data()
+      const u = view(doc)
       if (u.isDeleted === true || u.onboardingComplete !== true) continue
       activeUsers++
       const tier = u.subscriptionTier

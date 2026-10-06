@@ -3,7 +3,8 @@ import { doc, onSnapshot, updateDoc } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import AgeRangeSlider from './AgeRangeSlider'
-import { cityConfigPath, getNearestCity } from '../config/cities'
+import { cityConfigPath } from '../config/cities'
+import { marketOf, subscribeAccountView } from '../services/subscription'
 
 // Same choices as onboarding, plus no limit (stored as null).
 const OPTIONS: { value: string; label: string }[] = [
@@ -52,13 +53,11 @@ export default function DiscoverySettings() {
 
   useEffect(() => {
     if (!uid) return
-    return onSnapshot(
-      doc(db, 'users', uid),
-      (snap) => {
-        const d = snap.data()
-        const city =
-          typeof d?.locationLat === 'number' && typeof d?.locationLng === 'number' ? getNearestCity(d.locationLat, d.locationLng) : null
-        setLoaded({ uid, value: toOption(d?.radiusMiles), ages: toAges(d), cityId: city?.id ?? null })
+    return subscribeAccountView(
+      uid,
+      (d) => {
+        const city = marketOf(d)
+        setLoaded({ uid, value: toOption(d.radiusMiles), ages: toAges(d), cityId: city?.id ?? null })
       },
       () => setError(true),
     )

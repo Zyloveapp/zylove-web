@@ -16,6 +16,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https'
 import * as admin from 'firebase-admin'
 import { LEGACY_RUNTIME } from './legacyOptions'
+import { internalRef, loadInternal } from '../userData'
 
 const db = admin.firestore()
 
@@ -49,15 +50,15 @@ export const claimWomenElite = onCall(LEGACY_RUNTIME, async (request) => {
     return { success: false, error: 'not_eligible' }
   }
 
-  if (data.subscriptionTier === 'elite') {
+  if ((await loadInternal(uid, data)).subscriptionTier === 'elite') {
     return { success: true, alreadyElite: true }
   }
 
-  await userRef.update({
+  await internalRef(uid).set({
     subscriptionTier: 'elite',
     subscriptionSource: 'women_auto',
     subscriptionGrantedAt: Date.now(),
-  })
+  }, { merge: true })
 
   return { success: true, alreadyElite: false }
 })

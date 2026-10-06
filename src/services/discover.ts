@@ -17,8 +17,9 @@ import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { friendlyError } from './errors'
 import { db, functions } from './firebase'
-import { getDistanceMiles } from './location'
-import { cityConfigPath, getNearestCity } from '../config/cities'
+import { getDistances, type Distance } from './distances'
+import { loadAccountView, marketOf } from './subscription'
+import { cityConfigPath, type ZyloveCity } from '../config/cities'
 import { genderToAttractedToCategory } from '../utils/genderUtils'
 import type { DatingProfile } from '../types/profile'
 import type { Mode } from '../store/modeStore'
@@ -46,10 +47,8 @@ export type DiscoverProfile = Partial<Omit<DatingProfile, 'attractedTo'>> & {
   radiusMiles?: number | null
   // Random 0–1 pool position (see functions/src/discovery.ts).
   sortKey?: number
-  // Snapped coordinates (see services/location.ts).
-  locationLat?: number
-  locationLng?: number
-  // Set on candidates when both people have a location.
+  // Set on candidates when both people have a saved location (whole miles,
+  // from the server: services/distances.ts).
   distanceMiles?: number
 }
 
@@ -134,16 +133,9 @@ function asList(v: string[] | string | undefined): string[] {
   return v ? [v] : []
 }
 
-// Age from birthday when the stored age is missing or 0 (mirrors mobile).
+// The public age (birthdays are private; the server keeps age current).
 export function displayAge(p: DiscoverProfile): number | null {
-  if (p.age) return p.age
-  if (!p.birthday) return null
-  const b = new Date(`${p.birthday}T00:00:00`)
-  if (Number.isNaN(b.getTime())) return null
-  const now = new Date()
-  let age = now.getFullYear() - b.getFullYear()
-  if (now.getMonth() < b.getMonth() || (now.getMonth() === b.getMonth() && now.getDate() < b.getDate())) age--
-  return age
+  return p.age ? p.age : null
 }
 
 // Bilateral attraction: each side's attractedTo must include the other's
@@ -178,13 +170,15 @@ function shuffle<T>(items: T[]): T[] {
 // reaches profiles that don't have a sortKey yet, or works while the index
 // builds). Results are filtered here, not in the queries.
 export async function fetchCandidates(uid: string, mode: Mode): Promise<DiscoverProfile[]> {
-  const meSnap = await getDoc(doc(db, 'users', uid))
-  if (!meSnap.exists()) return []
-  const me = { ...(meSnap.data() as DiscoverProfile), uid }
+  const view = await loadAccountView(uid)
+  if (!view) return []
+  const me = { ...(view as DiscoverProfile), uid }
+  const myCity = marketOf(view)
 
-  const [blocked, founding, actedOn] = await Promise.all([loadBlockedUids(uid), inFoundingPeriod(me), loadActedOn(uid, mode)])
+  const [blocked, founding, actedOn] = await Promise.all([loadBlockedUids(uid), inFoundingPeriod(myCity), loadActedOn(uid, mode)])
   const swiped = new Set([...loadSwiped(uid, mode), ...actedOn])
   const eligible = (p: DiscoverProfile) => isEligible(me, p, mode, swiped, blocked, founding)
+  const distances = new Map<string, Distance>()
 
   const users = collection(db, 'users')
   const notSuspended = where('isSuspended', '==', false)
@@ -198,15 +192,19 @@ export async function fetchCandidates(uid: string, mode: Mode): Promise<Discover
   for (const constraints of passes) {
     if (found.size >= MIN_CANDIDATES) break
     const snap = await getDocs(query(users, ...constraints)).catch(() => null)
-    for (const d of snap?.docs ?? []) {
-      const p = { ...(d.data() as DiscoverProfile), uid: d.id }
-      if (!found.has(p.uid) && eligible(p)) found.set(p.uid, p)
+    const fresh = (snap?.docs ?? []).map((d) => ({ ...(d.data() as DiscoverProfile), uid: d.id })).filter((p) => !found.has(p.uid) && eligible(p))
+    // Distances for this pass's survivors, then the distance setting.
+    for (const [u, d] of await getDistances(fresh.map((p) => p.uid))) distances.set(u, d)
+    for (const p of fresh) {
+      const d = distances.get(p.uid)
+      if (!founding && !withinRadius(me, d)) continue
+      found.set(p.uid, d ? { ...p, distanceMiles: d.miles } : p)
     }
   }
 
   // Everyone left has photos, so "photos first" is already satisfied.
-  const located = withDistance(me, [...found.values()])
-  return localFirst(me, mode === 'play' ? await withPlayProfiles(located) : located)
+  const located = [...found.values()]
+  return localFirst(myCity, distances, mode === 'play' ? await withPlayProfiles(located) : located)
 }
 
 function isEligible(
@@ -225,20 +223,19 @@ function isEligible(
   const age = displayAge(p)
   if (age !== null && me.ageMin && me.ageMax && (age < me.ageMin || age > me.ageMax)) return false
   // Founding period: everyone, any distance, bots included. Once the
-  // viewer's city is live: their distance setting, and no bots.
-  if (!founding && !withinRadius(me, p)) return false
+  // viewer's city is live: their distance setting (fetchCandidates), and no
+  // bots.
   if (!founding && p.uid.startsWith(BOT_PREFIX)) return false
   return mutuallyAttracted(me, p)
 }
 
 // Max distance from Settings → Discovery, once the viewer's city is live.
 // Skipped when either side has no location (missing data never hides
-// anyone; bots have none).
-function withinRadius(me: DiscoverProfile, p: DiscoverProfile): boolean {
-  if (me.radiusMiles === null) return true
+// anyone).
+function withinRadius(me: DiscoverProfile, d: Distance | undefined): boolean {
+  if (me.radiusMiles === null || !d) return true
   const radius = typeof me.radiusMiles === 'number' && me.radiusMiles > 0 ? me.radiusMiles : DEFAULT_RADIUS_MILES
-  if (!hasLocation(me) || !hasLocation(p)) return true
-  return getDistanceMiles(me.locationLat, me.locationLng, p.locationLat, p.locationLng) <= radius
+  return d.miles <= radius
 }
 
 // Founding period: the viewer's launch city hasn't filled its founding
@@ -247,23 +244,10 @@ function withinRadius(me: DiscoverProfile, p: DiscoverProfile): boolean {
 // Zylove), so a new city never looks empty. Viewers outside every launch
 // city, without a location, or whose config can't be read are always in it.
 // Settings → Discovery locks the distance control on the same check.
-export async function inFoundingPeriod(me: { locationLat?: number; locationLng?: number }): Promise<boolean> {
-  if (typeof me.locationLat !== 'number' || typeof me.locationLng !== 'number') return true
-  const city = getNearestCity(me.locationLat, me.locationLng)
+export async function inFoundingPeriod(city: ZyloveCity | null): Promise<boolean> {
   if (!city) return true
   const snap = await getDoc(doc(db, cityConfigPath(city.id))).catch(() => null)
   return snap?.data()?.botsActive !== false
-}
-
-function hasLocation(p: DiscoverProfile): p is DiscoverProfile & { locationLat: number; locationLng: number } {
-  return typeof p.locationLat === 'number' && typeof p.locationLng === 'number'
-}
-
-function withDistance(me: DiscoverProfile, candidates: DiscoverProfile[]): DiscoverProfile[] {
-  if (!hasLocation(me)) return candidates
-  return candidates.map((p) =>
-    hasLocation(p) ? { ...p, distanceMiles: getDistanceMiles(me.locationLat, me.locationLng, p.locationLat, p.locationLng) } : p,
-  )
 }
 
 // A soft sort, never a filter, each group shuffled:
@@ -274,21 +258,15 @@ function withDistance(me: DiscoverProfile, candidates: DiscoverProfile[]): Disco
 // Without coordinates, a location label naming the viewer's city counts.
 const LOCAL_MILES = 50
 
-function isLocal(me: DiscoverProfile, p: DiscoverProfile): boolean {
-  if (!hasLocation(me)) return false
-  const myCity = getNearestCity(me.locationLat, me.locationLng)
-  if (hasLocation(p)) {
-    return myCity
-      ? getNearestCity(p.locationLat, p.locationLng)?.id === myCity.id
-      : getDistanceMiles(me.locationLat, me.locationLng, p.locationLat, p.locationLng) <= LOCAL_MILES
-  }
+function isLocal(myCity: ZyloveCity | null, d: Distance | undefined, p: DiscoverProfile): boolean {
+  if (d) return myCity ? d.sameMarket : d.miles <= LOCAL_MILES
   return !!myCity && p.locationLabel?.split(',')[0]?.trim().toLowerCase() === myCity.name.toLowerCase()
 }
 
-function localFirst(me: DiscoverProfile, candidates: DiscoverProfile[]): DiscoverProfile[] {
+function localFirst(myCity: ZyloveCity | null, distances: Map<string, Distance>, candidates: DiscoverProfile[]): DiscoverProfile[] {
   const bots = candidates.filter((p) => p.uid.startsWith(BOT_PREFIX))
   const real = candidates.filter((p) => !p.uid.startsWith(BOT_PREFIX))
-  const local = real.filter((p) => isLocal(me, p))
+  const local = real.filter((p) => isLocal(myCity, distances.get(p.uid), p))
   const rest = real.filter((p) => !local.includes(p))
   return [...shuffle(local), ...shuffle(bots), ...shuffle(rest)]
 }

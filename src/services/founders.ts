@@ -2,7 +2,9 @@ import { doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { requestLocation, saveUserLocation } from './location'
-import { cityConfigPath, getNearestCity, type ZyloveCity } from '../config/cities'
+import { loadAccountView, marketOf } from './subscription'
+import { loadSettingsView } from './privateSettings'
+import { cityConfigPath, type ZyloveCity } from '../config/cities'
 
 export type FounderResult =
   | { eligible: true; cohortNumber: number; cityId?: string; cityName?: string }
@@ -74,29 +76,31 @@ async function locationAlreadyGranted(): Promise<boolean> {
 // here; once LocationGate has the location, the profile banner offers it.
 export async function founderOffer(uid: string, { ask }: { ask: boolean }): Promise<FounderOffer | null> {
   try {
-    const ref = doc(db, 'users', uid)
-    let user = (await getDoc(ref)).data()
+    let user = await loadAccountView(uid)
     if (!user || user.isFounder === true || user.founderStatus === 'converted') return null
     if (typeof user.locationLat !== 'number' || typeof user.locationLng !== 'number') {
       if (!ask || !(await locationAlreadyGranted())) return null
       const fresh = await requestLocation()
       if (!fresh) return null
-      await saveUserLocation(uid, fresh)
-      user = (await getDoc(ref)).data()
+      await saveUserLocation(fresh)
+      user = await loadAccountView(uid)
       if (typeof user?.locationLat !== 'number' || typeof user?.locationLng !== 'number') return null
     }
-    const city = getNearestCity(user.locationLat, user.locationLng)
+    const city = marketOf(user)
     if (!city) return null
     const bucket = bucketFor(user.genderIdentity)
     if (!(await spotOpen(city.id, bucket))) return null
-    return { city, bucket, smsConsented: typeof user.smsConsent === 'object' && user.smsConsent !== null }
+    const { smsConsent } = await loadSettingsView(uid)
+    return { city, bucket, smsConsented: typeof smsConsent === 'object' && smsConsent !== null }
   } catch {
     return null
   }
 }
 
+// The saved location (snapped; the owner's own). assignFounderBadge uses the
+// server's copy — this only tells us one is saved.
 async function savedLocation(uid: string): Promise<{ locationLat: number; locationLng: number } | null> {
-  const d = (await getDoc(doc(db, 'users', uid))).data()
+  const d = await loadAccountView(uid)
   return typeof d?.locationLat === 'number' && typeof d?.locationLng === 'number'
     ? { locationLat: d.locationLat, locationLng: d.locationLng }
     : null
@@ -111,7 +115,7 @@ export async function claimFounderBadge(uid: string): Promise<FounderResult | nu
     if (!location) {
       const fresh = await requestLocation()
       if (!fresh) return null
-      await saveUserLocation(uid, fresh)
+      await saveUserLocation(fresh)
       location = await savedLocation(uid)
       if (!location) return null
     }

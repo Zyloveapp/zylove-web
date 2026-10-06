@@ -48,7 +48,8 @@ export { updateDisplayName } from './displayName'
 export { processBotLikeBacks, queueBotLikeBack } from './botLikeBack'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
-import { ALWAYS_ELITE_IDENTITIES, marketFor, marketOpen, newTrial, trialExempt } from './trial'
+import { ALWAYS_ELITE_IDENTITIES, marketFor, marketOpen, newTrial, planView, trialExempt } from './trial'
+import { accountRef, internalRef, isAdminAuth, loadInternal, loadLocation, loadSettings } from './userData'
 import { countMessages, generationOf, participants, pastConnectionId } from './matchGeneration'
 import {
   FLAG_CATEGORY_IDS,
@@ -133,7 +134,7 @@ export const generateSparkBio = onCall(
 const PLAY_BIO_WEEKLY_LIMIT = 3
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
-// Successful generations in the last week, from users/{uid}.bioGenerations.play
+// Successful generations in the last week, from userInternal/{uid}.bioGenerations.play
 // (a list of epoch-ms timestamps).
 function recentGenerations(data: DocumentData | undefined, now: number): number[] {
   const raw: unknown = data?.bioGenerations?.play
@@ -148,7 +149,8 @@ export const generatePlayBio = onCall(
   async (request): Promise<BioResponse> => {
     // invoker is public (org policy), so gate spend on a signed-in caller.
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to generate a bio.')
-    const userRef = getFirestore().doc(`users/${request.auth.uid}`)
+    // Rate-limit counters live in userInternal (server-only; userData.ts).
+    const userRef = internalRef(request.auth.uid)
 
     const snap = await userRef.get()
     if (recentGenerations(snap.data(), Date.now()).length >= PLAY_BIO_WEEKLY_LIMIT) {
@@ -239,7 +241,8 @@ export const generatePlayGoDeeper = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ questions: [string, string] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to generate questions.')
-    const userRef = getFirestore().doc(`users/${request.auth.uid}`)
+    // Rate-limit counters live in userInternal (server-only; userData.ts).
+    const userRef = internalRef(request.auth.uid)
 
     const snap = await userRef.get()
     if (recentGoDeeper(snap.data(), Date.now()).length >= PLAY_GO_DEEPER_WEEKLY_LIMIT) {
@@ -293,7 +296,8 @@ export const generateSparkGoDeeper = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ questions: [string, string] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to generate questions.')
-    const userRef = getFirestore().doc(`users/${request.auth.uid}`)
+    // Rate-limit counters live in userInternal (server-only; userData.ts).
+    const userRef = internalRef(request.auth.uid)
 
     const snap = await userRef.get()
     if (recentSparkGoDeeper(snap.data(), Date.now()).length >= SPARK_GO_DEEPER_WEEKLY_LIMIT) {
@@ -333,57 +337,70 @@ export const generateSparkGoDeeper = onCall(
   },
 )
 
-// Trust/safety defaults. Firestore rules reject any client write to these, so
-// profiles created by the web onboarding lack them — and Discover queries
-// isSuspended == false, which never matches a missing field.
-const TRUST_DEFAULTS = {
+// Defaults for new profiles. Public ones stay on users/{uid} (Explore queries
+// isSuspended == false, which never matches a missing field); the plan and
+// trust counters live in userInternal (server-only; userData.ts).
+const PUBLIC_DEFAULTS = {
   isSuspended: false,
-  reportCount: 0,
   verificationStatus: 'unverified',
-  subscriptionTier: 'free',
+} as const
+const INTERNAL_DEFAULTS = {
+  reportCount: 0,
   sparkScore: 50,
 } as const
 
-// Fills in whichever trust/safety fields are missing on the caller's own
-// users/{uid} doc. Only missing fields are written, so values set elsewhere
-// (e.g. Elite from a founder code) are never overwritten. Idempotent.
-// Also starts the 30-day trial (trial.ts) for anyone without one whose market
-// has opened — existing users too, since the app calls this on every load.
-// In a pre-launch market (or none) there's no clock yet.
+// Fills in whichever defaults are missing for the caller. Only missing fields
+// are written, so values set elsewhere (e.g. Elite from a founder spot) are
+// never overwritten. Idempotent. Also starts the 30-day trial (trial.ts) for
+// anyone without one whose market has opened — existing users too, since the
+// app calls this on every load. In a pre-launch market (or none) there's no
+// clock yet.
 export const initUserDefaults = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    const uid = request.auth.uid
 
-    const ref = getFirestore().collection('users').doc(request.auth.uid)
+    const ref = getFirestore().collection('users').doc(uid)
     const snap = await ref.get()
     // Never create a stub profile — onboarding must have saved the doc first.
     if (!snap.exists) throw new HttpsError('failed-precondition', 'Profile not found')
 
     const data = snap.data() ?? {}
+    const internal = await loadInternal(uid, data)
     const missing: Record<string, unknown> = Object.fromEntries(
-      Object.entries(TRUST_DEFAULTS).filter(([field]) => data[field] === undefined),
+      Object.entries(PUBLIC_DEFAULTS).filter(([field]) => data[field] === undefined),
     )
-    if (data.subscriptionTier === undefined) {
+    const missingInternal: Record<string, unknown> = Object.fromEntries(
+      Object.entries(INTERNAL_DEFAULTS).filter(([field]) => internal[field] === undefined),
+    )
+    if (internal.subscriptionTier === undefined) {
       const gender: unknown = Array.isArray(data.genderIdentity) ? data.genderIdentity[0] : data.genderIdentity
       const elite = data.isFounder === true || (typeof gender === 'string' && ALWAYS_ELITE_IDENTITIES.includes(gender))
-      missing.subscriptionTier = elite ? 'elite' : 'free'
+      missingInternal.subscriptionTier = elite ? 'elite' : 'free'
     }
-    // Gender is locked once onboarding is done (rules then refuse changes to
-    // birthday, genderIdentity, matchableAs) — Elite comes from gender, so it
-    // can't be switched later. Mobile locks at its onboarding step 2.
+    // Gender (and age) are locked once onboarding is done (rules then refuse
+    // changes to them) — Elite comes from gender, so it can't be switched
+    // later. Mobile locks at its onboarding step 2.
     if (data.identityLockedAt == null && data.genderIdentity != null) {
       missing.identityLockedAt = FieldValue.serverTimestamp()
     }
-    if (data.trialStartedAt === undefined && !trialExempt(data)) {
-      const market = marketFor(data)
-      if (market && (await marketOpen(market))) Object.assign(missing, newTrial())
+    if (internal.trialStartedAt === undefined && !trialExempt(planView(data, internal))) {
+      const market = marketFor(await loadLocation(uid, data))
+      if (market && (await marketOpen(market))) Object.assign(missingInternal, newTrial())
     }
     // Explore pool position (see discovery.ts): set once, never changed.
     if (typeof data.sortKey !== 'number') missing.sortKey = Math.random()
-    if (Object.keys(missing).length > 0) {
-      await ref.set(missing, { merge: true })
-      logger.info('initUserDefaults: filled missing fields', { fields: Object.keys(missing) })
+    // A location saved before the profile existed (setLocation) leaves its
+    // city label in private/account; the public doc gets it now.
+    if (typeof data.locationLabel !== 'string' || data.locationLabel === '') {
+      const label: unknown = (await accountRef(uid).get()).data()?.location?.label
+      if (typeof label === 'string' && label) missing.locationLabel = label
+    }
+    if (Object.keys(missing).length > 0) await ref.set(missing, { merge: true })
+    if (Object.keys(missingInternal).length > 0) await internalRef(uid).set(missingInternal, { merge: true })
+    if (Object.keys(missing).length + Object.keys(missingInternal).length > 0) {
+      logger.info('initUserDefaults: filled missing fields', { fields: [...Object.keys(missing), ...Object.keys(missingInternal)] })
     }
     return { success: true }
   },
@@ -623,10 +640,10 @@ export const recordVibeRating = onCall(
     // otherwise repeated calls could farm points for a friend. Admins skip it
     // for testing, but a repeat inside the window moves no scores: the
     // rating is recorded, the points and behaviour signal aren't.
-    const [previous, caller] = await Promise.all([vibeRef.get(), db.collection('users').doc(callerId).get()])
+    const previous = await vibeRef.get()
     const previousAt: unknown = previous.data()?.createdAt
     const inCooldown = previousAt instanceof Timestamp && Date.now() - previousAt.toMillis() < cooldownMs
-    const adminRepeat = inCooldown && caller.data()?.isAdmin === true
+    const adminRepeat = inCooldown && isAdminAuth(request.auth)
     if (inCooldown && !adminRepeat) {
       throw new HttpsError('resource-exhausted', `Already rated this conversation in the last ${cooldownMs / 3_600_000} hours`)
     }
@@ -644,10 +661,10 @@ export const recordVibeRating = onCall(
     })
     const points = adminRepeat ? 0 : VIBE_POINTS[vibe]
     if (points !== 0) {
-      batch.update(db.collection('users').doc(otherUid), { 'zyloveScore.vibePoints': FieldValue.increment(points) })
+      batch.set(internalRef(otherUid), { zyloveScore: { vibePoints: FieldValue.increment(points) } }, { merge: true })
     }
     if (!adminRepeat) {
-      batch.update(db.collection('users').doc(callerId), { 'zyloveScore.participationPoints': FieldValue.increment(1) })
+      batch.set(internalRef(callerId), { zyloveScore: { participationPoints: FieldValue.increment(1) } }, { merge: true })
     }
     await batch.commit()
     if (adminRepeat) logger.info('recordVibeRating: admin test repeat, no score change', { matchId })
@@ -831,10 +848,18 @@ async function applyVibeAdjustment(uid: string): Promise<void> {
   const scoreRef = userRef.collection('zyloveScore').doc('current')
   const signalsRef = db.collection('behaviorSignals').doc(uid)
   await db.runTransaction(async (tx) => {
-    const [userSnap, scoreSnap, signalsSnap] = await Promise.all([tx.get(userRef), tx.get(scoreRef), tx.get(signalsRef)])
+    const [userSnap, scoreSnap, signalsSnap, internalSnap] = await Promise.all([
+      tx.get(userRef),
+      tx.get(scoreRef),
+      tx.get(signalsRef),
+      tx.get(internalRef(uid)),
+    ])
     if (!userSnap.exists) return
     const current = scoreSnap.data() ?? {}
-    const adjustment = vibeAdjustment(signalsSnap.data(), vibePointsOf(userSnap.data()))
+    const internal = internalSnap.data()
+    // userInternal holds the points; an unmigrated account still has them on the root.
+    const points = internal?.zyloveScore || internal?.zylovScore ? vibePointsOf(internal) : vibePointsOf(userSnap.data())
+    const adjustment = vibeAdjustment(signalsSnap.data(), points)
     if (scoreSnap.exists && num(current.vibeAdjustment, 0) === adjustment && current.reviewScore !== undefined) return
     const reviewScore = readScoreState(current).score
     const score = Math.round(clamp(reviewScore + adjustment, 0, 100))
@@ -1490,7 +1515,7 @@ export const reviewProfile = onCall(
     let review: ProfileScorecard | null = null
     try {
       const { root, spark } = await loadOwnProfileDocs(request.auth.uid)
-      const photos = photoConsent(root, 'spark') ? await loadReviewPhotos(request.auth.uid, root.photoURLs) : []
+      const photos = photoConsent(await loadSettings(request.auth.uid, root), 'spark') ? await loadReviewPhotos(request.auth.uid, root.photoURLs) : []
       const prompt = `Review this dating profile on Zylove Spark — serious dating, real compatibility. Give honest, constructive feedback. Be direct but kind.
 
 Profile:
@@ -1529,7 +1554,7 @@ ${scorecardInstructions(SPARK_REVIEW_SECTIONS, { photos: photos.length > 0 })}`
 
 const PLAY_REVIEW_WEEKLY_LIMIT = 3
 
-// Successful Play reviews in the last week (users/{uid}.profileReviews.play).
+// Successful Play reviews in the last week (userInternal/{uid}.profileReviews.play).
 function recentPlayReviews(data: DocumentData | undefined, now: number): number[] {
   const raw: unknown = data?.profileReviews?.play
   return Array.isArray(raw) ? raw.filter((t): t is number => typeof t === 'number' && now - t < WEEK_MS) : []
@@ -1543,15 +1568,19 @@ export const reviewPlayProfile = onCall(
   async (request): Promise<{ review: ProfileScorecard }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const db = getFirestore()
-    const userRef = db.doc(`users/${request.auth.uid}`)
-    const [userSnap, playSnap] = await Promise.all([userRef.get(), userRef.collection('playProfile').doc('data').get()])
+    const userRef = internalRef(request.auth.uid) // review counter (server-only)
+    const [userSnap, playSnap, settings] = await Promise.all([
+      userRef.get(),
+      db.doc(`users/${request.auth.uid}/playProfile/data`).get(),
+      loadSettings(request.auth.uid),
+    ])
     if (recentPlayReviews(userSnap.data(), Date.now()).length >= PLAY_REVIEW_WEEKLY_LIMIT) {
       throw new HttpsError('resource-exhausted', 'Play profile review limit reached. Try again next week.')
     }
     if (!playSnap.exists) throw new HttpsError('failed-precondition', 'Set up your Play profile first.')
 
     const play = playSnap.data() ?? {}
-    const photos = photoConsent(userSnap.data(), 'play') ? await loadReviewPhotos(request.auth.uid, play.photoURLs) : []
+    const photos = photoConsent(settings, 'play') ? await loadReviewPhotos(request.auth.uid, play.photoURLs) : []
     const reply = await askClaudeWithPhotos(
       'reviewPlayProfile',
       buildPlayReviewPrompt(play, photos.length),
@@ -1735,7 +1764,7 @@ export const getCuriousVisitors = onCall(
       db.collection('pairs').where('userA', '==', uid).get(),
       db.collection('pairs').where('userB', '==', uid).get(),
     ])
-    const unlocked = hasEliteAccess(me.data())
+    const unlocked = hasEliteAccess(planView(me.data(), await loadInternal(uid, me.data())))
 
     const candidates = [...asA.docs, ...asB.docs]
       .map((d) => ({ id: d.id, pair: d.data() }))
@@ -1790,6 +1819,8 @@ export { botTypingStart, botTypingStop } from './botTyping'
 export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate, unmatchConnection } from './behavior'
 export { markChatPhotoViewed, sweepChatPhotos } from './photos'
 export { checkTrialStatus, onMarketOpened } from './trial'
+export { mirrorPlan } from './userData'
+export { getDistances, grantSmsConsent, recordActivity, refreshAges, setLocation } from './location'
 export { createCheckoutSession, createPortalSession, stripeWebhook } from './stripe'
 export {
   broadcastToFounders,

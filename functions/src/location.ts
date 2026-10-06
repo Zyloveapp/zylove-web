@@ -1,0 +1,260 @@
+import { HttpsError, onCall } from 'firebase-functions/v2/https'
+import { onSchedule } from 'firebase-functions/v2/scheduler'
+import { logger } from 'firebase-functions'
+import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
+import { distanceMiles, getNearestCity } from './cities'
+import { marketFor } from './trial'
+import { accountRef, identityRef, internalRef, locationRef, userRef } from './userData'
+
+// Locations, server-side (Stage 1a). Nobody reads another user's coordinates:
+// the browser's position goes to setLocation, which snaps it and keeps it in
+// userLocations/{uid} (server-only); the app asks getDistances for how far
+// away people are and gets whole miles back, never coordinates.
+
+// ~3.5 miles of latitude. Both ends of every distance are snapped to it.
+const GRID_DEG = 0.05
+const MAX_CHANGES_PER_DAY = 3
+const DAY_MS = 24 * 60 * 60 * 1000
+export const LOCATION_LIMIT_MESSAGE = 'You can update your location again tomorrow'
+
+function snap(v: number): number {
+  return Math.round(Math.round(v / GRID_DEG) * GRID_DEG * 1000) / 1000
+}
+
+function coord(v: unknown, max: number): number {
+  if (typeof v !== 'number' || !Number.isFinite(v) || Math.abs(v) > max) throw new HttpsError('invalid-argument', 'Invalid location')
+  return v
+}
+
+// "Austin, TX" from OpenStreetMap's reverse geocoder, or null on any failure.
+async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=10&addressdetails=1`
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json', 'User-Agent': 'Zylove/1.0 (https://zylove.app)' },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) return null
+    const data: unknown = await res.json()
+    const address = (data as { address?: Record<string, string> }).address ?? {}
+    const city = address.city ?? address.town ?? address.village ?? address.municipality ?? address.county
+    // ISO3166-2-lvl4 is "US-TX"; fall back to the full state name.
+    const code = address['ISO3166-2-lvl4']
+    const state = code?.includes('-') ? code.split('-')[1] : address.state
+    const label = city ? (state ? `${city}, ${state}` : city) : (state ?? null)
+    return label ? label.slice(0, 80) : null
+  } catch {
+    return null
+  }
+}
+
+// ─── setLocation ─────────────────────────────────────────────────────────────
+
+// Saves the caller's location: snapped to the grid, labelled ("Austin, TX"),
+// and their launch market locked the first time it resolves to one (so a
+// later move can't take them off a market's trial clock). A position in the
+// same grid cell as the saved one changes nothing and isn't counted; real
+// moves are limited to MAX_CHANGES_PER_DAY, which also keeps anyone from
+// walking their own location around to triangulate someone else.
+//
+// Writes userLocations/{uid}, the owner's summary in private/account, and
+// the public city label on users/{uid} (only if the profile exists —
+// onboarding creates it, and initUserDefaults copies the label over then).
+export const setLocation = onCall(
+  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
+  async (request): Promise<{ changed: boolean; label: string | null; marketCityId: string | null }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    const uid = request.auth.uid
+    const data = (request.data ?? {}) as Record<string, unknown>
+    const lat = snap(coord(data.lat, 90))
+    const lng = snap(coord(data.lng, 180))
+
+    const existing = (await locationRef(uid).get()).data()
+    const account = (await accountRef(uid).get()).data()
+    const savedLabel: unknown = account?.location?.label
+    if (existing?.lat === lat && existing?.lng === lng && typeof savedLabel === 'string') {
+      return { changed: false, label: savedLabel, marketCityId: typeof existing.marketCityId === 'string' ? existing.marketCityId : null }
+    }
+
+    const now = Date.now()
+    const recent = (Array.isArray(existing?.changes) ? (existing.changes as unknown[]) : []).filter(
+      (t): t is number => typeof t === 'number' && now - t < DAY_MS,
+    )
+    const moved = existing?.lat !== lat || existing?.lng !== lng
+    if (moved && recent.length >= MAX_CHANGES_PER_DAY) throw new HttpsError('resource-exhausted', LOCATION_LIMIT_MESSAGE)
+
+    const label = (await reverseGeocode(lat, lng)) ?? (typeof savedLabel === 'string' ? savedLabel : null)
+    const locked: unknown = existing?.marketCityId
+    const marketCityId = typeof locked === 'string' ? locked : (getNearestCity(lat, lng)?.id ?? null)
+    const updatedAt = Timestamp.now()
+
+    await locationRef(uid).set({
+      lat,
+      lng,
+      marketCityId,
+      updatedAt,
+      changes: moved ? [...recent, now] : recent,
+    })
+    await accountRef(uid).set({ location: { lat, lng, label, marketCityId, updatedAt } }, { merge: true })
+    const root = userRef(uid)
+    if ((await root.get()).exists) {
+      await root.update({
+        ...(label && { locationLabel: label }),
+        // Older copies of the coordinates on the public doc go.
+        locationLat: FieldValue.delete(),
+        locationLng: FieldValue.delete(),
+        locationUpdatedAt: FieldValue.delete(),
+        geohash: FieldValue.delete(),
+        _location: FieldValue.delete(),
+      })
+    }
+    logger.info('setLocation', { moved, marketCityId, changesToday: moved ? recent.length + 1 : recent.length })
+    return { changed: moved, label, marketCityId }
+  },
+)
+
+// ─── getDistances ────────────────────────────────────────────────────────────
+
+const MAX_UIDS = 200
+const CALL_WINDOW_MS = 10 * 60 * 1000
+const MAX_CALLS_PER_WINDOW = 120
+const UID_RE = /^[A-Za-z0-9_-]{1,128}$/
+
+export interface Distance {
+  // Whole miles between the two snapped locations (0 = under a mile).
+  miles: number
+  // Both in the same launch market.
+  sameMarket: boolean
+}
+
+// Coordinates for a uid: userLocations, else the old copy on the root doc
+// (accounts not migrated; bots, which are seeded there).
+function coordsFrom(loc: DocumentData | undefined, root: DocumentData | undefined): { lat: number; lng: number; marketCityId: string | null } | null {
+  if (typeof loc?.lat === 'number' && typeof loc?.lng === 'number') {
+    return { lat: loc.lat, lng: loc.lng, marketCityId: typeof loc.marketCityId === 'string' ? loc.marketCityId : null }
+  }
+  if (typeof root?.locationLat === 'number' && typeof root?.locationLng === 'number') {
+    return { lat: root.locationLat, lng: root.locationLng, marketCityId: null }
+  }
+  return null
+}
+
+// Calls per caller, in userInternal (a sliding window of timestamps).
+async function takeDistanceCall(uid: string): Promise<void> {
+  const ref = internalRef(uid)
+  await getFirestore().runTransaction(async (tx) => {
+    const now = Date.now()
+    const raw: unknown = (await tx.get(ref)).data()?.distanceCalls
+    const recent = (Array.isArray(raw) ? raw : []).filter((t): t is number => typeof t === 'number' && now - t < CALL_WINDOW_MS)
+    if (recent.length >= MAX_CALLS_PER_WINDOW) throw new HttpsError('resource-exhausted', 'Too many requests. Try again in a few minutes.')
+    tx.set(ref, { distanceCalls: [...recent, now] }, { merge: true })
+  })
+}
+
+// How far the caller is from each of `uids` (up to MAX_UIDS). Anyone without
+// a saved location — or the caller, if they have none — is left out.
+export const getDistances = onCall(
+  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
+  async (request): Promise<{ distances: Record<string, Distance> }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    const uid = request.auth.uid
+    const raw = (request.data as Record<string, unknown> | null)?.uids
+    if (!Array.isArray(raw) || raw.length > MAX_UIDS || !raw.every((u) => typeof u === 'string' && UID_RE.test(u))) {
+      throw new HttpsError('invalid-argument', `uids must be up to ${MAX_UIDS} user ids`)
+    }
+    const uids = [...new Set(raw as string[])].filter((u) => u !== uid)
+    await takeDistanceCall(uid)
+    const db = getFirestore()
+
+    const [myLoc, myRoot] = await Promise.all([locationRef(uid).get(), userRef(uid).get()])
+    const me = coordsFrom(myLoc.data(), myRoot.data())
+    if (!me || uids.length === 0) return { distances: {} }
+    const myMarket = marketFor(me)
+
+    const locs = await db.getAll(...uids.map(locationRef))
+    const missing = uids.filter((_, i) => typeof locs[i].data()?.lat !== 'number')
+    const roots = missing.length ? await db.getAll(...missing.map(userRef)) : []
+    const rootOf = new Map(roots.map((s) => [s.id, s.data()]))
+
+    const distances: Record<string, Distance> = {}
+    uids.forEach((u, i) => {
+      const them = coordsFrom(locs[i].data(), rootOf.get(u))
+      if (!them) return
+      const miles = distanceMiles(me.lat, me.lng, them.lat, them.lng)
+      distances[u] = {
+        miles: miles < 1 ? 0 : Math.round(miles),
+        sameMarket: !!myMarket && marketFor(them)?.id === myMarket.id,
+      }
+    })
+    return { distances }
+  },
+)
+
+// ─── grantSmsConsent ─────────────────────────────────────────────────────────
+
+// Turns on texts: records consent with the phone number from the caller's
+// verified sign-in (never one the client sends) in private/account.
+export const grantSmsConsent = onCall(
+  { timeoutSeconds: 20, memory: '256MiB', invoker: 'public' },
+  async (request): Promise<{ ok: true }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    const phone: unknown = request.auth.token.phone_number
+    if (typeof phone !== 'string' || !/^\+[1-9]\d{6,14}$/.test(phone)) {
+      throw new HttpsError('failed-precondition', 'Sign in with a phone number to turn on texts.')
+    }
+    await accountRef(request.auth.uid).set({ smsConsent: { grantedAt: FieldValue.serverTimestamp(), phone } }, { merge: true })
+    return { ok: true }
+  },
+)
+
+// ─── recordActivity ──────────────────────────────────────────────────────────
+
+// When the user was last in the app (admin activity stats), server-side.
+// At most one write an hour.
+export const recordActivity = onCall(
+  { timeoutSeconds: 20, memory: '256MiB', invoker: 'public' },
+  async (request): Promise<{ ok: true }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    const ref = internalRef(request.auth.uid)
+    const last: unknown = (await ref.get()).data()?.lastActive
+    const now = Date.now()
+    if (typeof last !== 'number' || now - last >= 60 * 60 * 1000) await ref.set({ lastActive: now }, { merge: true })
+    return { ok: true }
+  },
+)
+
+// ─── refreshAges ─────────────────────────────────────────────────────────────
+
+// Whole years from an ISO birthday ("1995-04-12"), or null.
+export function ageFrom(birthday: unknown, now = new Date()): number | null {
+  if (typeof birthday !== 'string') return null
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(birthday)
+  if (!m) return null
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  let age = now.getUTCFullYear() - y
+  if (now.getUTCMonth() + 1 < mo || (now.getUTCMonth() + 1 === mo && now.getUTCDate() < d)) age--
+  return age >= 0 && age < 130 ? age : null
+}
+
+// 4am Central: the public age follows the private birthday (birthdays only
+// live in private/identity now, so nothing else ages people).
+export const refreshAges = onSchedule(
+  { schedule: '0 4 * * *', timeZone: 'America/Chicago', timeoutSeconds: 300, memory: '256MiB' },
+  async () => {
+    const db = getFirestore()
+    const users = await db.collection('users').select('age', 'isDeleted').get()
+    const live = users.docs.filter((d) => d.data().isDeleted !== true)
+    let updated = 0
+    for (let i = 0; i < live.length; i += 100) {
+      const chunk = live.slice(i, i + 100)
+      const identities = await db.getAll(...chunk.map((d) => identityRef(d.id)))
+      for (const [j, idDoc] of identities.entries()) {
+        const age = ageFrom(idDoc.data()?.birthday)
+        if (age === null || chunk[j].data().age === age) continue
+        await chunk[j].ref.update({ age })
+        updated++
+      }
+    }
+    logger.info('refreshAges', { users: live.length, updated })
+  },
+)

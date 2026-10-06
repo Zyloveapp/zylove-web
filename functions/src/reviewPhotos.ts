@@ -4,7 +4,7 @@ import { storagePath } from './storagePath'
 
 // Profile photos for the AI profile reviews, sent to Claude as base64 image
 // blocks — only when the user turned on photo coaching for that mode
-// (users/{uid}.photoAnalysisConsent.spark|play).
+// (users/{uid}/private/settings photoAnalysisConsent.spark|play).
 
 export interface ImageBlock {
   type: 'image'
@@ -17,8 +17,8 @@ const MAX_PHOTOS = 6
 const MAX_BYTES = Math.floor((5 * 1024 * 1024 * 3) / 4)
 const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 
-export function photoConsent(root: Record<string, unknown> | undefined, mode: 'spark' | 'play'): boolean {
-  const consent = root?.photoAnalysisConsent
+export function photoConsent(settings: Record<string, unknown> | undefined, mode: 'spark' | 'play'): boolean {
+  const consent = settings?.photoAnalysisConsent
   return typeof consent === 'object' && consent !== null && (consent as Record<string, unknown>)[mode] === true
 }
 
