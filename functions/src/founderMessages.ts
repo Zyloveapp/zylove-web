@@ -248,7 +248,7 @@ export const broadcastToFounders = onCall(
 // ─── Reading ─────────────────────────────────────────────────────────────────
 
 export const markFounderThreadRead = onCall(
-  { timeoutSeconds: 30, memory: '128MiB', invoker: 'public' },
+  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const uid = request.auth.uid

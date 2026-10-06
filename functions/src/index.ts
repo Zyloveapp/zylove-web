@@ -3,6 +3,8 @@
 // reviewQueue collection, config/launch, publicStats/founding
 // Build as /admin route gated on isAdmin: true when Stripe is complete
 // (Behavior signals and risk scores actually live server-only in behaviorSignals/{uid}; see behavior.ts.)
+// Must stay the first import: global defaults (memory) before any function is defined.
+import './globalOptions'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { onSchedule } from 'firebase-functions/v2/scheduler'

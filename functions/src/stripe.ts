@@ -124,7 +124,7 @@ export const createCheckoutSession = onCall(
 // ─── createPortalSession ─────────────────────────────────────────────────────
 
 export const createPortalSession = onCall(
-  { timeoutSeconds: 30, memory: '128MiB', secrets: [stripeSecretKey], invoker: 'public' },
+  { timeoutSeconds: 30, memory: '256MiB', secrets: [stripeSecretKey], invoker: 'public' },
   async (request): Promise<{ url: string }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const customerId = await verifiedCustomerId(request.auth.uid)
