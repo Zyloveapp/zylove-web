@@ -4,6 +4,7 @@ import { httpsCallable } from 'firebase/functions'
 import { db, functions, storage } from './firebase'
 import { loadIdentity } from './privateIdentity'
 import { loadPrivateProfile } from './privateProfile'
+import { loadMatching } from './privateMatching'
 import { displayAge, type DiscoverProfile } from './discover'
 import type { SparkBioRequest } from './bio'
 import type { PromptAnswer } from '../types/dualProfile'
@@ -58,9 +59,15 @@ export async function loadOwnProfile(uid: string): Promise<OwnProfile | null> {
   if (!root.exists()) return null
   // The birthday is private (private/identity) and so is the intent
   // (private/profile, Stage 2); only their owner gets them here.
-  const [{ birthday }, meta] = await Promise.all([loadIdentity(uid, root.data().birthday), loadPrivateProfile(uid, root.data())])
+  const [{ birthday }, meta, matching] = await Promise.all([
+    loadIdentity(uid, root.data().birthday),
+    loadPrivateProfile(uid, root.data()),
+    loadMatching(uid, root.data()),
+  ])
   const profile = {
     ...(root.data() as DiscoverProfile),
+    // The owner's matching preferences (private/matching, Stage 3); empty for anyone else.
+    ...(matching as Partial<DiscoverProfile>),
     uid,
     birthday: birthday ?? undefined,
     ...(typeof meta.intent === 'string' && { intent: meta.intent as DiscoverProfile['intent'] }),

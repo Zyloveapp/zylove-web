@@ -1,38 +1,15 @@
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  startAfter,
-  updateDoc,
-  where,
-  type QueryConstraint,
-} from 'firebase/firestore'
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc, type DocumentData } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { friendlyError } from './errors'
 import { db, functions } from './firebase'
-import { getDistances, type Distance } from './distances'
-import { loadAccountView, marketOf } from './subscription'
-import { cityConfigPath, type ZyloveCity } from '../config/cities'
-import { genderToAttractedToCategory } from '../utils/genderUtils'
+import { primeDistances } from './distances'
+import { primePhotoUrls } from './photoUrls'
+import { loadMatching } from './privateMatching'
 import type { DatingProfile } from '../types/profile'
 import type { Mode } from '../store/modeStore'
 import { loadPlayProfile, parsePlayProfile, type PlayProfileData } from './playProfile'
 import { playNameOf } from './displayNames'
-import { loadBlockedUids } from './safety'
-
-const CANDIDATE_LIMIT = 50
-// Below this many eligible profiles, a load tops up from further queries.
-const MIN_CANDIDATES = 20
-// radiusMiles missing on the profile; null means "No limit".
-const DEFAULT_RADIUS_MILES = 25
-const BOT_PREFIX = 'zbot-'
 
 // Firestore docs are written by several clients over time, so every field is
 // treated as possibly missing. attractedTo was a single string on older docs.
@@ -79,35 +56,6 @@ export function markSwiped(uid: string, mode: Mode, targetUid: string): void {
   }
 }
 
-// ─── Already acted on (server records) ──────────────────────────────────────
-
-const SWIPES_LIMIT = 500
-
-// People this user already liked, passed or linked with in this mode, from
-// the server, so a new device (empty localStorage) doesn't show them again.
-// swipes/{id} ({ swiperId, swipedId, action, mode }) is written by
-// recordSwipe; matches are readable by their participants. Either read may
-// be refused by the rules or fail — then it just contributes nothing.
-async function loadActedOn(uid: string, mode: Mode): Promise<Set<string>> {
-  const [swipes, matches] = await Promise.all([
-    getDocs(query(collection(db, 'swipes'), where('swiperId', '==', uid), limit(SWIPES_LIMIT))).catch(() => null),
-    getDocs(query(collection(db, 'matches'), where('users', 'array-contains', uid), where('mode', '==', mode))).catch(() => null),
-  ])
-  const acted = new Set<string>()
-  for (const d of swipes?.docs ?? []) {
-    const s = d.data()
-    // Older swipes have no mode; they count for both.
-    if (typeof s.swipedId === 'string' && (s.mode === undefined || s.mode === mode)) acted.add(s.swipedId)
-  }
-  for (const d of matches?.docs ?? []) {
-    const m = d.data()
-    if ((m.mode === 'play' ? 'play' : 'spark') !== mode) continue
-    const users: unknown = m.users ?? m.participants
-    if (Array.isArray(users)) for (const u of users) if (typeof u === 'string' && u !== uid) acted.add(u)
-  }
-  return acted
-}
-
 // ─── Viewer profile ──────────────────────────────────────────────────────────
 
 const myProfileRequests = new Map<string, Promise<DiscoverProfile | null>>()
@@ -117,8 +65,9 @@ const myProfileRequests = new Map<string, Promise<DiscoverProfile | null>>()
 export function fetchMyProfile(uid: string): Promise<DiscoverProfile | null> {
   let request = myProfileRequests.get(uid)
   if (!request) {
-    request = getDoc(doc(db, 'users', uid)).then((snap) =>
-      snap.exists() ? { ...(snap.data() as DiscoverProfile), uid } : null,
+    // With their own matching preferences (private/matching, Stage 3).
+    request = getDoc(doc(db, 'users', uid)).then(async (snap) =>
+      snap.exists() ? { ...(snap.data() as DiscoverProfile), ...((await loadMatching(uid, snap.data())) as Partial<DiscoverProfile>), uid } : null,
     )
     request.catch(() => myProfileRequests.delete(uid))
     myProfileRequests.set(uid, request)
@@ -126,176 +75,44 @@ export function fetchMyProfile(uid: string): Promise<DiscoverProfile | null> {
   return request
 }
 
-// ─── Filtering ───────────────────────────────────────────────────────────────
-
-function asList(v: string[] | string | undefined): string[] {
-  if (Array.isArray(v)) return v
-  return v ? [v] : []
-}
+// ─── Explore deck ────────────────────────────────────────────────────────────
 
 // The public age (birthdays are private; the server keeps age current).
 export function displayAge(p: DiscoverProfile): number | null {
   return p.age ? p.age : null
 }
 
-// Bilateral attraction: each side's attractedTo must include the other's
-// gender category (off-map identities use matchableAs).
-function mutuallyAttracted(me: DiscoverProfile, them: DiscoverProfile): boolean {
-  const meAs = genderToAttractedToCategory(me.genderIdentity ?? '', me.matchableAs)
-  const themAs = genderToAttractedToCategory(them.genderIdentity ?? '', them.matchableAs)
-  const theyWantMe = asList(them.attractedTo)
-  const iWantThem = asList(me.attractedTo)
-  return (
-    (theyWantMe.includes('everyone') || theyWantMe.some((a) => meAs.includes(a))) &&
-    (iWantThem.includes('everyone') || iWantThem.some((a) => themAs.includes(a)))
-  )
+// Explore candidates, from the server (getExploreDeck, Stage 3): it applies
+// every filter Explore uses — mutual attraction, age range, distance,
+// visibility, blocks, people already liked or passed, Play access — and
+// orders them local first. Nobody's preferences, location or the user list
+// reach the browser. The deck only advances as the user swipes (calls without
+// swiping return the same cards), so it can't be used to page through
+// everyone. Photo URLs and distances come with it.
+interface DeckCard {
+  uid: string
+  profile: DocumentData
+  playProfile?: DocumentData
+  distanceMiles: number | null
+  sameMarket: boolean
 }
 
-// In Spark unless Play-only: Play-only accounts have Spark hidden (and, not
-// yet migrated, the old public intent 'play').
-function inSpark(p: DiscoverProfile): boolean {
-  return p.intent !== 'play'
-}
-
-function shuffle<T>(items: T[]): T[] {
-  const a = [...items]
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[a[i], a[j]] = [a[j], a[i]]
-  }
-  return a
-}
-
-// Explore candidates. The pool is read from a random point in sortKey order so
-// each load sees a different slice; if too few survive the filters it wraps
-// around from the start, then falls back to an unordered read (which also
-// reaches profiles that don't have a sortKey yet, or works while the index
-// builds). Results are filtered here, not in the queries.
 export async function fetchCandidates(uid: string, mode: Mode): Promise<DiscoverProfile[]> {
-  const view = await loadAccountView(uid)
-  if (!view) return []
-  const me = { ...(view as DiscoverProfile), uid }
-  const myCity = marketOf(view)
-
-  const [blocked, founding, actedOn] = await Promise.all([loadBlockedUids(uid), inFoundingPeriod(myCity), loadActedOn(uid, mode)])
-  const swiped = new Set([...loadSwiped(uid, mode), ...actedOn])
-  const eligible = (p: DiscoverProfile) => isEligible(me, p, mode, swiped, blocked, founding)
-  const distances = new Map<string, Distance>()
-
-  const users = collection(db, 'users')
-  const notSuspended = where('isSuspended', '==', false)
-  const passes: QueryConstraint[][] = [
-    [notSuspended, orderBy('sortKey'), startAfter(Math.random()), limit(CANDIDATE_LIMIT)],
-    [notSuspended, orderBy('sortKey'), limit(CANDIDATE_LIMIT)],
-    [notSuspended, limit(CANDIDATE_LIMIT)],
-  ]
-
-  const found = new Map<string, DiscoverProfile>()
-  for (const constraints of passes) {
-    if (found.size >= MIN_CANDIDATES) break
-    const snap = await getDocs(query(users, ...constraints)).catch(() => null)
-    const fresh = (snap?.docs ?? []).map((d) => ({ ...(d.data() as DiscoverProfile), uid: d.id })).filter((p) => !found.has(p.uid) && eligible(p))
-    // Distances for this pass's survivors, then the distance setting.
-    for (const [u, d] of await getDistances(fresh.map((p) => p.uid))) distances.set(u, d)
-    for (const p of fresh) {
-      const d = distances.get(p.uid)
-      if (!founding && !withinRadius(me, d)) continue
-      found.set(p.uid, d ? { ...p, distanceMiles: d.miles } : p)
-    }
-  }
-
-  // Everyone left has photos, so "photos first" is already satisfied.
-  const located = [...found.values()]
-  return localFirst(myCity, distances, mode === 'play' ? await withPlayProfiles(located) : located)
-}
-
-function isEligible(
-  me: DiscoverProfile,
-  p: DiscoverProfile,
-  mode: Mode,
-  swiped: Set<string>,
-  blocked: Set<string>,
-  founding: boolean,
-): boolean {
-  if (p.uid === me.uid || swiped.has(p.uid) || blocked.has(p.uid)) return false
-  // Spark: the public doc's photos and visibility. Play: the Play profile's,
-  // checked once it's read (withPlayProfiles) — nothing Play is public.
-  if (mode === 'spark') {
-    if (!p.photoURLs?.length) return false
-    if (!inSpark(p)) return false
-    if (p.sparkVisibility === 'paused' || p.sparkVisibility === 'hidden') return false
-  }
-  const age = displayAge(p)
-  if (age !== null && me.ageMin && me.ageMax && (age < me.ageMin || age > me.ageMax)) return false
-  // Founding period: everyone, any distance, bots included. Once the
-  // viewer's city is live: their distance setting (fetchCandidates), and no
-  // bots.
-  if (!founding && p.uid.startsWith(BOT_PREFIX)) return false
-  return mutuallyAttracted(me, p)
-}
-
-// Max distance from Settings → Discovery, once the viewer's city is live.
-// Skipped when either side has no location (missing data never hides
-// anyone).
-function withinRadius(me: DiscoverProfile, d: Distance | undefined): boolean {
-  if (me.radiusMiles === null || !d) return true
-  const radius = typeof me.radiusMiles === 'number' && me.radiusMiles > 0 ? me.radiusMiles : DEFAULT_RADIUS_MILES
-  return d.miles <= radius
-}
-
-// Founding period: the viewer's launch city hasn't filled its founding
-// circle yet (config/city_{id}.botsActive isn't false). Until it has, Explore
-// shows everyone at any distance, bots included (they're the preview of
-// Zylove), so a new city never looks empty. Viewers outside every launch
-// city, without a location, or whose config can't be read are always in it.
-// Settings → Discovery locks the distance control on the same check.
-export async function inFoundingPeriod(city: ZyloveCity | null): Promise<boolean> {
-  if (!city) return true
-  const snap = await getDoc(doc(db, cityConfigPath(city.id))).catch(() => null)
-  return snap?.data()?.botsActive !== false
-}
-
-// A soft sort, never a filter, each group shuffled:
-//   1. real people local to the viewer — same launch city, or within
-//      LOCAL_MILES when the viewer isn't in one
-//   2. bots (Austin-seeded, shown to everyone) as filler
-//   3. everyone else
-// Without coordinates, a location label naming the viewer's city counts.
-const LOCAL_MILES = 50
-
-function isLocal(myCity: ZyloveCity | null, d: Distance | undefined, p: DiscoverProfile): boolean {
-  if (d) return myCity ? d.sameMarket : d.miles <= LOCAL_MILES
-  return !!myCity && p.locationLabel?.split(',')[0]?.trim().toLowerCase() === myCity.name.toLowerCase()
-}
-
-function localFirst(myCity: ZyloveCity | null, distances: Map<string, Distance>, candidates: DiscoverProfile[]): DiscoverProfile[] {
-  const bots = candidates.filter((p) => p.uid.startsWith(BOT_PREFIX))
-  const real = candidates.filter((p) => !p.uid.startsWith(BOT_PREFIX))
-  const local = real.filter((p) => isLocal(myCity, distances.get(p.uid), p))
-  const rest = real.filter((p) => !local.includes(p))
-  return [...shuffle(local), ...shuffle(bots), ...shuffle(rest)]
-}
-
-// Play Explore only shows people with a Play profile, and shows them with it:
-// everyone left after the filters gets their playProfile/data read in
-// parallel (bot or not). No Play profile, no Play photos, paused/hidden in
-// Play, or an unreadable one — the rules refuse it while either side lacks
-// Play access (Stage 2) — means they're left out. Never Spark data in Play.
-async function withPlayProfiles(candidates: DiscoverProfile[]): Promise<DiscoverProfile[]> {
-  const play = await Promise.all(
-    candidates.map((p) =>
-      getDoc(doc(db, `users/${p.uid}/playProfile/data`))
-        .then((snap) => (snap.exists() ? parsePlayProfile(snap.data()) : null))
-        .catch(() => null),
-    ),
-  )
-  return candidates.flatMap((p, i) => {
-    const playProfile = play[i]
+  const { data } = await httpsCallable<
+    { mode: Mode },
+    { cards: DeckCard[]; photoUrls: Record<string, string>; expiresAt: number; exhausted: boolean }
+  >(functions, 'getExploreDeck')({ mode })
+  primePhotoUrls(data.photoUrls, data.expiresAt)
+  primeDistances(data.cards.flatMap((c) => (c.distanceMiles === null ? [] : [[c.uid, { miles: c.distanceMiles, sameMarket: c.sameMarket }] as const])))
+  // A swipe this browser just made may not have reached the server yet.
+  const swiped = loadSwiped(uid, mode)
+  return data.cards.filter((c) => !swiped.has(c.uid)).map((c) => {
+    const base = { ...(c.profile as DiscoverProfile), uid: c.uid, ...(c.distanceMiles !== null && { distanceMiles: c.distanceMiles }) }
+    if (mode !== 'play' || !c.playProfile) return base
+    const playProfile = parsePlayProfile(c.playProfile)
     // Play Explore shows the Play name everywhere the card, details or match
     // overlay read displayName.
-    // Paused or hidden in Play (server-set on the Play profile): left out.
-    if (!playProfile?.photoURLs.length || playProfile.playVisibility !== 'active') return []
-    return [{ ...p, playProfile, displayName: playNameOf(playProfile, p) || 'Someone' }]
+    return { ...base, playProfile, displayName: playNameOf(playProfile, base) || 'Someone' }
   })
 }
 
@@ -380,6 +197,9 @@ export interface CompatibilityResult {
   breakdown?: { spark?: Record<string, number>; play?: Record<string, number> }
   triggeredDealbreakers?: string[]
   tier1?: Tier1Result | null
+  // The viewed person has physical preferences to score against (their
+  // preferences themselves are private, Stage 3).
+  hasPhysicalPrefs?: boolean
 }
 
 function num(v: unknown): number | null {

@@ -25,7 +25,7 @@ import { REVIEW_TONE } from './shared/reviewCategories'
 import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
 import { phoneHash, wereMatched } from './trust'
 import { softDeleteAccount } from './adminActivity'
-import { adminUids, isAdminAuth, isAdminUid } from './userData'
+import { accountRef, adminUids, internalRef, isAdminAuth, isAdminUid, isSuspendedUid, loadInternal } from './userData'
 
 const BOT_PREFIXES = ['zbot-', 'seed-']
 const URGENT = new Set(['felt_unsafe', 'aggressive'])
@@ -92,7 +92,7 @@ export async function recordReport(input: {
     db().doc(`users/${reporterUid}`).get(),
     db().doc(`users/${reportedUid}`).get(),
   ])
-  if (reporterSnap.data()?.isSuspended === true) throw new HttpsError('permission-denied', 'Account suspended.')
+  if (await isSuspendedUid(reporterUid, reporterSnap.data())) throw new HttpsError('permission-denied', 'Account suspended.')
   const reported = reportedSnap.data()
   if (isBotUid(reportedUid) || reported?.isBot === true) {
     throw new HttpsError('failed-precondition', "Curated profiles can't be reported.")
@@ -311,7 +311,9 @@ export const adminGetReports = onCall(
 
     const uids = [...byUser.keys()]
     const userDocs = uids.length ? await db().getAll(...uids.map((u) => db().doc(`users/${u}`))) : []
-    const users = new Map(userDocs.map((s) => [s.id, s.data()]))
+    // Account state (suspension, bans) is in userInternal (Stage 3).
+    const internals = uids.length ? await db().getAll(...uids.map((u) => db().doc(`userInternal/${u}`))) : []
+    const users = new Map(userDocs.map((s, i) => [s.id, s.exists ? { ...s.data(), ...(internals[i]?.data() ?? {}) } : undefined]))
     const joined = await joinDates(uids)
     const admins = await adminUids()
 
@@ -356,8 +358,9 @@ export const adminGetReports = onCall(
     reported.sort((a, b) => rank(a) - rank(b) || (b.lastReportedAt ?? 0) - (a.lastReportedAt ?? 0))
 
     const goodSnap = await db().collection('users').where('zyloveScoreTier', 'in', GOOD_TIERS).limit(100).get()
-    const good = goodSnap.docs.filter((d) => {
-      const u = d.data()
+    const goodInternals = goodSnap.empty ? [] : await db().getAll(...goodSnap.docs.map((d) => db().doc(`userInternal/${d.id}`)))
+    const good = goodSnap.docs.filter((d, i) => {
+      const u = { ...d.data(), ...(goodInternals[i]?.data() ?? {}) }
       return !isBotUid(d.id) && u.isBot !== true && u.isSuspended !== true && u.isDeleted !== true
     })
     const scores = good.length ? await db().getAll(...good.map((d) => db().doc(`users/${d.id}/zyloveScore/current`))) : []
@@ -419,15 +422,16 @@ async function setAuthDisabled(uid: string, disabled: boolean): Promise<void> {
 }
 
 export async function liftSuspension(uid: string): Promise<void> {
-  await db()
-    .doc(`users/${uid}`)
-    .update({
+  await internalRef(uid).set(
+    {
       isSuspended: false,
       suspendedAt: FieldValue.delete(),
       suspendedUntil: FieldValue.delete(),
       suspendedBy: FieldValue.delete(),
       suspendSource: FieldValue.delete(),
-    })
+    },
+    { merge: true },
+  )
   await setAuthDisabled(uid, false)
 }
 
@@ -445,7 +449,9 @@ export const adminModerate = onCall(
       typeof data.message === 'string' && data.message.trim() ? data.message.trim().slice(0, MAX_MESSAGE) : null
 
     const ref = db().doc(`users/${uid}`)
-    const user = (await ref.get()).data()
+    const root = (await ref.get()).data()
+    // Root doc + account state from userInternal (Stage 3).
+    const user = root ? { ...root, ...(await loadInternal(uid, root)) } : undefined
     if ((await isAdminUid(uid)) && action !== 'thank' && action !== 'clear') {
       throw new HttpsError('failed-precondition', 'Not on an admin account.')
     }
@@ -455,7 +461,9 @@ export const adminModerate = onCall(
     switch (action) {
       case 'warn': {
         if (!user || user.isDeleted === true) throw new HttpsError('failed-precondition', 'That account no longer exists.')
-        await ref.update({ adminNotice: notice('warning', message ?? DEFAULT_WARNING), lastWarnedAt: FieldValue.serverTimestamp() })
+        // The notice is the owner's alone (private/account); the timestamp is admin data (F-040).
+        await accountRef(uid).set({ adminNotice: notice('warning', message ?? DEFAULT_WARNING) }, { merge: true })
+        await internalRef(uid).set({ lastWarnedAt: FieldValue.serverTimestamp() }, { merge: true })
         const texted = await textAccount(uid, 'Zylove: You have an important notice about your account. Open zylove.app to read it.')
         const resolved = await resolveReports(uid, 'actioned', action, adminUid)
         await log({ texted })
@@ -463,7 +471,8 @@ export const adminModerate = onCall(
       }
       case 'thank': {
         if (!user || user.isDeleted === true) throw new HttpsError('failed-precondition', 'That account no longer exists.')
-        await ref.update({ adminNotice: notice('thanks', message ?? DEFAULT_THANKS), lastThankedAt: FieldValue.serverTimestamp() })
+        await accountRef(uid).set({ adminNotice: notice('thanks', message ?? DEFAULT_THANKS) }, { merge: true })
+        await internalRef(uid).set({ lastThankedAt: FieldValue.serverTimestamp() }, { merge: true })
         const texted = await textAccount(uid, '✦ Zylove: The team left you a note. Open zylove.app to read it.')
         await log({ texted })
         return { ok: true, texted }
@@ -472,13 +481,16 @@ export const adminModerate = onCall(
         const days = data.days
         if (!SUSPEND_DAYS.includes(days as (typeof SUSPEND_DAYS)[number])) throw new HttpsError('invalid-argument', 'days must be 30, 60 or 90.')
         if (!user || user.isDeleted === true) throw new HttpsError('failed-precondition', 'That account no longer exists.')
-        await ref.update({
-          isSuspended: true,
-          suspendedAt: FieldValue.serverTimestamp(),
-          suspendedUntil: Timestamp.fromMillis(Date.now() + (days as number) * DAY_MS),
-          suspendedBy: adminUid,
-          suspendSource: 'admin',
-        })
+        await internalRef(uid).set(
+          {
+            isSuspended: true,
+            suspendedAt: FieldValue.serverTimestamp(),
+            suspendedUntil: Timestamp.fromMillis(Date.now() + (days as number) * DAY_MS),
+            suspendedBy: adminUid,
+            suspendSource: 'admin',
+          },
+          { merge: true },
+        )
         // Locked: no sign-in, and current sessions end when their token next refreshes.
         await setAuthDisabled(uid, true)
         const resolved = await resolveReports(uid, 'actioned', action, adminUid)
@@ -517,7 +529,7 @@ export const adminModerate = onCall(
         // that's already gone just gets its recovery record marked.
         if (user && user.isDeleted !== true) await softDeleteAccount(uid, user, adminUid, { banned: true })
         else if (phone) await db().doc(`deletedAccounts/${phone}`).set({ banned: true }, { merge: true })
-        if (user) await ref.update({ bannedAt: FieldValue.serverTimestamp(), bannedBy: adminUid })
+        if (user) await internalRef(uid).set({ bannedAt: FieldValue.serverTimestamp(), bannedBy: adminUid }, { merge: true })
         const resolved = await resolveReports(uid, 'actioned', action, adminUid)
         await log({ phoneBanned: phone !== null })
         logger.warn('adminModerate: banned', { phoneBanned: phone !== null })
@@ -537,10 +549,11 @@ export const adminModerate = onCall(
 export const liftExpiredSuspensions = onSchedule(
   { schedule: '15 * * * *', timeZone: 'America/Chicago', timeoutSeconds: 120, memory: '256MiB' },
   async () => {
-    const due = await db().collection('users').where('suspendedUntil', '<=', Timestamp.now()).get()
+    // Account state is in userInternal (Stage 3).
+    const due = await db().collection('userInternal').where('suspendedUntil', '<=', Timestamp.now()).get()
     let lifted = 0
     for (const d of due.docs) {
-      const u = d.data()
+      const u = { ...((await db().doc(`users/${d.id}`).get()).data() ?? {}), ...d.data() }
       if (u.isSuspended !== true || u.isDeleted === true || u.bannedAt != null) continue
       await liftSuspension(d.id).catch((err: unknown) =>
         logger.error('liftExpiredSuspensions failed', { message: err instanceof Error ? err.message : String(err) }),

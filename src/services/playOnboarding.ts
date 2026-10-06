@@ -32,6 +32,7 @@ import {
 } from '../types/playDescriptors'
 import { parseBirthday, type OnboardingDraft, type PhotoDraft } from '../components/onboarding/types'
 import { loadPrivateProfile, privateProfileDoc } from './privateProfile'
+import { addMatching } from './privateMatching'
 
 export type PlayTagCategory = 'arrangement' | 'acts' | 'dynamic' | 'vibe' | 'place'
 
@@ -239,7 +240,7 @@ export async function savePlayOnboarding(
       aiPhotoScanningConsent: true,
       isActive: d.photos.length > 0,
       lastUpdated: now,
-      ...(!existing.exists() && { createdAt: now, radiusMiles: 25, ageMin: 21, ageMax: 45 }),
+      ...(!existing.exists() && { createdAt: now }),
     },
     { merge: true },
   )
@@ -252,12 +253,12 @@ export async function savePlayOnboarding(
 }
 
 // Play-only onboarding (the Play path in /onboarding): no Spark profile. The
-// root doc gets identity, discovery settings and the minimum Spark fields
-// scoring expects, hidden from Spark — nothing Play (Stage 2): the Play
-// profile goes to playProfile/data, the path/mode/intent to the owner-only
-// private/profile. Trust/trial fields come from initUserDefaults (rules
-// reject client writes to them).
-const NO_LIMIT_RADIUS_MILES = 500
+// root doc gets identity and the minimum Spark fields scoring expects, hidden
+// from Spark — nothing Play (Stage 2): the Play profile goes to
+// playProfile/data, the path/mode/intent to the owner-only private/profile,
+// the discovery settings to the owner-only private/matching (Stage 3).
+// Trust/trial fields come from initUserDefaults (rules reject client writes
+// to them).
 
 export async function savePlayOnlyOnboarding(
   uid: string,
@@ -308,14 +309,7 @@ export async function savePlayOnlyOnboarding(
       age,
       ...(!identityLocked && { genderIdentity }),
       ...(!identityLocked && genderIdentity === 'self_describe' && selfDescribe && { genderSelfDescribe: selfDescribe }),
-      ...(!identityLocked &&
-        OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) &&
-        d.matchableAs.length > 0 && { matchableAs: d.matchableAs }),
       ...(pronouns && { pronouns }),
-      attractedTo: d.attractedTo,
-      radiusMiles: d.radiusMiles,
-      ageMin: d.ageMin,
-      ageMax: d.ageMax,
       relationshipStatus: 'prefer_not_to_say',
       openTo: [],
       onboardingComplete: true,
@@ -342,9 +336,6 @@ export async function savePlayOnlyOnboarding(
       playOnboardingComplete: true,
       aiPhotoScanningConsent: true,
       isActive: d.photos.length > 0,
-      radiusMiles: d.radiusMiles ?? NO_LIMIT_RADIUS_MILES,
-      ageMin: d.ageMin,
-      ageMax: d.ageMax,
       lastUpdated: now,
       ...(!existingPlay.exists() && { photoURLs: [], createdAt: now }),
     },
@@ -355,6 +346,14 @@ export async function savePlayOnlyOnboarding(
     { intent: 'open', intentionAnswers: d.intentionAnswers, onboardingPath: 'play', mode: 'play' },
     { merge: true },
   )
+  // Matching preferences: owner-only (private/matching, Stage 3).
+  addMatching(batch, uid, {
+    attractedTo: d.attractedTo,
+    radiusMiles: d.radiusMiles,
+    ageMin: d.ageMin,
+    ageMax: d.ageMax,
+    ...(!identityLocked && OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) && d.matchableAs.length > 0 && { matchableAs: d.matchableAs }),
+  })
   // Owner-only (users/{uid}/private/identity): legal name once, birthday
   // until identity is locked.
   await addIdentity(batch, uid, d.legalName, !identityLocked && birthday ? birthday.iso : null)

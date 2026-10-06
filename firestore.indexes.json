@@ -271,6 +271,34 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "exploreIndex",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "sparkActive",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "sortKey",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "exploreIndex",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "playActive",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "sortKey",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

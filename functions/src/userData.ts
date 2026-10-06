@@ -36,6 +36,8 @@ export const identityRef = (uid: string): DocumentReference => db().doc(`users/$
 export const locationRef = (uid: string): DocumentReference => db().doc(`userLocations/${uid}`)
 // Stage 2: owner-only profile metadata that would reveal Play use.
 export const profileRef = (uid: string): DocumentReference => db().doc(`users/${uid}/private/profile`)
+// Stage 3: owner-only matching preferences (Explore and scoring read them server-side).
+export const matchingRef = (uid: string): DocumentReference => db().doc(`users/${uid}/private/matching`)
 
 // The plan: written to userInternal only; mirrored to private/account.
 export const PLAN_FIELDS = ['subscriptionTier', 'subscriptionStatus', 'trialStartedAt', 'trialEndsAt', 'trialExpired'] as const
@@ -54,8 +56,13 @@ export const INTERNAL_FIELDS = [
   'hasSeenHowTo', 'pushPermissionDeclined', 'onboardingFeedbackSeen',
   // Mobile-era photo-scanning flags (nothing reads them; not user settings).
   'aiPhotoScanningConsent', 'photoScanningConsent', 'photoScanningConsentAt',
+  // Stage 3: suspension, bans and pending deletion (account state). The
+  // public doc keeps only isDeleted (the rules hide deleted profiles by it).
+  'isSuspended', 'suspendedAt', 'suspendedUntil', 'suspendedBy', 'suspendSource', 'suspendReason',
+  'suspendedPendingReview', 'bannedAt', 'bannedBy', 'deletionRequestedAt', 'deletionScheduledFor', 'deletionReason',
+  'lastWarnedAt', 'lastThankedAt',
 ] as const
-export const ACCOUNT_FIELDS = ['smsConsent', 'pendingPhotoURLs', 'photoRejectedAt', 'photoRejectionReason'] as const
+export const ACCOUNT_FIELDS = ['smsConsent', 'pendingPhotoURLs', 'photoRejectedAt', 'photoRejectionReason', 'adminNotice'] as const
 export const SETTINGS_FIELDS = ['smsNotifications', 'smsNotificationsEnabled', 'smsQuietHours', 'photoAnalysisConsent'] as const
 export const IDENTITY_FIELDS = ['birthday'] as const
 export const LOCATION_FIELDS = ['locationLat', 'locationLng', 'locationUpdatedAt'] as const
@@ -73,6 +80,27 @@ export const PLAY_ROOT_FIELDS = [
 ] as const
 export const PRIVATE_PROFILE_FIELDS = ['intent', 'onboardingPath', 'mode', 'intentionAnswers'] as const
 
+// Stage 3 (F-013): who someone wants to see and how — used only server-side
+// (Explore, scoring), so it lives in the owner-only private/matching.
+export const MATCHING_FIELDS = [
+  'attractedTo', 'matchableAs', 'ageMin', 'ageMax', 'radiusMiles', 'drinkingHabit', 'showOrientation',
+  'dealbreakers', 'seekingBodyTypes', 'seekingTraits', 'seekingHeightMinCm', 'seekingHeightMaxCm',
+] as const
+
+export async function loadMatching(uid: string, root?: DocumentData): Promise<DocumentData> {
+  const [m, r] = await Promise.all([matchingRef(uid).get(), root ? Promise.resolve(root) : userRef(uid).get().then((s) => s.data())])
+  return withFallback(m.data(), r, MATCHING_FIELDS)
+}
+
+// Suspended (server-only flag in userInternal; older copies on the root doc
+// count until migrated). Deleted accounts count as suspended.
+export async function isSuspendedUid(uid: string, root?: DocumentData): Promise<boolean> {
+  const r = root ?? (await userRef(uid).get()).data()
+  if (r?.isDeleted === true) return true
+  // The root copy too, until the Stage 3 migration has moved it (userInternal may hold the default false).
+  return (await loadInternal(uid, r)).isSuspended === true || r?.isSuspended === true
+}
+
 // The owner's private profile metadata, root-doc copies as fallback.
 export async function loadPrivateProfile(uid: string, root?: DocumentData): Promise<DocumentData> {
   const [p, r] = await Promise.all([profileRef(uid).get(), root ? Promise.resolve(root) : userRef(uid).get().then((s) => s.data())])
@@ -82,7 +110,8 @@ export async function loadPrivateProfile(uid: string, root?: DocumentData): Prom
 // A root doc with the private profile metadata merged back in — for scoring,
 // which compares intents, server-side only.
 export async function withPrivateProfile(uid: string, root: DocumentData): Promise<DocumentData> {
-  return { ...root, ...(await loadPrivateProfile(uid, root)) }
+  const [meta, matching] = await Promise.all([loadPrivateProfile(uid, root), loadMatching(uid, root)])
+  return { ...root, ...meta, ...matching }
 }
 
 // A doc's fields, falling back to the root doc's old copies for any of
@@ -160,7 +189,7 @@ export function isAdminAuth(auth: { token?: Record<string, unknown> } | undefine
 // Every moved or dropped field, as deletes — so an anonymised root doc keeps
 // none of them (older docs may still carry copies).
 export const ROOT_SCRUB: Record<string, FieldValue> = Object.fromEntries(
-  [...INTERNAL_FIELDS, ...ACCOUNT_FIELDS, ...SETTINGS_FIELDS, ...IDENTITY_FIELDS, ...LOCATION_FIELDS, ...DROPPED_FIELDS, ...PLAY_ROOT_FIELDS, ...PRIVATE_PROFILE_FIELDS].map((f) => [f, FieldValue.delete()]),
+  [...INTERNAL_FIELDS, ...ACCOUNT_FIELDS, ...SETTINGS_FIELDS, ...IDENTITY_FIELDS, ...LOCATION_FIELDS, ...DROPPED_FIELDS, ...PLAY_ROOT_FIELDS, ...PRIVATE_PROFILE_FIELDS, ...MATCHING_FIELDS].map((f) => [f, FieldValue.delete()]),
 )
 
 // The private values a deleted account's 90-day recovery record keeps.
@@ -228,6 +257,9 @@ export async function clearPrivateData(uid: string): Promise<void> {
     settingsRef(uid).delete(),
     identityRef(uid).delete(),
     profileRef(uid).delete(),
+    matchingRef(uid).delete(),
+    db().doc(`exploreIndex/${uid}`).delete(),
+    db().doc(`exploreState/${uid}`).delete(),
     internalRef(uid).delete(),
     locationRef(uid).delete(),
     db().doc(`rateLimits/${uid}`).delete(),

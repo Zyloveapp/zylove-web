@@ -156,20 +156,19 @@ async function textOpenSpot(cityId: string, bucket: Bucket, spots: number, skip:
   if (!city || spots <= 0) return 0
   const db = getFirestore()
   const [snap, locSnap, sentSnap] = await Promise.all([
-    db
-      .collection('users')
-      .where('isSuspended', '==', false)
-      .select('locationLat', 'locationLng', 'genderIdentity', 'isFounder', 'claimSMSSentAt')
-      .get(),
+    db.collection('users').select('locationLat', 'locationLng', 'genderIdentity', 'isFounder', 'claimSMSSentAt', 'isDeleted').get(),
     db.collection('userLocations').select('lat', 'lng').get(),
     db.collection('userInternal').where('claimSMSSentAt', '!=', null).select('claimSMSSentAt').get(),
   ])
+  // Suspended (userInternal, Stage 3) and deleted accounts are skipped.
+  const suspended = new Set((await db.collection('userInternal').where('isSuspended', '==', true).select().get()).docs.map((d) => d.id))
   const locs = new Map(locSnap.docs.map((d) => [d.id, d.data()]))
   const sentAt = new Map(sentSnap.docs.map((d) => [d.id, d.data().claimSMSSentAt as unknown]))
   const now = Date.now()
   const candidates = snap.docs.filter((d) => {
     const u = d.data()
     if (d.id.startsWith(BOT_PREFIX) || skip.has(d.id) || u.isFounder === true) return false
+    if (suspended.has(d.id) || u.isDeleted === true) return false
     // userLocations, or the root doc's old copy for accounts not migrated.
     const loc = locs.get(d.id)
     const lat: unknown = loc?.lat ?? u.locationLat

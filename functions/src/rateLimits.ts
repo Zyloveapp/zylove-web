@@ -15,3 +15,19 @@ export async function takeRateLimit(uid: string, key: string, { max, windowMs }:
     tx.set(ref, { [key]: [...recent, now] }, { merge: true })
   })
 }
+
+// Takes up to `n` from the same kind of window and returns how many it got
+// (0 when the window is full) — for counting things revealed in a batch.
+export async function takeRateLimitUpTo(uid: string, key: string, n: number, { max, windowMs }: { max: number; windowMs: number }): Promise<number> {
+  if (n <= 0) return 0
+  const db = getFirestore()
+  const ref = db.doc(`rateLimits/${uid}`)
+  return db.runTransaction(async (tx) => {
+    const now = Date.now()
+    const raw: unknown = (await tx.get(ref)).data()?.[key]
+    const recent = (Array.isArray(raw) ? raw : []).filter((t): t is number => typeof t === 'number' && now - t < windowMs)
+    const take = Math.max(0, Math.min(n, max - recent.length))
+    if (take > 0) tx.set(ref, { [key]: [...recent, ...Array.from({ length: take }, () => now)] }, { merge: true })
+    return take
+  })
+}

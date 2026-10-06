@@ -7,7 +7,7 @@ import { calculateSparkScore, calculatePlayScore } from "./scoring";
 import { UserDoc, PairDoc } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { bothHavePlay, playFields, setPlayScores } from "../pairPlay";
-import { withPrivateProfile } from "../userData";
+import { isSuspendedUid, withPrivateProfile } from "../userData";
 
 // Rescores every pair of userId. Spark scores on the pair doc; Play scores
 // (Stage 2) in pairs/{id}/modes/play, and only while both people have Play
@@ -16,7 +16,7 @@ async function rescorePairs(userId: string, afterRoot: UserDoc): Promise<void> {
   const db = admin.firestore();
   // A deleted or suspended account isn't rescored (deletion removes its Play
   // scores; a rescore racing it must not write them back).
-  if ((afterRoot as any).isDeleted === true || (afterRoot as any).isSuspended === true) return;
+  if ((afterRoot as any).isDeleted === true || (await isSuspendedUid(userId, afterRoot as any))) return;
   // Scoring compares intents, which live in the owner-only private/profile (Stage 2).
   const after = await withPrivateProfile(userId, afterRoot) as UserDoc;
 

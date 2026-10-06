@@ -54,14 +54,20 @@ export const getPhotoUrls = onCall(
     const owners = [...new Set(refs.map((r) => ownerOf(r).uid))].filter((u) => u !== viewer)
     const info = new Map<string, { root?: DocumentData; play?: DocumentData; blocked: boolean }>()
     if (!admin && owners.length) {
-      const [roots, plays, theyBlocked, iBlocked] = await Promise.all([
+      const [roots, plays, theyBlocked, iBlocked, internals] = await Promise.all([
         db.getAll(...owners.map((u) => db.doc(`users/${u}`))),
         db.getAll(...owners.map((u) => db.doc(`users/${u}/playProfile/data`))),
         db.getAll(...owners.map((u) => db.doc(`users/${u}/blockedUsers/${viewer}`))),
         db.getAll(...owners.map((u) => db.doc(`users/${viewer}/blockedUsers/${u}`))),
+        db.getAll(...owners.map((u) => db.doc(`userInternal/${u}`))),
       ])
+      // Suspension is in userInternal (Stage 3); older root copies count.
       owners.forEach((u, i) =>
-        info.set(u, { root: roots[i].data(), play: plays[i].data(), blocked: theyBlocked[i].exists || iBlocked[i].exists }),
+        info.set(u, {
+          root: roots[i].exists ? { ...roots[i].data(), isSuspended: internals[i].data()?.isSuspended ?? roots[i].data()?.isSuspended } : undefined,
+          play: plays[i].data(),
+          blocked: theyBlocked[i].exists || iBlocked[i].exists,
+        }),
       )
     }
 
@@ -85,21 +91,27 @@ export const getPhotoUrls = onCall(
       return published(o.root, ref)
     })
 
-    const hourStart = Math.floor(Date.now() / HOUR_MS) * HOUR_MS
-    const expires = hourStart + 2 * HOUR_MS
-    const bucket = getStorage().bucket(defaultBucket())
-    const signed = await Promise.all(
-      allowed.map((ref) =>
-        bucket
-          .file(ref)
-          .getSignedUrl({ version: 'v4', action: 'read', accessibleAt: new Date(hourStart), expires })
-          .then(([url]) => [ref, url] as const)
-          .catch(() => null),
-      ),
-    )
-    return { urls: Object.fromEntries(signed.filter((s): s is readonly [string, string] => s !== null)), expiresAt: expires }
+    return signPhotoRefs(allowed)
   },
 )
+
+// Signs photo paths the caller has already cleared (getPhotoUrls above, the
+// Explore deck): the same URL for everyone within the hour, gone within two.
+export async function signPhotoRefs(refs: string[]): Promise<{ urls: Record<string, string>; expiresAt: number }> {
+  const hourStart = Math.floor(Date.now() / HOUR_MS) * HOUR_MS
+  const expires = hourStart + 2 * HOUR_MS
+  const bucket = getStorage().bucket(defaultBucket())
+  const signed = await Promise.all(
+    [...new Set(refs)].filter(isPhotoRef).map((ref) =>
+      bucket
+        .file(ref)
+        .getSignedUrl({ version: 'v4', action: 'read', accessibleAt: new Date(hourStart), expires })
+        .then(([url]) => [ref, url] as const)
+        .catch(() => null),
+    ),
+  )
+  return { urls: Object.fromEntries(signed.filter((s): s is readonly [string, string] => s !== null)), expiresAt: expires }
+}
 
 // ─── Review PDFs (F-033) ─────────────────────────────────────────────────────
 

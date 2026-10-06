@@ -10,8 +10,11 @@ interface Notice {
   message: string
 }
 
-// users/{uid}.adminNotice, set by the moderation team (adminModerate): a
-// warning or a thank-you, shown once until dismissed.
+// adminNotice, set by the moderation team (adminModerate): a warning or a
+// thank-you, shown once until dismissed. It lives in the owner-only
+// users/{uid}/private/account (F-040); older ones on the public doc count
+// until migrated.
+const accountDoc = (uid: string) => doc(db, 'users', uid, 'private', 'account')
 function parseNotice(v: unknown): Notice | null {
   if (typeof v !== 'object' || v === null) return null
   const n = v as Record<string, unknown>
@@ -21,19 +24,20 @@ function parseNotice(v: unknown): Notice | null {
 
 export default function AdminNotice() {
   const uid = useAuthStore((s) => s.user?.uid) ?? null
-  const [notice, setNotice] = useState<{ uid: string; notice: Notice } | null>(null)
+  const [notice, setNotice] = useState<{ uid: string; notice: Notice; where: 'account' | 'root' } | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (!uid) return
-    return onSnapshot(
-      doc(db, 'users', uid),
-      (snap) => {
-        const n = parseNotice(snap.data()?.adminNotice)
-        setNotice(n ? { uid, notice: n } : null)
-      },
-      () => setNotice(null),
-    )
+    let fromAccount: Notice | null = null
+    let fromRoot: Notice | null = null
+    const emit = () =>
+      setNotice(fromAccount ? { uid, notice: fromAccount, where: 'account' } : fromRoot ? { uid, notice: fromRoot, where: 'root' } : null)
+    const offs = [
+      onSnapshot(accountDoc(uid), (snap) => ((fromAccount = parseNotice(snap.data()?.adminNotice)), emit()), () => {}),
+      onSnapshot(doc(db, 'users', uid), (snap) => ((fromRoot = parseNotice(snap.data()?.adminNotice)), emit()), () => {}),
+    ]
+    return () => offs.forEach((off) => off())
   }, [uid])
 
   const current = notice?.uid === uid ? notice.notice : null
@@ -43,7 +47,8 @@ export default function AdminNotice() {
   async function dismiss() {
     if (!uid) return
     setBusy(true)
-    await updateDoc(doc(db, 'users', uid), { 'adminNotice.seenAt': serverTimestamp() }).catch(() => setBusy(false))
+    const ref = notice?.where === 'root' ? doc(db, 'users', uid) : accountDoc(uid)
+    await updateDoc(ref, { 'adminNotice.seenAt': serverTimestamp() }).catch(() => setBusy(false))
   }
 
   return createPortal(

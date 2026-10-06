@@ -59,7 +59,9 @@ export function entitlement(root: DocumentData | undefined, plan: DocumentData |
 
 export function computeFlags(root: DocumentData | undefined, plan: DocumentData | undefined, play: DocumentData | undefined): PlayFlags {
   const { entitled, until } = entitlement(root, plan)
-  const live = !!root && root.isSuspended !== true && root.isDeleted !== true
+  // Suspension is in userInternal (Stage 3); older copies on the root doc count.
+  const suspended = (plan?.isSuspended ?? root?.isSuspended) === true
+  const live = !!root && !suspended && root.isDeleted !== true
   const finished = play?.playOnboardingComplete === true
   const access = entitled && live && finished
   return { playEntitled: entitled, playAccess: access, playAccessUntil: access && until !== null ? Timestamp.fromMillis(until) : null }
@@ -114,7 +116,7 @@ export async function setPlayVisibility(uid: string, visibility: 'active' | 'pau
 
 // ─── Triggers ────────────────────────────────────────────────────────────────
 
-const PLAN_KEYS = ['subscriptionTier', 'trialStartedAt', 'trialEndsAt', 'trialExpired']
+const PLAN_KEYS = ['subscriptionTier', 'trialStartedAt', 'trialEndsAt', 'trialExpired', 'isSuspended']
 const ROOT_KEYS = ['genderIdentity', 'isFounder', 'isSuspended', 'isDeleted']
 const changed = (before: DocumentData | undefined, after: DocumentData | undefined, keys: string[]) =>
   keys.some((k) => JSON.stringify(before?.[k] ?? null) !== JSON.stringify(after?.[k] ?? null))

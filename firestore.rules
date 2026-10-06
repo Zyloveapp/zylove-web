@@ -46,6 +46,18 @@ service cloud.firestore {
       return request.auth != null && hasPlay(request.auth.uid);
     }
 
+    // Account state (Stage 3): suspension is server-only, in
+    // userInternal/{uid}.isSuspended; deleted profiles are flagged isDeleted
+    // on the public doc. Bots and brand-new accounts may have no userInternal.
+    function notSuspended(uid) {
+      return !exists(/databases/$(database)/documents/userInternal/$(uid))
+          || get(/databases/$(database)/documents/userInternal/$(uid)).data.get('isSuspended', false) != true;
+    }
+    function profileVisible(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data.get('isDeleted', false) != true
+          && notSuspended(uid);
+    }
+
     function isVerified() {
       return exists(/databases/$(database)/documents/users/$(request.auth.uid))
           && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.phoneVerified == true;
@@ -91,7 +103,15 @@ service cloud.firestore {
         'playDisplayName', 'playDisplayNameUpdatedAt', 'playVisibility', 'spiceLevel', 'playInterestTags',
         'playNonNegotiables', 'playBio', 'playPromptAnswers', 'playGoDeeper', 'typePreferences', 'playBodyType',
         'playHeight', 'playBodyHair', 'playGrooming', 'playEnergy', 'playStyle', 'playPassExpiresAt', 'openToCrossover',
-        'intent', 'onboardingPath', 'mode', 'intentionAnswers'
+        'intent', 'onboardingPath', 'mode', 'intentionAnswers',
+        // Stage 3: matching preferences (→ the owner-only private/matching;
+        // Explore and scoring read them server-side), account state and
+        // moderation notes (→ userInternal / private/account)
+        'attractedTo', 'matchableAs', 'ageMin', 'ageMax', 'radiusMiles', 'drinkingHabit', 'showOrientation',
+        'dealbreakers', 'seekingBodyTypes', 'seekingTraits', 'seekingHeightMinCm', 'seekingHeightMaxCm',
+        'suspendedAt', 'suspendedUntil', 'suspendedBy', 'suspendSource', 'suspendReason', 'suspendedPendingReview',
+        'bannedAt', 'bannedBy', 'deletionRequestedAt', 'deletionScheduledFor', 'deletionReason',
+        'adminNotice', 'lastWarnedAt', 'lastThankedAt'
       ];
     }
 
@@ -104,10 +124,16 @@ service cloud.firestore {
                   .difference(before.get('photoURLs', []).toSet()).size() == 0;
     }
 
+    // Profiles are read one at a time (a profile, a chat partner); nobody
+    // lists the collection — Explore is server-side (getExploreDeck, Stage 3),
+    // so the user base can't be paged through. Suspended and deleted
+    // profiles are unreadable except by their owner.
     match /users/{uid} {
-      allow read: if isSignedIn()
-                  && (resource == null
-                      || resource.data.get('isSuspended', false) == false);
+      allow get: if isSignedIn()
+                 && (resource == null
+                     || isUser(uid)
+                     || (resource.data.get('isDeleted', false) != true && notSuspended(uid)));
+      allow list: if false;
       allow create: if isUser(uid) && isSignedIn()
                     && !request.resource.data.keys().hasAny(serverOnlyUserFields())
                     && request.resource.data.get('photoURLs', []).size() == 0;
@@ -133,11 +159,40 @@ service cloud.firestore {
       // the owner may only empty their Spark photo-review queue.
       match /private/account {
         allow read: if isSignedIn() && isUser(uid);
+        // The owner may empty their Spark photo-review queue, or mark the
+        // moderation team's notice as seen (adminNotice.seenAt, F-040).
         allow update: if isSignedIn() && isUser(uid)
-                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pendingPhotoURLs'])
-                      && request.resource.data.pendingPhotoURLs is list
-                      && request.resource.data.pendingPhotoURLs.size() == 0;
+                      && ((request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pendingPhotoURLs'])
+                           && request.resource.data.pendingPhotoURLs is list
+                           && request.resource.data.pendingPhotoURLs.size() == 0)
+                          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['adminNotice'])
+                              && request.resource.data.adminNotice.diff(resource.data.adminNotice).affectedKeys().hasOnly(['seenAt'])));
         allow create, delete: if false;
+      }
+
+      // Matching preferences (Stage 3, F-013): owner only; Explore and
+      // scoring read them server-side. These keys only.
+      function matchingKeys() {
+        return ['attractedTo', 'matchableAs', 'ageMin', 'ageMax', 'radiusMiles', 'drinkingHabit', 'showOrientation',
+                'dealbreakers', 'seekingBodyTypes', 'seekingTraits', 'seekingHeightMinCm', 'seekingHeightMaxCm'];
+      }
+      function validMatching(d) {
+        return d.keys().hasOnly(matchingKeys())
+            && (!('attractedTo' in d) || d.attractedTo is list)
+            && (!('matchableAs' in d) || d.matchableAs is list)
+            && (!('ageMin' in d) || d.ageMin is int)
+            && (!('ageMax' in d) || d.ageMax is int)
+            && (!('radiusMiles' in d) || d.radiusMiles == null || d.radiusMiles is number);
+      }
+      // matchableAs (how off-map identities are matched) stays identity-locked,
+      // as it was on the public doc.
+      match /private/matching {
+        allow read: if isSignedIn() && isUser(uid);
+        allow create: if isSignedIn() && isUser(uid) && validMatching(request.resource.data)
+                      && (!('matchableAs' in request.resource.data) || identityUnlocked());
+        allow update: if isSignedIn() && isUser(uid) && validMatching(request.resource.data)
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['matchableAs']) || identityUnlocked());
+        allow delete: if false;
       }
 
       // The owner's preferences: texts and AI photo coaching. These keys only.
@@ -201,7 +256,7 @@ service cloud.firestore {
       // Spark profile subcollection
       match /sparkProfile/{doc} {
         allow read: if isSignedIn()
-                    && get(/databases/$(database)/documents/users/$(uid)).data.get('isSuspended', false) != true;
+                    && profileVisible(uid);
         allow write: if isUser(uid) && isSignedIn();
       }
 
@@ -220,7 +275,7 @@ service cloud.firestore {
         allow read: if isSignedIn()
                     && (isUser(uid)
                         || (viewerHasPlay() && hasPlay(uid)
-                            && get(/databases/$(database)/documents/users/$(uid)).data.get('isSuspended', false) != true));
+                            && profileVisible(uid)));
         allow create: if isUser(uid) && isSignedIn()
                       && request.resource.data.get('photoURLs', []).size() == 0
                       && !request.resource.data.keys().hasAny(playServerFields());

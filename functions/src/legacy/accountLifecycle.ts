@@ -3,7 +3,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { UserDoc } from "./types";
 import { normalizeE164 } from "./utils/phone";
-import { ROOT_SCRUB, clearPrivateData, deletionView, identityRef, internalRef, loadPrivateProfile, profileRef } from "../userData";
+import { ROOT_SCRUB, clearPrivateData, deletionView, identityRef, internalRef, isSuspendedUid, loadMatching, loadPrivateProfile, matchingRef, profileRef } from "../userData";
 
 
 
@@ -56,7 +56,7 @@ const auth = admin.auth();
     // Identity (locked on restore — immutability contract)
     birthday:           priv.birthday,
     genderIdentity:     (user as any).genderIdentity ?? null,
-    matchableAs:        (user as any).matchableAs ?? [],
+    matchableAs:        (await loadMatching(uid, user as any)).matchableAs ?? [],
     identityLockedAt:   (user as any).identityLockedAt ?? null,
     pronouns:           (user as any).pronouns ?? null,
     genderSelfDescribe: (user as any).genderSelfDescribe ?? null,
@@ -87,7 +87,6 @@ const auth = admin.auth();
     deleted: true,
     isDeleted: true,
     deletedAt: admin.firestore.Timestamp.now(),
-    isSuspended: true,
     displayName: "Deleted User",
     bio: "",
     photoURLs: [],
@@ -121,7 +120,7 @@ export const checkRestoreEligibility = onCall(LEGACY_RUNTIME, async (request) =>
   // Pre-flight gate — if the live user doc is suspended, short-circuit
   // before checking deletion-recovery state. Front-end routes to /suspended.
   const userSnap = await db.doc(`users/${uid}`).get();
-  if (userSnap.data()?.isSuspended === true) {
+  if (userSnap.exists && (await isSuspendedUid(uid, userSnap.data()))) {
     return { status: "suspended" as const };
   }
 
@@ -229,7 +228,6 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
 
     // Identity — restored and locked (immutability contract)
     genderIdentity:     recovery.genderIdentity,
-    matchableAs:        recovery.matchableAs ?? [],
     identityLockedAt:   recovery.identityLockedAt ?? now,
     pronouns:           recovery.pronouns,
     genderSelfDescribe: recovery.genderSelfDescribe,
@@ -254,7 +252,6 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
     deleted:     false,
     isDeleted:   false,
     deletedAt:   null,
-    isSuspended: false,
     visible:     true,
     isVisible:   true,
 
@@ -269,9 +266,12 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
   batch.set(identityRef(newUid), { birthday: recovery.birthday ?? null });
   // The mode is owner-only (Stage 2), never on the public doc.
   batch.set(profileRef(newUid), { mode: recovery.mode === "play" ? "play" : "spark" }, { merge: true });
+  // Matching preferences are owner-only (Stage 3).
+  batch.set(matchingRef(newUid), { matchableAs: recovery.matchableAs ?? [] }, { merge: true });
   batch.set(internalRef(newUid), {
     subscriptionTier: recovery.isFounder ? "elite" : (recovery.subscriptionTier ?? "free"),
     reportCount: 0,
+    isSuspended: false,
   }, { merge: true });
 
   // Re-link pair docs from previousUid to newUid. Handles userA/userB AND
@@ -362,7 +362,6 @@ export const softBlockOnboarding = onCall(LEGACY_RUNTIME, async (request) => {
 
     // Identity — locked from recovery (immutability contract)
     genderIdentity:     recovery.genderIdentity,
-    matchableAs:        recovery.matchableAs ?? [],
     identityLockedAt:   now,
     pronouns:           recovery.pronouns,
     genderSelfDescribe: recovery.genderSelfDescribe,
@@ -382,7 +381,6 @@ export const softBlockOnboarding = onCall(LEGACY_RUNTIME, async (request) => {
     // Visibility — user becomes visible after onboarding completes
     deleted:     false,
     isDeleted:   false,
-    isSuspended: false,
     visible:     false,
     isVisible:   false,
   };
@@ -390,7 +388,8 @@ export const softBlockOnboarding = onCall(LEGACY_RUNTIME, async (request) => {
   const batch = db.batch();
   batch.set(db.collection("users").doc(newUid), prefillUser);
   batch.set(identityRef(newUid), { birthday: recovery.birthday ?? null });
-  batch.set(internalRef(newUid), { subscriptionTier: "free", reportCount: 0 }, { merge: true });
+  batch.set(internalRef(newUid), { subscriptionTier: "free", reportCount: 0, isSuspended: false }, { merge: true });
+  batch.set(matchingRef(newUid), { matchableAs: recovery.matchableAs ?? [] }, { merge: true });
   batch.delete(recoveryRef);
   await batch.commit();
 

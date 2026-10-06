@@ -14,8 +14,9 @@ export interface LatLng {
 // browser's position to a ~3-mile grid and keeps it where no other user can
 // read it; the owner gets a summary in private/account ({ lat, lng, label,
 // marketCityId }). Other people's distances come from getDistances.
-// The same grid as the server, so an unmoved position isn't re-sent.
-const GRID_DEG = 0.05
+// The same grid as the server (~1 mile, Stage 3), so an unmoved position
+// isn't re-sent.
+const GRID_DEG = 0.015
 
 function snap(v: number): number {
   return Math.round(Math.round(v / GRID_DEG) * GRID_DEG * 1000) / 1000
@@ -125,9 +126,11 @@ export function getDistanceMiles(lat1: number, lng1: number, lat2: number, lng2:
   return 3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
-// "Less than a mile away", "1 mile away", "12 miles away". Both ends are
-// snapped to ~3 miles, so it's approximate by design.
+// "Less than a mile away", "1 mile away", "15 miles away", "50+ miles away".
+// The server sends coarse miles (whole to 10, 5-mile steps to 50, 51 = 50+),
+// so it's approximate by design.
 export function distanceText(miles: number): string {
+  if (miles > 50) return '50+ miles away'
   const rounded = Math.round(miles)
   if (miles < 1 || rounded < 1) return 'Less than a mile away'
   return rounded === 1 ? '1 mile away' : `${rounded.toLocaleString()} miles away`

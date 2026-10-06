@@ -15,7 +15,7 @@ import { getNearestCity } from './cities'
 import { claimFounderSpot, type FounderResult } from './founders'
 import { revokeFounderStatus } from './founderActivity'
 import { SMS_SECRETS } from './sms'
-import { ROOT_SCRUB, clearPrivateData, deletionView, isAdminAuth, loadLocation, loadPrivateProfile } from './userData'
+import { ROOT_SCRUB, clearPrivateData, deletionView, internalRef, isAdminAuth, loadLocation, loadMatching, loadPrivateProfile } from './userData'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const PAGE_SIZE = 25
@@ -341,10 +341,12 @@ export const adminUserAction = onCall(
 
     if (action === 'suspend' || action === 'unsuspend') {
       const suspend = action === 'suspend'
-      await ref.update(
+      // Suspension lives in the server-only userInternal (Stage 3).
+      await internalRef(uid).set(
         suspend
           ? { isSuspended: true, suspendedAt: FieldValue.serverTimestamp(), suspendedBy: adminUid }
           : { isSuspended: false, suspendedAt: FieldValue.delete(), suspendedBy: FieldValue.delete() },
+        { merge: true },
       )
       await log()
       return { ok: true }
@@ -389,7 +391,7 @@ export async function softDeleteAccount(
       deletedAt: now,
       birthday: priv.birthday,
       genderIdentity: user.genderIdentity ?? null,
-      matchableAs: user.matchableAs ?? [],
+      matchableAs: (await loadMatching(uid, user)).matchableAs ?? [],
       identityLockedAt: user.identityLockedAt ?? null,
       pronouns: user.pronouns ?? null,
       genderSelfDescribe: user.genderSelfDescribe ?? null,
@@ -409,7 +411,6 @@ export async function softDeleteAccount(
     deleted: true,
     isDeleted: true,
     deletedAt: now,
-    isSuspended: true,
     displayName: 'Deleted User',
     bio: '',
     photoURLs: [],

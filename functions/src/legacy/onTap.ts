@@ -7,7 +7,7 @@ import { calculateSparkScore, calculatePlayScore } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
-import { withPrivateProfile } from "../userData";
+import { loadMatching, withPrivateProfile } from "../userData";
 
 export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
@@ -25,6 +25,12 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   // Stage 2 (Play sealing): Play scores only when both people have Play
   // access, and kept in pairs/{id}/modes/play — never on the pair doc.
   const play = await bothHavePlay(tapperId, tappedId);
+  // Whether the tapped person has physical preferences to score against
+  // (Stage 3: their preferences are private; the app only needs yes/no to
+  // hide the physical categories otherwise).
+  const tappedPrefs = await loadMatching(tappedId);
+  const hasPhysicalPrefs = (Array.isArray(tappedPrefs.seekingBodyTypes) && tappedPrefs.seekingBodyTypes.length > 0) ||
+    Boolean(tappedPrefs.seekingHeightMinCm) || Boolean(tappedPrefs.seekingHeightMaxCm);
 
   // Return cached score if pair already exists
   const existing = await pairRef.get();
@@ -38,6 +44,7 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
       breakdown:  { spark: data.sparkBreakdown, ...(playScores && { play: playScores.playBreakdown }) },
       triggeredDealbreakers: data.triggeredDealbreakers ?? [],
       ...(data.tier1Spark && { tier1: data.tier1Spark }),
+      hasPhysicalPrefs,
     };
   }
 
@@ -96,5 +103,6 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
     breakdown: { spark: sparkBreakdown, ...(playResult && { play: playResult.breakdown }) },
     triggeredDealbreakers,
     tier1: sparkTier1,
+    hasPhysicalPrefs,
   };
 });

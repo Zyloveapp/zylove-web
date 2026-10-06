@@ -9,7 +9,8 @@ import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { setPlayVisibility } from "../playAccess";
-import { internalRef } from "../userData";
+import { internalRef, isSuspendedUid } from "../userData";
+import { setBlocked } from "../explore";
 
 const REPORT_TIERS = {
   spam: 1, fake_profile: 1, low_effort: 1, misleading_photos: 1, inappropriate_username: 1,
@@ -29,8 +30,7 @@ export const reportUser = onCall(LEGACY_RUNTIME, async (request) => {
   const db = admin.firestore();
   const reporterUid = request.auth.uid;
 
-  const reporterSnap = await db.collection("users").doc(reporterUid).get();
-  if (reporterSnap.data()?.isSuspended === true) {
+  if (await isSuspendedUid(reporterUid)) {
     throw new HttpsError("permission-denied", "Account suspended");
   }
 
@@ -61,18 +61,17 @@ export const reportUser = onCall(LEGACY_RUNTIME, async (request) => {
 
   const batch = db.batch();
   batch.set(db.collection("reports").doc(reportId), record);
+  // Report counts and (tier 3) the suspension: server-only (userInternal).
   batch.set(internalRef(targetUid), {
     reportCount: admin.firestore.FieldValue.increment(1),
     [`reportTier${tier}Count`]: admin.firestore.FieldValue.increment(1),
-  }, { merge: true });
-  if (tier === 3) {
-    batch.update(db.collection("users").doc(targetUid), {
+    ...(tier === 3 && {
       isSuspended: true,
       suspendedAt: admin.firestore.FieldValue.serverTimestamp(),
       suspendReason: `Tier 3 report: ${category}`,
       suspendedPendingReview: true,
-    });
-  }
+    }),
+  }, { merge: true });
   await batch.commit();
 
   return { success: true, tier };
@@ -96,11 +95,14 @@ export const requestAccountDeletion = onCall(LEGACY_RUNTIME, async (request) => 
   const snap = await userRef.get();
   if (!snap.exists) throw new HttpsError("not-found", "User not found");
 
-  await userRef.update({
+  // Suspended and the pending deletion: server-only (userInternal, Stage 3).
+  await internalRef(uid).set({
     isSuspended: true,
     deletionRequestedAt: now,
     deletionScheduledFor: scheduledFor,
     deletionReason: reason,
+  }, { merge: true });
+  await userRef.update({
     sparkVisibility: "hidden",
     playVisibility: admin.firestore.FieldValue.delete(), // lives on the Play profile (Stage 2)
   });
@@ -129,11 +131,13 @@ export const cancelAccountDeletion = onCall(LEGACY_RUNTIME, async (request) => {
   const uid = request.auth.uid;
 
   const userRef = db.collection("users").doc(uid);
-  await userRef.update({
+  await internalRef(uid).set({
     isSuspended: false,
-    deletionRequestedAt: null,
-    deletionScheduledFor: null,
-    deletionReason: null,
+    deletionRequestedAt: admin.firestore.FieldValue.delete(),
+    deletionScheduledFor: admin.firestore.FieldValue.delete(),
+    deletionReason: admin.firestore.FieldValue.delete(),
+  }, { merge: true });
+  await userRef.update({
     sparkVisibility: "active",
     playVisibility: admin.firestore.FieldValue.delete(), // lives on the Play profile (Stage 2)
   });
@@ -181,8 +185,7 @@ export const submitUnmatch = onCall(LEGACY_RUNTIME, async (request) => {
   const db = admin.firestore();
 
   // Suspension check
-  const callerSnap = await db.collection("users").doc(uid).get();
-  if (callerSnap.data()?.isSuspended === true) {
+  if (await isSuspendedUid(uid)) {
     throw new HttpsError("permission-denied", "Account suspended");
   }
 
@@ -263,11 +266,8 @@ export const blockUser = onCall(LEGACY_RUNTIME, async (request) => {
   if (!targetUid) throw new HttpsError("invalid-argument", "targetUid required");
   if (uid === targetUid) throw new HttpsError("invalid-argument", "Cannot block yourself");
 
-  const db = admin.firestore();
-
   // Suspension check
-  const callerSnap = await db.collection("users").doc(uid).get();
-  if (callerSnap.data()?.isSuspended === true) {
+  if (await isSuspendedUid(uid)) {
     throw new HttpsError("permission-denied", "Account suspended");
   }
 
@@ -302,6 +302,8 @@ export async function blockPair(uid: string, targetUid: string, matchId?: string
   }
 
   await batch.commit();
+  // Explore (Stage 3): neither is shown to the other.
+  await setBlocked(uid, targetUid, true);
 }
 
 // ─── unblockUser ──────────────────────────────────────────────────────────────
@@ -327,5 +329,6 @@ export const unblockUser = onCall(LEGACY_RUNTIME, async (request) => {
   );
 
   await batch.commit();
+  await setBlocked(uid, targetUid, false);
   return { success: true };
 });

@@ -4,6 +4,7 @@ import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { PLAY_TAG_LABELS, SPICE_META, type PlayInterestTag, type SpiceLevel } from './shared/dualProfile'
+import { isSuspendedUid } from './userData'
 
 // Demonstration profiles like back. When a real person likes a bot, the like
 // lands in the bot's like queue (users/{bot}/likeQueue/{liker}, written by
@@ -158,11 +159,13 @@ async function likeBack(pendingRef: FirebaseFirestore.DocumentReference, pending
         ])
       : [undefined, undefined]
 
+  // Suspension is in userInternal (Stage 3).
+  const likerSuspended = await isSuspendedUid(likerUid)
   const created = await db.runTransaction(async (tx) => {
     const [match, pair, bot, liker] = await Promise.all([tx.get(matchRef), tx.get(pairRef), tx.get(botRef), tx.get(likerRef)])
     tx.delete(pendingRef)
     // Already matched (the bot liked them first), or either side is gone.
-    if (match.exists || !bot.exists || !liker.exists || liker.data()?.isSuspended === true) return null
+    if (match.exists || !bot.exists || !liker.exists || likerSuspended) return null
     const botField = pair.data()?.userA === botUid ? 'userALiked' : 'userBLiked'
     tx.set(
       pairRef,

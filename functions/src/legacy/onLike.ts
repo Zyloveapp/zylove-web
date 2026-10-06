@@ -7,8 +7,9 @@ import { calculateSparkScore, calculatePlayScore } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { getToken, sendPush } from "./notifications";
 import { LEGACY_RUNTIME } from "./legacyOptions";
-import { internalRef, withPrivateProfile } from "../userData";
+import { internalRef, isSuspendedUid, withPrivateProfile } from "../userData";
 import { requirePlayAccess } from "../playAccess";
+import { markActed } from "../explore";
 import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
 
 export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
@@ -28,7 +29,7 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
     pairRef.get(), likedRef.get(), likerRef.get(),
   ]);
 
-  if (likerSnap.data()?.isSuspended === true) {
+  if (await isSuspendedUid(likerId, likerSnap.data())) {
     throw new HttpsError("permission-denied", "Account suspended");
   }
   // Stage 2: a Play like needs Play access on both sides.
@@ -93,6 +94,9 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   const otherLiked = isUserA ? pair.userBLiked : pair.userALiked;
   const likerField = isUserA ? "userALiked" : "userBLiked";
   const matched   = otherLiked;
+
+  // Explore (Stage 3): acted on in this mode — out of the liker's deck.
+  await markActed(likerId, mode as "spark" | "play", likedId);
 
   await pairRef.update({
     [likerField]: true,

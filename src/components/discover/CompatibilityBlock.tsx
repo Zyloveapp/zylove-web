@@ -76,10 +76,11 @@ function dealbreakerLabel(id: string): string {
 // Categories scored from data the viewed profile may not have filled in.
 // With nothing to score against, the server returns a neutral default, so
 // these are hidden rather than shown as a misleading number.
-function emptyCategories(p: DiscoverProfile): Set<string> {
+// Whether they have physical preferences comes from the server (onTap's
+// hasPhysicalPrefs) — their preferences are private (Stage 3).
+function emptyCategories(p: DiscoverProfile, hasPhysicalPrefs: boolean | undefined): Set<string> {
   const empty = new Set<string>()
-  const hasPhysical = (p.seekingBodyTypes?.length ?? 0) > 0 || Boolean(p.seekingHeightMinCm) || Boolean(p.seekingHeightMaxCm)
-  if (!hasPhysical) {
+  if (hasPhysicalPrefs !== true) {
     empty.add('physicalPrefs')
     empty.add('physicalCompatibility')
   }
@@ -192,7 +193,7 @@ export default function CompatibilityBlock({
         result={result}
         mode={mode}
         animate={!cached}
-        hidden={emptyCategories(profile)}
+        hidden={emptyCategories(profile, result?.hasPhysicalPrefs)}
         fullReport={fullReport}
         comparison={comparison}
         facts={myProfile ? compareProfiles(myProfile, profile) : null}

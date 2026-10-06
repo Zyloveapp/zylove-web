@@ -81,3 +81,9 @@ export function cachedDistance(uid: string): Distance | null | undefined {
   ownerCheck()
   return cache.get(uid)
 }
+
+// Distances the server already sent (the Explore deck), so labels don't ask again.
+export function primeDistances(entries: Iterable<readonly [string, Distance]>): void {
+  ownerCheck()
+  for (const [uid, d] of entries) cache.set(uid, d)
+}

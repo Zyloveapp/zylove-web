@@ -5,6 +5,7 @@ import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { loadPlayName } from './playName'
 import { connectionMode } from './behavior'
+import { setBlocked } from './explore'
 
 // Trust & safety: phone-level bans, the caller's blocked list, and
 // server-side photo consent acceptance.
@@ -142,6 +143,8 @@ export const unblockMember = onCall(
     batch.delete(db.doc(`users/${targetUid}/blockedUsers/${uid}`))
     for (const d of legacy.docs) batch.delete(d.ref)
     await batch.commit()
+    // Explore (Stage 3): they can see each other again.
+    await setBlocked(uid, targetUid, false)
     return { success: true }
   },
 )

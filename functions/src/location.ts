@@ -12,8 +12,10 @@ import { takeRateLimit } from './rateLimits'
 // userLocations/{uid} (server-only); the app asks getDistances for how far
 // away people are and gets whole miles back, never coordinates.
 
-// ~3.5 miles of latitude. Both ends of every distance are snapped to it.
-const GRID_DEG = 0.05
+// ~1 mile of latitude (Stage 3; was 0.05°, ~3.5 mi). Both ends of every
+// distance are snapped to it; locations saved before keep their coarser grid
+// until the next save.
+const GRID_DEG = 0.015
 const MAX_CHANGES_PER_DAY = 3
 const DAY_MS = 24 * 60 * 60 * 1000
 export const LOCATION_LIMIT_MESSAGE = 'You can update your location again tomorrow'
@@ -121,8 +123,17 @@ const CALL_WINDOW_MS = 10 * 60 * 1000
 const MAX_CALLS_PER_WINDOW = 120
 const UID_RE = /^[A-Za-z0-9_-]{1,128}$/
 
+// Distances as coarse labels (Stage 3, with the finer grid): 0 = under a
+// mile, whole miles to 10, then 5-mile steps to 50, then 51 = "50+".
+export function bucketMiles(miles: number): number {
+  if (miles < 1) return 0
+  if (miles <= 10) return Math.max(1, Math.round(miles))
+  if (miles <= 50) return Math.min(50, Math.ceil(miles / 5) * 5)
+  return 51
+}
+
 export interface Distance {
-  // Whole miles between the two snapped locations (0 = under a mile).
+  // Coarse miles between the two snapped locations (bucketMiles).
   miles: number
   // Both in the same launch market.
   sameMarket: boolean
@@ -171,7 +182,7 @@ export const getDistances = onCall(
       if (!them) return
       const miles = distanceMiles(me.lat, me.lng, them.lat, them.lng)
       distances[u] = {
-        miles: miles < 1 ? 0 : Math.round(miles),
+        miles: bucketMiles(miles),
         sameMarket: !!myMarket && marketFor(them)?.id === myMarket.id,
       }
     })

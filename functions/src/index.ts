@@ -51,9 +51,10 @@ export { processBotLikeBacks, queueBotLikeBack } from './botLikeBack'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
 import { ALWAYS_ELITE_IDENTITIES, marketFor, marketOpen, newTrial, planView, trialExempt } from './trial'
-import { accountRef, internalRef, isAdminAuth, loadInternal, loadLocation, loadSettings } from './userData'
+import { accountRef, internalRef, isAdminAuth, isSuspendedUid, loadInternal, loadLocation, loadSettings } from './userData'
 import { playStatus, requirePlayAccess, requirePlayEntitled } from './playAccess'
 import { loadPlayScores } from './pairPlay'
+import { markActed } from './explore'
 import { countMessages, generationOf, participants, pastConnectionId } from './matchGeneration'
 import {
   FLAG_CATEGORY_IDS,
@@ -343,16 +344,16 @@ export const generateSparkGoDeeper = onCall(
   },
 )
 
-// Defaults for new profiles. Public ones stay on users/{uid} (Explore queries
-// isSuspended == false, which never matches a missing field); the plan and
-// trust counters live in userInternal (server-only; userData.ts).
+// Defaults for new profiles. Public ones stay on users/{uid}; the plan,
+// trust counters and suspension live in userInternal (server-only;
+// userData.ts — Stage 3 moved isSuspended there).
 const PUBLIC_DEFAULTS = {
-  isSuspended: false,
   verificationStatus: 'unverified',
 } as const
 const INTERNAL_DEFAULTS = {
   reportCount: 0,
   sparkScore: 50,
+  isSuspended: false,
 } as const
 
 // Fills in whichever defaults are missing for the caller. Only missing fields
@@ -552,6 +553,9 @@ export const likeBack = onCall(
       })
       return true
     })
+
+    // Explore (Stage 3): matched — neither shows the other again in this mode.
+    await Promise.all([markActed(callerId, mode, likerUid), markActed(likerUid, mode, callerId)])
 
     // The like is consumed either way. The liker's entry for the caller may
     // not exist; delete() on a missing doc is a no-op, and a failure here
@@ -1681,7 +1685,7 @@ export const getSentSparks = onCall(
         // likeBack creates matches without flipping pairs.matched.
         if (matchSnap.exists) return null
         const user = userSnap.data()
-        if (!user || user.isSuspended === true) return null
+        if (!user || (await isSuspendedUid(otherUid, user))) return null
         const queue = queueSnap.data()
         if (queue && (queue.mode === 'play' ? 'play' : 'spark') !== mode) return null
         // Play: only people who still have Play access; scores from the Play subdoc.
@@ -1818,7 +1822,7 @@ export const getCuriousVisitors = onCall(
         mode === 'play' ? db.doc(`users/${otherUid}/playProfile/data`).get().catch(() => null) : Promise.resolve(null),
       ])
       const user = userSnap.data()
-      if (matchSnap.exists || !user || user.isSuspended === true) continue
+      if (matchSnap.exists || !user || (await isSuspendedUid(otherUid, user))) continue
       // Play visitors need a Play profile; Spark visitors a Spark one (not
       // Play-only). Covers older reveals that didn't record the mode.
       const play = playSnap?.exists ? (playSnap.data() ?? {}) : null
@@ -1853,6 +1857,7 @@ export { checkTrialStatus, onMarketOpened } from './trial'
 export { mirrorPlan } from './userData'
 export { recordTermsAcceptance } from './legal'
 export { getPhotoUrls, getReviewPdfUrl } from './photoAccess'
+export { exploreOnInternal, exploreOnLocation, exploreOnUser, exploreOnUserDoc, getExploreDeck } from './explore'
 export { playAccessOnPlan, playAccessOnPlayProfile, playAccessOnProfile } from './playAccess'
 export { actOnPlayConnection, listLockedPlayConnections } from './lockedPlay'
 export { getDistances, grantSmsConsent, recordActivity, refreshAges, setLocation } from './location'

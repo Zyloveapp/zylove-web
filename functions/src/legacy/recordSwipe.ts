@@ -5,6 +5,8 @@ import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { requirePlayAccess } from "../playAccess";
+import { isSuspendedUid } from "../userData";
+import { markActed } from "../explore";
 
 export const recordSwipe = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
@@ -31,8 +33,7 @@ export const recordSwipe = onCall(LEGACY_RUNTIME, async (request) => {
   }
 
   // Suspension check
-  const callerSnap = await db.collection("users").doc(uid).get();
-  if (callerSnap.data()?.isSuspended === true) {
+  if (await isSuspendedUid(uid)) {
     throw new HttpsError("permission-denied", "Account suspended");
   }
 
@@ -43,6 +44,8 @@ export const recordSwipe = onCall(LEGACY_RUNTIME, async (request) => {
     mode,
     timestamp: admin.firestore.Timestamp.now(),
   });
+  // Explore (Stage 3): never shown again in this mode; the deck moves on.
+  await markActed(uid, mode, targetUid);
 
   return { success: true };
 });

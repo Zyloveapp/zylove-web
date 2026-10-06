@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore'
+import { doc, onSnapshot, setDoc } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import AgeRangeSlider from './AgeRangeSlider'
 import { cityConfigPath } from '../config/cities'
 import { marketOf, subscribeAccountView } from '../services/subscription'
+import { matchingDoc, subscribeMatching, type Matching } from '../services/privateMatching'
 
 // Same choices as onboarding, plus no limit (stored as null).
 const OPTIONS: { value: string; label: string }[] = [
@@ -31,8 +32,9 @@ function toOption(v: unknown): string {
   return typeof v === 'number' && v > 0 ? String(v) : DEFAULT
 }
 
-// Settings → Discovery: max distance (users/{uid}.radiusMiles) and age range
-// (ageMin / ageMax) for the Explore feed, in both modes. During the founding
+// Settings → Discovery: max distance (radiusMiles) and age range (ageMin /
+// ageMax) for the Explore feed, in both modes — in the owner-only
+// private/matching (Stage 3). During the founding
 // period (the viewer's city hasn't filled its founding circle, or they're
 // outside every launch city) Explore ignores distance, so the control is
 // locked; it unlocks live when config/city_{id}.botsActive goes false.
@@ -53,14 +55,18 @@ export default function DiscoverySettings() {
 
   useEffect(() => {
     if (!uid) return
-    return subscribeAccountView(
-      uid,
-      (d) => {
-        const city = marketOf(d)
-        setLoaded({ uid, value: toOption(d.radiusMiles), ages: toAges(d), cityId: city?.id ?? null })
-      },
-      () => setError(true),
-    )
+    // The market from the account view; the settings from private/matching.
+    let cityId: string | null | undefined
+    let prefs: Matching | undefined
+    const emit = () => {
+      if (cityId === undefined || prefs === undefined) return
+      setLoaded({ uid, value: toOption(prefs.radiusMiles), ages: toAges(prefs), cityId })
+    }
+    const offs = [
+      subscribeAccountView(uid, (d) => ((cityId = marketOf(d)?.id ?? null), emit()), () => setError(true)),
+      subscribeMatching(uid, (m) => ((prefs = m), emit()), () => setError(true)),
+    ]
+    return () => offs.forEach((off) => off())
   }, [uid])
 
   const cityId = loaded?.uid === uid ? loaded.cityId : null
@@ -88,7 +94,7 @@ export default function DiscoverySettings() {
     saveTimer.current = setTimeout(async () => {
       setError(false)
       try {
-        await updateDoc(doc(db, 'users', uid), { ageMin: min, ageMax: max })
+        await setDoc(matchingDoc(uid), { ageMin: min, ageMax: max }, { merge: true })
       } catch {
         setError(true)
       } finally {
@@ -102,7 +108,7 @@ export default function DiscoverySettings() {
     if (founding) return
     setError(false)
     try {
-      await updateDoc(doc(db, 'users', uid), { radiusMiles: next === 'none' ? null : Number(next) })
+      await setDoc(matchingDoc(uid), { radiusMiles: next === 'none' ? null : Number(next) }, { merge: true })
     } catch {
       setError(true)
     }

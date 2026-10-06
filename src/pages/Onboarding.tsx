@@ -204,7 +204,7 @@ function isStepValid(
     case 'attractedTo':
       return d.attractedTo.length > 0
     case 'relationship':
-      return d.relationshipStatus !== null && d.openTo.length > 0
+      return d.relationshipStatus !== null // openTo is optional (F-018)
     case 'lifestyle':
       return d.lifestyleTags.length > 0
     case 'personality':

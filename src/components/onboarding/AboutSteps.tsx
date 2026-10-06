@@ -145,7 +145,7 @@ export function RelationshipStep({ draft, update }: StepProps) {
         value={draft.relationshipStatus}
         onChange={(relationshipStatus) => update({ relationshipStatus })}
       />
-      <FieldLabel hint="Select all that apply.">I'm open to…</FieldLabel>
+      <FieldLabel hint="Optional. Select all that apply.">I'm open to…</FieldLabel>
       <ChipMultiSelect options={OPEN_TO_OPTIONS} value={draft.openTo} onChange={(openTo) => update({ openTo })} />
     </div>
   )

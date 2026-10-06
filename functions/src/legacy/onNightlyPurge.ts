@@ -265,7 +265,6 @@ export const processGraceExpiredDeletions = onSchedule(
           bio:           '',
           photoURLs:     [],
           locationLabel: '',
-          isSuspended:   true,
           ...ROOT_SCRUB,
         })
         await clearPrivateData(uid)

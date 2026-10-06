@@ -31,6 +31,7 @@ import {
   SpiceStep,
 } from '../components/onboarding/PlaySteps'
 import StoredImg from '../components/StoredImg'
+import { loadMatching } from '../services/privateMatching'
 
 type SectionId =
   | 'photos'
@@ -105,21 +106,27 @@ export default function EditPlayProfile() {
   useEffect(() => {
     if (!uid) return
     let cancelled = false
-    Promise.all([loadPlayDraft(uid, selectPlayPrompts(uid).map((p) => p.id)), getDoc(doc(db, 'users', uid))])
-      .then(([saved, root]) => {
+    Promise.all([
+      loadPlayDraft(uid, selectPlayPrompts(uid).map((p) => p.id)),
+      getDoc(doc(db, 'users', uid)),
+      getDoc(doc(db, `users/${uid}/playProfile/data`)),
+      loadMatching(uid),
+    ])
+      .then(([saved, root, playSnap, matching]) => {
         if (cancelled) return
         if (!saved) return setLoaded('none')
         const data = root.data()
-        // The root doc's Play name is the real one (the profile copy is a mirror).
-        const rootName: unknown = data?.playDisplayName
-        const current = typeof rootName === 'string' && rootName ? { ...saved, playDisplayName: rootName } : saved
+        const play = playSnap.data()
+        // The Play name and its last change live on the Play profile (Stage 2);
+        // older accounts may still have the root copies.
+        const current = saved.playDisplayName ? saved : typeof data?.playDisplayName === 'string' && data.playDisplayName ? { ...saved, playDisplayName: data.playDisplayName } : saved
         setDraft(current)
         setLoaded({
           uid,
           original: current,
-          identity: { genderIdentity: data?.genderIdentity, attractedTo: data?.attractedTo },
+          identity: { genderIdentity: data?.genderIdentity, attractedTo: matching.attractedTo },
           displayName: typeof data?.displayName === 'string' ? data.displayName : '',
-          nameLockedUntil: nextNameChange(data?.playDisplayNameUpdatedAt),
+          nameLockedUntil: nextNameChange(play?.playDisplayNameUpdatedAt ?? data?.playDisplayNameUpdatedAt),
         })
       })
       .catch(() => !cancelled && setLoaded('error'))

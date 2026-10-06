@@ -87,3 +87,9 @@ export function cachedPhoto(value: string): string | null | undefined {
 export function forgetPhoto(value: string): void {
   cache.delete(value)
 }
+
+// URLs the server already signed (the Explore deck), cached like looked-up ones.
+export function primePhotoUrls(urls: Record<string, string>, expiresAt: number): void {
+  ownerCheck()
+  for (const [ref, url] of Object.entries(urls)) cache.set(ref, { url, until: expiresAt - MARGIN_MS })
+}

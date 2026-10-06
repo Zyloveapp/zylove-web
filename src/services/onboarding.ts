@@ -35,6 +35,7 @@ import { loadOwnProfile } from './profile'
 import { changeDisplayName } from './displayNames'
 import { addIdentity, loadIdentity } from './privateIdentity'
 import { loadPrivateProfile, privateProfileDoc } from './privateProfile'
+import { matchingDoc } from './privateMatching'
 
 // ─── Legal acceptance ────────────────────────────────────────────────────────
 
@@ -64,6 +65,16 @@ type ServerOnlyField =
   // Stage 2: owner-only (private/profile) — they'd reveal Play use.
   | 'intent'
   | 'openToCrossover'
+  // Stage 3: owner-only (private/matching).
+  | 'attractedTo'
+  | 'matchableAs'
+  | 'radiusMiles'
+  | 'ageMin'
+  | 'ageMax'
+  | 'drinkingHabit'
+  | 'seekingBodyTypes'
+  | 'seekingTraits'
+  | 'dealbreakers'
 
 interface GoDeeperFields {
   conflictStyle?: ConflictStyle
@@ -88,7 +99,6 @@ type OptionalRootField =
   | 'genderSelfDescribe'
   | 'pronouns'
   | 'bodyType'
-  | 'drinkingHabit'
   | 'religion'
   | 'politicalView'
   | 'parentalCurrent'
@@ -102,7 +112,6 @@ const OPTIONAL_ROOT_FIELDS: OptionalRootField[] = [
   'genderSelfDescribe',
   'pronouns',
   'bodyType',
-  'drinkingHabit',
   'religion',
   'politicalView',
   'parentalCurrent',
@@ -148,8 +157,6 @@ function required<T>(value: T | null, field: string): T {
 // (under review, slow, failed) — empty when they all passed.
 // extraPrompts: saved prompts beyond the PROMPT_COUNT a refresh shows. They're
 // kept as-is unless the draft now uses the same prompt.
-const NO_LIMIT_RADIUS_MILES = 500
-
 export async function saveSparkOnboarding(
   uid: string,
   d: OnboardingDraft,
@@ -209,7 +216,6 @@ export async function saveSparkOnboarding(
     displayName: renaming ? priorName : newName,
     age,
     ...(!identityLocked && { genderIdentity }),
-    attractedTo: d.attractedTo,
     relationshipStatus,
     openTo: d.openTo,
     heightCm,
@@ -222,10 +228,15 @@ export async function saveSparkOnboarding(
     loveLangReceive: d.loveLangReceive,
     promptAnswers,
     photoURLs,
+  } satisfies Partial<RootProfileDoc>
+  // Matching preferences: owner-only (private/matching, Stage 3).
+  const matching = {
+    attractedTo: d.attractedTo,
     radiusMiles: d.radiusMiles,
     ageMin: d.ageMin,
     ageMax: d.ageMax,
-  } satisfies Partial<RootProfileDoc>
+    drinkingHabit: d.drinkingHabit ?? deleteField(),
+  }
 
   const optional: Partial<OptionalRootFields> = {
     ...(genderIdentity === 'self_describe' && d.genderSelfDescribe.trim() && {
@@ -233,7 +244,6 @@ export async function saveSparkOnboarding(
     }),
     ...(d.pronouns.trim() && { pronouns: d.pronouns.trim() }),
     ...(d.bodyType && { bodyType: d.bodyType }),
-    ...(d.drinkingHabit && { drinkingHabit: d.drinkingHabit }),
     ...(d.religion && { religion: d.religion }),
     ...(d.politicalView && { politicalView: d.politicalView }),
     ...(d.parentalCurrent && { parentalCurrent: d.parentalCurrent }),
@@ -288,7 +298,6 @@ export async function saveSparkOnboarding(
         ...coreFields,
         ...(bio && { bio }),
         ...optional,
-        ...matchable,
         ...deletions,
         ...(keys.changed && { publicKey: keys.publicKey }),
         ...goDeeper,
@@ -302,12 +311,7 @@ export async function saveSparkOnboarding(
       ...coreFields,
       genderIdentity,
       ...optional,
-      ...matchable,
       bio,
-      // Seeking data lives in the private seekingPreferences doc, not here.
-      seekingBodyTypes: [],
-      seekingTraits: [],
-      dealbreakers: [],
       locationLabel: '',
       phoneVerified: false,
       publicKey: keys.publicKey,
@@ -318,6 +322,7 @@ export async function saveSparkOnboarding(
     batch.set(rootRef, profile)
   }
   batch.set(privateProfileDoc(uid), privateMeta, { merge: true })
+  batch.set(matchingDoc(uid), { ...matching, ...matchable }, { merge: true })
 
   const spark: SparkProfileDoc = {
     uid,
@@ -325,7 +330,6 @@ export async function saveSparkOnboarding(
     age,
     ...(optional.pronouns && { pronouns: optional.pronouns }),
     genderIdentity,
-    attractedTo: d.attractedTo,
     photoURLs,
     ...(bio && { bio }),
     promptAnswers,
@@ -336,11 +340,6 @@ export async function saveSparkOnboarding(
     intent: 'spark',
     height: heightCm,
     ...(d.bodyType && { bodyType: d.bodyType }),
-    // The Spark profile mirror needs a number; 'no limit' is stored as a
-    // radius wider than anyone's search.
-    radiusMiles: d.radiusMiles ?? NO_LIMIT_RADIUS_MILES,
-    ageMin: d.ageMin,
-    ageMax: d.ageMax,
     isActive: hasPhotos,
     completeness: computeSparkCompleteness({ ...coreFields, ...optional, bio }),
     lastUpdated: now,

@@ -12,6 +12,7 @@ import { MAX_PHOTOS, releasePhotoPreview } from '../components/onboarding/types'
 import { selectPlayPrompts } from '../types/dualProfile'
 import { PLAY_BODY_TYPE_LABELS, type PlayBodyType } from '../types/playDescriptors'
 import { nextNameChange } from '../services/displayNames'
+import { loadMatching } from '../services/privateMatching'
 import {
   MIN_PLAY_ANSWERS,
   emptyPlayDraft,
@@ -189,9 +190,10 @@ export default function PlayOnboarding() {
   useEffect(() => {
     if (!uid) return
     getDoc(doc(db, 'users', uid))
-      .then((snap) => {
+      .then(async (snap) => {
         const data = snap.data()
-        setIdentity({ genderIdentity: data?.genderIdentity, attractedTo: data?.attractedTo })
+        // attractedTo is a matching preference (owner-only, private/matching).
+        setIdentity({ genderIdentity: data?.genderIdentity, attractedTo: (await loadMatching(uid, data)).attractedTo })
         setNames({
           displayName: typeof data?.displayName === 'string' ? data.displayName : '',
           playNameLockedUntil: wantsEdit ? nextNameChange(data?.playDisplayNameUpdatedAt) : null,
