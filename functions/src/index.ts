@@ -2059,3 +2059,8 @@ export { onNightlyPurge, processGraceExpiredDeletions } from './legacy/onNightly
 export { onPhotoUpload } from './legacy/onPhotoUpload'
 export { onProfileWrite } from './legacy/onProfileWrite'
 export { claimWomenElite } from './legacy/claimWomenElite'
+// Batch (c): Explore taps and likes, swipes, blocking.
+export { onTap } from './legacy/onTap'
+export { onLike } from './legacy/onLike'
+export { recordSwipe } from './legacy/recordSwipe'
+export { blockUser, unblockUser } from './legacy/trustSafety'
