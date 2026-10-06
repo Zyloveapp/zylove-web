@@ -21,10 +21,6 @@ service firebase.storage {
       return request.resource.size <= 10 * 1024 * 1024;
     }
 
-    function isAdmin() {
-      return request.auth != null && request.auth.token.admin == true;
-    }
-
     // Set only by server-side copies (scripts/migrate-stage1b.mjs), which
     // onPhotoUpload doesn't moderate again — so clients may never set it.
     function noServerMetadata() {
@@ -34,10 +30,10 @@ service firebase.storage {
 
     // ─── Profile photos (mobile-era path) ─────────────────────────────────────
     // Path: users/{uid}/photos/{filename}
-    // Owner and admins read; other users never read files directly (F-021).
+    // No client reads (see photos/ below).
 
     match /users/{uid}/photos/{filename} {
-      allow read:   if isSignedIn() && (isUser(uid) || isAdmin());
+      allow read:   if false;
       allow create: if isUser(uid)
                     && isSignedIn()
                     && isImage()
@@ -78,13 +74,14 @@ service firebase.storage {
     // ─── Profile photos (top-level path used by app) ─────────────────────────
     // Path: photos/{uid}/{spark|play}/{filename}
     // The upload path of onboarding and the profile editors, watched by
-    // onPhotoUpload (moderation). Only the owner and admins read the files;
-    // everyone else sees a photo through a short-lived signed URL from
-    // getPhotoUrls, which checks they may (F-021). No updates: replacing a
-    // moderated photo's bytes would skip its moderation.
+    // onPhotoUpload (moderation). No client reads the files: everyone, owner
+    // and admins included, sees a photo through a short-lived signed URL from
+    // getPhotoUrls, which checks they may (F-021). (Read access would also
+    // let a client mint a permanent download-token link with getDownloadURL.)
+    // No updates: replacing a moderated photo's bytes would skip moderation.
 
     match /photos/{uid}/{mode}/{filename} {
-      allow read:   if isSignedIn() && (isUser(uid) || isAdmin());
+      allow read:   if false;
       // resource == null: a new file only (Storage treats overwriting one as
       // a create).
       allow create: if isUser(uid) && isSignedIn() && isImage() && isUnderSizeLimit()
@@ -121,10 +118,12 @@ service firebase.storage {
 
     // ─── Profile review PDFs ─────────────────────────────────────────────────
     // Path: reviews/{uid}/{mode}/{reviewId}.pdf — generated server-side by
-    // zylove-web's review functions. Only the owner can read; no client writes.
+    // zylove-web's review functions. No client reads or writes: the owner
+    // opens them through getReviewPdfUrl (short-lived signed URLs). Read
+    // access would let a client mint a permanent token link (F-033).
 
     match /reviews/{uid}/{mode}/{filename} {
-      allow read: if isSignedIn() && isUser(uid);
+      allow read: if false;
       allow write: if false;
     }
 

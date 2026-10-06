@@ -64,8 +64,9 @@ export async function planObjects(bucket) {
 // unchanged.
 export function mapValue(v, map) {
   const path = pathOf(v)
-  if (!path || !path.startsWith('photos/')) return v
-  return map.get(path) ?? path
+  if (!path) return v
+  if (map.has(path)) return map.get(path)
+  return path.startsWith('photos/') ? path : v
 }
 
 const mapList = (list, map) => (Array.isArray(list) ? list.map((v) => mapValue(v, map)) : list)

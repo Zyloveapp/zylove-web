@@ -88,3 +88,27 @@ export const getPhotoUrls = onCall(
     return { urls: Object.fromEntries(signed.filter((s): s is readonly [string, string] => s !== null)), expiresAt: expires }
   },
 )
+
+// ─── Review PDFs (F-033) ─────────────────────────────────────────────────────
+
+// A short-lived link to one of the caller's own "How's my profile?" PDFs
+// (reviews/{uid}/{mode}/{reviewId}.pdf). Replaces getDownloadURL, whose token
+// link worked for anyone who had it, forever. Admins may open any.
+const PDF_RE = /^reviews\/([^/]+)\/(spark|play)\/[A-Za-z0-9_-]+\.pdf$/
+const PDF_TTL_MS = 15 * 60 * 1000
+
+export const getReviewPdfUrl = onCall(
+  { timeoutSeconds: 20, memory: '256MiB', invoker: 'public' },
+  async (request): Promise<{ url: string }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    const path = (request.data as Record<string, unknown> | null)?.pdfPath
+    const m = typeof path === 'string' ? PDF_RE.exec(path) : null
+    if (!m || typeof path !== 'string') throw new HttpsError('invalid-argument', 'pdfPath must be a review PDF path')
+    if (m[1] !== request.auth.uid && !isAdminAuth(request.auth)) throw new HttpsError('permission-denied', 'Not your review.')
+    await takeRateLimit(request.auth.uid, 'reviewPdf', { max: 30, windowMs: 10 * 60 * 1000 })
+    const file = getStorage().bucket(defaultBucket()).file(path)
+    if (!(await file.exists())[0]) throw new HttpsError('not-found', 'That review PDF no longer exists.')
+    const [url] = await file.getSignedUrl({ version: 'v4', action: 'read', expires: Date.now() + PDF_TTL_MS })
+    return { url }
+  },
+)

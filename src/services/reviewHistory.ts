@@ -1,6 +1,6 @@
 import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore'
-import { getDownloadURL, ref } from 'firebase/storage'
-import { db, storage } from './firebase'
+import { httpsCallable } from 'firebase/functions'
+import { db, functions } from './firebase'
 import type { Mode } from '../store/modeStore'
 
 // Saved "How's my profile?" reviews (written server-side by
@@ -54,20 +54,25 @@ export async function loadReviews(uid: string, mode: Mode): Promise<SavedReview[
   })
 }
 
-// Owner-only rules are checked when the tokenized URL is issued. Opened as a
-// link (no bucket CORS needed); the browser's PDF viewer handles saving.
+// A 15-minute signed link from the server (getReviewPdfUrl checks it's the
+// caller's own review) — never a download-token URL, which would work for
+// anyone, forever. Opened as a link (no bucket CORS needed); the browser's
+// PDF viewer handles saving.
+async function reviewPdfUrl(pdfPath: string): Promise<string> {
+  const { data } = await httpsCallable<{ pdfPath: string }, { url: string }>(functions, 'getReviewPdfUrl')({ pdfPath })
+  return data.url
+}
+
 export async function downloadReviewPdf(pdfPath: string): Promise<void> {
   // Open tab immediately during user gesture — Safari requires this
   const newTab = window.open('', '_blank')
   if (!newTab) {
     // Popup blocked — fallback: try direct link
-    const url = await getDownloadURL(ref(storage, pdfPath))
-    window.location.href = url
+    window.location.href = await reviewPdfUrl(pdfPath)
     return
   }
   try {
-    const url = await getDownloadURL(ref(storage, pdfPath))
-    newTab.location.href = url
+    newTab.location.href = await reviewPdfUrl(pdfPath)
   } catch (err) {
     console.error('PDF download failed:', err)
     newTab.close()
