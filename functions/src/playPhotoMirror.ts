@@ -1,46 +1,27 @@
 import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
-import { getFirestore } from 'firebase-admin/firestore'
+import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 
 function strings(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x !== '') : []
 }
 
-function sameList(a: string[], b: string[]): boolean {
-  return a.length === b.length && a.every((x, i) => x === b[i])
-}
-
-// Play-only accounts (web onboarding's Play path) have no Spark profile, so
-// their photos live only on playProfile/data — onPhotoUpload (mobile codebase)
-// publishes approved Play photos there. Explore filters on the root doc's
-// photoURLs, so while the account stays Play-only the approved list is mirrored
-// onto users/{uid}. Once a Spark profile exists, root photoURLs are the Spark
-// photos and this leaves them alone.
-//
-// Play photos must never land on a Spark profile, so it only writes when all
-// hold: onboardingPath is 'play', there's no sparkProfile/data, and the root
-// photoURLs are empty or nothing but Play photos (this or the previous list).
+// Play photos never sit on the public root doc (Stage 2, F-004). Play-only
+// accounts used to have their Play photos mirrored onto users/{uid}.photoURLs
+// so Explore would show them; Play Explore now reads the Play profile, so
+// this does the opposite: whenever a Play profile changes, any of the
+// owner's Play photos (photos/{uid}/play/… — every user photo is a path since
+// Stage 1b) on the root doc are removed. Spark photos are never touched.
+// Kept under the old name so the deploy updates it in place.
 export const mirrorPlayOnlyPhotos = onDocumentWritten('users/{uid}/playProfile/data', async (event) => {
-  const after = event.data?.after.data()
-  if (!after) return
-  const urls = strings(after.photoURLs)
-  if (sameList(urls, strings(event.data?.before.data()?.photoURLs))) return
-
-  const userRef = getFirestore().collection('users').doc(event.params.uid)
-  const [user, spark] = await Promise.all([userRef.get(), userRef.collection('sparkProfile').doc('data').get()])
-  const data = user.data()
-  if (!data || data.onboardingPath !== 'play' || spark.exists) return
-  const root = strings(data.photoURLs)
-  if (sameList(urls, root)) return
-  const playUrls = new Set([...urls, ...strings(event.data?.before.data()?.photoURLs)])
-  if (!root.every((u) => playUrls.has(u))) {
-    logger.warn('mirrorPlayOnlyPhotos: root photoURLs hold non-Play photos, not mirroring', { uid: event.params.uid })
-    return
-  }
-
-  await userRef.update({ photoURLs: urls })
-  logger.info('mirrorPlayOnlyPhotos: root photoURLs updated', {
-    uid: event.params.uid,
-    count: urls.length,
-  })
+  const uid = event.params.uid
+  // Bots share their (public, Spark-path) photos between both profiles.
+  if (uid.startsWith('zbot-')) return
+  const userRef = getFirestore().collection('users').doc(uid)
+  const root = strings((await userRef.get()).data()?.photoURLs)
+  if (root.length === 0) return
+  const remove = root.filter((u) => u.startsWith(`photos/${uid}/play/`))
+  if (remove.length === 0) return
+  await userRef.update({ photoURLs: FieldValue.arrayRemove(...remove) })
+  logger.info('mirrorPlayOnlyPhotos: Play photos removed from the root doc', { uid, count: remove.length })
 })

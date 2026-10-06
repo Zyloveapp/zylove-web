@@ -12,7 +12,7 @@
 import * as admin from 'firebase-admin'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { LEGACY_RUNTIME } from './legacyOptions'
-import { ROOT_SCRUB, clearPrivateData } from '../userData'
+import { ROOT_SCRUB, clearPrivateData, loadPrivateProfile } from '../userData'
 
 
 
@@ -254,7 +254,7 @@ export const processGraceExpiredDeletions = onSchedule(
           displayName: userData.displayName,
           photoURLs:   userData.photoURLs ?? [],
           bio:         userData.bio ?? '',
-          intent:      userData.intent ?? 'spark',
+          intent:      (await loadPrivateProfile(uid, userData)).intent ?? 'spark',
         })
 
         // Anonymize the user doc — same anonymization shape deleteAccount uses.

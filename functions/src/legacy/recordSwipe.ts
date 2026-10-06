@@ -4,6 +4,7 @@
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { LEGACY_RUNTIME } from "./legacyOptions";
+import { requirePlayAccess } from "../playAccess";
 
 export const recordSwipe = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
@@ -19,6 +20,10 @@ export const recordSwipe = onCall(LEGACY_RUNTIME, async (request) => {
   if (!targetUid || !action || !mode) {
     throw new HttpsError("invalid-argument", "Missing required fields");
   }
+
+  if (mode !== "spark" && mode !== "play") throw new HttpsError("invalid-argument", "Invalid mode");
+  // Stage 2: swiping in Play needs Play access.
+  if (mode === "play") await requirePlayAccess(uid);
 
   const validActions = ["like", "pass", "superlike"];
   if (!validActions.includes(action)) {

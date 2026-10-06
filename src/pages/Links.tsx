@@ -7,6 +7,7 @@ import { loadChatPreview, type ChatPreview } from '../services/chatPreview'
 import ChatView from '../components/chat/ChatView'
 import NoMatches from '../components/matches/NoMatches'
 import IgnitedRow from '../components/matches/IgnitedRow'
+import LockedPlayConnections from '../components/matches/LockedPlayConnections'
 import {
   hasMessages,
   isUnread,
@@ -103,6 +104,7 @@ export default function Links() {
           <h1 className="px-4 py-5 text-2xl font-extrabold text-white">{title}</h1>
         </aside>
         <main className="h-full flex-1">
+          {mode === 'spark' && <LockedPlayConnections />}
           <NoMatches />
         </main>
       </div>
@@ -137,6 +139,7 @@ export default function Links() {
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
+            {mode === 'spark' && <LockedPlayConnections />}
             {ignited.length > 0 && (
               <IgnitedRow
                 title={isPlay ? '🔥 Entanglements' : null}

@@ -34,6 +34,7 @@ import {
 import { loadOwnProfile } from './profile'
 import { changeDisplayName } from './displayNames'
 import { addIdentity, loadIdentity } from './privateIdentity'
+import { loadPrivateProfile, privateProfileDoc } from './privateProfile'
 
 // ─── Legal acceptance ────────────────────────────────────────────────────────
 
@@ -60,6 +61,9 @@ type ServerOnlyField =
   | 'geohash'
   | 'lastActive'
   | 'birthday'
+  // Stage 2: owner-only (private/profile) — they'd reveal Play use.
+  | 'intent'
+  | 'openToCrossover'
 
 interface GoDeeperFields {
   conflictStyle?: ConflictStyle
@@ -74,7 +78,6 @@ interface OnboardingMetaFields {
   sparkVisibility: 'active' | 'hidden' | 'paused'
   onboardingComplete: true
   profileUpdatedAt: FieldValue
-  mode: 'spark' | 'play'
 }
 
 type RootProfileDoc = Omit<DatingProfile, ServerOnlyField> & GoDeeperFields & OnboardingMetaFields
@@ -219,7 +222,6 @@ export async function saveSparkOnboarding(
     loveLangReceive: d.loveLangReceive,
     promptAnswers,
     photoURLs,
-    intent,
     radiusMiles: d.radiusMiles,
     ageMin: d.ageMin,
     ageMax: d.ageMax,
@@ -258,12 +260,16 @@ export async function saveSparkOnboarding(
           : 'active',
     onboardingComplete: true,
     profileUpdatedAt: serverTimestamp(),
-    mode: intent === 'play' ? 'play' : 'spark',
   }
 
-  // First onboarding only; a refresh leaves the original answers alone.
-  const intention =
-    d.onboardingPath !== null ? { intentionAnswers: d.intentionAnswers, onboardingPath: d.onboardingPath } : {}
+  // Owner-only (private/profile, Stage 2): which modes, the current mode and
+  // the intention answers — the intention ones on the first onboarding only
+  // (a refresh leaves the original answers alone).
+  const privateMeta = {
+    intent,
+    mode: intent === 'play' ? 'play' : 'spark',
+    ...(d.onboardingPath !== null && { intentionAnswers: d.intentionAnswers, onboardingPath: d.onboardingPath }),
+  }
 
   // Spark Go Deeper answers (answered ones only), on the root and Spark docs.
   const goDeeper = { goDeeper: answeredGoDeeper(d) }
@@ -285,7 +291,6 @@ export async function saveSparkOnboarding(
         ...matchable,
         ...deletions,
         ...(keys.changed && { publicKey: keys.publicKey }),
-        ...intention,
         ...goDeeper,
         ...meta,
       },
@@ -299,7 +304,6 @@ export async function saveSparkOnboarding(
       ...optional,
       ...matchable,
       bio,
-      openToCrossover: false,
       // Seeking data lives in the private seekingPreferences doc, not here.
       seekingBodyTypes: [],
       seekingTraits: [],
@@ -308,12 +312,12 @@ export async function saveSparkOnboarding(
       phoneVerified: false,
       publicKey: keys.publicKey,
       createdAt: now,
-      ...intention,
       ...goDeeper,
       ...meta,
     }
     batch.set(rootRef, profile)
   }
+  batch.set(privateProfileDoc(uid), privateMeta, { merge: true })
 
   const spark: SparkProfileDoc = {
     uid,
@@ -485,7 +489,7 @@ export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null
     seekingTraits: arr(s.seekingTraits),
     // Root dealbreakers (mobile) plus the private prefs (web).
     dealbreakers: arr(own.dealbreakers),
-    intent: str(p.intent),
+    intent: str((await loadPrivateProfile(uid, p)).intent),
     radiusMiles: p.radiusMiles === null ? null : num(p.radiusMiles, INITIAL_DRAFT.radiusMiles ?? 25),
     ageMin: num(p.ageMin, INITIAL_DRAFT.ageMin),
     ageMax: num(p.ageMax, INITIAL_DRAFT.ageMax),

@@ -29,6 +29,7 @@ export default function ReportModal({
   name,
   onClose,
   mode,
+  send,
 }: {
   matchId: string
   // Which match between these two (MatchEntry.startedAt); 0 if unknown.
@@ -38,6 +39,8 @@ export default function ReportModal({
   onClose: () => void
   // The connection's mode (Play: red Done button); defaults to the current mode.
   mode?: Mode
+  // Sends the report another way (a hidden Play connection: by match only).
+  send?: (categories: string[]) => Promise<void>
 }) {
   const currentMode = useModeStore((s) => s.mode)
   const accentBg = (mode ?? currentMode) === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
@@ -63,7 +66,7 @@ export default function ReportModal({
     setSubmitting(true)
     setError(null)
     try {
-      await submitReport(matchId, generation, partnerUid, selected)
+      await (send ? send(selected) : submitReport(matchId, generation, partnerUid, selected))
       setDone(true)
     } catch (err) {
       setError(reportError(err))

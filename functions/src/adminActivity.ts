@@ -15,7 +15,7 @@ import { getNearestCity } from './cities'
 import { claimFounderSpot, type FounderResult } from './founders'
 import { revokeFounderStatus } from './founderActivity'
 import { SMS_SECRETS } from './sms'
-import { ROOT_SCRUB, clearPrivateData, deletionView, isAdminAuth, loadLocation } from './userData'
+import { ROOT_SCRUB, clearPrivateData, deletionView, isAdminAuth, loadLocation, loadPrivateProfile } from './userData'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const PAGE_SIZE = 25
@@ -396,7 +396,7 @@ export async function softDeleteAccount(
       displayName: user.displayName ?? '',
       photoURLs: user.photoURLs ?? [],
       bio: user.bio ?? '',
-      mode: user.mode ?? 'spark',
+      mode: (await loadPrivateProfile(uid, user)).mode ?? 'spark',
       isFounder: false,
       subscriptionTier: priv.subscriptionTier,
       reportCount: priv.reportCount,

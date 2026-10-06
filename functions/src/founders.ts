@@ -288,7 +288,9 @@ export const onLaunchConfigUpdated = onDocumentUpdated(
     for (let i = 0; i < bots.docs.length; i += 400) {
       const batch = db.batch()
       for (const doc of bots.docs.slice(i, i + 400)) {
-        batch.update(doc.ref, { sparkVisibility: 'hidden', playVisibility: 'hidden' })
+        batch.update(doc.ref, { sparkVisibility: 'hidden', playVisibility: FieldValue.delete() })
+        // Play visibility lives on the Play profile (Stage 2).
+        batch.set(doc.ref.collection('playProfile').doc('data'), { playVisibility: 'hidden' }, { merge: true })
       }
       await batch.commit()
     }

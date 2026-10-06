@@ -7,7 +7,9 @@ import { calculateSparkScore, calculatePlayScore } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { getToken, sendPush } from "./notifications";
 import { LEGACY_RUNTIME } from "./legacyOptions";
-import { internalRef } from "../userData";
+import { internalRef, withPrivateProfile } from "../userData";
+import { requirePlayAccess } from "../playAccess";
+import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
 
 export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
@@ -15,7 +17,7 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   const db      = admin.firestore();
   const likerId = request.auth.uid;
   const likedId: string = request.data.likedUserId;
-  const mode: string    = request.data.mode ?? "spark";
+  const mode: string    = request.data.mode === "play" ? "play" : "spark";
 
   const pid      = pairId(likerId, likedId);
   const pairRef  = db.collection("pairs").doc(pid);
@@ -28,6 +30,12 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
 
   if (likerSnap.data()?.isSuspended === true) {
     throw new HttpsError("permission-denied", "Account suspended");
+  }
+  // Stage 2: a Play like needs Play access on both sides.
+  const play = await bothHavePlay(likerId, likedId);
+  if (mode === "play") {
+    await requirePlayAccess(likerId);
+    if (!play) throw new HttpsError("failed-precondition", "That profile isn't available in Play.");
   }
 
   let pair: PairDoc;
@@ -46,15 +54,16 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
       db.collection("users").doc(likedId).collection("playProfile").doc("data").get().catch(() => null),
     ]);
 
-    const likerDoc = likerSnap.data() as UserDoc;
-    const likedDoc = likedUserSnap.data() as UserDoc;
+    // Scoring compares intents, which live in the owner-only private/profile (Stage 2).
+    const likerDoc = await withPrivateProfile(likerId, likerSnap.data() ?? {}) as UserDoc;
+    const likedDoc = await withPrivateProfile(likedId, likedUserSnap.data() ?? {}) as UserDoc;
     const likerPlay = likerPlaySnap?.exists ? likerPlaySnap.data() ?? {} : {};
     const likedPlay = likedPlaySnap?.exists ? likedPlaySnap.data() ?? {} : {};
     const likerFull = { ...likerDoc, ...likerPlay, playProfile: likerPlay } as UserDoc;
     const likedFull = { ...likedDoc, ...likedPlay, playProfile: likedPlay } as UserDoc;
 
     const { score: sparkScore, breakdown: sparkBreakdown, triggeredDealbreakers, tier1: sparkTier1 } = calculateSparkScore(likerDoc,  likedDoc);
-    const { score: playScore,  breakdown: playBreakdown, tier1: playTier1 } = calculatePlayScore(likerFull, likedFull);
+    const playResult = play ? calculatePlayScore(likerFull, likedFull) : null;
 
     const [userA, userB] = [likerId, likedId].sort();
 
@@ -65,11 +74,8 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
       initiatedBy:       likerId,
       sparkScore,
       sparkBreakdown,
-      playScore,
-      playBreakdown,
       triggeredDealbreakers,
       ...(sparkTier1 && { tier1Spark: sparkTier1 }),
-      ...(playTier1 && { tier1Play: playTier1 }),
       scoreCalculatedAt: admin.firestore.Timestamp.now(),
       scoreVersion:      1,
       userALiked:        false,
@@ -78,7 +84,9 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
     };
 
     await pairRef.set(pair);
+    if (playResult) await setPlayScores(pid, playFields(playResult.score, playResult.breakdown, playResult.tier1));
   }
+  const playScores = mode === "play" ? await loadPlayScores(pid, pair) : undefined;
 
   const likedUser = likedUserSnap.data() as UserDoc;
   const isUserA   = pair.userA === likerId;
@@ -114,26 +122,39 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   // says "consume on match," and writing unconditionally keeps the
   // logic symmetric with the not-matched path.
   const likerDataForQueue = (likerSnap.data() ?? {}) as any;
+  // A Play like shows the liker's Play profile — never their Spark one.
+  const likerPlay = mode === "play"
+    ? (await db.doc(`users/${likerId}/playProfile/data`).get()).data() ?? {}
+    : null;
   await db.doc(`users/${likedId}/likeQueue/${likerId}`).set({
     likerUid:              likerId,
     likedAt:               Date.now(),
-    compatibilityScore:    mode === "play" ? (pair.playScore ?? 0) : (pair.sparkScore ?? 0),
-    dealbreakersTriggered: pair.triggeredDealbreakers ?? [],
+    compatibilityScore:    mode === "play" ? (playScores?.playScore ?? 0) : (pair.sparkScore ?? 0),
+    dealbreakersTriggered: mode === "play" ? [] : (pair.triggeredDealbreakers ?? []),
     istopPicks:            false,
     breakdown:             mode === "play"
-      ? (pair.playBreakdown ?? {})
+      ? (playScores?.playBreakdown ?? {})
       : (pair.sparkBreakdown ?? {}),
     dismissed:             false,
     isExpired:             false,
     action:                "like",
     mode,
-    likerProfile: {
+    likerProfile: likerPlay ? {
+      displayName:        likerPlay.playDisplayName ?? likerDataForQueue.playDisplayName ?? "",
+      age:                likerDataForQueue.age ?? 0,
+      photoURL:           likerPlay.photoURLs?.[0] ?? null,
+      photoURLs:          likerPlay.photoURLs ?? [],
+      bio:                likerPlay.playBio ?? "",
+      spiceLevel:         likerPlay.spiceLevel ?? null,
+      playInterestTags:   likerPlay.playInterestTags ?? [],
+      verificationStatus: likerDataForQueue.verificationStatus ?? "unverified",
+    } : {
       displayName:        likerDataForQueue.displayName    ?? "",
       age:                likerDataForQueue.age            ?? 0,
       photoURL:           likerDataForQueue.photoURLs?.[0] ?? null,
       photoURLs:          likerDataForQueue.photoURLs      ?? [],
       locationLabel:      likerDataForQueue.locationLabel  ?? "",
-      intent:             likerDataForQueue.intent         ?? mode,
+      intent:             mode, // never the liker's own intent (it would reveal Play use)
       verificationStatus: likerDataForQueue.verificationStatus ?? "unverified",
       bio:                likerDataForQueue.bio            ?? "",
       personalityTraits:  likerDataForQueue.personalityTraits  ?? [],
@@ -158,8 +179,14 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
     // UI (animation + Threads row) can render name/photo without a live
     // cross-user fetch.
     const likerSnap = await db.collection("users").doc(likerId).get();
-    const likerData = (likerSnap.data() ?? {}) as any;
-    const likedData = (likedUser ?? {}) as any;
+    // A Play match snapshots both Play identities (name, first Play photo).
+    const playOf = async (uid: string) =>
+      mode === "play" ? ((await db.doc(`users/${uid}/playProfile/data`).get()).data() ?? {}) : null;
+    const [likerP, likedP] = await Promise.all([playOf(likerId), playOf(likedId)]);
+    const withPlay = (root: any, p: any) =>
+      p ? { ...root, displayName: p.playDisplayName ?? root.playDisplayName ?? "Someone new", photoURLs: p.photoURLs ?? [] } : root;
+    const likerData = withPlay(likerSnap.data() ?? {}, likerP);
+    const likedData = withPlay(likedUser ?? {}, likedP);
 
     await matchRef.set({
       matchId,
@@ -189,8 +216,8 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
       hasUnread:          false,
       isBlocked:          false,
       isBot:              (pair as any).isBot === true,
-      sparkScore:         pair.sparkScore ?? 0,
-      playScore:          pair.playScore  ?? 0,
+      // Only this mode's score (Stage 2: no Play data on Spark matches).
+      ...(mode === "play" ? { playScore: playScores?.playScore ?? 0 } : { sparkScore: pair.sparkScore ?? 0 }),
       revealViewedAt:     null,
       revealViewedBy:     [],
       lastMessage:        null,

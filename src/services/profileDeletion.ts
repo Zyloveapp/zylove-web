@@ -1,6 +1,7 @@
 import { deleteDoc, deleteField, doc, getDoc, setDoc, updateDoc, writeBatch } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
+import { loadPrivateProfile, privateProfileDoc, savePrivateProfile } from './privateProfile'
 
 // Deleting one mode's profile keeps the account and the other mode. Each
 // returns whether the other profile exists, which decides where the user
@@ -27,7 +28,8 @@ async function hasSparkProfile(uid: string): Promise<boolean> {
   if ((await getDoc(doc(db, `users/${uid}/sparkProfile/data`))).exists()) return true
   // Mobile-created profiles may only have the root doc.
   const root = (await getDoc(doc(db, 'users', uid))).data()
-  return root?.onboardingPath !== 'play' && Array.isArray(root?.photoURLs) && root.photoURLs.length > 0
+  const path = (await loadPrivateProfile(uid, root)).onboardingPath
+  return path !== 'play' && Array.isArray(root?.photoURLs) && root.photoURLs.length > 0
 }
 
 // Spark lives on the root doc (plus sparkProfile/data). Identity (name, age,
@@ -39,9 +41,8 @@ export async function deleteSparkProfile(uid: string): Promise<{ playRemains: bo
   batch.update(doc(db, 'users', uid), {
     sparkVisibility: 'hidden',
     bio: deleteField(),
-    // Explore reads root photoURLs; a Play-only account shows its Play photos
-    // there (mirrorPlayOnlyPhotos only syncs when the Play profile changes).
-    photoURLs: remainingPlayPhotos ?? [],
+    // Spark photos only — Play photos never sit on the public doc (Stage 2).
+    photoURLs: [],
     promptAnswers: [],
     personalityTraits: [],
     relationshipValues: [],
@@ -53,10 +54,12 @@ export async function deleteSparkProfile(uid: string): Promise<{ playRemains: bo
     openTo: [],
     heightCm: deleteField(),
     bodyType: deleteField(),
-    // With Play left they become Play-only (in Play Explore only, launched
-    // straight into Play). With nothing left, onboarding starts over.
-    ...(playRemains ? { onboardingPath: 'play', intent: 'play' } : { onboardingComplete: false }),
+    // With nothing left, onboarding starts over.
+    ...(!playRemains && { onboardingComplete: false }),
   })
+  // With Play left they become Play-only (in Play Explore only, launched
+  // straight into Play) — recorded in the owner-only private/profile.
+  if (playRemains) batch.set(privateProfileDoc(uid), { onboardingPath: 'play', intent: 'play', mode: 'play' }, { merge: true })
   batch.delete(doc(db, `users/${uid}/sparkProfile/data`))
   await batch.commit()
   // Spark photos still in review go too (the rules let the owner only empty
@@ -66,33 +69,12 @@ export async function deleteSparkProfile(uid: string): Promise<{ playRemains: bo
   return { playRemains }
 }
 
-const PLAY_ROOT_FIELDS = [
-  'spiceLevel',
-  'playInterestTags',
-  'playNonNegotiables',
-  'playBio',
-  'playPromptAnswers',
-  'playGoDeeper',
-  'typePreferences',
-  'playBodyHair',
-  'playGrooming',
-  'playEnergy',
-  'playHeight',
-  'playBodyType',
-] as const
-
+// Play lives in playProfile/data alone (Stage 2); deleting it removes it.
 export async function deletePlayProfile(uid: string): Promise<{ sparkRemains: boolean }> {
   const sparkRemains = await hasSparkProfile(uid)
   await deleteDoc(doc(db, `users/${uid}/playProfile/data`))
-  await updateDoc(doc(db, 'users', uid), {
-    ...Object.fromEntries(PLAY_ROOT_FIELDS.map((f) => [f, deleteField()])),
-    playVisibility: 'hidden',
-    // Root photoURLs are the Spark photos — unless this was a Play-only
-    // account, where they were the mirrored Play photos.
-    ...(sparkRemains
-      ? { onboardingPath: 'spark', intent: 'spark' }
-      : { onboardingComplete: false, photoURLs: [] }),
-  })
+  await savePrivateProfile(uid, sparkRemains ? { onboardingPath: 'spark', intent: 'spark', mode: 'spark' } : {})
+  if (!sparkRemains) await updateDoc(doc(db, 'users', uid), { onboardingComplete: false })
   await deletePhotoFolder('play')
   return { sparkRemains }
 }

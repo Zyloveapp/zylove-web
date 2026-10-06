@@ -3,8 +3,10 @@ import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 
 // Changing a public name after it's first set goes through here: the
 // Firestore rules stop clients changing users/{uid}.displayName or
-// .playDisplayName once set (and stop them touching the timestamps), so the
-// 30-day limit can't be skipped by writing directly.
+// playProfile/data.playDisplayName once set (and stop them touching the
+// timestamps), so the 30-day limit can't be skipped by writing directly.
+// Spark's name lives on the root doc (mirrored to sparkProfile/data); Play's
+// on the Play profile (Stage 2 — no Play data on the public doc).
 
 const CHANGE_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000
 // Letters (any language), numbers, and single spaces, hyphens or apostrophes
@@ -44,8 +46,10 @@ export const updateDisplayName = onCall(
       const [userSnap, mirrorSnap] = await Promise.all([tx.get(userRef), tx.get(mirrorRef)])
       const user = userSnap.data()
       if (!user) throw new HttpsError('failed-precondition', 'Profile not found')
-      if (user[fields.name] === name) return
-      const last = millis(user[fields.updatedAt])
+      // Play: the Play profile's copies, else (not migrated yet) the root's.
+      const src = mode === 'play' ? { ...user, ...Object.fromEntries(Object.entries(mirrorSnap.data() ?? {}).filter(([k]) => k === fields.name || k === fields.updatedAt)) } : user
+      if (src[fields.name] === name) return
+      const last = millis(src[fields.updatedAt])
       if (last !== null && Date.now() - last < CHANGE_INTERVAL_MS) {
         const next = new Date(last + CHANGE_INTERVAL_MS).toLocaleDateString('en-US', {
           month: 'long',
@@ -57,6 +61,14 @@ export const updateDisplayName = onCall(
           'failed-precondition',
           `Display name can only be changed once every 30 days. Next change available: ${next}`,
         )
+      }
+      if (mode === 'play') {
+        if (!mirrorSnap.exists) throw new HttpsError('failed-precondition', 'No Play profile')
+        tx.update(mirrorRef, { playDisplayName: name, playDisplayNameUpdatedAt: FieldValue.serverTimestamp() })
+        if (user.playDisplayName !== undefined || user.playDisplayNameUpdatedAt !== undefined) {
+          tx.update(userRef, { playDisplayName: FieldValue.delete(), playDisplayNameUpdatedAt: FieldValue.delete() })
+        }
+        return
       }
       tx.update(userRef, { [fields.name]: name, [fields.updatedAt]: FieldValue.serverTimestamp() })
       // Keep the profile subdoc's copy in step (views read the root first).

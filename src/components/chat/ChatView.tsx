@@ -115,10 +115,16 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   // A Play chat shows their Play name and photo — never the Spark ones an
   // older snapshot may hold (blank while loading, 'Someone' with no name).
   const playIdentity = usePlayIdentity(partnerUid, entry.mode === 'play')
+  // Their Play profile can't be read (they don't have Play access right now,
+  // Stage 2): a neutral "not available" state — the snapshot name, no photo,
+  // no composer. The conversation is kept; it comes back with their access.
+  const partnerUnavailable = playIdentity?.unavailable === true
   const match: MatchEntry =
     playIdentity === null
       ? entry
-      : { ...entry, name: playIdentity?.name || (playIdentity ? 'Someone' : ''), photoURL: playIdentity?.photoURL ?? null }
+      : partnerUnavailable
+        ? { ...entry, photoURL: null }
+        : { ...entry, name: playIdentity?.name || (playIdentity ? 'Someone' : ''), photoURL: playIdentity?.photoURL ?? null }
   // The header says "Nearby" under NEARBY_MILES, and nothing otherwise.
   const miles = useDistanceMiles(partnerUid)
   const nearby = miles !== null && miles < NEARBY_MILES
@@ -740,6 +746,8 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
         )}
         {match.ended ? (
           <p className="py-2 text-center text-sm text-white/40">This connection has ended.</p>
+        ) : partnerUnavailable ? (
+          <p className="py-2 text-center text-sm text-white/40">This connection isn't available right now.</p>
         ) : (
           <>
             {text.length >= COUNTER_FROM && (

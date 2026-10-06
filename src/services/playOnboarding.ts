@@ -31,6 +31,7 @@ import {
   type TypePreferences,
 } from '../types/playDescriptors'
 import { parseBirthday, type OnboardingDraft, type PhotoDraft } from '../components/onboarding/types'
+import { loadPrivateProfile, privateProfileDoc } from './privateProfile'
 
 export type PlayTagCategory = 'arrangement' | 'acts' | 'dynamic' | 'vibe' | 'place'
 
@@ -192,8 +193,10 @@ export async function generatePlayGoDeeper(d: PlayDraft): Promise<GoDeeperResult
 // to playProfile/data, which must exist first). Resolves with notices for
 // photos that didn't publish — empty when they all passed. Prompt answers go out in both shapes: the playPromptAnswers map, and
 // the promptAnswers array that mobile and the web profile view read.
-// Editing (keepIntent) leaves the root intent alone: a Play-only mobile user
-// must not be switched to 'open' just by updating their Play profile.
+// Play profile data lives only in playProfile/data (Stage 2: nothing Play on
+// the public doc); the intent in the owner-only private/profile. Editing
+// (keepIntent) leaves the intent alone: a Play-only user must not be
+// switched to 'open' just by updating their Play profile.
 // onProgress: what the save is doing, for the button label.
 export async function savePlayOnboarding(
   uid: string,
@@ -213,7 +216,7 @@ export async function savePlayOnboarding(
   // The first Play name is written directly; changing it afterwards goes
   // through updateDisplayName (30-day limit — the rules refuse a direct
   // change), after the rest is saved.
-  const priorName: unknown = root.data()?.playDisplayName
+  const priorName: unknown = existing.data()?.playDisplayName ?? root.data()?.playDisplayName
   const playName = d.playDisplayName.trim()
   const renaming = typeof priorName === 'string' && priorName !== '' && priorName !== playName
   const nameFields = playName && !renaming ? { playDisplayName: playName } : {}
@@ -240,20 +243,7 @@ export async function savePlayOnboarding(
     },
     { merge: true },
   )
-  // Mirrors mobile's Play onboarding: mobile Discover and profile cards read
-  // these Play fields from the root doc, not the playProfile subcollection.
-  batch.update(doc(db, 'users', uid), {
-    ...(!keepIntent && { intent: 'open' }),
-    ...nameFields,
-    spiceLevel: d.spiceLevel,
-    playInterestTags: d.tags,
-    playNonNegotiables: d.nonNegotiables,
-    playBio: bio,
-    playPromptAnswers: prompts,
-    ...descriptorFields(d),
-    playGoDeeper: answeredGoDeeper(d),
-    profileUpdatedAt: serverTimestamp(),
-  })
+  if (!keepIntent) batch.set(privateProfileDoc(uid), { intent: 'open' }, { merge: true })
   await batch.commit()
 
   const { notices } = await uploadModeratedPhotos(uid, 'play', newPhotos, photoProgress(onProgress))
@@ -263,9 +253,10 @@ export async function savePlayOnboarding(
 
 // Play-only onboarding (the Play path in /onboarding): no Spark profile. The
 // root doc gets identity, discovery settings and the minimum Spark fields
-// mobile and scoring expect, hidden from Spark; trust/trial fields come from
-// initUserDefaults (rules reject client writes to them). Root photoURLs are
-// filled by mirrorPlayOnlyPhotos once moderation approves the Play photos.
+// scoring expects, hidden from Spark — nothing Play (Stage 2): the Play
+// profile goes to playProfile/data, the path/mode/intent to the owner-only
+// private/profile. Trust/trial fields come from initUserDefaults (rules
+// reject client writes to them).
 const NO_LIMIT_RADIUS_MILES = 500
 
 export async function savePlayOnlyOnboarding(
@@ -305,7 +296,7 @@ export async function savePlayOnlyOnboarding(
   const priorSparkName: unknown = data?.displayName
   const renamingSpark = typeof priorSparkName === 'string' && priorSparkName !== '' && priorSparkName !== sparkName
   const playName = play.playDisplayName.trim()
-  const priorPlayName: unknown = data?.playDisplayName
+  const priorPlayName: unknown = existingPlay.data()?.playDisplayName ?? data?.playDisplayName
   const renamingPlay = typeof priorPlayName === 'string' && priorPlayName !== '' && priorPlayName !== playName
 
   const batch = writeBatch(db)
@@ -327,24 +318,8 @@ export async function savePlayOnlyOnboarding(
       ageMax: d.ageMax,
       relationshipStatus: 'prefer_not_to_say',
       openTo: [],
-      intent: 'open',
-      intentionAnswers: d.intentionAnswers,
-      onboardingPath: 'play',
       onboardingComplete: true,
-      mode: 'play',
       sparkVisibility: 'hidden',
-      playVisibility: 'active',
-      openToCrossover: false,
-      // Mirrors mobile's Play onboarding: mobile Discover and profile cards
-      // read these Play fields from the root doc.
-      ...(playName && !renamingPlay && { playDisplayName: playName }),
-      spiceLevel: play.spiceLevel,
-      playInterestTags: play.tags,
-      playNonNegotiables: play.nonNegotiables,
-      playBio: bio,
-      playPromptAnswers: prompts,
-      ...descriptorFields(play),
-      playGoDeeper: answeredGoDeeper(play),
       profileUpdatedAt: serverTimestamp(),
       ...((keys.changed || !existing.exists()) && { publicKey: keys.publicKey }),
       ...(!existing.exists() && { photoURLs: [], locationLabel: '', phoneVerified: false, createdAt: now }),
@@ -373,6 +348,11 @@ export async function savePlayOnlyOnboarding(
       lastUpdated: now,
       ...(!existingPlay.exists() && { photoURLs: [], createdAt: now }),
     },
+    { merge: true },
+  )
+  batch.set(
+    privateProfileDoc(uid),
+    { intent: 'open', intentionAnswers: d.intentionAnswers, onboardingPath: 'play', mode: 'play' },
     { merge: true },
   )
   // Owner-only (users/{uid}/private/identity): legal name once, birthday
@@ -413,8 +393,7 @@ export async function needsPlayTrialWelcome(uid: string): Promise<boolean> {
 // Play-only: chose the Play path, finished Play, and never built a Spark
 // profile. Everyone else (missing or other onboardingPath) is a Spark user.
 export async function isPlayOnlyUser(uid: string): Promise<boolean> {
-  const user = await getDoc(doc(db, 'users', uid))
-  if (user.data()?.onboardingPath !== 'play') return false
+  if ((await loadPrivateProfile(uid)).onboardingPath !== 'play') return false
   const [play, spark] = await Promise.all([
     getDoc(doc(db, `users/${uid}/playProfile/data`)),
     getDoc(doc(db, `users/${uid}/sparkProfile/data`)),

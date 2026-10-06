@@ -74,7 +74,7 @@ async function phoneOf(uid: string): Promise<string | null> {
 // Records (or merges into) the reporter's report for this match generation.
 // Queue only — nothing happens to the reported account. Throws HttpsErrors
 // with messages meant for the reporter.
-async function recordReport(input: {
+export async function recordReport(input: {
   reporterUid: string
   reportedUid: string
   matchId: string
@@ -139,7 +139,7 @@ async function recordReport(input: {
 
 }
 
-function parseCategories(data: unknown): string[] {
+export function parseCategories(data: unknown): string[] {
   const raw = (data as Record<string, unknown> | null)?.categories
   if (!Array.isArray(raw)) throw new HttpsError('invalid-argument', 'Pick what happened.')
   return raw.filter((c): c is string => typeof c === 'string').slice(0, 24)

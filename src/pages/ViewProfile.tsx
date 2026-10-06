@@ -128,7 +128,7 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
             matchId: result.matchId,
             theirUid: targetUid,
             theirName:
-              (viewMode === 'play' ? playNameOf(current.data.profile, play) : current.data.profile.displayName) || 'Someone',
+              (viewMode === 'play' ? playNameOf(play, current.data.profile) : current.data.profile.displayName) || 'Someone',
             // Play: their Play photo only.
             theirPhoto: (viewMode === 'play' ? play?.photoURLs[0] : current.data.profile.photoURLs?.[0]) ?? null,
             mode: viewMode,

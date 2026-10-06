@@ -1,6 +1,7 @@
 import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
+import { getStorage } from 'firebase-admin/storage'
 import { FieldValue, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 
 // Where a user's non-public data lives (Stage 1a). users/{uid} is readable by
@@ -33,6 +34,8 @@ export const accountRef = (uid: string): DocumentReference => db().doc(`users/${
 export const settingsRef = (uid: string): DocumentReference => db().doc(`users/${uid}/private/settings`)
 export const identityRef = (uid: string): DocumentReference => db().doc(`users/${uid}/private/identity`)
 export const locationRef = (uid: string): DocumentReference => db().doc(`userLocations/${uid}`)
+// Stage 2: owner-only profile metadata that would reveal Play use.
+export const profileRef = (uid: string): DocumentReference => db().doc(`users/${uid}/private/profile`)
 
 // The plan: written to userInternal only; mirrored to private/account.
 export const PLAN_FIELDS = ['subscriptionTier', 'subscriptionStatus', 'trialStartedAt', 'trialEndsAt', 'trialExpired'] as const
@@ -59,6 +62,28 @@ export const LOCATION_FIELDS = ['locationLat', 'locationLng', 'locationUpdatedAt
 // Gone for good (no new home): geohash and the raw-GPS _location map.
 // isAdmin became the admin auth claim; phoneNumber stays in Firebase Auth.
 export const DROPPED_FIELDS = ['geohash', '_location', 'isAdmin', 'phoneNumber'] as const
+
+// Stage 2 (Play sealing). Play profile fields move to playProfile/data;
+// metadata that reveals Play use (which modes, the current mode, Play-leaning
+// intentions) to the owner-only private/profile.
+export const PLAY_ROOT_FIELDS = [
+  'playDisplayName', 'playDisplayNameUpdatedAt', 'playVisibility', 'spiceLevel', 'playInterestTags', 'playNonNegotiables',
+  'playBio', 'playPromptAnswers', 'playGoDeeper', 'typePreferences', 'playBodyType', 'playHeight', 'playBodyHair',
+  'playGrooming', 'playEnergy', 'playStyle', 'playPassExpiresAt', 'openToCrossover',
+] as const
+export const PRIVATE_PROFILE_FIELDS = ['intent', 'onboardingPath', 'mode', 'intentionAnswers'] as const
+
+// The owner's private profile metadata, root-doc copies as fallback.
+export async function loadPrivateProfile(uid: string, root?: DocumentData): Promise<DocumentData> {
+  const [p, r] = await Promise.all([profileRef(uid).get(), root ? Promise.resolve(root) : userRef(uid).get().then((s) => s.data())])
+  return withFallback(p.data(), r, PRIVATE_PROFILE_FIELDS)
+}
+
+// A root doc with the private profile metadata merged back in — for scoring,
+// which compares intents, server-side only.
+export async function withPrivateProfile(uid: string, root: DocumentData): Promise<DocumentData> {
+  return { ...root, ...(await loadPrivateProfile(uid, root)) }
+}
 
 // A doc's fields, falling back to the root doc's old copies for any of
 // `fields` the new doc doesn't have yet (accounts not migrated).
@@ -108,7 +133,8 @@ export const mirrorPlan = onDocumentWritten({ document: 'userInternal/{uid}', me
   const { uid } = event.params
   if (!after) return
   const changed = (f: string) => JSON.stringify(before[f] ?? null) !== JSON.stringify(after[f] ?? null)
-  const fields = [...PLAN_FIELDS]
+  // The plan, and (Stage 2) the Play flags — so the app knows its own Play access.
+  const fields = [...PLAN_FIELDS, 'playEntitled', 'playAccess', 'playAccessUntil']
   const billing = typeof after.stripeCustomerId === 'string' && after.stripeCustomerId !== ''
   const billingBefore = typeof before.stripeCustomerId === 'string' && before.stripeCustomerId !== ''
   if (!fields.some(changed) && billing === billingBefore && event.data?.before.exists) return
@@ -134,7 +160,7 @@ export function isAdminAuth(auth: { token?: Record<string, unknown> } | undefine
 // Every moved or dropped field, as deletes — so an anonymised root doc keeps
 // none of them (older docs may still carry copies).
 export const ROOT_SCRUB: Record<string, FieldValue> = Object.fromEntries(
-  [...INTERNAL_FIELDS, ...ACCOUNT_FIELDS, ...SETTINGS_FIELDS, ...IDENTITY_FIELDS, ...LOCATION_FIELDS, ...DROPPED_FIELDS].map((f) => [f, FieldValue.delete()]),
+  [...INTERNAL_FIELDS, ...ACCOUNT_FIELDS, ...SETTINGS_FIELDS, ...IDENTITY_FIELDS, ...LOCATION_FIELDS, ...DROPPED_FIELDS, ...PLAY_ROOT_FIELDS, ...PRIVATE_PROFILE_FIELDS].map((f) => [f, FieldValue.delete()]),
 )
 
 // The private values a deleted account's 90-day recovery record keeps.
@@ -147,12 +173,61 @@ export async function deletionView(uid: string, root: DocumentData): Promise<{ b
   }
 }
 
-// Removes the user's private docs, server-only record and location.
+// Everything Play of a deleted account (Stage 2): the Play profile and PIN,
+// Play photos, Play pair scores, Play likes they sent (in the other person's
+// queue) and received (in their own), and their Play name and photo on the
+// other person's Play match records. The other person's own data — the
+// conversation, their likes — stays. Called by every delete path
+// (clearPrivateData).
+export async function removePlayData(uid: string): Promise<void> {
+  const firestore = db()
+  const [pairsA, pairsB, ownQueue, matches] = await Promise.all([
+    firestore.collection('pairs').where('userA', '==', uid).get(),
+    firestore.collection('pairs').where('userB', '==', uid).get(),
+    firestore.collection(`users/${uid}/likeQueue`).where('mode', '==', 'play').get(),
+    firestore.collection('matches').where('users', 'array-contains', uid).where('mode', '==', 'play').get(),
+  ])
+  const refs: DocumentReference[] = [
+    firestore.doc(`users/${uid}/playProfile/data`),
+    firestore.doc(`users/${uid}/settings/playPin`),
+    // Holds the Play visibility and pause time (with Spark's).
+    firestore.doc(`users/${uid}/settings/pause`),
+    ...ownQueue.docs.map((d) => d.ref),
+  ]
+  for (const p of [...pairsA.docs, ...pairsB.docs]) {
+    refs.push(firestore.doc(`pairs/${p.id}/modes/play`))
+    const other = p.get('userA') === uid ? p.get('userB') : p.get('userA')
+    if (typeof other === 'string') {
+      const sent = firestore.doc(`users/${other}/likeQueue/${uid}`)
+      if ((await sent.get()).get('mode') === 'play') refs.push(sent)
+    }
+  }
+  for (let i = 0; i < refs.length; i += 400) {
+    const batch = firestore.batch()
+    for (const r of refs.slice(i, i + 400)) batch.delete(r)
+    await batch.commit()
+  }
+  for (const m of matches.docs) {
+    await m.ref.update({
+      [`participantSnapshots.${uid}.displayName`]: 'Deleted User',
+      [`participantSnapshots.${uid}.photoURL`]: null,
+    })
+  }
+  await getStorage()
+    .bucket()
+    .deleteFiles({ prefix: `photos/${uid}/play/` })
+    .catch((err) => logger.warn('removePlayData: Storage delete failed', { message: String(err) }))
+}
+
+// Removes the user's private docs, server-only record, location and (Stage 2)
+// all their Play data.
 export async function clearPrivateData(uid: string): Promise<void> {
+  await removePlayData(uid)
   await Promise.all([
     accountRef(uid).delete(),
     settingsRef(uid).delete(),
     identityRef(uid).delete(),
+    profileRef(uid).delete(),
     internalRef(uid).delete(),
     locationRef(uid).delete(),
     db().doc(`rateLimits/${uid}`).delete(),

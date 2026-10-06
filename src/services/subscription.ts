@@ -93,6 +93,15 @@ export function canAccess(tier: Tier, feature: Feature): boolean {
   return ACCESS[tier].includes(feature)
 }
 
+// Whether the server says this user can see other people's Play data now
+// (entitled + finished Play profile + not suspended; a trial's end applies
+// on the dot). undefined: not computed yet (accounts before Stage 2).
+export function hasPlayAccess(view: { playAccess?: unknown; playAccessUntil?: unknown }): boolean | undefined {
+  if (view.playAccess === undefined) return undefined
+  const until = toDate(view.playAccessUntil)
+  return view.playAccess === true && (until === null || until > new Date())
+}
+
 // 'active' | 'past_due' | 'canceled' | 'unpaid', or null for no subscription.
 export type SubscriptionStatus = 'active' | 'past_due' | 'canceled' | 'unpaid'
 
@@ -166,6 +175,10 @@ export function accountView(root: DocumentData | undefined, account: DocumentDat
     }
     if (typeof loc.label === 'string' && loc.label) view.locationLabel = loc.label
   }
+  // Play access as the server decided it (Stage 2; functions/src/playAccess.ts).
+  view.playEntitled = account?.playEntitled
+  view.playAccess = account?.playAccess
+  view.playAccessUntil = account?.playAccessUntil ?? null
   return view
 }
 

@@ -54,7 +54,7 @@ export default function SparkProfileView({
       const fallback = playBio || spiceLevel ? parsePlayProfile({ playBio, spiceLevel, playInterestTags, playNonNegotiables }) : null
       const playProfile = isFlame ? (play ?? fallback ?? undefined) : undefined
       // Play shows the Play name everywhere the details read displayName.
-      const displayName = isFlame ? playNameOf(profile, playProfile) || 'Someone' : profile.displayName
+      const displayName = isFlame ? playNameOf(playProfile, profile) || 'Someone' : profile.displayName
       setLoaded({ likerUid: spark.likerUid, profile: { ...profile, playProfile, displayName } })
     })
     return () => {

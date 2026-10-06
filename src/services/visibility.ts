@@ -1,7 +1,8 @@
-import { doc, onSnapshot, type Unsubscribe } from 'firebase/firestore'
+import { doc, onSnapshot, type DocumentData, type Unsubscribe } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import type { Mode } from '../store/modeStore'
+import { subscribePrivateProfile, type PrivateProfile } from './privateProfile'
 
 // Per-mode profile visibility, same values as mobile's pauseControl.ts:
 //   active — visible in discovery
@@ -12,7 +13,7 @@ export type Visibility = 'active' | 'hidden' | 'paused'
 export interface VisibilityState {
   spark: Visibility
   play: Visibility
-  // The modes this user has a profile for (from users/{uid}.intent).
+  // The modes this user has a profile for (from the owner-only intent).
   modes: Mode[]
 }
 
@@ -26,15 +27,26 @@ export function subscribeVisibility(
   onChange: (state: VisibilityState) => void,
   onError: (err: Error) => void,
 ): Unsubscribe {
-  return onSnapshot(
-    doc(db, 'users', uid),
-    (snap) => {
-      const data = snap.data() ?? {}
-      const modes: Mode[] = data.intent === 'open' ? ['spark', 'play'] : data.intent === 'play' ? ['play'] : ['spark']
-      onChange({ spark: toVisibility(data.sparkVisibility), play: toVisibility(data.playVisibility), modes })
-    },
-    onError,
-  )
+  // Spark visibility on the root doc; Play visibility on the Play profile
+  // and the intent in private/profile (Stage 2 — owner-only; the root copies
+  // count for accounts not yet migrated).
+  let root: DocumentData | undefined
+  let play: DocumentData | undefined
+  let meta: PrivateProfile | undefined
+  const answered = new Set<string>()
+  const emit = (key: string) => {
+    answered.add(key)
+    if (answered.size < 3) return
+    const intent = meta?.intent
+    const modes: Mode[] = intent === 'open' ? ['spark', 'play'] : intent === 'play' ? ['play'] : ['spark']
+    onChange({ spark: toVisibility(root?.sparkVisibility), play: toVisibility(play?.playVisibility ?? root?.playVisibility), modes })
+  }
+  const offs = [
+    onSnapshot(doc(db, 'users', uid), (s) => ((root = s.data()), emit('root')), (err) => onError(err)),
+    onSnapshot(doc(db, `users/${uid}/playProfile/data`), (s) => ((play = s.data()), emit('play')), () => emit('play')),
+    subscribePrivateProfile(uid, (p) => ((meta = p), emit('meta'))),
+  ]
+  return () => offs.forEach((off) => off())
 }
 
 // Fully on a break when every mode the user has is paused — mobile's rule.

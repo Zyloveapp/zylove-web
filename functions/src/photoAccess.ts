@@ -4,6 +4,7 @@ import { getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { defaultBucket, isPhotoRef } from './storagePath'
 import { isAdminAuth } from './userData'
 import { takeRateLimit } from './rateLimits'
+import { playStatus } from './playAccess'
 
 // Profile photos (F-021). Firestore holds each photo's Storage path
 // ("photos/{uid}/{spark|play}/{file}"), and Storage lets only the owner and
@@ -14,13 +15,13 @@ import { takeRateLimit } from './rateLimits'
 //   • admins: any photo
 //   • anyone else's published photo (in that user's photoURLs for the
 //     mode — root doc for Spark, playProfile/data for Play), when that user
-//     isn't suspended or deleted and neither has blocked the other
+//     isn't suspended or deleted and neither has blocked the other — and, for
+//     a Play photo, when both have Play access (Stage 2, playAccess.ts)
 //
 // Photos in review, rejected or removed are never handed out to others.
 // URLs are signed for the current clock hour and expire at the end of the
 // next one, so every viewer gets the same URL within an hour (browser cache
 // hits) and any URL dies within two hours.
-// TODO(Stage 2): Play photos only to viewers with Play access.
 
 const MAX_REFS = 120
 const HOUR_MS = 60 * 60 * 1000
@@ -64,13 +65,24 @@ export const getPhotoUrls = onCall(
       )
     }
 
+    // Play photos: the viewer and the owner both need Play access.
+    const playOwners = [...new Set(refs.filter((r) => ownerOf(r).mode === 'play').map((r) => ownerOf(r).uid))].filter((u) => u !== viewer)
+    const playOk = new Map<string, boolean>()
+    if (!admin && playOwners.length) {
+      const viewerPlay = (await playStatus(viewer)).access
+      for (const u of playOwners) playOk.set(u, viewerPlay && (await playStatus(u)).access)
+    }
+
     const allowed = refs.filter((ref) => {
       const { uid, mode } = ownerOf(ref)
       if (admin || uid === viewer) return true
       const o = info.get(uid)
       if (!o?.root || o.blocked) return false
       if (o.root.isSuspended === true || o.root.isDeleted === true) return false
-      return published(mode === 'play' ? o.play : o.root, ref)
+      if (mode === 'play') return playOk.get(uid) === true && published(o.play, ref)
+      // A Spark photo is published on the root doc. (Play-only accounts used
+      // to mirror Play photos there; only Play rules apply to those.)
+      return published(o.root, ref)
     })
 
     const hourStart = Math.floor(Date.now() / HOUR_MS) * HOUR_MS

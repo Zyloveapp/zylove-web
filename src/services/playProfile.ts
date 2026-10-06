@@ -9,6 +9,8 @@ export interface PlayProfileData {
   photoURLs: string[]
   // Shown instead of displayName on Play profiles; '' when unset.
   playDisplayName: string
+  // Server-set (setVisibility); missing means active.
+  playVisibility: 'active' | 'paused' | 'hidden'
   playBio: string
   spiceLevel: string | null
   playInterestTags: string[]
@@ -49,6 +51,7 @@ export function parsePlayProfile(d: DocumentData): PlayProfileData {
     // Curated profiles (and older mobile ones) name their Play profile with
     // its own displayName — this doc's, never the root (Spark) one.
     playDisplayName: [d.playDisplayName, d.displayName].find((n): n is string => typeof n === 'string' && n.trim() !== '')?.trim() ?? '',
+    playVisibility: d.playVisibility === 'paused' || d.playVisibility === 'hidden' ? d.playVisibility : 'active',
     playBio: typeof d.playBio === 'string' ? d.playBio.trim() : '',
     spiceLevel: typeof d.spiceLevel === 'string' && d.spiceLevel ? d.spiceLevel : null,
     playInterestTags: strings(d.playInterestTags),
@@ -64,6 +67,18 @@ export function parsePlayProfile(d: DocumentData): PlayProfileData {
             (g as { answer: string }).answer.trim() !== '',
         )
       : [],
+  }
+}
+
+// Someone's Play profile and whether the rules refused it (Stage 2: either
+// side without Play access) — denied isn't an error, just "unavailable".
+export async function loadPlayProfileStatus(uid: string): Promise<{ play: PlayProfileData | null; denied: boolean }> {
+  try {
+    const snap = await getDoc(doc(db, `users/${uid}/playProfile/data`))
+    const d = snap.data()
+    return { play: d ? parsePlayProfile(d) : null, denied: false }
+  } catch (err) {
+    return { play: null, denied: (err as { code?: string })?.code === 'permission-denied' }
   }
 }
 

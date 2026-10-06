@@ -8,6 +8,7 @@
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { LEGACY_RUNTIME } from "./legacyOptions";
+import { setPlayVisibility } from "../playAccess";
 import { internalRef } from "../userData";
 
 const REPORT_TIERS = {
@@ -101,8 +102,9 @@ export const requestAccountDeletion = onCall(LEGACY_RUNTIME, async (request) => 
     deletionScheduledFor: scheduledFor,
     deletionReason: reason,
     sparkVisibility: "hidden",
-    playVisibility: "hidden",
+    playVisibility: admin.firestore.FieldValue.delete(), // lives on the Play profile (Stage 2)
   });
+  await setPlayVisibility(uid, "hidden");
 
   await db.collection("deletionRequests").doc(uid).set({
     uid,
@@ -133,8 +135,9 @@ export const cancelAccountDeletion = onCall(LEGACY_RUNTIME, async (request) => {
     deletionScheduledFor: null,
     deletionReason: null,
     sparkVisibility: "active",
-    playVisibility: "active",
+    playVisibility: admin.firestore.FieldValue.delete(), // lives on the Play profile (Stage 2)
   });
+  await setPlayVisibility(uid, "active");
 
   await db.collection("deletionRequests").doc(uid).delete().catch(() => {
     // Tolerate missing doc — user may have bypassed the deletionRequests write
@@ -268,6 +271,14 @@ export const blockUser = onCall(LEGACY_RUNTIME, async (request) => {
     throw new HttpsError("permission-denied", "Account suspended");
   }
 
+  await blockPair(uid, targetUid, matchId);
+  return { success: true };
+});
+
+// Mirror block (both directions) and, with a matchId, the match soft-ended.
+// Shared with lockedPlay.ts (blocking a Play connection while Play is locked).
+export async function blockPair(uid: string, targetUid: string, matchId?: string): Promise<void> {
+  const db = admin.firestore();
   const now = admin.firestore.Timestamp.now();
   const batch = db.batch();
 
@@ -291,8 +302,7 @@ export const blockUser = onCall(LEGACY_RUNTIME, async (request) => {
   }
 
   await batch.commit();
-  return { success: true };
-});
+}
 
 // ─── unblockUser ──────────────────────────────────────────────────────────────
 // Mirror delete of both sides' blockedUsers subcollection entries.

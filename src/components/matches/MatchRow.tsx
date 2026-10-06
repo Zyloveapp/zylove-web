@@ -44,8 +44,11 @@ export default function MatchRow({ match, unread, preview, active, onSelect, onO
   // Play rows show the Play name and photo (older snapshots carry Spark's).
   const identity = usePlayIdentity(match.partnerUid, play)
   // No Play name → 'Someone'; blank while it loads — never the snapshot's.
-  const name = identity === null ? match.name : identity?.name || (identity ? 'Someone' : '')
-  const photoURL = identity === null ? match.photoURL : (identity?.photoURL ?? null)
+  // Unavailable (no Play access on their side right now): the match's own
+  // Play snapshot, and a neutral note instead of the preview.
+  const unavailable = identity?.unavailable === true
+  const name = identity === null ? match.name : unavailable ? match.name : identity?.name || (identity ? 'Someone' : '')
+  const photoURL = identity === null ? match.photoURL : unavailable ? null : (identity?.photoURL ?? null)
   return (
     <div className={`relative flex w-full items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03] ${active ? 'bg-white/5' : ''}`}>
       <button
@@ -93,7 +96,7 @@ export default function MatchRow({ match, unread, preview, active, onSelect, onO
           {time && <span className="shrink-0 text-xs text-white/35">{time}</span>}
         </span>
         <span className={`block truncate text-sm ${unread ? 'font-medium text-white' : 'text-white/40'}`}>
-          {previewLine(match, unread, preview) || '\u00a0'}
+          {unavailable ? 'Not available right now' : previewLine(match, unread, preview) || '\u00a0'}
         </span>
       </span>
     </div>

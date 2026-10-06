@@ -39,7 +39,7 @@ export default function AuthGuard() {
         const complete = snap.exists() && snap.data().onboardingComplete === true
         // Play-only (Play path, no Spark profile): into Play before the app
         // renders, so Spark never flashes. The Play lock asks for the PIN.
-        if (complete && snap.data()?.onboardingPath === 'play' && (await isPlayOnlyUser(uid).catch(() => false))) {
+        if (complete && (await isPlayOnlyUser(uid).catch(() => false))) {
           if (!cancelled) useModeStore.getState().setMode('play')
         }
         if (!cancelled) setResult({ uid, status: complete ? 'complete' : 'incomplete' })

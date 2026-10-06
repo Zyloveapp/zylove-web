@@ -52,6 +52,7 @@ import AdminActivity from './pages/admin/AdminActivity'
 import AdminReports from './pages/admin/AdminReports'
 import AdminNotice from './components/AdminNotice'
 import { touchLastActive } from './services/adminActivity'
+import { loadPrivateProfile } from './services/privateProfile'
 
 // Protected pages share the nav. Leaves room for the mobile bottom bar.
 // Location (and the founder check) run once per user per page load.
@@ -67,8 +68,8 @@ async function needsPlaySetup(uid: string): Promise<boolean> {
   } catch {
     // No session storage — still check, at worst it nudges again.
   }
-  const user = await getDoc(doc(db, 'users', uid)).catch(() => null)
-  if (user?.data()?.onboardingPath !== 'play') return false
+  const meta = await loadPrivateProfile(uid).catch(() => null)
+  if (meta?.onboardingPath !== 'play') return false
   const play = await getDoc(doc(db, `users/${uid}/playProfile/data`)).catch(() => null)
   return play !== null && !play.exists()
 }

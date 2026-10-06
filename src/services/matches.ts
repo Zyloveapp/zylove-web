@@ -11,7 +11,7 @@ import {
 import { db } from './firebase'
 import type { Mode } from '../store/modeStore'
 import { fetchPublicUserDoc } from './publicUserDoc'
-import { loadPlayProfile } from './playProfile'
+import { loadPlayProfileStatus } from './playProfile'
 import { playNameOf } from './displayNames'
 
 export interface MatchEntry {
@@ -91,7 +91,9 @@ export function subscribeMatches(
   onChange: (matches: MatchEntry[]) => void,
   onError: (err: Error) => void,
 ): Unsubscribe {
-  const q = query(collection(db, 'matches'), where('users', 'array-contains', uid))
+  // Filtered by mode in the query: Play matches are readable only with Play
+  // access (Stage 2 rules), and a query must not reach ones it can't read.
+  const q = query(collection(db, 'matches'), where('users', 'array-contains', uid), where('mode', '==', mode))
   return onSnapshot(
     q,
     (snap) => {
@@ -137,17 +139,31 @@ export function relativeTime(ms: number): string {
   return new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-// Every match the user is in, across both modes.
+// Every match the user is in, across both modes — Play ones only while the
+// user has Play access (the rules refuse them otherwise, and that's not an
+// error here: the Play half is simply empty).
 export function subscribeAllMatches(
   uid: string,
   onChange: (matches: MatchEntry[]) => void,
   onError: (err: Error) => void,
 ): Unsubscribe {
-  return onSnapshot(
-    query(collection(db, 'matches'), where('users', 'array-contains', uid)),
-    (snap) => onChange(snap.docs.map((d) => toEntry(d.id, d.data(), uid)).filter((e): e is MatchEntry => e !== null)),
-    onError,
-  )
+  const byMode: Partial<Record<Mode, MatchEntry[]>> = {}
+  const listen = (mode: Mode) =>
+    onSnapshot(
+      query(collection(db, 'matches'), where('users', 'array-contains', uid), where('mode', '==', mode)),
+      (snap) => {
+        byMode[mode] = snap.docs.map((d) => toEntry(d.id, d.data(), uid)).filter((e): e is MatchEntry => e !== null)
+        if (byMode.spark && byMode.play) onChange([...byMode.spark, ...byMode.play])
+      },
+      (err) => {
+        if (mode === 'play' && (err as { code?: string }).code === 'permission-denied') {
+          byMode.play = []
+          if (byMode.spark) onChange(byMode.spark)
+        } else onError(err)
+      },
+    )
+  const offs = [listen('spark'), listen('play')]
+  return () => offs.forEach((off) => off())
 }
 
 // Whether the conversation has started. The match doc's lastMessage* fields
@@ -168,6 +184,7 @@ export function isNewMatch(m: MatchEntry, now: number): boolean {
 export interface PlayIdentity {
   name: string // '' when they have none
   photoURL: string | null
+  unavailable: boolean
 }
 
 const playIdentities = new Map<string, Promise<PlayIdentity>>()
@@ -179,11 +196,16 @@ const playIdentities = new Map<string, Promise<PlayIdentity>>()
 export function loadPlayIdentity(uid: string): Promise<PlayIdentity> {
   let request = playIdentities.get(uid)
   if (!request) {
-    request = Promise.all([fetchPublicUserDoc(uid), loadPlayProfile(uid)]).then(([root, play]) => ({
-      name: playNameOf(root, play),
+    request = Promise.all([fetchPublicUserDoc(uid), loadPlayProfileStatus(uid)]).then(([root, { play, denied }]) => ({
+      name: playNameOf(play, root),
       photoURL: play?.photoURLs[0] ?? null,
+      // Their Play profile can't be read: they (or you) don't have Play
+      // access right now — shown as unavailable, not as an error.
+      unavailable: denied,
     }))
     playIdentities.set(uid, request)
+    // Don't keep an "unavailable" answer: access can come back this session.
+    void request.then((r) => r.unavailable && playIdentities.delete(uid))
   }
   return request
 }

@@ -28,8 +28,8 @@ export function formatNameChangeDate(d: Date): string {
 
 // The name a Play profile shows: its Play name, or '' when it has none —
 // never the Spark displayName (the modes stay sealed; callers show
-// 'Someone'). Pass the root user doc first — its playDisplayName is the
-// enforced one (the playProfile copy is a client-writable mirror).
+// 'Someone'). Pass the Play profile first — since Stage 2 its playDisplayName
+// is the enforced one; an older root copy counts only as a fallback.
 export function playNameOf(...sources: (object | null | undefined)[]): string {
   for (const s of sources) {
     const name = (s as { playDisplayName?: unknown } | null | undefined)?.playDisplayName

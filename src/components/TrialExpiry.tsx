@@ -10,6 +10,7 @@ import { isPlayOnlyUser } from '../services/playOnboarding'
 import { deleteAccount } from '../services/profileDeletion'
 import { ConfirmModal } from './DeleteProfileControls'
 import { useBilling } from './PaywallGate'
+import LockedPlayConnections from './matches/LockedPlayConnections'
 
 // Trial over and no plan: blocks the app (no close button, no Escape) until
 // they subscribe, sign out, or delete. Women and founders are Elite for life, so their
@@ -28,6 +29,8 @@ export default function TrialExpiry() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  // Safety stays reachable while everything else is locked (Stage 2).
+  const [safety, setSafety] = useState(false)
 
   useEffect(() => {
     if (!uid || !expired) return
@@ -113,6 +116,19 @@ export default function TrialExpiry() {
             >
               Not for me — delete my account
             </button>
+            <button
+              type="button"
+              onClick={() => setSafety((v) => !v)}
+              aria-expanded={safety}
+              className="w-full py-1 text-sm text-white/50 hover:text-white"
+            >
+              Report or block a Play connection
+            </button>
+            {safety && (
+              <div className="-mx-4 text-left">
+                <LockedPlayConnections showEmpty />
+              </div>
+            )}
           </div>
         )}
       </div>

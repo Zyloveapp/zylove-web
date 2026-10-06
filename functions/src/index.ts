@@ -52,6 +52,8 @@ import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
 import { ALWAYS_ELITE_IDENTITIES, marketFor, marketOpen, newTrial, planView, trialExempt } from './trial'
 import { accountRef, internalRef, isAdminAuth, loadInternal, loadLocation, loadSettings } from './userData'
+import { playStatus, requirePlayAccess, requirePlayEntitled } from './playAccess'
+import { loadPlayScores } from './pairPlay'
 import { countMessages, generationOf, participants, pastConnectionId } from './matchGeneration'
 import {
   FLAG_CATEGORY_IDS,
@@ -151,6 +153,7 @@ export const generatePlayBio = onCall(
   async (request): Promise<BioResponse> => {
     // invoker is public (org policy), so gate spend on a signed-in caller.
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to generate a bio.')
+    await requirePlayEntitled(request.auth.uid)
     // Rate-limit counters live in userInternal (server-only; userData.ts).
     const userRef = internalRef(request.auth.uid)
 
@@ -243,6 +246,7 @@ export const generatePlayGoDeeper = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ questions: [string, string] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to generate questions.')
+    await requirePlayEntitled(request.auth.uid)
     // Rate-limit counters live in userInternal (server-only; userData.ts).
     const userRef = internalRef(request.auth.uid)
 
@@ -450,8 +454,8 @@ function modeIdentity(
   if (play) {
     return {
       displayName:
-        nonEmpty(user?.playDisplayName) ??
         nonEmpty(play.playDisplayName) ??
+        nonEmpty(user?.playDisplayName) ??
         nonEmpty(play.displayName) ??
         'Someone',
       photoURL: firstString(play.photoURLs),
@@ -493,6 +497,11 @@ export const likeBack = onCall(
     const callerId = request.auth.uid
     const { likerUid, mode } = parseLikeBackRequest(request.data)
     if (likerUid === callerId) throw new HttpsError('invalid-argument', 'Cannot like yourself back')
+    // Stage 2: a Play match needs Play access on both sides.
+    if (mode === 'play') {
+      await requirePlayAccess(callerId)
+      if (!(await playStatus(likerUid)).access) throw new HttpsError('failed-precondition', "That profile isn't available in Play.")
+    }
 
     const db = getFirestore()
     const callerQueueRef = db.doc(`users/${callerId}/likeQueue/${likerUid}`)
@@ -725,6 +734,10 @@ export const setVisibility = onCall(
     if (!(await userRef.get()).exists) throw new HttpsError('failed-precondition', 'Profile not found')
 
     const field = `${mode}Visibility`
+    // Play visibility lives on the Play profile (Stage 2: no Play data on the
+    // public doc), Spark visibility on the root doc.
+    const playRef = userRef.collection('playProfile').doc('data')
+    if (mode === 'play' && !(await playRef.get()).exists) throw new HttpsError('failed-precondition', 'No Play profile')
     const batch = db.batch()
     batch.set(
       userRef.collection('settings').doc('pause'),
@@ -735,7 +748,12 @@ export const setVisibility = onCall(
       },
       { merge: true },
     )
-    batch.update(userRef, { [field]: visibility })
+    if (mode === 'play') {
+      batch.update(playRef, { playVisibility: visibility })
+      batch.update(userRef, { playVisibility: FieldValue.delete() })
+    } else {
+      batch.update(userRef, { [field]: visibility })
+    }
     await batch.commit()
     return { success: true }
   },
@@ -1255,7 +1273,7 @@ const PLAY_FALLBACK_STARTERS = [
 
 function playPersonLine(root: DocumentData | undefined, play: DocumentData | undefined): string {
   const name =
-    [root?.playDisplayName, play?.displayName].find((n): n is string => typeof n === 'string' && n.trim() !== '') ?? 'Someone'
+    [play?.playDisplayName, root?.playDisplayName, play?.displayName].find((n): n is string => typeof n === 'string' && n.trim() !== '') ?? 'Someone'
   const bio = typeof play?.playBio === 'string' && play.playBio.trim() ? `"${play.playBio.trim().slice(0, 200)}"` : 'none'
   const spice = typeof play?.spiceLevel === 'string' ? play.spiceLevel : 'unknown'
   return `${name}, Play bio: ${bio}, spice level: ${spice}, into: ${list(play?.playInterestTags)}, prompts: ${promptSummary(play?.promptAnswers)}`
@@ -1297,6 +1315,8 @@ export const generateConversationStarter = onCall(
     // Gates AI spend and profile reads to the caller's own match.
     const match = await requireMatchPair(matchId, callerId, otherUid)
     const play = match.mode === 'play'
+    // Stage 2: a Play match is sealed while the caller has no Play access.
+    if (play) await requirePlayAccess(callerId)
     const fallback = play ? PLAY_FALLBACK_STARTERS : FALLBACK_STARTERS
 
     try {
@@ -1569,6 +1589,7 @@ export const reviewPlayProfile = onCall(
   { timeoutSeconds: 120, memory: '512MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ review: ProfileScorecard }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requirePlayEntitled(request.auth.uid)
     const db = getFirestore()
     const userRef = internalRef(request.auth.uid) // review counter (server-only)
     const [userSnap, playSnap, settings] = await Promise.all([
@@ -1636,6 +1657,7 @@ export const getSentSparks = onCall(
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const uid = request.auth.uid
     const mode = (request.data as Record<string, unknown> | null)?.mode === 'play' ? 'play' : 'spark'
+    if (mode === 'play') await requirePlayAccess(uid)
     const db = getFirestore()
     const pairs = db.collection('pairs')
 
@@ -1662,12 +1684,15 @@ export const getSentSparks = onCall(
         if (!user || user.isSuspended === true) return null
         const queue = queueSnap.data()
         if (queue && (queue.mode === 'play' ? 'play' : 'spark') !== mode) return null
+        // Play: only people who still have Play access; scores from the Play subdoc.
+        if (mode === 'play' && !(await playStatus(otherUid)).access) return null
+        const playScores = mode === 'play' ? await loadPlayScores(pairSnap.id, pair) : undefined
         return {
           uid: otherUid,
           ...modeIdentity(user, play),
           age: typeof user.age === 'number' && user.age > 0 ? user.age : null,
-          sparkScore: typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
-          playScore: typeof pair.playScore === 'number' ? pair.playScore : null,
+          sparkScore: mode === 'spark' && typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
+          playScore: typeof playScores?.playScore === 'number' ? playScores.playScore : null,
           tier1Spark: pair.tier1Spark ?? null,
           likedAt: toMillis(queue?.likedAt) || toMillis(pair.createdAt),
         }
@@ -1759,6 +1784,8 @@ export const getCuriousVisitors = onCall(
     const uid = request.auth.uid
     const rawMode = (request.data as Record<string, unknown> | null)?.mode
     const mode = rawMode === 'play' || rawMode === 'spark' ? rawMode : null
+    // Stage 2: Play visitors only for callers with Play access.
+    if (mode === 'play' && !(await playStatus(uid)).access) return { locked: true, count: 0, visitors: [] }
     const db = getFirestore()
 
     const [me, asA, asB] = await Promise.all([
@@ -1795,16 +1822,18 @@ export const getCuriousVisitors = onCall(
       // Play visitors need a Play profile; Spark visitors a Spark one (not
       // Play-only). Covers older reveals that didn't record the mode.
       const play = playSnap?.exists ? (playSnap.data() ?? {}) : null
-      if (mode === 'play' && !play) continue
-      if (mode === 'spark' && user.intent === 'play') continue
+      if (mode === 'play' && (!play || !(await playStatus(otherUid)).access)) continue
+      // Play-only accounts have Spark hidden.
+      if (mode === 'spark' && user.sparkVisibility === 'hidden') continue
+      const playScores = mode === 'play' ? await loadPlayScores(id, pair) : undefined
       visitors.push({
         uid: otherUid,
         ...modeIdentity(user, mode === 'play' ? play : null),
         age: typeof user.age === 'number' && user.age > 0 ? user.age : null,
         locationLabel: typeof user.locationLabel === 'string' && user.locationLabel ? user.locationLabel : null,
-        intent: typeof user.intent === 'string' ? user.intent : null,
-        sparkScore: typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
-        playScore: typeof pair.playScore === 'number' ? pair.playScore : null,
+        intent: mode,
+        sparkScore: mode !== 'play' && typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
+        playScore: typeof playScores?.playScore === 'number' ? playScores.playScore : null,
         tier1Spark: pair.tier1Spark ?? null,
         at: revealedAt(pair, uid),
       })
@@ -1824,6 +1853,8 @@ export { checkTrialStatus, onMarketOpened } from './trial'
 export { mirrorPlan } from './userData'
 export { recordTermsAcceptance } from './legal'
 export { getPhotoUrls, getReviewPdfUrl } from './photoAccess'
+export { playAccessOnPlan, playAccessOnPlayProfile, playAccessOnProfile } from './playAccess'
+export { actOnPlayConnection, listLockedPlayConnections } from './lockedPlay'
 export { getDistances, grantSmsConsent, recordActivity, refreshAges, setLocation } from './location'
 export { createCheckoutSession, createPortalSession, stripeWebhook } from './stripe'
 export {
@@ -2092,7 +2123,7 @@ export { requestAccountDeletion, cancelAccountDeletion } from './legacy/trustSaf
 export { onNightlyPurge, processGraceExpiredDeletions } from './legacy/onNightlyPurge'
 // Batch (b): photo moderation, pair rescoring, women's Elite.
 export { onPhotoUpload } from './legacy/onPhotoUpload'
-export { onProfileWrite } from './legacy/onProfileWrite'
+export { onPlayProfileWrite, onProfileWrite } from './legacy/onProfileWrite'
 export { claimWomenElite } from './legacy/claimWomenElite'
 // Batch (c): Explore taps and likes, swipes, blocking.
 export { onTap } from './legacy/onTap'

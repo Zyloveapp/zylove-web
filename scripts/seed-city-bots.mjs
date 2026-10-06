@@ -405,7 +405,7 @@ function build(p) {
   const root = {
     uid, displayName: name, age, birthday: birthday(age, mmdd),
     genderIdentity: isWoman ? 'woman' : 'man', attractedTo: seeking, showOrientation: false,
-    relationshipStatus: 'single', openTo, intent: 'open', openToCrossover: true,
+    relationshipStatus: 'single', openTo,
     bodyType, heightCm,
     lifestyleTags: a.lifestyleTags, habitTags: a.habitTags, drinkingHabit, religion, politicalView,
     personalityTraits: a.personalityTraits, relationshipValues: a.relationshipValues, weekendVibes: a.weekendVibes,
@@ -420,19 +420,23 @@ function build(p) {
     // coordinates any signed-in user could read; see scrub-raw-location.mjs).
     locationLabel: city.label, locationLat: city.lat, locationLng: city.lng,
     verificationStatus: 'phone_verified', phoneVerified: true, isBot: true, reportCount: 0, isSuspended: false,
-    subscriptionTier: 'elite', mode: 'spark', sparkVisibility: 'active', playVisibility: 'active',
-    publicKey: '', playStyle, relationshipStyle, sortKey: Math.random(),
+    subscriptionTier: 'elite', sparkVisibility: 'active',
+    publicKey: '', relationshipStyle, sortKey: Math.random(),
   }
+  // Stage 2: nothing Play on the public doc — the intent/mode go to the
+  // owner-only private/profile, Play fields to playProfile/data.
+  const meta = { intent: 'open', mode: 'spark' }
   const play = {
     uid, displayName: name, genderIdentity: root.genderIdentity, attractedTo: seeking,
     spiceLevel: a.spiceLevel, playInterestTags: a.playInterestTags, playNonNegotiables, playStyle, playBio,
     promptAnswers: a.playPrompts.map(([promptId, answer]) => ({ promptId, answer })),
     ageMin, ageMax, radiusMiles: 25, orientation: seeking, intent: 'open',
+    playVisibility: 'active', playOnboardingComplete: true,
   }
   // Austin bot whose photos this one borrows by default.
   const n = Number(id.slice(-3))
   const photoSource = `zbot-${isWoman ? 'w' : 'm'}-${String(id.startsWith('hou') ? n + 10 : n).padStart(3, '0')}`
-  return { uid, root, play, photoSource }
+  return { uid, root, play, meta, photoSource }
 }
 
 // ─── Run ─────────────────────────────────────────────────────────────────────
@@ -477,6 +481,7 @@ for (const bot of bots) {
   const batch = db.batch()
   batch.set(ref, { ...bot.root, photoURLs: photos, identityLockedAt: now, createdAt: now, lastActive: now, profileUpdatedAt: now })
   batch.set(ref.collection('playProfile').doc('data'), { ...bot.play, photoURLs: photos, createdAt: now, lastUpdated: now })
+  batch.set(ref.collection('private').doc('profile'), bot.meta)
   await batch.commit()
   created++
 }

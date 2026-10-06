@@ -10,7 +10,16 @@ rules and indexes, Storage rules. Never from the mobile repo.
 - [ ] Rules: review the diff against what's live.
 - [ ] Migrations: backup first (Firestore export; copy any Storage files the
       migration deletes), dry run, review, then apply.
-- [ ] Order: functions → client push → rules → backup → migration.
+- [ ] Order: functions → client push → rules → backup → migration. When the
+      new client or migration needs rules that would break the live app, split
+      the rules: an additive set first, the restrictive set after migration.
+- [ ] Big functions deploys hit Google's per-minute limits (Cloud Functions
+      mutations, Cloud Run writes) and leave functions on the old build. If
+      the planner shows more than ~40 changes, deploy in batches of ~20–30
+      by name (`--only functions:web:a,functions:web:b,…`) with a ~2-minute
+      pause between batches, then verify every function was updated (its
+      updateTime is after the deploy started and its Cloud Run revision is
+      ready) and redeploy any that weren't.
 
 ## Right after each step
 - [ ] Real sign-in works (dev account, email/password).

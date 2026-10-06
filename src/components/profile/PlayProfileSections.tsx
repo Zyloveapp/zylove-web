@@ -140,7 +140,7 @@ export default function PlayProfileSections({
   // Play shows only Play data — name, photos, bio — never the Spark ones;
   // the header reads the name through displayName. Spark height and body
   // type stay off it: Play's own show under "A little about me".
-  const named = { ...profile, displayName: playNameOf(profile, play) || 'Someone', heightCm: undefined, bodyType: undefined }
+  const named = { ...profile, displayName: playNameOf(play, profile) || 'Someone', heightCm: undefined, bodyType: undefined }
   const photos = play.photoURLs
   const bio = play.playBio
 

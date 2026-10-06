@@ -3,7 +3,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { UserDoc } from "./types";
 import { normalizeE164 } from "./utils/phone";
-import { ROOT_SCRUB, clearPrivateData, deletionView, identityRef, internalRef } from "../userData";
+import { ROOT_SCRUB, clearPrivateData, deletionView, identityRef, internalRef, loadPrivateProfile, profileRef } from "../userData";
 
 
 
@@ -65,7 +65,7 @@ const auth = admin.auth();
     displayName: user.displayName ?? "",
     photoURLs:   user.photoURLs ?? [],
     bio:         user.bio ?? "",
-    mode:        (user as any).mode ?? "spark",
+    mode:        (await loadPrivateProfile(uid, user as any)).mode ?? "spark",
 
     // Policy state
     isFounder: (user as any).isFounder ?? false,
@@ -238,7 +238,6 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
     displayName: recovery.displayName ?? "",
     photoURLs:   recovery.photoURLs ?? [],
     bio:         recovery.bio ?? "",
-    mode:        recovery.mode ?? "spark",
 
     // Policy state
     isFounder: recovery.isFounder ?? false,
@@ -268,6 +267,8 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
   // Write new user doc
   batch.set(db.collection("users").doc(newUid), restoredUser);
   batch.set(identityRef(newUid), { birthday: recovery.birthday ?? null });
+  // The mode is owner-only (Stage 2), never on the public doc.
+  batch.set(profileRef(newUid), { mode: recovery.mode === "play" ? "play" : "spark" }, { merge: true });
   batch.set(internalRef(newUid), {
     subscriptionTier: recovery.isFounder ? "elite" : (recovery.subscriptionTier ?? "free"),
     reportCount: 0,
@@ -370,7 +371,6 @@ export const softBlockOnboarding = onCall(LEGACY_RUNTIME, async (request) => {
     displayName:      "",
     photoURLs:        [],
     bio:              "",
-    mode:             "spark",
     isFounder: false,
     behaviorScore:    50,
 

@@ -67,6 +67,7 @@ import {
   SceneStep,
   SpiceStep,
 } from '../components/onboarding/PlaySteps'
+import { loadPrivateProfile } from '../services/privateProfile'
 import {
   CONFLICT_STYLE_LABELS,
   INITIAL_DRAFT,
@@ -420,12 +421,12 @@ export default function Onboarding() {
   useEffect(() => {
     if (!sparkSetup || !userId) return
     let cancelled = false
-    Promise.all([loadRefreshDraft(userId), getDoc(doc(db, 'users', userId))])
-      .then(([loaded, root]) => {
+    Promise.all([loadRefreshDraft(userId), loadPrivateProfile(userId)])
+      .then(([loaded, privateProfile]) => {
         if (cancelled) return
         if (!loaded) return setSetupLoad('error')
         const d = loaded.draft
-        const answers: unknown = root.data()?.intentionAnswers
+        const answers: unknown = privateProfile.intentionAnswers
         restoreSaved(userId, {
           ...INITIAL_DRAFT,
           termsAccepted: true,

@@ -287,6 +287,18 @@ export default function Header() {
       .catch(() => {})
   }, [uid, tier, searchParams])
 
+  // Play needs a plan that includes it, on every page (Stage 2) — not just
+  // when switching: whatever put the app in Play mode (a stored mode, a link,
+  // a lapsed trial), without it the app goes back to Spark with the upgrade
+  // prompt. The rules refuse other people's Play data anyway; this keeps the
+  // UI from showing broken Play screens.
+  useEffect(() => {
+    if (mode === 'play' && tier !== null && !canAccess(tier, 'play_mode')) {
+      setMode('spark')
+      setPlayPaywall(true)
+    }
+  }, [mode, tier, setMode])
+
   const isPlay = mode === 'play'
   const current = visibility?.[mode] ?? null
   const dot = visibilityOptions(mode).find((o) => o.value === current)

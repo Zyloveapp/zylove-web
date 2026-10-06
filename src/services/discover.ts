@@ -91,7 +91,7 @@ const SWIPES_LIMIT = 500
 async function loadActedOn(uid: string, mode: Mode): Promise<Set<string>> {
   const [swipes, matches] = await Promise.all([
     getDocs(query(collection(db, 'swipes'), where('swiperId', '==', uid), limit(SWIPES_LIMIT))).catch(() => null),
-    getDocs(query(collection(db, 'matches'), where('users', 'array-contains', uid))).catch(() => null),
+    getDocs(query(collection(db, 'matches'), where('users', 'array-contains', uid), where('mode', '==', mode))).catch(() => null),
   ])
   const acted = new Set<string>()
   for (const d of swipes?.docs ?? []) {
@@ -151,8 +151,10 @@ function mutuallyAttracted(me: DiscoverProfile, them: DiscoverProfile): boolean 
   )
 }
 
-function intentMatchesMode(p: DiscoverProfile, mode: Mode): boolean {
-  return p.intent === mode || p.intent === 'open'
+// In Spark unless Play-only: Play-only accounts have Spark hidden (and, not
+// yet migrated, the old public intent 'play').
+function inSpark(p: DiscoverProfile): boolean {
+  return p.intent !== 'play'
 }
 
 function shuffle<T>(items: T[]): T[] {
@@ -215,11 +217,14 @@ function isEligible(
   blocked: Set<string>,
   founding: boolean,
 ): boolean {
-  const visibilityField = mode === 'play' ? 'playVisibility' : 'sparkVisibility'
   if (p.uid === me.uid || swiped.has(p.uid) || blocked.has(p.uid)) return false
-  if (!p.photoURLs?.length) return false
-  if (!intentMatchesMode(p, mode)) return false
-  if (p[visibilityField] === 'paused' || p[visibilityField] === 'hidden') return false
+  // Spark: the public doc's photos and visibility. Play: the Play profile's,
+  // checked once it's read (withPlayProfiles) — nothing Play is public.
+  if (mode === 'spark') {
+    if (!p.photoURLs?.length) return false
+    if (!inSpark(p)) return false
+    if (p.sparkVisibility === 'paused' || p.sparkVisibility === 'hidden') return false
+  }
   const age = displayAge(p)
   if (age !== null && me.ageMin && me.ageMax && (age < me.ageMin || age > me.ageMax)) return false
   // Founding period: everyone, any distance, bots included. Once the
@@ -273,9 +278,9 @@ function localFirst(myCity: ZyloveCity | null, distances: Map<string, Distance>,
 
 // Play Explore only shows people with a Play profile, and shows them with it:
 // everyone left after the filters gets their playProfile/data read in
-// parallel (bot or not, whatever their intent). No Play profile, no Play
-// photos, or an unreadable one, means they're left out — never Spark data in
-// Play.
+// parallel (bot or not). No Play profile, no Play photos, paused/hidden in
+// Play, or an unreadable one — the rules refuse it while either side lacks
+// Play access (Stage 2) — means they're left out. Never Spark data in Play.
 async function withPlayProfiles(candidates: DiscoverProfile[]): Promise<DiscoverProfile[]> {
   const play = await Promise.all(
     candidates.map((p) =>
@@ -288,7 +293,9 @@ async function withPlayProfiles(candidates: DiscoverProfile[]): Promise<Discover
     const playProfile = play[i]
     // Play Explore shows the Play name everywhere the card, details or match
     // overlay read displayName.
-    return playProfile?.photoURLs.length ? [{ ...p, playProfile, displayName: playNameOf(p, playProfile) || 'Someone' }] : []
+    // Paused or hidden in Play (server-set on the Play profile): left out.
+    if (!playProfile?.photoURLs.length || playProfile.playVisibility !== 'active') return []
+    return [{ ...p, playProfile, displayName: playNameOf(playProfile, p) || 'Someone' }]
   })
 }
 
@@ -463,7 +470,7 @@ function participantSnapshot(
   play: PlayProfileData | null,
 ): { displayName: string; age: number | null; photoURL: string | null } {
   return {
-    displayName: (play ? playNameOf(p, play) : p.displayName) || 'Someone',
+    displayName: (play ? playNameOf(play, p) : p.displayName) || 'Someone',
     age: displayAge(p),
     photoURL: (play ? play.photoURLs[0] : p.photoURLs?.[0]) ?? null,
   }
@@ -565,8 +572,12 @@ const PLAY_ARCHETYPE_COPY: Record<string, { label: string; copy: string }> = {
 // The pair's Play archetype. onTap only returns the Spark tier1, so this reads
 // pairs/{a_b}.tier1Play directly (participants can). Null when there's none.
 export async function fetchPlayArchetype(uid: string, targetUid: string): Promise<ArchetypeMatch | null> {
-  const snap = await getDoc(doc(db, 'pairs', [uid, targetUid].sort().join('_'))).catch(() => null)
-  const tier1: unknown = snap?.data()?.tier1Play
+  // Stage 2: Play scores live in pairs/{a_b}/modes/play (participants with
+  // Play access); older pairs had them on the pair doc.
+  const pairId = [uid, targetUid].sort().join('_')
+  const sub = await getDoc(doc(db, `pairs/${pairId}/modes/play`)).catch(() => null)
+  const legacy = sub?.exists() ? null : await getDoc(doc(db, 'pairs', pairId)).catch(() => null)
+  const tier1: unknown = sub?.data()?.tier1Play ?? legacy?.data()?.tier1Play
   const archetype = typeof tier1 === 'object' && tier1 !== null ? parseArchetype((tier1 as Record<string, unknown>).archetype) : null
   const copy = archetype ? PLAY_ARCHETYPE_COPY[archetype.id] : undefined
   return archetype && copy ? { ...archetype, ...copy } : null

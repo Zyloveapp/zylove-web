@@ -1,14 +1,4 @@
-import {
-  collection,
-  doc,
-  getDoc,
-  onSnapshot,
-  orderBy,
-  query,
-  updateDoc,
-  type DocumentData,
-  type Unsubscribe,
-} from 'firebase/firestore'
+import { collection, doc, getDoc, onSnapshot, orderBy, query, updateDoc, where, type DocumentData, type Unsubscribe } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { displayScore, likeProfile, parseTier1, passProfile, type DiscoverProfile, type DisplayScore } from './discover'
@@ -65,7 +55,9 @@ export function subscribeSparks(
   onChange: (sparks: SparkEntry[]) => void,
   onError: (err: Error) => void,
 ): Unsubscribe {
-  const q = query(collection(db, `users/${uid}/likeQueue`), orderBy('likedAt', 'desc'))
+  // Filtered by mode in the query: Play likes are readable only with Play
+  // access (Stage 2 rules), and a query must not reach ones it can't read.
+  const q = query(collection(db, `users/${uid}/likeQueue`), where('mode', '==', mode), orderBy('likedAt', 'desc'))
   return onSnapshot(
     q,
     (snap) => {
@@ -94,7 +86,9 @@ export function subscribeSparkQueue(
   onChange: (queue: { live: SparkEntry[]; viewed: SparkEntry[] }) => void,
   onError: (err: Error) => void,
 ): Unsubscribe {
-  const q = query(collection(db, `users/${uid}/likeQueue`), orderBy('likedAt', 'desc'))
+  // Filtered by mode in the query: Play likes are readable only with Play
+  // access (Stage 2 rules), and a query must not reach ones it can't read.
+  const q = query(collection(db, `users/${uid}/likeQueue`), where('mode', '==', mode), orderBy('likedAt', 'desc'))
   return onSnapshot(
     q,
     (snap) => {

@@ -6,6 +6,8 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { calculateSparkScore, calculatePlayScore } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
+import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
+import { withPrivateProfile } from "../userData";
 
 export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
@@ -20,15 +22,20 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   const pid     = pairId(tapperId, tappedId);
   const pairRef = db.collection("pairs").doc(pid);
 
+  // Stage 2 (Play sealing): Play scores only when both people have Play
+  // access, and kept in pairs/{id}/modes/play — never on the pair doc.
+  const play = await bothHavePlay(tapperId, tappedId);
+
   // Return cached score if pair already exists
   const existing = await pairRef.get();
   if (existing.exists) {
     const data = existing.data() as PairDoc;
+    const playScores = play ? await loadPlayScores(pid, data) : undefined;
     return {
       pairId:     pid,
       sparkScore: data.sparkScore,
-      playScore:  data.playScore,
-      breakdown:  { spark: data.sparkBreakdown, play: data.playBreakdown },
+      ...(playScores && { playScore: playScores.playScore }),
+      breakdown:  { spark: data.sparkBreakdown, ...(playScores && { play: playScores.playBreakdown }) },
       triggeredDealbreakers: data.triggeredDealbreakers ?? [],
       ...(data.tier1Spark && { tier1: data.tier1Spark }),
     };
@@ -46,8 +53,9 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
     throw new HttpsError("not-found", "User profile not found");
   }
 
-  const tapperDoc  = tapperSnap.data() as UserDoc;
-  const tappedDoc  = tappedSnap.data() as UserDoc;
+  // Scoring compares intents, which live in the owner-only private/profile (Stage 2).
+  const tapperDoc  = await withPrivateProfile(tapperId, tapperSnap.data() ?? {}) as UserDoc;
+  const tappedDoc  = await withPrivateProfile(tappedId, tappedSnap.data() ?? {}) as UserDoc;
   const tapperPlay = tapperPlaySnap?.exists ? tapperPlaySnap.data() ?? {} : {};
   const tappedPlay = tappedPlaySnap?.exists ? tappedPlaySnap.data() ?? {} : {};
 
@@ -58,7 +66,7 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   const tappedFull = { ...tappedDoc, ...tappedPlay, playProfile: tappedPlay } as UserDoc;
 
   const { score: sparkScore, breakdown: sparkBreakdown, triggeredDealbreakers, tier1: sparkTier1 } = calculateSparkScore(tapperDoc,  tappedDoc);
-  const { score: playScore,  breakdown: playBreakdown, tier1: playTier1 } = calculatePlayScore(tapperFull, tappedFull);
+  const playResult = play ? calculatePlayScore(tapperFull, tappedFull) : null;
 
   const [userA, userB] = [tapperId, tappedId].sort();
 
@@ -69,11 +77,8 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
     initiatedBy:       tapperId,
     sparkScore,
     sparkBreakdown,
-    playScore,
-    playBreakdown,
     triggeredDealbreakers,
     ...(sparkTier1 && { tier1Spark: sparkTier1 }),
-    ...(playTier1 && { tier1Play: playTier1 }),
     scoreCalculatedAt: admin.firestore.Timestamp.now(),
     scoreVersion:      1,
     userALiked:        false,
@@ -82,6 +87,14 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   };
 
   await pairRef.set(pairData);
+  if (playResult) await setPlayScores(pid, playFields(playResult.score, playResult.breakdown, playResult.tier1));
 
-  return { pairId: pid, sparkScore, playScore, breakdown: { spark: sparkBreakdown, play: playBreakdown }, triggeredDealbreakers, tier1: sparkTier1 };
+  return {
+    pairId: pid,
+    sparkScore,
+    ...(playResult && { playScore: playResult.score }),
+    breakdown: { spark: sparkBreakdown, ...(playResult && { play: playResult.breakdown }) },
+    triggeredDealbreakers,
+    tier1: sparkTier1,
+  };
 });
