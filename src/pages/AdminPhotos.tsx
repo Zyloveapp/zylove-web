@@ -73,57 +73,56 @@ export default function AdminPhotos() {
       ) : photos.length === 0 ? (
         <p className="text-white/50">Nothing waiting for review.</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-white/10">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-white/5 text-xs uppercase tracking-wide text-white/40">
-              <tr>
-                <th className="px-3 py-2">Photo</th>
-                <th className="px-3 py-2">User</th>
-                <th className="px-3 py-2">Mode</th>
-                <th className="px-3 py-2">Submitted</th>
-                <th className="px-3 py-2">Flag</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/10">
-              {photos.map((p) => (
-                <tr key={p.url} className="align-top">
-                  <td className="px-3 py-2">
-                    <FullSizeLink photo={p.url} />
-                  </td>
-                  <td className="px-3 py-2">
-                    <p className="font-medium">{p.displayName || '—'}</p>
-                    <p className="font-mono text-xs text-white/40">{p.uid}</p>
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={p.mode === 'play' ? 'text-red-400' : 'text-[#6B8FFF]'}>{p.mode}</span>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-white/60">{submitted(p.flaggedAt)}</td>
-                  <td className="px-3 py-2 text-white/60">{flagReason(p.reason)}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => decide(p, 'approve')}
-                        disabled={busy !== null}
-                        className="whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-1.5 font-medium disabled:opacity-40"
-                      >
-                        ✓ Approve
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => decide(p, 'reject')}
-                        disabled={busy !== null}
-                        className="whitespace-nowrap rounded-lg bg-red-600 px-3 py-1.5 font-medium disabled:opacity-40"
-                      >
-                        ✗ Reject
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        // A grid, not a table: long ids and flag text wrap and the actions
+        // stack, so it fits a laptop-width window (no sideways scrolling);
+        // on a phone each photo is its own card.
+        <div className="rounded-xl border border-white/10">
+          <div className="hidden grid-cols-[auto_minmax(0,1.4fr)_auto_minmax(0,1fr)_auto] gap-4 bg-white/5 px-3 py-2 text-xs uppercase tracking-wide text-white/40 md:grid">
+            <span>Photo</span>
+            <span>User</span>
+            <span>Mode · submitted</span>
+            <span>Flag</span>
+            <span className="sr-only">Actions</span>
+          </div>
+          <ul className="divide-y divide-white/10">
+            {photos.map((p) => (
+              <li
+                key={p.url}
+                className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 px-3 py-3 text-sm md:grid-cols-[auto_minmax(0,1.4fr)_auto_minmax(0,1fr)_auto] md:items-start"
+              >
+                <div className="row-span-3 md:row-span-1">
+                  <FullSizeLink photo={p.url} />
+                </div>
+                <div className="min-w-0">
+                  <p className="font-medium">{p.displayName || '—'}</p>
+                  <p className="break-all font-mono text-xs text-white/40">{p.uid}</p>
+                </div>
+                <p className="text-white/60">
+                  <span className={p.mode === 'play' ? 'text-red-400' : 'text-[#6B8FFF]'}>{p.mode}</span>
+                  <span className="block whitespace-nowrap text-xs">{submitted(p.flaggedAt)}</span>
+                </p>
+                <p className="min-w-0 break-words text-white/60">{flagReason(p.reason)}</p>
+                <div className="col-span-2 flex gap-2 md:col-span-1 md:flex-col">
+                  <button
+                    type="button"
+                    onClick={() => decide(p, 'approve')}
+                    disabled={busy !== null}
+                    className="whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-1.5 font-medium disabled:opacity-40"
+                  >
+                    ✓ Approve
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => decide(p, 'reject')}
+                    disabled={busy !== null}
+                    className="whitespace-nowrap rounded-lg bg-red-600 px-3 py-1.5 font-medium disabled:opacity-40"
+                  >
+                    ✗ Reject
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

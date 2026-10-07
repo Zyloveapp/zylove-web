@@ -73,6 +73,15 @@ export const onPhotoUpload = onObjectFinalized(
     // names) were moderated as originals; the rules stop clients setting this.
     if (event.data.metadata?.zyloveCopy === '1') return
 
+    // No profile to attach it to (a deleted account, or one that never
+    // finished onboarding — which saves the profile before any photo): the
+    // upload is removed and logged, never queued as a "moderation error".
+    if (!(await admin.firestore().doc(`users/${uid}`).get()).exists) {
+      console.warn(`[moderation] No profile for uid ${uid}; removed ${filePath}`)
+      await admin.storage().bucket(event.data.bucket).file(filePath).delete({ ignoreNotFound: true })
+      return
+    }
+
     // Stage B (F-054): every upload is a paid moderation call and may page
     // the admins — at most 30 a day per person, and 10 waiting for review.
     // Past either, the upload is removed unmoderated.

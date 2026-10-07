@@ -47,7 +47,8 @@ export function flagReason(reason: unknown): string {
   if (typeof reason !== 'object' || reason === null) return '—'
   const r = reason as Record<string, unknown>
   if (r.noFace === true) return 'No face (first photo)'
-  if (typeof r.error === 'string') return `Moderation error: ${r.error}`
+  // The automatic check failed (details are in the function logs, not here).
+  if (typeof r.error === 'string') return "Automatic check didn't finish — review it yourself"
   const scores = (['nudity', 'gore', 'offensive'] as const)
     .filter((k) => typeof r[k] === 'number' && (r[k] as number) > 0)
     .map((k) => `${k} ${Math.round((r[k] as number) * 100)}%`)

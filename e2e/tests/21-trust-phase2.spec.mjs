@@ -377,3 +377,48 @@ test('legal notice: only the Privacy Policy changed since they last saw it → t
   await expect(notice).toBeHidden()
   await ctx.close()
 })
+
+// ─── Follow-up: moderation without a profile; the review page fits ───────────
+
+test('moderation: an upload for an account with no profile is removed and logged, never queued as an error', async () => {
+  const a = await seedUser('Ann')
+  await db.doc(`users/${a.uid}`).delete() // e.g. a deleted account's leftover session
+  const path = `photos/${a.uid}/spark/e2e-clean-orphan.jpg`
+  expect(await storageUpload(a.uid, path, JPEG, 'image/jpeg')).toBe(200)
+  const { getStorage } = await import('firebase-admin/storage')
+  const file = getStorage().bucket(BUCKET).file(path)
+  await expect.poll(async () => (await file.exists())[0], { timeout: 30000 }).toBe(false)
+  expect((await accountDoc(a.uid))?.pendingPhotoURLs ?? []).toEqual([])
+  expect((await internalDoc(a.uid))?.hasPendingPhotos).not.toBe(true)
+  expect((await db.doc(`photoSignals/${a.uid}`).get()).exists).toBe(false)
+})
+
+test('admin photo review: both buttons fit at laptop and phone widths, no sideways scroll; errors read plainly', async ({ browser }) => {
+  const admin = await seedUser('Kim', { isAdmin: true })
+  const a = await seedUser('Ann')
+  const b = await seedUser('Abe')
+  await db.doc(`users/${a.uid}/private/account`).set({ pendingPhotoURLs: [{ url: `photos/${a.uid}/spark/x1.jpg`, mode: 'spark', flaggedAt: Timestamp.now(), approved: false, reason: { error: '5 NOT_FOUND: No document to update: users/smoke-p2-1791402718393-with-a-very-long-id' } }] }, { merge: true })
+  await db.doc(`users/${b.uid}/private/account`).set({ pendingPhotoURLs: [{ url: `photos/${b.uid}/play/x2.jpg`, mode: 'play', flaggedAt: Timestamp.now(), approved: false, reason: { sexual_activity: 0.7, sexual_display: 0.9, erotica: 0.8, very_suggestive: 0.95, gore: 0.6, offensive: 0.7, nudity: 0.9, exceeded: ['sexual_activity', 'gore'] } }] }, { merge: true })
+  for (const u of [a, b]) await db.doc(`userInternal/${u.uid}`).set({ hasPendingPhotos: true }, { merge: true })
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+    const ctx = await browser.newContext({ ...CONTEXT, viewport })
+    const page = await ctx.newPage()
+    await offline(page)
+    await quietFirstRun(page, admin.uid)
+    await signIn(page, admin.phone, { expectPath: /\/discover/ })
+    await page.goto(`${APP}/admin/photos`)
+    await expect(page.getByRole('button', { name: '✗ Reject' })).toHaveCount(2, { timeout: 20000 })
+    await expect(page.getByText("Automatic check didn't finish — review it yourself")).toBeVisible()
+    await expect(page.getByText(/NOT_FOUND/)).toHaveCount(0)
+    for (const name of ['✓ Approve', '✗ Reject']) {
+      for (const btn of await page.getByRole('button', { name }).all()) {
+        const box = await btn.boundingBox()
+        expect(box.x).toBeGreaterThanOrEqual(0)
+        expect(box.x + box.width).toBeLessThanOrEqual(viewport.width)
+      }
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await page.screenshot({ path: `test-results/admin-photos-${viewport.width}.png`, fullPage: true })
+    await ctx.close()
+  }
+})
