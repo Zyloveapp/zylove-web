@@ -3,7 +3,7 @@
 // settings (legacyOptions.ts) are new.
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { calculateSparkScore, calculatePlayScore } from "./scoring";
+import { calculateSparkScore, calculatePlayScore, deepFitRecord, sparkPairFields } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { getToken, sendPush } from "./notifications";
 import { LEGACY_RUNTIME } from "./legacyOptions";
@@ -75,7 +75,8 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
     const likerFull = { ...likerDoc, ...likerPlay, playProfile: likerPlay } as UserDoc;
     const likedFull = { ...likedDoc, ...likedPlay, playProfile: likedPlay } as UserDoc;
 
-    const { score: sparkScore, breakdown: sparkBreakdown, triggeredDealbreakers, tier1: sparkTier1 } = calculateSparkScore(likerDoc,  likedDoc);
+    const spark = calculateSparkScore(likerDoc, likedDoc);
+    const { breakdown: sparkBreakdown, triggeredDealbreakers } = spark;
     const playResult = play ? calculatePlayScore(likerFull, likedFull) : null;
 
     const [userA, userB] = [likerId, likedId].sort();
@@ -84,14 +85,15 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
       userA,
       userB,
       createdAt:         admin.firestore.Timestamp.now(),
-      sparkScore,
+      // Engine v2: the headline, its "Not enough info" flag and the engine version.
+      ...sparkPairFields(spark),
       scoreCalculatedAt: admin.firestore.Timestamp.now(),
       scoreVersion:      1,
     };
 
     const pairBatch = db.batch();
     pairBatch.set(pairRef, pair);
-    writeSparkDetails(pairBatch, pid, { breakdown: sparkBreakdown, dealbreakers: triggeredDealbreakers, tier1: sparkTier1 }, false);
+    writeSparkDetails(pairBatch, pid, { breakdown: sparkBreakdown, dealbreakers: triggeredDealbreakers, tier1: deepFitRecord(spark.tier1, likerId, likedId) }, false);
     await pairBatch.commit();
     if (playResult) await setPlayScores(pid, playFields(playResult.score, playResult.breakdown, playResult.tier1));
   }

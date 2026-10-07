@@ -4,5 +4,5 @@
 // updates a function, so they're pinned here: moving a function into the web
 // codebase must not change how it runs. The folder was the deployed source
 // byte for byte until the 2026-10 scoring overhaul (engine v2: scoring.ts,
-// tier1/, onTap.ts, onProfileWrite.ts); the rest still is.
+// tier1/, onTap.ts, onLike.ts, onProfileWrite.ts); the rest still is.
 export const LEGACY_RUNTIME = { memory: '256MiB', timeoutSeconds: 60, maxInstances: 20 } as const
