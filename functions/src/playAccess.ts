@@ -2,7 +2,7 @@ import { HttpsError } from 'firebase-functions/v2/https'
 import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
-import { computeEntitlement, type Entitlement } from './entitlements'
+import { cityIsOpen, computeEntitlement, type Entitlement } from './entitlements'
 import { accountRef, internalRef, userRef } from './userData'
 
 // Play access (Stage 2, F-004). Play data is sealed: reading another
@@ -82,8 +82,17 @@ export async function refreshPlayAccess(uid: string): Promise<PlayFlags> {
       tx.get(db.doc(`users/${uid}/private/matching`)),
       tx.get(db.doc(`userLocations/${uid}`)),
     ])
+    // A far user's linked city, if it's a launch city: has it opened?
+    const linked: unknown = loc.data()?.linkedCityId
+    const linkedCfg = typeof linked === 'string' && !loc.data()?.marketCityId ? await tx.get(db.doc(`config/city_${linked}`)) : null
     // The whole entitlement, stored with the Play flags it decides.
-    const ent = computeEntitlement({ root: root.data(), plan: internal.data(), matching: matching.data() ?? { matchableAs: root.data()?.matchableAs }, loc: loc.data() })
+    const ent = computeEntitlement({
+      root: root.data(),
+      plan: internal.data(),
+      matching: matching.data() ?? { matchableAs: root.data()?.matchableAs },
+      loc: loc.data(),
+      linkedCityOpen: linkedCfg ? cityIsOpen(linkedCfg.data()) : false,
+    })
     const flags = computeFlags(root.data(), internal.data(), play.data(), ent)
     // A deleted account's server record is gone for good (clearPrivateData):
     // never write it back.

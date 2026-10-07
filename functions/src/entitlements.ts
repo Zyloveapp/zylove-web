@@ -49,7 +49,8 @@ export function launchCityOf(loc: DocumentData | undefined): string | null {
 }
 
 export function computeEntitlement(
-  input: { root?: DocumentData; plan?: DocumentData; matching?: DocumentData; loc?: DocumentData; cityOpen?: boolean },
+  // linkedCityOpen: whether the linked (far) city — when it's a launch city — has opened.
+  input: { root?: DocumentData; plan?: DocumentData; matching?: DocumentData; loc?: DocumentData; linkedCityOpen?: boolean },
   now = Date.now(),
 ): Entitlement {
   const { root, plan = {}, matching = {}, loc } = input
@@ -71,23 +72,18 @@ export function computeEntitlement(
   }
   // Never had a trial: a cancelled subscriber gets neither a trial nor pre-launch.
   if (plan.hadPaidPlan === true) return e('free', 'free')
-  if (!launchCityOf(loc)) return e('free', 'waiting')
-  // Near a launch city: Elite while it's founding, and once it's open until
-  // their trial starts (initUserDefaults / onMarketOpened start it).
-  return e('elite', 'prelaunch')
+  // Near a launch city (within its radius — the locked market): Elite while
+  // it's founding, and once it's open until their trial starts
+  // (initUserDefaults / onMarketOpened start it).
+  const market = typeof loc?.marketCityId === 'string' && ZYLOVE_CITIES.some((c) => c.id === loc.marketCityId)
+  if (market) return e('elite', 'prelaunch')
+  // Linked from further away: Free until that city opens; then, until their
+  // trial starts, the same as everyone there.
+  const linkedLaunch = typeof loc?.linkedCityId === 'string' && ZYLOVE_CITIES.some((c) => c.id === loc.linkedCityId)
+  if (linkedLaunch && input.linkedCityOpen === true) return e('elite', 'prelaunch')
+  return e('free', 'waiting')
 }
 
-// Everything needed, read now.
-export async function loadEntitlement(uid: string, root?: DocumentData, plan?: DocumentData): Promise<Entitlement> {
-  const db = getFirestore()
-  const [r, p, m, l] = await Promise.all([
-    root ? Promise.resolve(root) : db.doc(`users/${uid}`).get().then((s) => s.data()),
-    plan ? Promise.resolve(plan) : db.doc(`userInternal/${uid}`).get().then((s) => s.data()),
-    db.doc(`users/${uid}/private/matching`).get().then((s) => s.data()),
-    db.doc(`userLocations/${uid}`).get().then((s) => s.data()),
-  ])
-  return computeEntitlement({ root: r, plan: p, matching: m ?? { matchableAs: r?.matchableAs }, loc: l })
-}
 
 // The stored tier, as of now (a trial past its end counts as Free). Bots are Elite.
 export async function tierNow(uid: string): Promise<Tier> {
