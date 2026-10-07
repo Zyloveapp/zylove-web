@@ -4,7 +4,7 @@
 // private/profile and private/matching triggers.
 import * as admin from "firebase-admin";
 import { onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
-import { calculateSparkScore, calculatePlayScore, sparkPairFields } from "./scoring";
+import { calculateSparkScore, calculatePlayScore, deepFitRecord, sparkPairFields } from "./scoring";
 import { UserDoc, PairDoc } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { bothHavePlay, playFields, setPlayScores } from "../pairPlay";
@@ -49,7 +49,7 @@ export async function rescorePair(
   if (!batch) return spark;
 
   // Stage C: the details go to the plan-gated sub-docs (pairSpark.ts).
-  writeSparkDetails(batch, pairSnap.id, { breakdown: spark.breakdown, dealbreakers: spark.triggeredDealbreakers, tier1: spark.tier1 }, false);
+  writeSparkDetails(batch, pairSnap.id, { breakdown: spark.breakdown, dealbreakers: spark.triggeredDealbreakers, tier1: deepFitRecord(spark.tier1, userId, otherUid) }, false);
   batch.update(pairSnap.ref, {
     ...sparkPairFields(spark),
     sparkBreakdown: admin.firestore.FieldValue.delete(),

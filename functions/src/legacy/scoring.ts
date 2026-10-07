@@ -231,9 +231,10 @@ const pct = (v: number | null): number | null => (v === null ? null : Math.round
 const NON_CORE: (keyof typeof SPARK_WEIGHTS)[] = ["valuesIntentions", "physicalPrefs", "loveLanguages", "lifestyle", "personality"];
 
 /**
- * Spark compatibility for a pair: the Tier 0 score (the headline for most
- * plans), its category breakdown, triggered dealbreakers, and the Tier 1
- * "Deep Fit" result (facet-based; Elite and bot pairs see it).
+ * Spark compatibility for a pair. `score` is the one headline everyone sees:
+ * the Deep Fit (Tier 1, facet-based) score, or Tier 0 if Tier 1 fails.
+ * Tier 0 survives as the category breakdown (Spark+ bars). `tier1` carries
+ * Deep Fit's detail — both directions and the reasons (Elite).
  *
  * Both engines: missing data is excluded, not a match; thin evidence pulls
  * toward EVIDENCE_PRIOR; a dealbreaker caps the score at DEALBREAKER_CAP;
@@ -249,16 +250,11 @@ export function calculateSparkScore(
   // Engine output before calibration, shrinkage and caps (for calibration
   // and audits; never stored or shown).
   raw: { tier0: number; tier1: number | null };
+  // The Tier 0 score on the display scale (the headline's fallback).
+  tier0Score: number;
   breakdown: SparkBreakdown;
   triggeredDealbreakers: string[];
-  tier1: {
-    archetype:      unknown;
-    combinedScore:  number;
-    asymmetryGap:   number;
-    dataConfidence: number;
-    coverage:       number;
-    enoughInfo:     boolean;
-  } | null;
+  tier1: Tier1Spark | null;
 } {
   const a = userA as any;
   const b = userB as any;
@@ -290,14 +286,7 @@ export function calculateSparkScore(
   const raw0 = attraction === 0 ? 0 : parts.reduce((n, [w, v]) => n + w * v, 0) / parts.reduce((n, [w]) => n + w, 0);
 
   // ── Tier 1 (fail-open) ──────────────────────────────────────────────────
-  let tier1: {
-    archetype:      unknown;
-    combinedScore:  number;
-    asymmetryGap:   number;
-    dataConfidence: number;
-    coverage:       number;
-    enoughInfo:     boolean;
-  } | null = null;
+  let tier1: Tier1Spark | null = null;
   // Shared facet evidence (0–1) — the one measure of how much we know, for
   // both engines. 0 if Tier 1 fails, so Tier 0 falls to the prior.
   let coverage = 0;
@@ -308,10 +297,13 @@ export function calculateSparkScore(
     raw1 = pair.combinedRaw;
     // Tier 0's dealbreakers (habits, drinking, kids…) cap Deep Fit too; Tier 1
     // only sees the facet-shaped ones.
-    const combined = dealbreakerResult.triggered.length > 0 ? Math.min(DEALBREAKER_CAP, pair.combinedScore) : pair.combinedScore;
+    const cap = (v: number) => (dealbreakerResult.triggered.length > 0 ? Math.min(DEALBREAKER_CAP, v) : v);
     tier1 = {
       archetype:      pair.archetype,
-      combinedScore:  combined,
+      combinedScore:  cap(pair.combinedScore),
+      directions:     { ab: cap(pair.displayAB), ba: cap(pair.displayBA) },
+      strengths:      pair.strengths,
+      differences:    pair.differences,
       asymmetryGap:   pair.asymmetryData.gap,
       dataConfidence: pair.dataConfidence,
       coverage:       pair.coverage,
@@ -321,12 +313,14 @@ export function calculateSparkScore(
     console.warn("[scoring] Tier 1 computation failed", err);
   }
 
-  let score = attraction === 0 ? 0 : shrinkToPrior(calibrateTier0(raw0), coverage);
+  let tier0Score = attraction === 0 ? 0 : shrinkToPrior(calibrateTier0(raw0), coverage);
   const n = dealbreakerResult.triggered.length;
-  if (n > 0) score = Math.min(DEALBREAKER_CAP, score * Math.pow(0.5, n));
+  if (n > 0) tier0Score = Math.min(DEALBREAKER_CAP, tier0Score * Math.pow(0.5, n));
+  const headline = attraction === 0 ? 0 : tier1 ? tier1.combinedScore : tier0Score;
 
   return {
-    score: Math.round(Math.min(100, Math.max(0, score))),
+    score: Math.round(Math.min(100, Math.max(0, headline))),
+    tier0Score: Math.round(Math.min(100, Math.max(0, tier0Score))),
     enoughInfo: attraction !== 0 && hasEnoughInfo(coverage, facetsA.recognized, facetsB.recognized),
     raw: { tier0: raw0, tier1: raw1 },
     breakdown,
@@ -335,7 +329,30 @@ export function calculateSparkScore(
   };
 }
 
-// The pair-doc fields for a Spark result (the headline the free plan sees).
+// Deep Fit detail as calculateSparkScore returns it, A/B = its arguments.
+export interface Tier1Spark {
+  archetype:      unknown;
+  combinedScore:  number;
+  // Display scale: ab = how well B fits A, ba = how well A fits B.
+  directions:     { ab: number; ba: number };
+  strengths:      string[];
+  differences:    string[];
+  asymmetryGap:   number;
+  dataConfidence: number;
+  coverage:       number;
+  enoughInfo:     boolean;
+}
+
+// What pairs/{id}/modes/deep stores (Elite): Deep Fit with the directions
+// keyed by uid — fitFor[uid] = how well the other person fits that uid —
+// so either person's view reads the same doc.
+export function deepFitRecord(tier1: Tier1Spark | null, uidA: string, uidB: string): Record<string, unknown> | null {
+  if (!tier1) return null;
+  const { directions, ...rest } = tier1;
+  return { ...rest, fitFor: { [uidA]: Math.round(directions.ab), [uidB]: Math.round(directions.ba) } };
+}
+
+// The pair-doc fields for a Spark result (the headline everyone sees).
 export function sparkPairFields(result: ReturnType<typeof calculateSparkScore>): {
   sparkScore: number;
   sparkEnoughInfo: boolean;

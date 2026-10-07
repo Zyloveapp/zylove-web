@@ -42,7 +42,7 @@
 // rather than imported — legacy file is being phased out.
 
 import type { FacetId } from './facets'
-import { ALL_FACET_IDS } from './facets'
+import { ALL_FACET_IDS, FACETS } from './facets'
 import {
   DEALBREAKER_REPULSION_MAP,
   type DealbreakerRepulsion,
@@ -81,6 +81,14 @@ export interface PairScoreResult {
   combinedRaw:             number
   // Share of facet weight both people gave evidence for (0–1).
   coverage:                number
+  // Each direction on the display scale (calibrated, shrunk, capped like
+  // combinedScore): how well B fits A, and how well A fits B.
+  displayAB:               number
+  displayBA:               number
+  // Deep Fit's reasons: the facets (display names) where the two line up
+  // most, and where they differ most. Only facets both gave evidence for.
+  strengths:               string[]
+  differences:             string[]
   // Both people answered enough recognized questions, and the shared
   // evidence covers enough of the facet weight, for a number to mean much.
   enoughInfo:              boolean
@@ -376,6 +384,26 @@ function directionScore(psychological: number | null, physical: number | null, i
   return Math.max(0, Math.min(100, value * 100))
 }
 
+// Facet display names by id.
+const FACET_NAMES = Object.fromEntries(Object.values(FACETS).map((f) => [f.id, f.name])) as Record<FacetId, string>
+const STRENGTH_MIN = 0.85
+const DIFFERENCE_MAX = 0.6
+
+// Where the pair lines up most (high score on heavily weighted facets) and
+// differs most, from facets both people gave evidence for (NaN = excluded).
+function reasons(facetScores: Record<FacetId, number>): { strengths: string[]; differences: string[] } {
+  const scored = ALL_FACET_IDS.filter((id) => !Number.isNaN(facetScores[id]))
+  const strengths = scored
+    .filter((id) => facetScores[id] >= STRENGTH_MIN)
+    .sort((x, y) => facetWeight(y) * facetScores[y] - facetWeight(x) * facetScores[x])
+    .slice(0, 3)
+  const differences = scored
+    .filter((id) => facetScores[id] <= DIFFERENCE_MAX)
+    .sort((x, y) => facetWeight(y) * (1 - facetScores[y]) - facetWeight(x) * (1 - facetScores[x]))
+    .slice(0, 2)
+  return { strengths: strengths.map((id) => FACET_NAMES[id]), differences: differences.map((id) => FACET_NAMES[id]) }
+}
+
 // ─── Dealbreaker evaluation ───────────────────────────────────────────────
 
 function checkThreshold(value: number, threshold: number, op: 'lt' | 'gt'): boolean {
@@ -515,6 +543,10 @@ function buildZeroResult(): PairScoreResult {
     combinedScore:           0,
     combinedRaw:             0,
     coverage:                0,
+    displayAB:               0,
+    displayBA:               0,
+    strengths:               [],
+    differences:             [],
     enoughInfo:              true,
 
     asymmetryData: {
@@ -582,8 +614,13 @@ export function computePairScore(
 
   const combinedRaw = combineScores(scoreAB, scoreBA)
   const hasDealbreakerPenalty = dbAB.multiplier < 1 || dbBA.multiplier < 1
-  const calibrated = shrinkToPrior(calibrateTier1(combinedRaw), coverage)
-  const combined = hasDealbreakerPenalty ? Math.min(DEALBREAKER_CAP, calibrated) : calibrated
+  // Raw → display scale: calibrate, pull thin evidence toward the prior,
+  // and cap any pair with a dealbreaker.
+  const toDisplay = (raw: number) => {
+    const v = shrinkToPrior(calibrateTier1(raw), coverage)
+    return hasDealbreakerPenalty ? Math.min(DEALBREAKER_CAP, v) : v
+  }
+  const combined = toDisplay(combinedRaw)
   const enoughInfo = hasEnoughInfo(coverage, analysisA.recognized, analysisB.recognized)
 
   // Archetype classification — facet-based matchers run first, Unlikely
@@ -617,6 +654,9 @@ export function computePairScore(
     combinedScore:           combined,
     combinedRaw,
     coverage,
+    displayAB:               toDisplay(scoreAB),
+    displayBA:               toDisplay(scoreBA),
+    ...(enoughInfo ? reasons(facetScores) : { strengths: [], differences: [] }),
     enoughInfo,
 
     asymmetryData: {

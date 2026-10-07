@@ -9,6 +9,9 @@
 //   node scripts/rescore-pairs.mjs --dry-run   old → new for every pair, and the distribution
 //   node scripts/rescore-pairs.mjs --apply
 //
+// Prints only — it writes no files (production data never lands in the
+// repo; redirect output to a scratch directory if you need to keep it).
+//
 // Run --apply after the engine v2 functions are live (or onTap would serve
 // v1 scores to clients that call it in between — harmless, it re-scores
 // anything below the current engine version). Idempotent.
@@ -32,8 +35,10 @@ const { rescorePair, scoringDocs } = require('./lib/legacy/onProfileWrite.js')
 const { SCORE_ENGINE_VERSION } = require('./lib/legacy/scoring.js')
 const { isSuspendedUid } = require('./lib/userData.js')
 
-// What the web app shows for a pair (src/services/discover.ts displayScore),
-// for a viewer who sees Deep Fit (Elite, or a bot pair) and one who doesn't.
+// What the web app shows for a pair (src/services/discover.ts displayScore).
+// Before (engine v1) it depended on the plan: Deep Fit for Elite and bot
+// pairs, the base score otherwise. After (engine v2) every plan sees the same
+// headline.
 const BANDS = [[75, 'Strong fit'], [60, 'Good fit'], [0, 'Some differences']]
 const label = (v) => BANDS.find(([min]) => v >= min)[1]
 function shownV1(pair, deep) {
@@ -41,10 +46,8 @@ function shownV1(pair, deep) {
   const v = d ? deep.combinedScore : pair.sparkScore
   return typeof v === 'number' ? Math.max(0, Math.min(100, Math.round(v))) : null
 }
-function shownV2(r, deep) {
-  if (!r.enoughInfo) return 'Not enough info'
-  const v = Math.round(deep && r.tier1 ? r.tier1.combinedScore : r.score)
-  return `${v} ${label(v)}`
+function shownV2(r) {
+  return r.enoughInfo ? `${r.score} ${label(r.score)}` : 'Not enough info'
 }
 
 const pairs = (await db.collection('pairs').get()).docs
@@ -85,11 +88,9 @@ for (const snap of pairs) {
     engine: pair.engineVersion ?? 1,
     before: shownV1(pair, bot ? deep : null),
     beforeElite: shownV1(pair, deep),
-    after: shownV2(r, bot),
-    afterElite: shownV2(r, true),
+    after: shownV2(r),
     dealbreakers: r.triggeredDealbreakers.join(','),
-    newTier0: r.score,
-    newDeep: r.tier1 ? +r.tier1.combinedScore.toFixed(1) : null,
+    headline: r.score,
     enoughInfo: r.enoughInfo,
   })
   if (batch && ++inBatch >= 100) {
@@ -106,9 +107,9 @@ if (batch && inBatch) {
 
 console.log(`Pairs: ${pairs.length}; re-scored ${rows.length}; skipped ${skipped.length}. Engine → v${SCORE_ENGINE_VERSION}.`)
 for (const s of skipped) console.log(`  skipped ${s}`)
-console.log('\nPair                                                   engine  before(Elite) → after(Elite)')
+console.log('\nPair                                                   engine  before: plan (Elite) → after: every plan')
 for (const r of rows) {
-  console.log(`  ${r.pair.padEnd(52)} v${r.engine}   ${String(r.before).padStart(3)} (${String(r.beforeElite).padStart(3)}) → ${r.after} (${r.afterElite})${r.dealbreakers ? `  [dealbreaker: ${r.dealbreakers}]` : ''}`)
+  console.log(`  ${r.pair.padEnd(52)} v${r.engine}   ${String(r.before).padStart(3)} (${String(r.beforeElite).padStart(3)}) → ${r.after}${r.dealbreakers ? `  [dealbreaker: ${r.dealbreakers}]` : ''}`)
 }
 function dist(name, xs) {
   xs = xs.filter((x) => typeof x === 'number').sort((a, b) => a - b)
@@ -118,8 +119,9 @@ function dist(name, xs) {
   console.log(`  ${name.padEnd(26)} n=${xs.length} min=${xs[0]} median=${q(0.5)} max=${xs.at(-1)}  90+: ${n((x) => x >= 90)}  100: ${n((x) => x >= 100)}  Strong(75+): ${n((x) => x >= 75)}  Good(60–74): ${n((x) => x >= 60 && x < 75)}  Some differences(<60): ${n((x) => x < 60)}`)
 }
 const num = (s) => (typeof s === 'string' && /^\d/.test(s) ? Number(s.split(' ')[0]) : s)
-console.log('\nWhat Elite viewers (and bot pairs) see:')
-dist('before', rows.map((r) => r.beforeElite))
-dist('after', rows.map((r) => num(r.afterElite)))
-console.log(`  after: Not enough info ${rows.filter((r) => !r.enoughInfo).length}; dealbreaker pairs ${rows.filter((r) => r.dealbreakers).length} (highest shown ${Math.max(0, ...rows.filter((r) => r.dealbreakers).map((r) => Math.max(r.newTier0, r.newDeep ?? 0)))})`)
+console.log('\nShown scores:')
+dist('before (Free, non-bot)', rows.map((r) => r.before))
+dist('before (Elite)', rows.map((r) => r.beforeElite))
+dist('after (every plan)', rows.map((r) => num(r.after)))
+console.log(`  after: Not enough info ${rows.filter((r) => !r.enoughInfo).length}; dealbreaker pairs ${rows.filter((r) => r.dealbreakers).length} (highest shown ${Math.max(0, ...rows.filter((r) => r.dealbreakers).map((r) => r.headline))})`)
 console.log(apply ? `\nApplied: ${written} pairs written.` : '\nDry run — nothing written.')

@@ -180,6 +180,11 @@ export interface Tier1Result {
   combinedScore: number | null // engine v1 could exceed 100; v2 is 0–100
   asymmetryGap: number | null // |A→B − B→A| in score points
   dataConfidence: number | null
+  // Engine v2 Deep Fit detail (Elite): fitFor[uid] = how well the other
+  // person fits that uid; where the pair lines up and differs most.
+  fitFor: Record<string, number>
+  strengths: string[]
+  differences: string[]
 }
 
 export interface CompatibilityResult {
@@ -197,6 +202,10 @@ export interface CompatibilityResult {
   // The viewed person has physical preferences to score against (their
   // preferences themselves are private, Stage 3).
   hasPhysicalPrefs?: boolean
+}
+
+function strings(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x !== '') : []
 }
 
 function num(v: unknown): number | null {
@@ -220,6 +229,12 @@ export function parseTier1(v: unknown): Tier1Result | null {
     combinedScore: num(t.combinedScore),
     asymmetryGap: num(t.asymmetryGap),
     dataConfidence: num(t.dataConfidence),
+    fitFor:
+      typeof t.fitFor === 'object' && t.fitFor !== null
+        ? Object.fromEntries(Object.entries(t.fitFor).filter((e): e is [string, number] => num(e[1]) !== null))
+        : {},
+    strengths: strings(t.strengths),
+    differences: strings(t.differences),
   }
 }
 
@@ -331,20 +346,20 @@ export interface DisplayScore {
   label: ScoreLabel | null // Spark, engine v2; null for Play and engine v1
 }
 
-// The one compatibility number shown anywhere: Deep Fit when the pair has
-// it (Spark only), otherwise the base score. Always 0–100.
+// The one compatibility number shown anywhere. Engine v2: the pair's
+// sparkScore — Deep Fit's headline, the same for every plan (plans differ
+// in the explanation, not the number). Engine v1 (until re-scored): Deep
+// Fit when trustworthy, else the base score. Always 0–100.
 export function displayScore(result: CompatibilityResult, mode: Mode): DisplayScore | null {
   if (mode === 'play') {
     return typeof result.playScore === 'number' ? { value: clampScore(result.playScore), deep: false, label: null } : null
   }
   const t = result.tier1
   if (result.engineVersion === SCORE_ENGINE_VERSION) {
-    if (result.sparkEnoughInfo === false) return { value: null, deep: false, label: 'Not enough info' }
-    const deep = t?.combinedScore != null
-    const raw = deep ? t.combinedScore : result.sparkScore
-    if (typeof raw !== 'number') return null
-    const value = clampScore(raw)
-    return { value, deep, label: scoreLabel(value) }
+    if (result.sparkEnoughInfo === false) return { value: null, deep: true, label: 'Not enough info' }
+    if (typeof result.sparkScore !== 'number') return null
+    const value = clampScore(result.sparkScore)
+    return { value, deep: true, label: scoreLabel(value) }
   }
   if (t && t.combinedScore !== null && t.combinedScore <= 100 && (t.dataConfidence ?? 0) >= DEEP_FIT_MIN_CONFIDENCE) {
     return { value: clampScore(t.combinedScore), deep: true, label: null }

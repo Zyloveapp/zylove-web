@@ -23,3 +23,11 @@ dist-ssr
 *.sln
 *.sw?
 scripts/.token-sweep-plan.json
+
+# Production-data scratch output never belongs in the repo: scripts that read
+# production write to a scratch directory outside it. Safety net for strays.
+profiles.json
+*.prod.json
+*.dump.json
+dryrun*.txt
+scratch/

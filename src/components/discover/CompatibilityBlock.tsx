@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
+  SCORE_ENGINE_VERSION,
   displayScore,
   fetchCompatibility,
   fetchMyProfile,
@@ -192,6 +193,8 @@ export default function CompatibilityBlock({
       <RevealedScore
         result={result}
         mode={mode}
+        viewerUid={uid}
+        targetUid={targetUid}
         animate={!cached}
         hidden={emptyCategories(profile, result?.hasPhysicalPrefs)}
         fullReport={fullReport}
@@ -238,6 +241,8 @@ export default function CompatibilityBlock({
 function RevealedScore({
   result,
   mode,
+  viewerUid,
+  targetUid,
   animate,
   hidden,
   fullReport,
@@ -249,6 +254,8 @@ function RevealedScore({
 }: {
   result: CompatibilityResult
   mode: Mode
+  viewerUid: string
+  targetUid: string
   animate: boolean
   hidden: Set<string>
   fullReport: boolean
@@ -262,8 +269,11 @@ function RevealedScore({
   breakTheIce: ReactNode
 }) {
   const theme = discoverTheme(mode)
-  // Free: the score only; the breakdown, report and starters are Spark+.
+  // Plans sell the explanation, not the number. Free: the score and its
+  // label. Spark+: the breakdown, report and starters. Elite: Deep Fit's
+  // detail — sent by the server only to Elite (and for curated profiles).
   const fullAccess = useCanAccess('compatibility')
+  const deepAccess = useCanAccess('deep_fit')
   // Start hidden only when freshly revealed, then fade/slide in on the next frame.
   const [visible, setVisible] = useState(!animate)
   useEffect(() => {
@@ -304,11 +314,10 @@ function RevealedScore({
   const dealbreakers = isPlay ? [] : (result.triggeredDealbreakers ?? [])
   // onTap's tier1 is Spark-only; Play's archetype comes from the pair doc.
   const tier1 = isPlay ? null : (result.tier1 ?? null)
-  const archetype = isPlay
-    ? playArchetype
-    : tier1?.archetype && tier1.archetype.confidence > 0.4
-      ? tier1.archetype
-      : null
+  const sparkArchetype = tier1?.archetype && tier1.archetype.confidence > 0.4 ? tier1.archetype : null
+  // Engine v2: the Spark archetype is part of Elite's Deep Fit card below.
+  const v2 = !isPlay && result.engineVersion === SCORE_ENGINE_VERSION
+  const archetype = isPlay ? playArchetype : v2 ? null : sparkArchetype
   // Play "Why this works" is built from both Play profiles once they load.
   const playLines = isPlay && fullReport && playFacts ? playWhyLines(playFacts) : null
   // Deep Fit replaces the base score as the headline when it's trustworthy.
@@ -336,6 +345,16 @@ function RevealedScore({
       </p>
       {qualifier && <p className="mt-0.5 text-xs text-white/50">{qualifier}</p>}
       <p className="mt-1 text-xs text-white/35">{score.deep ? '✦ Deep compatibility score' : 'Compatibility estimate'}</p>
+
+      {v2 && tier1 && (
+        <DeepFitDetail
+          fitsYou={tier1.fitFor[viewerUid] ?? null}
+          youFit={tier1.fitFor[targetUid] ?? null}
+          strengths={tier1.strengths}
+          differences={tier1.differences}
+          archetype={sparkArchetype}
+        />
+      )}
 
       {fullAccess === false && <PaywallCard feature="compatibility" />}
 
@@ -394,6 +413,63 @@ function RevealedScore({
       )}
 
       {fullAccess && breakTheIce}
+
+      {/* Spark+ without Elite: what Deep Fit's detail adds. */}
+      {v2 && !tier1 && fullAccess && deepAccess === false && <PaywallCard feature="deep_fit" />}
+    </div>
+  )
+}
+
+// Elite: Deep Fit in full — how well each of you fits the other, where you
+// line up and differ most, and the pair's archetype.
+function DeepFitDetail({
+  fitsYou,
+  youFit,
+  strengths,
+  differences,
+  archetype,
+}: {
+  fitsYou: number | null
+  youFit: number | null
+  strengths: string[]
+  differences: string[]
+  archetype: ArchetypeMatch | null
+}) {
+  return (
+    <div className="mt-5 space-y-4 rounded-xl border border-[#1B4FD8]/30 bg-[#1B4FD8]/10 p-4">
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-[#9DB4FF]">✦ Deep Fit</p>
+      {archetype && (
+        <div>
+          <p className="text-sm font-semibold text-white">{archetype.label}</p>
+          {archetype.copy && <p className="mt-1 text-sm text-white/60">{archetype.copy}</p>}
+        </div>
+      )}
+      {fitsYou !== null && youFit !== null && (
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-2xl font-bold text-white">{fitsYou}%</p>
+            <p className="text-xs text-white/50">How they fit what you want</p>
+          </div>
+          <div>
+            <p className="text-2xl font-bold text-white">{youFit}%</p>
+            <p className="text-xs text-white/50">How you fit what they want</p>
+          </div>
+        </div>
+      )}
+      {strengths.length > 0 && (
+        <p className="text-sm">
+          <span className="text-white/55">Where you line up</span>
+          <span className="mx-2 text-white/20">·</span>
+          <span className="text-white/85">{strengths.join(', ')}</span>
+        </p>
+      )}
+      {differences.length > 0 && (
+        <p className="text-sm">
+          <span className="text-white/55">Where you differ</span>
+          <span className="mx-2 text-white/20">·</span>
+          <span className="text-white/85">{differences.join(', ')}</span>
+        </p>
+      )}
     </div>
   )
 }

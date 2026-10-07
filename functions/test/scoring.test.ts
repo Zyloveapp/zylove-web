@@ -6,13 +6,15 @@ import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { calculateSparkScore, SCORE_ENGINE_VERSION, sparkPairFields } from '../src/legacy/scoring'
+import { calculateSparkScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkPairFields } from '../src/legacy/scoring'
 import { DEALBREAKER_CAP } from '../src/legacy/tier1/scorePair'
 import type { UserDoc } from '../src/legacy/types'
 import { person, quantile, rng, type Profile } from './population'
 
 const score = (a: Profile, b: Profile) => calculateSparkScore(a as unknown as UserDoc, b as unknown as UserDoc)
 const deep = (r: ReturnType<typeof score>) => r.tier1?.combinedScore ?? NaN
+// "Tier 0" below is the breakdown engine's own score (r.tier0Score); the
+// headline everyone sees (r.score) is Deep Fit's.
 
 const man = (o: Profile = {}): Profile => ({ genderIdentity: 'man', attractedTo: ['women'], age: 33, ageMin: 26, ageMax: 40, intent: 'spark', ...o })
 const woman = (o: Profile = {}): Profile => ({ genderIdentity: 'woman', attractedTo: ['men'], age: 31, ageMin: 28, ageMax: 40, intent: 'spark', ...o })
@@ -51,17 +53,33 @@ test('engine version and pair fields', () => {
   assert.equal(SCORE_ENGINE_VERSION, 2)
 })
 
+test('the headline is the Deep Fit score, with both directions and reasons', () => {
+  const r = score(man(HOMEBODY), woman({ ...HOMEBODY, personalityTraits: ['caring', 'romantic', 'funny'] }))
+  assert.equal(r.score, Math.round(deep(r)))
+  const t = r.tier1!
+  for (const v of [t.directions.ab, t.directions.ba]) assert.ok(v >= 0 && v <= 100, `direction ${v}`)
+  assert.ok(t.strengths.length > 0, 'no strengths')
+  const rec = deepFitRecord(t, 'uidA', 'uidB') as { fitFor: Record<string, number>; directions?: unknown }
+  assert.deepEqual(rec.fitFor, { uidA: Math.round(t.directions.ab), uidB: Math.round(t.directions.ba) })
+  assert.equal(rec.directions, undefined)
+})
+
+test('no reasons without enough info', () => {
+  const r = score(man(), woman(HOMEBODY))
+  assert.deepEqual([r.tier1!.strengths, r.tier1!.differences], [[], []])
+})
+
 test('opposite profiles score low (< 40) in both engines', () => {
   const r = score(man({ ...HOMEBODY, intent: 'spark' }), woman({ ...NIGHT_OWL, intent: 'open' }))
   assert.equal(r.enoughInfo, true)
-  assert.ok(r.score < 40, `Tier 0 ${r.score}`)
+  assert.ok(r.tier0Score < 40, `Tier 0 ${r.tier0Score}`)
   assert.ok(deep(r) < 40, `Deep Fit ${deep(r)}`)
 })
 
 test('identical profiles score high (> 85) in both engines', () => {
   const r = score(man(HOMEBODY), woman(HOMEBODY))
   assert.equal(r.enoughInfo, true)
-  assert.ok(r.score > 85, `Tier 0 ${r.score}`)
+  assert.ok(r.tier0Score > 85, `Tier 0 ${r.tier0Score}`)
   assert.ok(deep(r) > 85, `Deep Fit ${deep(r)}`)
 })
 
@@ -69,7 +87,7 @@ test('blank profiles are "Not enough info" and score low (< 50)', () => {
   for (const [a, b] of [[man(), woman()], [man(HOMEBODY), woman()], [man(), woman(NIGHT_OWL)]]) {
     const r = score(a, b)
     assert.equal(r.enoughInfo, false)
-    assert.ok(r.score < 50, `Tier 0 ${r.score}`)
+    assert.ok(r.tier0Score < 50, `Tier 0 ${r.tier0Score}`)
     assert.ok(deep(r) < 50, `Deep Fit ${deep(r)}`)
   }
 })
@@ -78,7 +96,7 @@ test('a mostly blank profile is "Not enough info" and scores low', () => {
   const thin = { personalityTraits: ['funny'], weekendVibes: ['no_plan'], conflictStyle: 'direct' }
   const r = score(man(thin), woman(HOMEBODY))
   assert.equal(r.enoughInfo, false)
-  assert.ok(r.score < 50 && deep(r) < 50, `${r.score} / ${deep(r)}`)
+  assert.ok(r.tier0Score < 50 && deep(r) < 50, `${r.tier0Score} / ${deep(r)}`)
 })
 
 test('a dealbreaker pair never scores high, however well everything else fits', () => {
@@ -86,13 +104,16 @@ test('a dealbreaker pair never scores high, however well everything else fits', 
   const smoker = { ...HOMEBODY, habitTags: ['reader', 'early_riser', 'cigarette_smoker', 'meditates'] }
   const r = score(man(smoker), woman({ ...HOMEBODY, dealbreakers: ['cigarette_smoker'] }))
   assert.deepEqual(r.triggeredDealbreakers, ['cigarette_smoker'])
-  assert.ok(r.score <= DEALBREAKER_CAP, `Tier 0 ${r.score}`)
+  assert.ok(r.tier0Score <= DEALBREAKER_CAP, `Tier 0 ${r.tier0Score}`)
   assert.ok(deep(r) <= DEALBREAKER_CAP, `Deep Fit ${deep(r)}`)
+  assert.ok(r.score <= DEALBREAKER_CAP, `headline ${r.score}`)
+  assert.ok(r.tier1!.directions.ab <= DEALBREAKER_CAP && r.tier1!.directions.ba <= DEALBREAKER_CAP, 'a direction above the cap')
 })
 
 test('orientation mismatch scores 0', () => {
   const r = score(man(HOMEBODY), woman({ ...HOMEBODY, attractedTo: ['women'] }))
   assert.equal(r.score, 0)
+  assert.equal(r.tier0Score, 0)
   assert.equal(deep(r), 0)
 })
 
@@ -114,7 +135,7 @@ const ISABELLA = woman({
 test('meeting one physical preference no longer makes a near-perfect match', () => {
   const r = score(man({ ...NIGHT_OWL, intent: 'open', bodyType: 'athletic', heightCm: 185, politicalView: 'apolitical' }), ISABELLA)
   assert.ok(deep(r) < 75, `Deep Fit ${deep(r)}`)
-  assert.ok(r.score < 75, `Tier 0 ${r.score}`)
+  assert.ok(r.tier0Score < 75, `Tier 0 ${r.tier0Score}`)
 })
 
 // ─── Population ─────────────────────────────────────────────────────────────
@@ -126,7 +147,7 @@ const POP = (() => {
 
 test('every score is within 0–100', () => {
   for (const r of POP) {
-    assert.ok(r.score >= 0 && r.score <= 100, `Tier 0 ${r.score}`)
+    assert.ok(r.tier0Score >= 0 && r.tier0Score <= 100, `Tier 0 ${r.tier0Score}`)
     assert.ok(deep(r) >= 0 && deep(r) <= 100, `Deep Fit ${deep(r)}`)
   }
 })
@@ -135,7 +156,7 @@ test('no dealbreaker pair in the population scores above the cap', () => {
   const triggered = POP.filter((r) => r.triggeredDealbreakers.length > 0)
   assert.ok(triggered.length > 500, `only ${triggered.length} dealbreaker pairs`)
   for (const r of triggered) {
-    assert.ok(r.score <= DEALBREAKER_CAP && deep(r) <= DEALBREAKER_CAP, `${r.score} / ${deep(r)} with ${r.triggeredDealbreakers}`)
+    assert.ok(r.score <= DEALBREAKER_CAP && r.tier0Score <= DEALBREAKER_CAP && deep(r) <= DEALBREAKER_CAP, `${r.score} / ${r.tier0Score} / ${deep(r)} with ${r.triggeredDealbreakers}`)
   }
 })
 
@@ -144,7 +165,7 @@ test('people who skipped the questions are never "enough info"', () => {
   for (let i = 0; i < 500; i++) {
     const r = score(person(rnd, 'man', { blankShare: 1 }), person(rnd, 'woman'))
     assert.equal(r.enoughInfo, false)
-    assert.ok(r.score < 50 && deep(r) < 50, `${r.score} / ${deep(r)}`)
+    assert.ok(r.tier0Score < 50 && deep(r) < 50, `${r.tier0Score} / ${deep(r)}`)
   }
 })
 
@@ -163,7 +184,7 @@ const REAL = (() => {
   return out
 })()
 
-for (const [name, pick] of [['Tier 0', (r: ReturnType<typeof score>) => r.score], ['Deep Fit', deep]] as const) {
+for (const [name, pick] of [['Tier 0', (r: ReturnType<typeof score>) => r.tier0Score], ['Deep Fit', deep]] as const) {
   test(`${name}: calibrated spread on realistic profiles (median ≈ 55, 95+ under 1%, Strong fit 10–20%)`, () => {
     const shown = REAL.filter((r) => r.enoughInfo && !r.triggeredDealbreakers.length).map(pick).sort((a, b) => a - b)
     assert.ok(shown.length > 200, `only ${shown.length} pairs`)
@@ -178,5 +199,5 @@ for (const [name, pick] of [['Tier 0', (r: ReturnType<typeof score>) => r.score]
 test('realistic dealbreaker pairs never score above the cap', () => {
   const triggered = REAL.filter((r) => r.triggeredDealbreakers.length > 0)
   assert.ok(triggered.length > 30, `only ${triggered.length}`)
-  for (const r of triggered) assert.ok(r.score <= DEALBREAKER_CAP && deep(r) <= DEALBREAKER_CAP, `${r.score} / ${deep(r)}`)
+  for (const r of triggered) assert.ok(r.score <= DEALBREAKER_CAP && r.tier0Score <= DEALBREAKER_CAP && deep(r) <= DEALBREAKER_CAP, `${r.score} / ${r.tier0Score} / ${deep(r)}`)
 })

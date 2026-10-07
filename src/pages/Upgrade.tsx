@@ -12,7 +12,7 @@ import { usePageTitle } from '../components/public/usePageTitle'
 const FREE = [
   'Explore, matching and chat with your matches',
   '10 likes a day',
-  'Your compatibility score',
+  'Your compatibility score, with a fit label',
   'How many people liked you',
   'Vibe checks',
   '1 conversation starter a week',
@@ -22,7 +22,7 @@ const SPARK_PLUS = [
   'Unlimited likes',
   'See who liked you — and like them back',
   'Top Picks and your Sent list',
-  'Full compatibility reports and Break the ice',
+  'The full breakdown behind every score, and Break the ice',
   'Encrypted photo sharing in chat',
   '5 conversation starters a day',
   'AI bio, profile review and Go Deeper — 2 each a month',
@@ -31,7 +31,7 @@ const ELITE_EXTRAS = [
   'Curious — who looked at your score',
   'Your Zylove Score page',
   'Play mode, with its own AI tools',
-  'Deep Fit — compatibility from both sides',
+  'Deep Fit in full — how you fit each other, both ways, and why',
   'AI tools — 5 each a month, in Spark and in Play',
 ]
 

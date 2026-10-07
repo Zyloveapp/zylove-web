@@ -3,7 +3,7 @@
 // settings (legacyOptions.ts) are new.
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { calculateSparkScore, calculatePlayScore, SCORE_ENGINE_VERSION, sparkPairFields } from "./scoring";
+import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkPairFields } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
@@ -35,8 +35,9 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   const hasPhysicalPrefs = (Array.isArray(tappedPrefs.seekingBodyTypes) && tappedPrefs.seekingBodyTypes.length > 0) ||
     Boolean(tappedPrefs.seekingHeightMinCm) || Boolean(tappedPrefs.seekingHeightMaxCm);
 
-  // Stage C: Free sees the score; Spark+ the full report (breakdown,
-  // dealbreakers); Elite also Deep Fit (tier1).
+  // Stage C / engine v2: everyone sees the score (Deep Fit's headline) and
+  // its label; Spark+ the breakdown and dealbreakers; Elite Deep Fit's detail
+  // (tier1: both directions, the reasons).
   // No paid feature ever involves a bot: a bot's report is shown in full.
   const tier = await tierNow(tapperId);
   const bot = tappedId.startsWith("zbot-");
@@ -89,7 +90,8 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   const tappedFull = { ...tappedDoc, ...tappedPlay, playProfile: tappedPlay } as UserDoc;
 
   const spark = calculateSparkScore(tapperDoc, tappedDoc);
-  const { score: sparkScore, breakdown: sparkBreakdown, triggeredDealbreakers, tier1: sparkTier1 } = spark;
+  const { score: sparkScore, breakdown: sparkBreakdown, triggeredDealbreakers } = spark;
+  const sparkTier1 = deepFitRecord(spark.tier1, tapperId, tappedId);
   const playResult = play ? calculatePlayScore(tapperFull, tappedFull) : null;
 
   const [userA, userB] = [tapperId, tappedId].sort();

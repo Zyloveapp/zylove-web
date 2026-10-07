@@ -6,7 +6,7 @@ import { billingErrorMessage, openBillingPortal, startCheckout, type PaidTier } 
 
 // Plan named on each card must match ACCESS in services/subscription: Play
 // mode and Zylove Score are Elite-only; the rest come with Spark+.
-const ELITE_ONLY: readonly Feature[] = ['play_mode', 'zylove_score']
+const ELITE_ONLY: readonly Feature[] = ['play_mode', 'zylove_score', 'deep_fit']
 
 export const PAYWALL_COPY: Partial<Record<Feature, { title: string; body: string; button: string }>> = {
   sparks: {
@@ -15,9 +15,14 @@ export const PAYWALL_COPY: Partial<Record<Feature, { title: string; body: string
     button: 'Upgrade to Spark+',
   },
   compatibility: {
-    title: '✦ Your compatibility report is ready',
-    body: 'Upgrade to Spark+ to reveal your full compatibility breakdown.',
+    title: '✦ See what\u2019s behind your score',
+    body: 'Upgrade to Spark+ for the full breakdown: where you match, where you differ, and how to start the conversation.',
     button: 'Upgrade to Spark+',
+  },
+  deep_fit: {
+    title: '✦ Go deeper with Deep Fit',
+    body: 'Elite shows Deep Fit in full: how well they fit what you want, how well you fit what they want, and why.',
+    button: 'Upgrade to Elite',
   },
   photo_sharing: {
     title: '🔒 Share photos privately',
