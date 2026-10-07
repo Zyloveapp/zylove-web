@@ -27,6 +27,16 @@ export interface PhotoSignal {
   web: { full: number; pages: number; sample: string[] } | null
 }
 
+// A photo's moderation result (published / pending) can land after another
+// photo's check recounts, so a photo checked this recently always counts.
+export const RECENT_CHECK_MS = 15 * 60 * 1000
+
+// The account's counts over the photos it still has (or just uploaded).
+export function photoFlagCounts(photos: (PhotoSignal & { at?: number })[], current: Set<string>, now = Date.now()): { ai: number; stolen: number } {
+  const live = photos.filter((p) => current.has(p.path) || (typeof p.at === 'number' && now - p.at < RECENT_CHECK_MS))
+  return { ai: live.filter(isAiPhoto).length, stolen: live.filter(isStolenPhoto).length }
+}
+
 export const isAiPhoto = (p: Pick<PhotoSignal, 'ai' | 'deepfake'>) => (p.ai ?? 0) >= AI_FLAG_AT || (p.deepfake ?? 0) >= DEEPFAKE_FLAG_AT
 export const isStolenPhoto = (p: Pick<PhotoSignal, 'web'>) => !!p.web && (p.web.full > 0 || p.web.pages > 0)
 
@@ -47,9 +57,7 @@ export async function recordPhotoSignal(uid: string, signal: PhotoSignal): Promi
     ...((account.data()?.pendingPhotoURLs ?? []) as DocumentData[]).map((p) => String(p?.url ?? '')),
     signal.path,
   ])
-  const photos = Object.values((saved.data()?.photos ?? {}) as Record<string, PhotoSignal>).filter((p) => current.has(p.path))
-  const ai = photos.filter(isAiPhoto).length
-  const stolen = photos.filter(isStolenPhoto).length
+  const { ai, stolen } = photoFlagCounts(Object.values((saved.data()?.photos ?? {}) as Record<string, PhotoSignal & { at?: number }>), current)
   await db()
     .doc(`behaviorSignals/${uid}`)
     .set({ photoFlags: ai || stolen ? { ai, stolen, at: Date.now() } : FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })

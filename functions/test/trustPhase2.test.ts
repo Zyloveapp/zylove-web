@@ -6,7 +6,7 @@ import { gzipSync, gunzipSync } from 'node:zlib'
 import { FLAG_AT, featuresOf, replyBandOf, scoreFeatures, type Features } from '../src/trustScore'
 import { REPORTER_MIN_AGE_MS, independentReporters } from '../src/scamReports'
 import { countryDisagreement, countryOfCity, countryOfPhone, mmdbFromTar } from '../src/geo'
-import { isAiPhoto, isStolenPhoto } from '../src/photoChecks'
+import { RECENT_CHECK_MS, isAiPhoto, isStolenPhoto, photoFlagCounts } from '../src/photoChecks'
 
 const DAY = 864e5
 const now = Date.now()
@@ -105,4 +105,15 @@ test('photo thresholds', () => {
   assert.ok(isStolenPhoto({ web: { full: 1, pages: 0, sample: [] } }))
   assert.ok(!isStolenPhoto({ web: { full: 0, pages: 0, sample: [] } }))
   assert.ok(!isStolenPhoto({ web: null }))
+})
+
+test('photo counts: a just-checked photo counts before its moderation result lands; removed old ones don\'t', () => {
+  const web = { full: 3, pages: 2, sample: [] }
+  const photos = [
+    { path: 'a', ai: 0.99, deepfake: 0, web: null, at: now - 60_000 }, // published
+    { path: 'b', ai: 0, deepfake: 0, web, at: now - 30_000 }, // just checked, not on any list yet
+    { path: 'c', ai: 0.99, deepfake: 0, web, at: now - RECENT_CHECK_MS - 1 }, // removed long ago
+  ]
+  assert.deepEqual(photoFlagCounts(photos, new Set(['a']), now), { ai: 1, stolen: 1 })
+  assert.deepEqual(photoFlagCounts(photos, new Set(['a', 'c']), now), { ai: 2, stolen: 2 })
 })
