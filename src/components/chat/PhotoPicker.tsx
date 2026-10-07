@@ -8,12 +8,14 @@ interface PhotoPickerProps {
   partnerUid: string
   // The chat's mode: Play's accents are red, Spark's cobalt.
   mode: 'spark' | 'play'
+  // T&S Phase 4: this photo's number among the sender's messages (franking).
+  seq?: number
   onClose: () => void
 }
 
 // Pick, preview, choose a timer, send. Timers are open to every web user
 // for now (no paywall yet).
-export default function PhotoPicker({ matchId, uid, partnerUid, mode, onClose }: PhotoPickerProps) {
+export default function PhotoPicker({ matchId, uid, partnerUid, mode, seq = 1, onClose }: PhotoPickerProps) {
   const play = mode === 'play'
   const accent = play ? 'border-[#E03131] bg-[#E03131]' : 'border-[#1B4FD8] bg-[#1B4FD8]'
   const inputRef = useRef<HTMLInputElement>(null)
@@ -52,7 +54,7 @@ export default function PhotoPicker({ matchId, uid, partnerUid, mode, onClose }:
     setError(null)
     try {
       const bytes = await preparePhoto(file)
-      await sendEncryptedPhoto(matchId, uid, partnerUid, bytes, timer)
+      await sendEncryptedPhoto(matchId, uid, partnerUid, bytes, timer, seq)
       onClose()
     } catch (err) {
       const code = err instanceof Error ? err.message : ''

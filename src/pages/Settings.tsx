@@ -320,6 +320,16 @@ function AdminSection({ uid }: { uid: string }) {
       </button>
       <button
         type="button"
+        onClick={() => navigate('/admin/locker')}
+        className="flex w-full items-center justify-between border-t border-white/5 px-5 py-4 text-left hover:bg-white/[0.03]"
+      >
+        <span className="font-medium">Evidence locker & appeals</span>
+        <span className="text-white/30" aria-hidden>
+          →
+        </span>
+      </button>
+      <button
+        type="button"
         onClick={() => navigate('/admin/messages')}
         className="flex w-full items-center justify-between border-t border-white/5 px-5 py-4 text-left hover:bg-white/[0.03]"
       >

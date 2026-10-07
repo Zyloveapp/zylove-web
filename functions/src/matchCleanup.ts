@@ -1,6 +1,7 @@
 import { logger } from 'firebase-functions'
 import { Timestamp, getFirestore, FieldPath } from 'firebase-admin/firestore'
 import { getStorage } from 'firebase-admin/storage'
+import { expireFranking } from './franking'
 import { generationOf } from './matchGeneration'
 
 // Deletes what an ended match leaves behind: its messages and its chat
@@ -48,6 +49,9 @@ export async function purgeMatchContent(matchId: string, cutoff: number | null):
       .filter((d) => limit === null || Number(d.id.slice(matchId.length + 1)) < limit)
       .map((d) => d.ref.delete()),
   )
+
+  // T&S Phase 4: franking tags outlive the messages by 30 days.
+  await expireFranking(matchId, limit)
 
   logger.info('purgeMatchContent', { matchId, cutoff: limit, messages: deleted, photos: doomed.length })
 }

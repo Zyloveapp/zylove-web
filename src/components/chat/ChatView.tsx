@@ -67,6 +67,10 @@ import { useAuthStore } from '../../store/authStore'
 import { IncomingSafety } from './ChatSafety'
 import { ContactCardMessage, ContactNotice, ContactSheet } from './ContactExchange'
 import { useContactExchange } from './useContactExchange'
+import { useFrankChecks } from './useFrankChecks'
+import { revealKf } from '../../services/franking'
+import { openPhotoBytes } from '../../services/photos'
+import type { EvidenceCandidate } from '../../services/evidence'
 import { CONTACT_CODES, parseCard, requestContact, respondContact, revokeContact, saveDefaults, savedDefaults, sendContactCard, setPendingCard, UNLOCK_MESSAGES, type ContactCard, type ContactCode } from '../../services/contactExchange'
 import { CONTACT_MASK, detectContact, maskContact } from '../../services/contactDetect'
 import { LINKS_LATER, useCanSendLinks, useSenderTrust } from './useChatSafety'
@@ -415,6 +419,26 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     partnerKey: partnerKey && !partnerKey.error && partnerKey.key ? partnerKey.key : null,
     messages: rawMessages,
   })
+  // T&S Phase 4: this sender's next message number (franking), the messages
+  // whose commitment didn't check out (refused), and what a report may attach.
+  const mySeq = (rawMessages ?? []).filter((m) => m.senderId === uid && m.nonce !== 'system' && (m.messageType === 'text' || m.messageType === 'photo')).length + 1
+  const partnerKeyValue = partnerKey && !partnerKey.error && partnerKey.key ? partnerKey.key : null
+  const frankBad = useFrankChecks(messages, matchId, partnerKeyValue, myPrivateKey)
+  const evidenceCandidates = useMemo<EvidenceCandidate[]>(
+    () =>
+      (messages ?? [])
+        .filter((m) => m.nonce !== 'system' && !m.undecryptable && (m.messageType === 'text' || (m.messageType === 'photo' && m.photo)))
+        .map((m) => ({
+          id: m.id,
+          from: m.senderId === uid ? ('me' as const) : ('them' as const),
+          type: m.messageType === 'photo' ? ('photo' as const) : ('text' as const),
+          text: m.messageType === 'photo' ? '📷 Photo' : m.text,
+          sentAt: m.sentAt,
+          revealKf: () => (m.frank && partnerKeyValue && myPrivateKey ? revealKf(m.frank, partnerKeyValue, myPrivateKey) : null),
+          ...(m.photo && partnerKeyValue ? { photoBytes: () => openPhotoBytes(m.photo!, m.senderId === uid, uid, partnerKeyValue) } : {}),
+        })),
+    [messages, uid, partnerKeyValue, myPrivateKey],
+  )
   const latestContactNoticeId = useMemo(
     () => [...(messages ?? [])].reverse().find((m) => m.messageType === 'contact_request' && m.nonce === 'system')?.id ?? null,
     [messages],
@@ -529,7 +553,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
       // My first message in this chat: its on-device hash goes along (duplicate-opener check).
       const firstFromMe = !(rawMessages ?? []).some((m) => m.senderId === uid && m.nonce !== 'system')
       const fh = firstFromMe ? await openerHash(sent, match.name).catch(() => null) : null
-      delivered = (await sendMessage(matchId, uid, sent, partnerKey.key, partnerUid, fh)).delivered
+      delivered = (await sendMessage(matchId, uid, sent, partnerKey.key, partnerUid, fh, mySeq)).delivered
     } catch (err) {
       restore(err)
       return
@@ -766,6 +790,14 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
                 )
               }
               const own = m.senderId === uid
+              // T&S Phase 4: its franking commitment didn't check out — refused.
+              if (frankBad.has(m.id)) {
+                return (
+                  <p key={m.id} className={`max-w-xs text-xs italic text-amber-200/70 ${own ? 'ml-auto text-right' : ''}`}>
+                    ⚠️ This message couldn't be verified, so it isn't shown.
+                  </p>
+                )
+              }
               // T&S Phase 3: contact details that slipped through are masked here.
               const masked = !own && m.messageType === 'text' && detectContact(m.text).length > 0
               const body =
@@ -1121,6 +1153,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
           uid={uid}
           partnerUid={partnerUid}
           mode={match.mode === 'play' ? 'play' : 'spark'}
+          seq={mySeq}
           onClose={() => setShowPhotoPicker(false)}
         />
       )}
@@ -1133,6 +1166,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
           partnerUid={partnerUid}
           name={match.name}
           initialCategories={reportPreset}
+          evidence={evidenceCandidates}
           onClose={() => setShowReport(false)}
         />
       )}

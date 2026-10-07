@@ -34,6 +34,10 @@ ln -sfn "$WEB/functions/node_modules" "$E/web-fn/node_modules"
 perl -pi -e "s/admin\.firestore\.(FieldValue|Timestamp|GeoPoint|FieldPath)\b/require('firebase-admin\/firestore').\$1/g" "$E"/web-fn/lib/legacy/*.js
 # Every test-only secret in .env.test reaches the functions emulator.
 grep -E '^[A-Z_][A-Z0-9_]*=' "$E/.env.test" > "$E/web-fn/.secret.local"
+# T&S Phase 4: fixed TEST-ONLY franking and evidence-locker keys (never the
+# production ones, which only Matthew sets) unless .env.test defines its own.
+grep -q '^FRANKING_KEY=' "$E/web-fn/.secret.local" || echo "FRANKING_KEY=v1:$(printf 'e2e-franking-key' | shasum -a 256 | cut -c1-64)" >> "$E/web-fn/.secret.local"
+grep -q '^EVIDENCE_LOCKER_KEY=' "$E/web-fn/.secret.local" || echo "EVIDENCE_LOCKER_KEY=v1:$(printf 'e2e-locker-key' | shasum -a 256 | cut -c1-64)" >> "$E/web-fn/.secret.local"
 
 # The repo's own rules (the emulator only reads files inside e2e/).
 cp "$WEB/firestore.rules" "$WEB/storage.rules" "$C/"

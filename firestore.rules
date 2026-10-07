@@ -523,8 +523,22 @@ service cloud.firestore {
                 && ((m.users[0] != request.auth.uid && m.users[0].matches('^(zbot|seed)-.*'))
                     || (m.users[1] != request.auth.uid && m.users[1].matches('^(zbot|seed)-.*'))));
       }
+      // T&S Phase 4: franking — the commitment `fc`, the per-message key `fk`
+      // (encrypted to the partner, nonce `fkn`), a client message id `cid` and
+      // the sender's sequence number `seq`. Optional (older apps don't send
+      // them); when present, all of them, well-formed.
+      function validFrank(d) {
+        return !d.keys().hasAny(['fc', 'fk', 'fkn', 'cid', 'seq'])
+            || (d.keys().hasAll(['fc', 'fk', 'fkn', 'cid', 'seq'])
+                && d.fc is string && d.fc.matches('^[a-f0-9]{64}$')
+                && d.fk is string && d.fk.size() <= 200
+                && d.fkn is string && d.fkn.size() <= 64
+                && d.cid is string && d.cid.matches('^[A-Za-z0-9_-]{8,64}$')
+                && d.seq is int && d.seq >= 1 && d.seq <= 1000000);
+      }
       function validTextMessage(d, m) {
-        return d.keys().hasOnly(['ciphertext', 'nonce', 'senderId', 'sentAt', 'status', 'messageType', 'fh'])
+        return d.keys().hasOnly(['ciphertext', 'nonce', 'senderId', 'sentAt', 'status', 'messageType', 'fh', 'fc', 'fk', 'fkn', 'cid', 'seq'])
+            && validFrank(d)
             && d.messageType == 'text'
             && d.ciphertext is string && d.ciphertext.size() <= 20000
             && d.nonce is string && d.nonce != 'system' && d.nonce.size() <= 64
@@ -535,7 +549,8 @@ service cloud.firestore {
         return d.keys().hasOnly(['senderId', 'messageType', 'encrypted', 'storageRef', 'photoNonce',
                                  'encryptedKeyForSender', 'encryptedKeyForRecipient', 'keyNonceForSender',
                                  'keyNonceForRecipient', 'timerSeconds', 'firstViewedAt', 'photoExpiresAt',
-                                 'destructedAt', 'sentAt', 'status'])
+                                 'destructedAt', 'sentAt', 'status', 'fc', 'fk', 'fkn', 'cid', 'seq'])
+            && validFrank(d)
             && d.messageType == 'photo'
             // Sending photos in chat is Spark+ (Stage C); receiving isn't.
             && viewerHasSparkPlus()

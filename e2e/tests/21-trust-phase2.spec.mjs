@@ -130,7 +130,8 @@ test('report scam: 2 unlinked 48h+ reporters suspend pending review; linked or n
   await report(r2)
   const n = await internalDoc(t.uid)
   expect(n).toMatchObject({ isSuspended: true, suspendedPendingReview: true, suspendSource: 'auto_scam', suspendedUntil: null })
-  expect((await adminAuth.getUser(t.uid)).disabled).toBe(true)
+  // T&S Phase 4: sign-in is refused (with an appeal) rather than the Auth account disabled.
+  expect(await fnLib('appeals').suspensionRefusal(t.uid)).toMatch(/^ZYLOVE_SUSPENDED:[^:]+:none:review:0$/)
   expect((await flag(t.uid)).status).toBe('open')
   expect((await flag(t.uid)).reasons.map((r) => r.key)).toContain('scam_reports')
   const audits = (await db.collection('adminAudit').where('action', '==', 'trust.auto_suspend').get()).docs.map((d) => d.data())
@@ -141,7 +142,7 @@ test('report scam: 2 unlinked 48h+ reporters suspend pending review; linked or n
   expect(detail).toMatchObject({ suspended: true, suspendedPendingReview: true, suspendSource: 'auto_scam' })
   await callAs(admin.uid, 'adminTrustAction', { uid: t.uid, action: 'lift_suspension', reason: 'Reviewed: not a scam' })
   expect((await internalDoc(t.uid)).isSuspended).toBe(false)
-  expect((await adminAuth.getUser(t.uid)).disabled).toBe(false)
+  expect(await fnLib('appeals').suspensionRefusal(t.uid)).toBeNull()
   expect((await flag(t.uid)).status).toBe('dismissed')
 })
 

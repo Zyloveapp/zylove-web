@@ -4,6 +4,7 @@ import { httpsCallable } from 'firebase/functions'
 import { db, functions, storage } from './firebase'
 import { ENCRYPTION_KEYS_UNAVAILABLE, decryptPhoto, encryptPhoto, isRealPublicKey } from './encryption'
 import { getPrivateKey, getSendingKey, keysReady, publicKeyFor } from './keys'
+import { frank, photoPlaintext } from './franking'
 import type { ConsentCode, PhotoPayload } from './chat'
 
 // ─── Consent ─────────────────────────────────────────────────────────────────
@@ -155,6 +156,8 @@ export async function sendEncryptedPhoto(
   recipientUid: string,
   photoBytes: Uint8Array,
   timerSeconds: PhotoTimer,
+  // T&S Phase 4: this message's number among the sender's in the chat.
+  seq = 1,
 ): Promise<void> {
   const privateKey = await getSendingKey(uid)
   const senderPublicKey = privateKey ? publicKeyFor(privateKey) : null
@@ -164,6 +167,8 @@ export async function sendEncryptedPhoto(
   }
 
   const sealed = encryptPhoto(photoBytes, privateKey, senderPublicKey, recipientKey)
+  // Franking binds the decrypted bytes (their SHA-256) to this message.
+  const franked = await frank({ plaintext: await photoPlaintext(photoBytes), matchId, sender: uid, seq, partnerPublicKey: recipientKey, myPrivateKey: privateKey })
   const storagePath = `chat-photos/${matchId}/${uid}_${Date.now()}.bin`
   // The chat-photos Storage rule only accepts image/* content types, so the
   // ciphertext goes up labelled as an encrypted image.
@@ -188,6 +193,7 @@ export async function sendEncryptedPhoto(
     destructedAt: null,
     sentAt: serverTimestamp(),
     status: 'sent',
+    ...(franked ?? {}),
   })
   await updateDoc(doc(db, 'matches', matchId), {
     lastMessagePreview: '📷 Photo',
@@ -209,6 +215,17 @@ export async function openPhoto(
   uid: string,
   partnerPublicKey: string,
 ): Promise<string | null> {
+  const bytes = await openPhotoBytes(photo, isMine, uid, partnerPublicKey)
+  return bytes ? URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/jpeg' })) : null
+}
+
+// The decrypted bytes (also what a report attaches, T&S Phase 4).
+export async function openPhotoBytes(
+  photo: PhotoPayload,
+  isMine: boolean,
+  uid: string,
+  partnerPublicKey: string,
+): Promise<Uint8Array | null> {
   if (!photo.storageRef) return null
   await keysReady(uid)
   const privateKey = await getPrivateKey(uid)
@@ -230,7 +247,7 @@ export async function openPhoto(
       privateKey,
       senderPublicKey,
     )
-    return bytes ? URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/jpeg' })) : null
+    return bytes
   } catch (err) {
     console.error('Chat photo download failed:', err)
     return null

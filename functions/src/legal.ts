@@ -16,7 +16,7 @@ import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 // with a .N suffix for a second update on the same day.
 // Bump these whenever either document changes, together with the client
 // mirror (src/config/legal.ts), which shows existing users the change notice.
-export const LEGAL_VERSIONS = { terms: '2026-10-07.2', privacy: '2026-10-07.4' } as const
+export const LEGAL_VERSIONS = { terms: '2026-10-07.2', privacy: '2026-10-07.5' } as const
 
 // Mirrors CONSENT_IDS in src/services/onboarding.ts: every box on the Terms
 // step must be ticked.

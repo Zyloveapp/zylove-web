@@ -7,6 +7,7 @@ import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase
 import { loadPlayName } from './playName'
 import { connectionMode } from './behavior'
 import { setBlocked } from './explore'
+import { suspensionRefusal } from './appeals'
 import { probationOf } from './probation'
 
 // Trust & safety: phone-level bans, the caller's blocked list, and
@@ -69,6 +70,14 @@ export const onBeforeSignIn = beforeUserSignedIn({ timeoutSeconds: 7, memory: '2
   if (reportCount >= SIGN_IN_BLOCKED_AT) {
     throw new HttpsError('permission-denied', 'This phone number can no longer be used on Zylove.')
   }
+  // T&S Phase 4: a suspended account is refused here (its Auth account stays
+  // enabled so this runs — after the phone was verified), with an appeal token.
+  const uid = event.data?.uid
+  const refusal = uid ? await suspensionRefusal(uid).catch((err: unknown) => {
+    logger.error('onBeforeSignIn: suspension lookup failed, allowing sign-in', { message: err instanceof Error ? err.message : String(err) })
+    return null
+  }) : null
+  if (refusal) throw new HttpsError('permission-denied', refusal)
 })
 
 // ─── Blocked users ───────────────────────────────────────────────────────────

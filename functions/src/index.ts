@@ -2193,3 +2193,7 @@ export { refreshGeoDb } from './geo'
 export { adminGetProbation, adminSetProbation } from './probation'
 // T&S Phase 3: contact exchange.
 export { requestContactExchange, respondContactExchange, revokeContactExchange } from './contactExchange'
+// T&S Phase 4: franking, the evidence locker, appeals.
+export { frankOnMessage } from './franking'
+export { adminLockerDecide, adminLockerDetail, adminLockerHold, adminLockerList, getEvidencePdf, purgeEvidence, submitEvidence } from './evidence'
+export { adminDecideAppeal, adminListAppeals, submitAppeal } from './appeals'

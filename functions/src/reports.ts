@@ -30,6 +30,7 @@ import { phoneHash, wereMatched } from './trust'
 import { softDeleteAccount } from './adminActivity'
 import { audit, requireAdminAudited } from './audit'
 import { markBannedDevices } from './devices'
+import { decideEvidenceFor } from './evidence'
 import { accountRef, adminUids, internalRef, isAdminAuth, isAdminUid, isSuspendedUid, loadInternal } from './userData'
 
 const BOT_PREFIXES = ['zbot-', 'seed-']
@@ -403,6 +404,8 @@ function notice(type: 'warning' | 'thanks', message: string) {
 
 // Marks every pending report against uid as resolved by this action.
 async function resolveReports(uid: string, status: 'actioned' | 'cleared', action: ModerateAction, adminUid: string): Promise<number> {
+  // T&S Phase 4: evidence filed with those reports is decided the same way.
+  await decideEvidenceFor(uid, status === 'actioned' ? 'actioned' : 'no_action', adminUid)
   const snap = await db().collection('reports').where('reportedUid', '==', uid).get()
   const open = snap.docs.filter((d) => statusOf(d.data()) === 'pending')
   for (let i = 0; i < open.length; i += 400) {
@@ -430,8 +433,14 @@ export async function suspendAccount(uid: string, days: number | null, by: strin
     },
     { merge: true },
   )
-  // Locked: no sign-in, and current sessions end when their token next refreshes.
-  await setAuthDisabled(uid, true)
+  // T&S Phase 4: sign-in is refused by onBeforeSignIn (which offers an
+  // appeal) rather than by disabling the Auth account; current sessions end
+  // when their token next refreshes.
+  await getAuth()
+    .revokeRefreshTokens(uid)
+    .catch((err: unknown) => {
+      if ((err as { code?: string }).code !== 'auth/user-not-found') throw err
+    })
 }
 
 export async function setAuthDisabled(uid: string, disabled: boolean): Promise<void> {

@@ -14,6 +14,7 @@ import { db } from './firebase'
 import { encryptMessage, isRealPublicKey } from './encryption'
 import { isBotUid } from './zyloveScore'
 import { getSendingKey } from './keys'
+import { frank } from './franking'
 
 // Message format shared with the mobile app. `ciphertext` holds a base64
 // nacl.box payload, or plaintext when the nonce is 'stub' / 'stub-nonce' /
@@ -28,6 +29,8 @@ export interface ChatMessage {
   messageType: string
   // Set on encrypted photo messages (messageType 'photo' sent from the web).
   photo?: PhotoPayload
+  // T&S Phase 4: franking (franking.ts) — absent on older messages.
+  frank?: { fc: string; fk: string; fkn: string; cid: string; seq: number }
 }
 
 // Everything needed to fetch and open an encrypted photo, plus its timer.
@@ -124,6 +127,9 @@ export function subscribeMessages(
           status: typeof data.status === 'string' ? data.status : 'sent',
           messageType,
           ...(photo ? { photo } : {}),
+          ...(typeof data.fc === 'string' && typeof data.fk === 'string' && typeof data.fkn === 'string' && typeof data.cid === 'string' && typeof data.seq === 'number'
+            ? { frank: { fc: data.fc, fk: data.fk, fkn: data.fkn, cid: data.cid, seq: data.seq } }
+            : {}),
         })
       }
       onChange(messages)
@@ -156,6 +162,8 @@ export async function sendMessage(
   recipientUid: string,
   // On-device hash of a first message (openerHash.ts); never the text.
   openerHashHex: string | null = null,
+  // T&S Phase 4: this message's number among the sender's in the chat.
+  seq = 1,
 ): Promise<{ delivered: Promise<void> }> {
   const recipientHasKey = isRealPublicKey(recipientPublicKey)
   if (!recipientHasKey && !isBotUid(recipientUid)) throw new Error(RECIPIENT_NO_KEY)
@@ -165,6 +173,9 @@ export async function sendMessage(
     recipientHasKey && privateKey ? encryptMessage(text, recipientPublicKey, privateKey) : { ciphertext: text, nonce: 'stub' }
   // encryptMessage falls back to 'stub' if the stored private key is corrupt.
   if (recipientHasKey && nonce === 'stub') throw new Error(ENCRYPTION_KEY_MISSING)
+  // Franked whenever it's encrypted (people, not curated profiles).
+  const franked =
+    recipientHasKey && privateKey ? await frank({ plaintext: text, matchId, sender: uid, seq, partnerPublicKey: recipientPublicKey, myPrivateKey: privateKey }) : null
   const delivered = setDoc(doc(collection(db, `matches/${matchId}/messages`)), {
     ciphertext,
     nonce,
@@ -173,6 +184,7 @@ export async function sendMessage(
     status: 'sent',
     messageType: 'text',
     ...(openerHashHex && !isBotUid(recipientUid) ? { fh: openerHashHex } : {}),
+    ...(franked ?? {}),
   })
   // Same fields the mobile chat updates; lastSenderId drives unread state.
   // The preview is generic so message content never sits unencrypted on the match doc.

@@ -325,7 +325,9 @@ test('actions: reduce visibility reaches Explore; suspend locks the account and 
   await expect.poll(async () => (await db.doc(`exploreIndex/${a.uid}`).get()).data()?.reduced, { timeout: 10000 }).toBe(true)
   await callAs(admin.uid, 'adminTrustAction', { uid: a.uid, action: 'suspend', reason: 'Scam pattern confirmed', days: 30 })
   expect((await internalDoc(a.uid))).toMatchObject({ isSuspended: true, suspendSource: 'trust' })
-  expect((await adminAuth.getUser(a.uid)).disabled).toBe(true)
+  // T&S Phase 4: locked by refusing sign-in (with an appeal), sessions revoked; Auth stays enabled.
+  expect(await fnLib('appeals').suspensionRefusal(a.uid)).toMatch(/^ZYLOVE_SUSPENDED:/)
+  expect(Date.parse((await adminAuth.getUser(a.uid)).tokensValidAfterTime)).toBeGreaterThan(Date.now() - 60_000)
   expect((await db.doc(`trustFlags/${a.uid}`).get()).data()).toMatchObject({ status: 'actioned', closeReason: expect.stringMatching(/Linked|Scam/) })
 })
 

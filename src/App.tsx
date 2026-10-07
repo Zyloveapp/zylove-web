@@ -53,6 +53,7 @@ import AdminCities from './pages/admin/AdminCities'
 import AdminActivity from './pages/admin/AdminActivity'
 import AdminReports from './pages/admin/AdminReports'
 import AdminTrust from './pages/admin/AdminTrust'
+import AdminLocker from './pages/admin/AdminLocker'
 import AdminNotice from './components/AdminNotice'
 import LegalUpdateNotice from './components/LegalUpdateNotice'
 import { touchLastActive } from './services/adminActivity'
@@ -221,6 +222,7 @@ export default function App() {
                 <Route path="/admin/activity" element={<AdminActivity />} />
                 <Route path="/admin/reports" element={<AdminReports />} />
                 <Route path="/admin/trust" element={<AdminTrust />} />
+                <Route path="/admin/locker" element={<AdminLocker />} />
               </Route>
             </Route>
           </Route>

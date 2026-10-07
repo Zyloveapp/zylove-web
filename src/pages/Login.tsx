@@ -10,6 +10,8 @@ import FoundingCounter from '../components/public/FoundingCounter'
 import { afterLoginPath } from '../services/afterLogin'
 import { friendlyError } from '../services/errors'
 import { usePageTitle } from '../components/public/usePageTitle'
+import SuspendedPanel from '../components/SuspendedPanel'
+import { parseSuspension, type Suspension } from '../services/appeals'
 import { FOUNDER_CAPACITY_PER_CITY, FOUNDER_TERMS_SHORT } from '../config/founderCopy'
 
 // US numbers only: the field shows a fixed +1 and holds just the 10 digits.
@@ -74,6 +76,7 @@ function SignInCard() {
   // Resend opens 30 seconds after each code goes out.
   const [canResend, setCanResend] = useState(false)
   const [resent, setResent] = useState(false)
+  const [suspension, setSuspension] = useState<Suspension | null>(null)
   useEffect(() => {
     if (!confirmation) return
     const t = setTimeout(() => setCanResend(true), 30_000)
@@ -175,7 +178,10 @@ function SignInCard() {
       // Explore's LocationGate asks.
       navigate(afterLoginPath('/discover'), { replace: true })
     } catch (err) {
-      setError(errorMessage(err))
+      // T&S Phase 4: a suspended account — offer the appeal.
+      const s = parseSuspension(err)
+      if (s) setSuspension(s)
+      else setError(errorMessage(err))
       setSubmitting(false)
     }
   }
@@ -193,7 +199,15 @@ function SignInCard() {
 
   return (
     <div id="signin" className="w-full max-w-sm scroll-mt-8 rounded-2xl border border-white/10 bg-white/5 p-6 text-left">
-      {!confirmation ? (
+      {suspension ? (
+        <SuspendedPanel
+          suspension={suspension}
+          onBack={() => {
+            setSuspension(null)
+            handleChangeNumber()
+          }}
+        />
+      ) : !confirmation ? (
         <form onSubmit={handleSendCode} className="space-y-4">
           <div>
             <h2 className="text-lg font-semibold text-white">Sign in or join</h2>

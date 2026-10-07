@@ -3,6 +3,8 @@ import { FirebaseError } from 'firebase/app'
 import { submitReport } from '../../services/safety'
 import { REPORT_ONLY_CATEGORY_DEFS, REVIEW_CATEGORY_DEFS } from '../../types/reviewCategories'
 import { useModeStore, type Mode } from '../../store/modeStore'
+import EvidencePicker from './EvidencePicker'
+import { downloadEvidencePdf, submitEvidence, type EvidenceCandidate } from '../../services/evidence'
 
 // Safety first (scam included — T&S Phase 2), then the rest of the negative categories.
 const ORDER = ['felt_unsafe', 'aggressive', 'scam', 'pushed_boundaries', 'inappropriate', 'pressured_me', 'disrespectful']
@@ -31,6 +33,7 @@ export default function ReportModal({
   mode,
   send,
   initialCategories = [],
+  evidence,
 }: {
   matchId: string
   // Which match between these two (MatchEntry.startedAt); 0 if unknown.
@@ -44,6 +47,8 @@ export default function ReportModal({
   send?: (categories: string[]) => Promise<void>
   // Chosen when it opens (a scam banner's Report: ['scam']).
   initialCategories?: string[]
+  // T&S Phase 4: the chat's messages, offered as evidence (decrypted here).
+  evidence?: EvidenceCandidate[]
 }) {
   const currentMode = useModeStore((s) => s.mode)
   const accentBg = (mode ?? currentMode) === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
@@ -51,6 +56,9 @@ export default function ReportModal({
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [step, setStep] = useState<'categories' | 'evidence'>('categories')
+  const [lockerId, setLockerId] = useState<string | null>(null)
+  const [pdfError, setPdfError] = useState<string | null>(null)
 
   useEffect(() => {
     function onKey(e: globalThis.KeyboardEvent) {
@@ -64,12 +72,14 @@ export default function ReportModal({
     setSelected((s) => (s.includes(id) ? s.filter((c) => c !== id) : [...s, id]))
   }
 
-  async function submit() {
+  async function submit(items: Parameters<typeof submitEvidence>[0]['items'] = []) {
     if (selected.length === 0 || submitting) return
     setSubmitting(true)
     setError(null)
     try {
       await (send ? send(selected) : submitReport(matchId, generation, partnerUid, selected))
+      // The evidence goes with the report just filed — only what was picked.
+      if (items.length) setLockerId((await submitEvidence({ matchId, reportedUid: partnerUid, generation, items })).lockerId)
       setDone(true)
     } catch (err) {
       setError(reportError(err))
@@ -94,6 +104,19 @@ export default function ReportModal({
             <p className="mt-2 text-sm text-white/60">
               Our team reviews every report. {name} won't know who reported them.
             </p>
+            {lockerId && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPdfError(null)
+                  downloadEvidencePdf(lockerId).catch(() => setPdfError("Couldn't make the PDF. Try again."))
+                }}
+                className="mt-4 text-sm font-semibold text-[#7C9BFF] underline hover:text-white"
+              >
+                Download your copy (PDF)
+              </button>
+            )}
+            {pdfError && <p className="mt-2 text-sm text-red-400">{pdfError}</p>}
             <button
               type="button"
               onClick={onClose}
@@ -103,6 +126,22 @@ export default function ReportModal({
               Done
             </button>
           </div>
+        ) : step === 'evidence' && evidence ? (
+          <>
+            <h2 id="report-title" className="text-xl font-bold">
+              Report {name}
+            </h2>
+            {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+            <div className="mt-4">
+              <EvidencePicker
+                candidates={evidence}
+                partnerName={name}
+                busy={submitting}
+                onBack={() => setStep('categories')}
+                onConfirm={(items) => void submit(items)}
+              />
+            </div>
+          </>
         ) : (
           <>
             <h2 id="report-title" className="text-xl font-bold">
@@ -142,6 +181,16 @@ export default function ReportModal({
             >
               {submitting ? 'Sending…' : 'Send report'}
             </button>
+            {evidence && evidence.length > 0 && !send && (
+              <button
+                type="button"
+                onClick={() => setStep('evidence')}
+                disabled={selected.length === 0 || submitting}
+                className="mt-2 w-full rounded-xl border border-white/15 py-3 font-semibold text-white/85 hover:bg-white/5 disabled:opacity-30"
+              >
+                Add evidence (choose messages)
+              </button>
+            )}
             <button type="button" onClick={onClose} disabled={submitting} className="mt-2 w-full py-2 text-sm text-white/40 hover:text-white/60">
               Cancel
             </button>
