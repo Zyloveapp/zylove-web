@@ -140,7 +140,7 @@ export function RecommendationScreen({
           <>
             <div className="mx-auto mt-6 h-px w-16 bg-white/15" aria-hidden />
             <p className="mb-2 mt-4 text-center text-sm text-white/50">
-              🔒 Play is completely separate. What happens in Play, stays in Play.
+              🔒 Play stays sealed: your Play profile never crosses into Spark.
             </p>
           </>
         )}

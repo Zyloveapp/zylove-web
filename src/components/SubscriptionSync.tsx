@@ -15,8 +15,8 @@ import {
 
 const EMPTY = { daysLeft: null, alwaysElite: false, subscriptionStatus: null, trialEnded: false, marketName: null } as const
 
-// Keeps useSubscriptionStore in step with the signed-in user's doc. If the
-// doc can't be read, access fails open rather than locking anyone out.
+// Keeps useSubscriptionStore in step with the signed-in user's plan (the
+// server's entitlement). If it can't be read, the app shows Free.
 //
 // No trial yet (pre-launch): asks the server (initUserDefaults) to start one
 // in case their market has opened — once per session, and again if their
@@ -52,7 +52,8 @@ export default function SubscriptionSync() {
           marketName: market?.name ?? null,
         })
       },
-      () => set({ uid, tier: 'elite', ...EMPTY }),
+      // Stage C: unreadable → Free (fails closed; the server enforces anyway).
+      () => set({ uid, tier: 'free', ...EMPTY }),
     )
   }, [uid, set])
 

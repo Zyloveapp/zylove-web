@@ -23,6 +23,12 @@ service firebase.storage {
 
     // Set only by server-side copies (scripts/migrate-stage1b.mjs), which
     // onPhotoUpload doesn't moderate again — so clients may never set it.
+    function sparkPlus() {
+      let e = firestore.get(/databases/(default)/documents/userInternal/$(request.auth.uid)).data.get('entitlement', {});
+      return (e.get('until', null) == null || request.time < e.until)
+          && (e.get('tier', 'free') == 'spark_plus' || e.get('tier', 'free') == 'elite');
+    }
+
     function noServerMetadata() {
       return request.resource.metadata == null
           || !('zyloveCopy' in request.resource.metadata);
@@ -111,7 +117,10 @@ service firebase.storage {
         ).data.users;
       // A new file only, named for its sender (Stage A: the other participant
       // can't replace it); the app uploads ciphertext as image/x-zylove-encrypted.
+      // Sending photos in chat is Spark+ (Stage C; userInternal entitlement,
+      // a trial's tier ending at its `until`).
       allow create: if isSignedIn()
+        && sparkPlus()
         && request.resource.contentType == 'image/x-zylove-encrypted'
         && resource == null
         && filename.matches(request.auth.uid + '_[A-Za-z0-9._-]+')

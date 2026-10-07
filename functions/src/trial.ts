@@ -3,6 +3,7 @@ import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, getNearestCity, type ZyloveCity } from './cities'
+import { eliteByMatching } from './identity'
 
 // The 30-day free trial runs only once discovery is open in the user's
 // market. Until then everyone is free ("pre-launch": no trialStartedAt).
@@ -33,9 +34,11 @@ function genderOf(user: DocumentData): string {
   return typeof g === 'string' ? g.toLowerCase().trim() : ''
 }
 
+// Stage C (decision 2): by how they're matched (women / nonbinary people),
+// not the identity they describe. `user` should carry matchableAs (from
+// private/matching) for identities that don't map to a category.
 export function hasEliteIdentity(user: DocumentData): boolean {
-  const g = genderOf(user)
-  return ALWAYS_ELITE_IDENTITIES.includes(g) || g === 'cis woman'
+  return eliteByMatching(genderOf(user) || user.genderIdentity, user.matchableAs)
 }
 
 export function hasPaidSubscription(user: DocumentData | undefined): boolean {
@@ -110,14 +113,18 @@ export const onMarketOpened = onDocumentWritten(
     if (!(stamped instanceof Timestamp)) await db.doc(`config/${docId}`).update({ discoveryOpenedAt: openedAt })
     await db.doc(`publicStats/${docId}`).set({ discoveryOpen: true, discoveryOpenedAt: openedAt }, { merge: true })
 
-    // Everyone whose locked market is this city (single-field query).
-    const inMarket = await db.collection('userLocations').where('marketCityId', '==', city.id).select().get()
+    // Everyone whose locked market is this city — and (Stage C) everyone
+    // linked to it from outside every launch radius (single-field queries).
+    const [inMarket, linked] = await Promise.all([
+      db.collection('userLocations').where('marketCityId', '==', city.id).select().get(),
+      db.collection('userLocations').where('linkedCityId', '==', city.id).select().get(),
+    ])
     const starting: string[] = []
-    for (const d of inMarket.docs) {
-      if (isBotUid(d.id)) continue
-      const [root, internal] = await Promise.all([db.doc(`users/${d.id}`).get(), db.doc(`userInternal/${d.id}`).get()])
-      const u = planView(root.data(), internal.data())
-      if (root.data()?.onboardingComplete === true && u.trialStartedAt === undefined && !trialExempt(u)) starting.push(d.id)
+    const everyone = [...new Set([...inMarket.docs, ...linked.docs].map((d) => d.id))].filter((id) => !isBotUid(id))
+    for (const id of everyone) {
+      const [root, internal, matching] = await Promise.all([db.doc(`users/${id}`).get(), db.doc(`userInternal/${id}`).get(), db.doc(`users/${id}/private/matching`).get()])
+      const u: DocumentData = { ...planView(root.data(), internal.data()), matchableAs: matching.get('matchableAs') }
+      if (root.data()?.onboardingComplete === true && u.trialStartedAt === undefined && u.hadPaidPlan !== true && !trialExempt(u)) starting.push(id)
     }
     const trial = newTrial()
     for (let i = 0; i < starting.length; i += 450) {
@@ -125,7 +132,16 @@ export const onMarketOpened = onDocumentWritten(
       for (const uid of starting.slice(i, i + 450)) batch.set(db.doc(`userInternal/${uid}`), trial, { merge: true })
       await batch.commit()
     }
-    logger.info('onMarketOpened', { city: city.id, trialsStarted: starting.length })
+    // Their trial on record by phone (trialHistory), so it can't be had twice.
+    const { getAuth } = await import('firebase-admin/auth')
+    for (const uid of starting) {
+      const phone = (await getAuth().getUser(uid).catch(() => null))?.phoneNumber
+      await noteTrialHistory(phone, { trialStartedAt: trial.trialStartedAt, trialEndsAt: trial.trialEndsAt }).catch(() => {})
+    }
+    // Everyone's entitlement follows the city (pre-launch → trial).
+    const { refreshPlayAccess } = await import('./playAccess')
+    for (const id of everyone) await refreshPlayAccess(id).catch(() => {})
+    logger.info('onMarketOpened', { city: city.id, trialsStarted: starting.length, refreshed: everyone.length })
   },
 )
 
@@ -154,3 +170,20 @@ export const checkTrialStatus = onSchedule(
     logger.info('checkTrialStatus', { trialsEnded: ended.size, markedExpired: expiring.length })
   },
 )
+
+// ─── Trial history (Stage C) ─────────────────────────────────────────────────
+// trialHistory/{phoneHash} (server-only): the trial — and whether they ever
+// paid — kept by phone number, so deleting the account and signing up again
+// doesn't bring a fresh trial (or pre-launch) back.
+
+export async function priorTrial(phone: string | null | undefined): Promise<DocumentData | null> {
+  if (!phone) return null
+  const { phoneHash } = await import('./trust')
+  return (await getFirestore().doc(`trialHistory/${phoneHash(phone)}`).get()).data() ?? null
+}
+
+export async function noteTrialHistory(phone: string | null | undefined, fields: DocumentData): Promise<void> {
+  if (!phone) return
+  const { phoneHash } = await import('./trust')
+  await getFirestore().doc(`trialHistory/${phoneHash(phone)}`).set({ ...fields, updatedAt: FieldValue.serverTimestamp() }, { merge: true })
+}

@@ -2,7 +2,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
-import { distanceMiles, getNearestCity } from './cities'
+import { distanceMiles, getLinkedCity, getNearestCity } from './cities'
 import { marketFor } from './trial'
 import { accountRef, identityRef, internalRef, locationRef, userRef, requireActive } from './userData'
 import { takeRateLimit } from './rateLimits'
@@ -100,12 +100,18 @@ export const setLocation = onCall(
     const label = (await reverseGeocode(lat, lng)) ?? (typeof savedLabel === 'string' ? savedLabel : null)
     const locked: unknown = existing?.marketCityId
     const marketCityId = typeof locked === 'string' ? locked : (getNearestCity(lat, lng)?.id ?? null)
+    // Stage C (decision 1): outside every launch radius, linked to the
+    // nearest launch or major city — locked like the market, so moving later
+    // can't change which city's opening their free period waits for.
+    const linkedLocked: unknown = existing?.linkedCityId
+    const linkedCityId = marketCityId ? null : typeof linkedLocked === 'string' ? linkedLocked : getLinkedCity(lat, lng).id
     const updatedAt = Timestamp.now()
 
     await locationRef(uid).set({
       lat,
       lng,
       marketCityId,
+      ...(linkedCityId ? { linkedCityId } : {}),
       updatedAt,
       changes: moved ? [...recent, now] : recent,
     })

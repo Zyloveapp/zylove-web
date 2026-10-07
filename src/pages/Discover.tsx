@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { leftText, useAllowance } from '../services/usage'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore, type Mode } from '../store/modeStore'
 import PhotoGallery from '../components/discover/PhotoGallery'
@@ -46,6 +47,9 @@ export default function Discover() {
 function Explore() {
   // AuthGuard guarantees a signed-in user on this route.
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
+  // Free: 10 likes a day (Stage C) — shown, enforced by the server.
+  const likes = useAllowance('likes', uid)
+  const likesLeft = leftText(likes.allowance, ['like', 'likes'])
   const mode = useModeStore((s) => s.mode)
   const key = `${uid}:${mode}`
 
@@ -111,6 +115,7 @@ function Explore() {
     try {
       if (action === 'interested') {
         const result = await likeProfile(uid, mode, current)
+        likes.refresh()
         if (result.matched) {
           setNewMatch({
             matchId: result.matchId ?? [uid, current.uid].sort().join('_'),
@@ -183,6 +188,14 @@ function Explore() {
       <div className="pt-4 empty:hidden">
         <LaunchBanner />
       </div>
+      {likesLeft && (
+        <p className="px-6 pt-3 text-center text-xs text-white/50">
+          {likesLeft} ·{' '}
+          <a href="/upgrade" className="underline hover:text-white">
+            Spark+ likes are unlimited
+          </a>
+        </p>
+      )}
       <div className="bg-gray-950 text-white lg:flex">
         <aside ref={asideRef} className="flex flex-col p-6 lg:sticky lg:top-14 lg:h-[calc(100dvh-7.5rem)] lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:py-10">
           <PhotoGallery key={current.uid} photos={photosOf(current, mode)} name={name} />

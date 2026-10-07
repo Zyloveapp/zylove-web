@@ -6,7 +6,7 @@ import SparksList, { CuriousList, SentList } from '../components/matches/SparksL
 import SparkProfileView from '../components/matches/SparkProfileView'
 import MatchOverlay, { type NewMatch } from '../components/discover/MatchOverlay'
 import { subscribeMatches, type MatchEntry } from '../services/matches'
-import { CURIOUS_MAX, fetchCurious, fetchSentSparks, subscribeSparkQueue, type CuriousResult, type SentSpark, type SparkEntry } from '../services/sparks'
+import { CURIOUS_MAX, fetchCurious, fetchFreeSparks, fetchSentSparks, subscribeSparkQueue, type CuriousResult, type SentSpark, type SparkEntry } from '../services/sparks'
 import { displayScore, fetchCompatibility } from '../services/discover'
 import { PaywallCard, useCanAccess } from '../components/PaywallGate'
 
@@ -54,15 +54,33 @@ export default function Sparks() {
     setReload((n) => n + 1)
   }
 
+  // Free (Stage C): the count of real people, and curated profiles' likes.
+  const [freeCount, setFreeCount] = useState<{ key: string; count: number } | null>(null)
   useEffect(() => {
-    if (!uid) return
+    if (!uid || sparksAllowed !== false) return
+    let cancelled = false
+    fetchFreeSparks(mode).then(
+      ({ count, live, viewed }) => {
+        if (cancelled) return
+        setFreeCount({ key, count })
+        setQueue({ key, live, viewed, error: false })
+      },
+      () => !cancelled && setQueue({ key, live: [], viewed: [], error: true }),
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [uid, mode, key, reload, sparksAllowed])
+
+  useEffect(() => {
+    if (!uid || sparksAllowed !== true) return
     return subscribeSparkQueue(
       uid,
       mode,
       ({ live, viewed }) => setQueue({ key, live, viewed, error: false }),
       () => setQueue({ key, live: [], viewed: [], error: true }),
     )
-  }, [uid, mode, key, reload])
+  }, [uid, mode, key, reload, sparksAllowed])
 
   useEffect(() => {
     if (!uid) return
@@ -184,9 +202,11 @@ export default function Sparks() {
       .catch(() => {})
   }
 
-  // Free: how many people are interested, never who.
+  // Free: how many people are interested, never who — curated profiles'
+  // likes aside (no paid feature involves a bot).
   if (sparksAllowed === false) {
-    const count = loaded ? loaded.live.length + loaded.viewed.length : null
+    const count = freeCount?.key === key ? freeCount.count : null
+    const curated = loaded ? [...loaded.live, ...loaded.viewed] : []
     return (
       <div className="min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] bg-gray-950 px-4 py-8 text-white">
         <PaywallCard
@@ -211,6 +231,27 @@ export default function Sparks() {
             </div>
           }
         />
+        {curated.length > 0 && (
+          <div className="mx-auto mt-8 max-w-2xl">
+            <h2 className="mb-2 text-sm font-semibold text-white/60">From Zylove curated profiles</h2>
+            <SparksList sparks={curated} mode={mode} matchedUids={matchedUids} onSelect={setSelected} scores={syncedScores} />
+          </div>
+        )}
+        {selected && (
+          <SparkProfileView
+            key={selected.likerUid}
+            uid={uid}
+            spark={selected}
+            matched={matchedUids.has(selected.likerUid)}
+            onClose={() => setSelected(null)}
+            onMatchStart={(name, photo) =>
+              setNewMatch({ matchId: null, theirUid: selected.likerUid, theirName: name, theirPhoto: photo, mode: selected.mode })
+            }
+            onMatched={(matchId) => setNewMatch((m) => (m ? { ...m, matchId } : m))}
+            onMatchFailed={() => setNewMatch(null)}
+          />
+        )}
+        {newMatch && <MatchOverlay match={newMatch} onClose={() => setNewMatch(null)} />}
       </div>
     )
   }

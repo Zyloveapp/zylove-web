@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import CuratedBadge from '../CuratedBadge'
 import { Link } from 'react-router-dom'
 import { CURIOUS_MAX, type CuriousResult, type SentSpark, type SparkEntry } from '../../services/sparks'
 import { displayAge, type DiscoverProfile } from '../../services/discover'
@@ -81,6 +82,7 @@ function NameLine({ profile, uid, mode, name: known }: { profile: DiscoverProfil
         {age !== null && <span className="font-normal text-white/50">, {age}</span>}
       </span>
       <UserTierBadge uid={uid} />
+      <CuratedBadge uid={uid} />
     </span>
   )
 }
@@ -199,6 +201,7 @@ export function SentList({ sent, mode }: { sent: SentSpark[]; mode: Mode }) {
                 {s.age !== null && <span className="font-normal text-white/50">, {s.age}</span>}
               </span>
               <UserTierBadge uid={s.uid} />
+              <CuratedBadge uid={s.uid} />
             </span>
             <span className="flex items-center gap-2 text-sm text-white/45">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white/40" aria-hidden />

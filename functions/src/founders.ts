@@ -27,11 +27,11 @@ import { FieldPath, FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, getNearestCity } from './cities'
 import { textAccount } from './sms'
 import { accountRef, internalRef, loadLocation } from './userData'
+import { eliteByMatching } from './identity'
 
 // Per half (women / men); a city's circle is twice this.
 export const DEFAULT_FOUNDER_TARGET = 50
 // Everyone else counts toward the other half.
-const MEN_IDENTITIES = new Set(['man', 'trans_man'])
 const BOT_PREFIX = 'zbot-'
 
 type Ineligible = 'outside_coverage' | 'already_assigned' | 'cohort_full' | 'no_profile'
@@ -51,9 +51,10 @@ export type FounderStatus = 'active' | 'pending_revocation' | 'permanent' | 'rev
 const MEMBER_STATUSES = new Set(['active', 'permanent'])
 
 // Spark profiles store a string, Play an array; the first entry decides.
-export function bucketFor(genderIdentity: unknown): Bucket {
-  const g = Array.isArray(genderIdentity) ? genderIdentity[0] : genderIdentity
-  return typeof g === 'string' && MEN_IDENTITIES.has(g) ? 'men' : 'women'
+// Stage C (decision 2): the women's half is for people matched as women or
+// nonbinary people (identity.ts) — not anyone who isn't a man by identity.
+export function bucketFor(genderIdentity: unknown, matchableAs?: unknown): Bucket {
+  return eliteByMatching(genderIdentity, matchableAs) ? 'women' : 'men'
 }
 
 export const num = (v: unknown, fallback: number) => (typeof v === 'number' ? v : fallback)
@@ -95,11 +96,12 @@ export async function claimFounderSpot(uid: string, lat: number, lng: number, so
   const isAustin = city.id === 'austin'
 
   const claim = await db.runTransaction(async (tx): Promise<Claim> => {
-    const [citySnap, userSnap, launchSnap, recordSnap] = await Promise.all([
+    const [citySnap, userSnap, launchSnap, recordSnap, matchingSnap] = await Promise.all([
       tx.get(cityRef),
       tx.get(userRef),
       isAustin ? tx.get(launchRef) : Promise.resolve(null),
       tx.get(recordRef),
+      tx.get(db.doc(`users/${uid}/private/matching`)),
     ])
     const user = userSnap.data()
     if (!user || user.onboardingComplete !== true) return { eligible: false, reason: 'no_profile' }
@@ -118,7 +120,7 @@ export async function claimFounderSpot(uid: string, lat: number, lng: number, so
     const women = Math.max(num(config.womenCount, 0), isAustin ? num(launch.womenCount, 0) : 0)
     const men = Math.max(num(config.menCount, 0), isAustin ? num(launch.menCount, 0) : 0)
 
-    const bucket = bucketFor(user.genderIdentity)
+    const bucket = bucketFor(user.genderIdentity, matchingSnap.get('matchableAs') ?? user.matchableAs)
     if ((bucket === 'women' ? women : men) >= target) return { eligible: false, reason: 'cohort_full' }
 
     const nextWomen = bucket === 'women' ? women + 1 : women

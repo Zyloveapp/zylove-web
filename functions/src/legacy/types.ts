@@ -67,7 +67,7 @@ export interface PairDoc {
   createdAt: Timestamp;
   initiatedBy?: string;
   sparkScore: number;
-  sparkBreakdown: SparkBreakdown;
+  sparkBreakdown?: SparkBreakdown;
   // Stage 2: Play scores live in pairs/{id}/modes/play (../pairPlay.ts);
   // older pair docs may still carry these.
   playScore?: number;

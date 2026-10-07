@@ -9,6 +9,7 @@
 
 import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https'
 import { defineSecret } from 'firebase-functions/params'
+import { noteTrialHistory } from './trial'
 import { logger } from 'firebase-functions'
 import { FieldValue } from 'firebase-admin/firestore'
 import Stripe = require('stripe')
@@ -139,7 +140,13 @@ export const createPortalSession = onCall(
 // Applies a subscription's state to its user. Events for a subscription other
 // than the one on file are stale (an old, replaced subscription) and ignored —
 // unless none is on file yet, as when this arrives before checkout's event.
-async function applySubscription(sub: Stripe.Subscription, deleted: boolean): Promise<void> {
+// Stage C: the event's copy can be stale (Stripe doesn't promise order — a
+// late "active" after a cancel would turn access back on), so the current
+// state is read from Stripe. A subscriber who's ever paid is marked
+// hadPaidPlan: when it ends they're Free — never pre-launch, never a trial.
+async function applySubscription(eventSub: Stripe.Subscription, deletedEvent: boolean): Promise<void> {
+  const sub = await stripe().subscriptions.retrieve(eventSub.id).catch(() => eventSub)
+  const deleted = deletedEvent || sub.status === 'canceled'
   const customerId = idOf(sub.customer)
   const uid = customerId ? await uidForCustomer(customerId) : null
   if (!uid) return void logger.warn('Subscription event for unknown customer', { subscription: sub.id })
@@ -153,7 +160,7 @@ async function applySubscription(sub: Stripe.Subscription, deleted: boolean): Pr
   const now = FieldValue.serverTimestamp()
   if (deleted) {
     await ref.set(
-      { subscriptionTier: 'free', subscriptionStatus: 'canceled', stripeSubscriptionId: null, subscriptionUpdatedAt: now },
+      { subscriptionTier: 'free', subscriptionStatus: 'canceled', stripeSubscriptionId: null, subscriptionUpdatedAt: now, hadPaidPlan: true },
       { merge: true },
     )
     return void logger.info('Subscription deleted', { subscription: sub.id })
@@ -171,6 +178,7 @@ async function applySubscription(sub: Stripe.Subscription, deleted: boolean): Pr
           stripeSubscriptionId: sub.id,
           trialExpired: false,
           subscriptionUpdatedAt: now,
+          hadPaidPlan: true,
         },
         { merge: true },
       )
@@ -185,7 +193,7 @@ async function applySubscription(sub: Stripe.Subscription, deleted: boolean): Pr
     case 'incomplete_expired':
     case 'paused':
       await ref.set(
-        { subscriptionTier: 'free', subscriptionStatus: sub.status === 'unpaid' ? 'unpaid' : 'canceled', subscriptionUpdatedAt: now },
+        { subscriptionTier: 'free', subscriptionStatus: sub.status === 'unpaid' ? 'unpaid' : 'canceled', subscriptionUpdatedAt: now, hadPaidPlan: true },
         { merge: true },
       )
       break
@@ -214,10 +222,33 @@ async function onCheckoutCompleted(session: Stripe.Checkout.Session): Promise<vo
       subscriptionStatus: 'active',
       subscriptionUpdatedAt: FieldValue.serverTimestamp(),
       trialExpired: false,
+      hadPaidPlan: true,
     },
     { merge: true },
   )
+  // Stage C: on record by phone too (trialHistory), so deleting the account
+  // and starting again doesn't bring pre-launch or a trial back.
+  const { getAuth } = await import('firebase-admin/auth')
+  const phone = (await getAuth().getUser(uid).catch(() => null))?.phoneNumber
+  await noteTrialHistory(phone, { hadPaidPlan: true }).catch(() => {})
   logger.info('Checkout completed', { tier })
+}
+
+// Stage C: a full refund or a dispute ends the plan — the subscription is
+// cancelled in Stripe and the user is Free at once (the deletion event that
+// follows is then a no-op).
+async function onChargeReversed(charge: Stripe.Charge, why: 'refunded' | 'disputed'): Promise<void> {
+  if (why === 'refunded' && charge.amount_refunded < charge.amount) return void logger.info('Partial refund: plan kept', { charge: charge.id })
+  const customerId = idOf(charge.customer)
+  const uid = customerId ? await uidForCustomer(customerId) : null
+  if (!uid) return void logger.warn('Refund/dispute for unknown customer', { charge: charge.id })
+  const subId: unknown = (await loadInternal(uid)).stripeSubscriptionId
+  if (typeof subId === 'string' && subId) await stripe().subscriptions.cancel(subId).catch((err) => logger.warn('Cancel after refund/dispute failed', { message: String(err) }))
+  await billingRef(uid).set(
+    { subscriptionTier: 'free', subscriptionStatus: why, stripeSubscriptionId: null, hadPaidPlan: true, subscriptionUpdatedAt: FieldValue.serverTimestamp() },
+    { merge: true },
+  )
+  logger.info('Plan ended by refund/dispute', { why })
 }
 
 async function onPaymentFailed(invoice: Stripe.Invoice): Promise<void> {
@@ -269,6 +300,15 @@ export const stripeWebhook = onRequest(
         case 'invoice.payment_failed':
           await onPaymentFailed(event.data.object)
           break
+        case 'charge.refunded':
+          await onChargeReversed(event.data.object, 'refunded')
+          break
+        case 'charge.dispute.created': {
+          const dispute = event.data.object
+          const charge = typeof dispute.charge === 'string' ? await stripe().charges.retrieve(dispute.charge) : dispute.charge
+          await onChargeReversed(charge, 'disputed')
+          break
+        }
         default:
           break
       }

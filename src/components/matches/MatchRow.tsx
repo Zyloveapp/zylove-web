@@ -1,4 +1,5 @@
 import { relativeTime, type MatchEntry } from '../../services/matches'
+import CuratedBadge from '../CuratedBadge'
 import { UserTierBadge } from '../TierBadge'
 import type { ChatPreview } from '../../services/chatPreview'
 import { usePlayIdentity } from './usePlayIdentity'
@@ -92,6 +93,7 @@ export default function MatchRow({ match, unread, preview, active, onSelect, onO
               {match.age !== null && <span className="font-normal text-white/50">, {match.age}</span>}
             </button>
             <UserTierBadge uid={match.partnerUid} />
+            <CuratedBadge uid={match.partnerUid} />
           </span>
           {time && <span className="shrink-0 text-xs text-white/35">{time}</span>}
         </span>

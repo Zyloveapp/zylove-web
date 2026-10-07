@@ -46,8 +46,11 @@ function scoreColor(score: number): string {
 
 function errorState(err: unknown): State {
   const code = err instanceof FirebaseError ? err.code : ''
-  if (code === 'functions/resource-exhausted') {
-    return { status: 'error', limited: true, message: "You've used this week's 3 Play profile reviews. Try again next week." }
+  // Stage C: the plan's allowance (Free: once; Spark+: 2 a month; Elite: 5
+  // a month per mode) — the server's message says which.
+  if (code === 'functions/resource-exhausted' || code === 'functions/permission-denied') {
+    const msg = err instanceof FirebaseError && err.message && !err.message.startsWith('internal') ? err.message : "You've used your profile reviews for now."
+    return { status: 'error', limited: true, message: `${msg} Upgrade for more →` }
   }
   if (code === 'functions/failed-precondition') {
     return { status: 'error', limited: true, message: 'Set up your Play profile first.' }
@@ -57,7 +60,8 @@ function errorState(err: unknown): State {
 
 // "How's my profile?" for either mode: an AI scorecard — overall ring, four
 // scored sections with what's working and what to improve, and the one top
-// suggestion. Spark is cobalt, Play is red; Play reviews are 3 per week.
+// suggestion. Spark is cobalt, Play is red; how many depends on the plan
+// (functions/src/usage.ts).
 // Photo analysis follows photoAnalysisConsent for the mode; if they've never
 // chosen, they're asked first, so no review is spent before the choice.
 export default function ProfileReviewSheet({ mode, onClose }: { mode: Mode; onClose: () => void }) {

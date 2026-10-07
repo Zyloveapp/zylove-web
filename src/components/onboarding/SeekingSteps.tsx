@@ -142,10 +142,8 @@ export function IntentStep({ draft, update }: StepProps) {
 }
 
 export function DiscoveryStep({ draft, update }: StepProps) {
-  const distances: { value: number | null; label: string }[] = [
-    ...RADIUS_OPTIONS.map((d) => ({ value: d, label: `${d} mi` })),
-    { value: null, label: 'No limit' },
-  ]
+  // Stage C: up to 100 miles — no "no limit".
+  const distances: { value: number | null; label: string }[] = RADIUS_OPTIONS.filter((d) => d <= 100).map((d) => ({ value: d, label: `${d} mi` }))
   return (
     <div>
       <StepHeader title="Who should you see?" subtitle="You can change this anytime." />

@@ -489,7 +489,8 @@ export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null
     // Root dealbreakers (mobile) plus the private prefs (web).
     dealbreakers: arr(own.dealbreakers),
     intent: str((await loadPrivateProfile(uid, p)).intent),
-    radiusMiles: p.radiusMiles === null ? null : num(p.radiusMiles, INITIAL_DRAFT.radiusMiles ?? 25),
+    // Stage C: 1–100 miles; an old "no limit" becomes 100.
+    radiusMiles: p.radiusMiles === null ? 100 : Math.min(num(p.radiusMiles, INITIAL_DRAFT.radiusMiles ?? 25), 100),
     ageMin: num(p.ageMin, INITIAL_DRAFT.ageMin),
     ageMax: num(p.ageMax, INITIAL_DRAFT.ageMax),
     selectedPromptIds: prompts.map((q) => q.promptId),

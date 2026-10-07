@@ -5,7 +5,8 @@ import {
   getDaysLeftInTrial,
   getSubscriptionStatus,
   getUserTier,
-  hasEliteIdentity,
+  entitlementOf,
+  waitingForCity,
   hasTrialEnded,
   marketOf,
   prelaunchLine,
@@ -13,6 +14,7 @@ import {
   trialDaysLine,
 } from '../services/subscription'
 import { useModeStore, type Mode } from '../store/modeStore'
+import { anyCityById } from '../config/cities'
 import { useBilling } from './PaywallGate'
 
 // The 😈 is Play's voice; Spark gets its own symbol.
@@ -45,7 +47,7 @@ function membershipRow(user: DocumentData, mode: Mode): Row {
     const badge = typeof user.founderBadge === 'string' && user.founderBadge ? user.founderBadge : 'Founder'
     return { label: `✦ ${badge} · Elite`, sublabel: top, border: 'cobalt', action: user.hasBillingAccount === true ? 'portal' : null }
   }
-  if (hasEliteIdentity(user)) {
+  if (entitlementOf(user)?.source === 'identity') {
     return { label: '✦ Elite · Complimentary', sublabel: "You've got the best of Zylove. Nothing more to unlock.", border: 'cobalt', action: null }
   }
   if (user.subscriptionTier === 'elite' && status === 'active') {
@@ -81,8 +83,19 @@ function membershipRow(user: DocumentData, mode: Mode): Row {
       action: null,
     }
   }
+  // Stage C: no launch city near them yet — Free until their linked city opens.
+  const waiting = waitingForCity(user)
+  if (waiting !== null || entitlementOf(user)?.source === 'waiting') {
+    const city = waiting ? anyCityById(waiting) : null
+    return {
+      label: '✦ Free',
+      sublabel: city ? `Your 30-day Elite trial starts when Zylove opens in ${city.name}. Upgrade any time →` : 'Upgrade any time →',
+      border: 'cobalt',
+      action: 'upgrade',
+    }
+  }
   if (hasTrialEnded(user)) {
-    return { label: '✦ Free · Trial ended', sublabel: 'Subscribe to continue →', border: 'red', action: 'upgrade' }
+    return { label: '✦ Free · Trial ended', sublabel: 'Upgrade any time →', border: 'cobalt', action: 'upgrade' }
   }
   const days = getDaysLeftInTrial(user)
   return {

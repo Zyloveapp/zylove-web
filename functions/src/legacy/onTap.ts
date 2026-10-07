@@ -8,6 +8,8 @@ import { UserDoc, PairDoc, pairId } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
 import { loadMatching, requireActive, withPrivateProfile } from "../userData";
+import { atLeast, tierNow } from "../entitlements";
+import { loadSparkDetails, writeSparkDetails } from "../pairSpark";
 
 export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
@@ -33,19 +35,29 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   const hasPhysicalPrefs = (Array.isArray(tappedPrefs.seekingBodyTypes) && tappedPrefs.seekingBodyTypes.length > 0) ||
     Boolean(tappedPrefs.seekingHeightMinCm) || Boolean(tappedPrefs.seekingHeightMaxCm);
 
+  // Stage C: Free sees the score; Spark+ the full report (breakdown,
+  // dealbreakers); Elite also Deep Fit (tier1).
+  // No paid feature ever involves a bot: a bot's report is shown in full.
+  const tier = await tierNow(tapperId);
+  const bot = tappedId.startsWith("zbot-");
+  const full = bot || atLeast(tier, "spark_plus");
+  const deep = bot || tier === "elite";
+
   // Return cached score if pair already exists
   const existing = await pairRef.get();
   if (existing.exists) {
     const data = existing.data() as PairDoc;
     const playScores = play ? await loadPlayScores(pid, data) : undefined;
+    const details = full ? await loadSparkDetails(pid, data) : null;
     return {
       pairId:     pid,
       sparkScore: data.sparkScore,
       ...(playScores && { playScore: playScores.playScore }),
-      breakdown:  { spark: data.sparkBreakdown, ...(playScores && { play: playScores.playBreakdown }) },
-      triggeredDealbreakers: data.triggeredDealbreakers ?? [],
-      ...(data.tier1Spark && { tier1: data.tier1Spark }),
+      breakdown:  { ...(details && { spark: details.sparkBreakdown }), ...(playScores && { play: playScores.playBreakdown }) },
+      triggeredDealbreakers: details?.triggeredDealbreakers ?? [],
+      ...(deep && details?.tier1Spark ? { tier1: details.tier1Spark } : {}),
       hasPhysicalPrefs,
+      locked: !full,
     };
   }
 
@@ -83,23 +95,24 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
     userB,
     createdAt:         admin.firestore.Timestamp.now(),
     sparkScore,
-    sparkBreakdown,
-    triggeredDealbreakers,
-    ...(sparkTier1 && { tier1Spark: sparkTier1 }),
     scoreCalculatedAt: admin.firestore.Timestamp.now(),
     scoreVersion:      1,
   };
 
-  await pairRef.set(pairData);
+  const batch = db.batch();
+  batch.set(pairRef, pairData);
+  writeSparkDetails(batch, pid, { breakdown: sparkBreakdown, dealbreakers: triggeredDealbreakers, tier1: sparkTier1 }, false);
+  await batch.commit();
   if (playResult) await setPlayScores(pid, playFields(playResult.score, playResult.breakdown, playResult.tier1));
 
   return {
     pairId: pid,
     sparkScore,
     ...(playResult && { playScore: playResult.score }),
-    breakdown: { spark: sparkBreakdown, ...(playResult && { play: playResult.breakdown }) },
-    triggeredDealbreakers,
-    tier1: sparkTier1,
+    breakdown: { ...(full && { spark: sparkBreakdown }), ...(playResult && { play: playResult.breakdown }) },
+    triggeredDealbreakers: full ? triggeredDealbreakers : [],
+    ...(deep && sparkTier1 ? { tier1: sparkTier1 } : {}),
     hasPhysicalPrefs,
+    locked: !full,
   };
 });

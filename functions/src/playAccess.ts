@@ -2,8 +2,8 @@ import { HttpsError } from 'firebase-functions/v2/https'
 import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
-import { hasEliteIdentity } from './trial'
-import { internalRef, userRef } from './userData'
+import { computeEntitlement, type Entitlement } from './entitlements'
+import { accountRef, internalRef, userRef } from './userData'
 
 // Play access (Stage 2, F-004). Play data is sealed: reading another
 // person's Play profile, Play photos, Play scores, Play matches or Play likes
@@ -44,21 +44,22 @@ export interface PlayFlags {
   playAccessUntil: Timestamp | null
 }
 
-// Entitlement from the root doc (identity, founder) and the plan (userInternal).
-export function entitlement(root: DocumentData | undefined, plan: DocumentData | undefined, now = Date.now()): { entitled: boolean; until: number | null } {
-  if (!root) return { entitled: false, until: null }
-  if (hasEliteIdentity(root) || root.isFounder === true) return { entitled: true, until: null }
-  const p = plan ?? {}
-  if (p.subscriptionTier === 'elite') return { entitled: true, until: null }
-  if (p.subscriptionTier === 'spark_plus') return { entitled: false, until: null }
-  if (p.trialStartedAt == null) return { entitled: true, until: null } // pre-launch
-  const ends = toMillis(p.trialEndsAt)
-  if (p.trialExpired !== true && ends !== null && ends > now) return { entitled: true, until: ends }
-  return { entitled: false, until: null }
+function legacyEntitlement(root: DocumentData | undefined, plan: DocumentData | undefined): Entitlement {
+  const e = computeEntitlement({ root, plan, matching: { matchableAs: root?.matchableAs } })
+  return e.source === 'waiting' ? { ...e, tier: 'elite', source: 'prelaunch' } : e
 }
 
-export function computeFlags(root: DocumentData | undefined, plan: DocumentData | undefined, play: DocumentData | undefined): PlayFlags {
-  const { entitled, until } = entitlement(root, plan)
+// Stage C: Play is an Elite feature — entitlements.ts decides the tier.
+export function computeFlags(
+  root: DocumentData | undefined,
+  plan: DocumentData | undefined,
+  play: DocumentData | undefined,
+  // Without one (scripts/lib/stage2.mjs, run before Stage C): from the docs at
+  // hand, with that stage's rule that no trial yet meant pre-launch.
+  ent: Entitlement = legacyEntitlement(root, plan),
+): PlayFlags {
+  const entitled = ent.tier === 'elite'
+  const until = ent.until?.toMillis() ?? null
   // Suspension is in userInternal (Stage 3); older copies on the root doc count.
   const suspended = (plan?.isSuspended ?? root?.isSuspended) === true
   const live = !!root && !suspended && root.isDeleted !== true
@@ -68,24 +69,41 @@ export function computeFlags(root: DocumentData | undefined, plan: DocumentData 
 }
 
 // Recomputes and stores the flags (only when they changed).
+// Stage C: one transaction — every input read and the result written
+// together, so a run that read before (say) the location was saved can't
+// land after a newer one and overwrite it with a stale plan.
 export async function refreshPlayAccess(uid: string): Promise<PlayFlags> {
   const db = getFirestore()
-  const [root, internal, play] = await Promise.all([
-    userRef(uid).get(),
-    internalRef(uid).get(),
-    db.doc(`users/${uid}/playProfile/data`).get(),
-  ])
-  const flags = computeFlags(root.data(), internal.data(), play.data())
-  // A deleted account's server record is gone for good (clearPrivateData):
-  // never write it back.
-  if (!root.exists || root.data()?.isDeleted === true) return flags
-  const cur = internal.data() ?? {}
-  const same =
-    cur.playEntitled === flags.playEntitled &&
-    cur.playAccess === flags.playAccess &&
-    (toMillis(cur.playAccessUntil) ?? null) === (flags.playAccessUntil?.toMillis() ?? null)
-  if (!same) await internalRef(uid).set(flags, { merge: true })
-  return flags
+  return db.runTransaction(async (tx) => {
+    const [root, internal, play, matching, loc] = await Promise.all([
+      tx.get(userRef(uid)),
+      tx.get(internalRef(uid)),
+      tx.get(db.doc(`users/${uid}/playProfile/data`)),
+      tx.get(db.doc(`users/${uid}/private/matching`)),
+      tx.get(db.doc(`userLocations/${uid}`)),
+    ])
+    // The whole entitlement, stored with the Play flags it decides.
+    const ent = computeEntitlement({ root: root.data(), plan: internal.data(), matching: matching.data() ?? { matchableAs: root.data()?.matchableAs }, loc: loc.data() })
+    const flags = computeFlags(root.data(), internal.data(), play.data(), ent)
+    // A deleted account's server record is gone for good (clearPrivateData):
+    // never write it back.
+    if (!root.exists || root.data()?.isDeleted === true) return flags
+    const cur = internal.data() ?? {}
+    const entJson = (x: DocumentData | undefined) =>
+      JSON.stringify({ tier: x?.tier ?? null, source: x?.source ?? null, until: toMillis(x?.until) ?? null, cityId: x?.cityId ?? null })
+    const same =
+      cur.playEntitled === flags.playEntitled &&
+      cur.playAccess === flags.playAccess &&
+      (toMillis(cur.playAccessUntil) ?? null) === (flags.playAccessUntil?.toMillis() ?? null) &&
+      entJson(cur.entitlement) === entJson(ent)
+    if (!same) {
+      tx.set(internalRef(uid), { ...flags, entitlement: ent }, { merge: true })
+      // The app's copy at once (mirrorPlan would follow a moment later), so a
+      // new plan shows without a gap.
+      tx.set(accountRef(uid), { ...flags, entitlement: ent }, { merge: true })
+    }
+    return flags
+  })
 }
 
 // The stored flags, read now: entitled / access as of this moment.
@@ -116,7 +134,7 @@ export async function setPlayVisibility(uid: string, visibility: 'active' | 'pau
 
 // ─── Triggers ────────────────────────────────────────────────────────────────
 
-const PLAN_KEYS = ['subscriptionTier', 'trialStartedAt', 'trialEndsAt', 'trialExpired', 'isSuspended']
+const PLAN_KEYS = ['subscriptionTier', 'trialStartedAt', 'trialEndsAt', 'trialExpired', 'isSuspended', 'hadPaidPlan']
 const ROOT_KEYS = ['genderIdentity', 'isFounder', 'isSuspended', 'isDeleted']
 const changed = (before: DocumentData | undefined, after: DocumentData | undefined, keys: string[]) =>
   keys.some((k) => JSON.stringify(before?.[k] ?? null) !== JSON.stringify(after?.[k] ?? null))
@@ -142,5 +160,18 @@ export const playAccessOnPlayProfile = onDocumentWritten({ document: 'users/{uid
   if (isBotUid(event.params.uid)) return
   const b = event.data?.before.data(), a = event.data?.after.data()
   if (event.data?.before.exists && event.data?.after.exists && b?.playOnboardingComplete === a?.playOnboardingComplete) return
+  await refreshPlayAccess(event.params.uid)
+})
+
+// Stage C: how someone is matched (matchableAs) and their launch city also
+// decide the tier.
+export const entitlementOnMatching = onDocumentWritten({ document: 'users/{uid}/private/matching', memory: '256MiB' }, async (event) => {
+  if (isBotUid(event.params.uid)) return
+  if (event.data?.before.exists && !changed(event.data.before.data(), event.data?.after.data(), ['matchableAs'])) return
+  await refreshPlayAccess(event.params.uid)
+})
+export const entitlementOnLocation = onDocumentWritten({ document: 'userLocations/{uid}', memory: '256MiB' }, async (event) => {
+  if (isBotUid(event.params.uid)) return
+  if (event.data?.before.exists && !changed(event.data.before.data(), event.data?.after.data(), ['marketCityId', 'linkedCityId'])) return
   await refreshPlayAccess(event.params.uid)
 })

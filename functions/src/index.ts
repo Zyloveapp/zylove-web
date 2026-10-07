@@ -49,10 +49,13 @@ export { updateDisplayName } from './displayName'
 export { processBotLikeBacks, queueBotLikeBack } from './botLikeBack'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
-import { ALWAYS_ELITE_IDENTITIES, marketFor, marketOpen, newTrial, planView, trialExempt } from './trial'
-import { accountRef, internalRef, isAdminAuth, isSuspendedUid, loadInternal, loadLocation, loadSettings, requireActive } from './userData'
+import { newTrial, noteTrialHistory, planView, priorTrial, trialExempt } from './trial'
+import { cityIsOpen, launchCityOf, requireTier, tierNow } from './entitlements'
+import { accountRef, internalRef, isAdminAuth, isSuspendedUid, loadInternal, loadMatching, loadSettings, requireActive } from './userData'
 import { blockedEitherWay, likedInMode, pairIdOf, recordLike } from './likes'
-import { reserveSlot, takeRateLimit } from './rateLimits'
+import { takeRateLimit } from './rateLimits'
+import { takeQuota } from './usage'
+import { loadSparkDetails } from './pairSpark'
 import { clientIp } from './legal'
 import { playStatus, requirePlayAccess, requirePlayEntitled } from './playAccess'
 import { loadPlayScores } from './pairPlay'
@@ -79,6 +82,8 @@ const MAX_BIO_LENGTH = 300
 
 interface BioResponse {
   bio: string
+  // The plan's allowance is used up (Stage C).
+  limited?: boolean
 }
 
 function extractText(body: unknown): string {
@@ -108,8 +113,10 @@ export const generateSparkBio = onCall(
     if (!request.auth) return { bio: '' }
     if (!(await requireActive(request.auth.uid).then(() => true, () => false))) return { bio: '' }
     // Stage B: was unlimited. Over the limit the app falls back to its own template.
-    const refund = await reserveSlot(request.auth.uid, 'ai_sparkBio', { max: 5, windowMs: DAY_MS }).catch(() => null)
-    if (!refund) return { bio: '' }
+    // Stage C: the plan's allowance (usage.ts). Used up: no AI call — the app
+    // shows its own template and the upgrade note.
+    const refund = await takeQuota(request.auth.uid, 'sparkBio').catch(() => null)
+    if (!refund) return { bio: '', limited: true }
 
     try {
       const input = parseBioRequest(request.data)
@@ -144,9 +151,6 @@ export const generateSparkBio = onCall(
   },
 )
 
-// Play bio generations allowed per rolling week, per user.
-const PLAY_BIO_WEEKLY_LIMIT = 3
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
 
 // Writes a Play bio from Play onboarding answers. Unlike generateSparkBio this
@@ -161,7 +165,7 @@ export const generatePlayBio = onCall(
     await requirePlayEntitled(request.auth.uid)
     // Stage B: the slot is reserved before the call (parallel calls can't
     // overrun the limit) and given back if nothing comes of it.
-    const refund = await reserveSlot(request.auth.uid, 'ai_playBio', { max: PLAY_BIO_WEEKLY_LIMIT, windowMs: WEEK_MS }, 'Play bio generation limit reached. Try again next week.')
+    const refund = await takeQuota(request.auth.uid, 'playBio')
 
     try {
       const input = parsePlayBioRequest(request.data)
@@ -199,8 +203,6 @@ export const generatePlayBio = onCall(
 
 // ─── generatePlayGoDeeper ─────────────────────────────────────────────────────
 
-// Go Deeper generations (each one a pair of questions) per rolling week.
-const PLAY_GO_DEEPER_WEEKLY_LIMIT = 3
 const GO_DEEPER_TEMPERATURES = [0.9, 1.0] as const
 
 
@@ -242,7 +244,7 @@ export const generatePlayGoDeeper = onCall(
     await requirePlayEntitled(request.auth.uid)
     const input = parsePlayGoDeeperRequest(request.data)
     // Reserved before the calls, given back if they fail (Stage B).
-    const refund = await reserveSlot(request.auth.uid, 'ai_playGoDeeper', { max: PLAY_GO_DEEPER_WEEKLY_LIMIT, windowMs: WEEK_MS }, 'Go Deeper limit reached. Try again next week.')
+    const refund = await takeQuota(request.auth.uid, 'playGoDeeper')
     let first = ''
     let second = ''
     try {
@@ -265,7 +267,6 @@ export const generatePlayGoDeeper = onCall(
 
 // ─── generateSparkGoDeeper ────────────────────────────────────────────────────
 
-const SPARK_GO_DEEPER_WEEKLY_LIMIT = 3
 
 
 // Spark onboarding's Go Deeper: two personal questions from the user's Spark
@@ -278,7 +279,7 @@ export const generateSparkGoDeeper = onCall(
     await requireActive(request.auth.uid)
     const input = parseSparkGoDeeperRequest(request.data)
     // Reserved before the calls, given back if they fail (Stage B).
-    const refund = await reserveSlot(request.auth.uid, 'ai_sparkGoDeeper', { max: SPARK_GO_DEEPER_WEEKLY_LIMIT, windowMs: WEEK_MS }, 'Go Deeper limit reached. Try again next week.')
+    const refund = await takeQuota(request.auth.uid, 'sparkGoDeeper')
     let first = ''
     let second = ''
     try {
@@ -339,20 +340,39 @@ export const initUserDefaults = onCall(
     const missingInternal: Record<string, unknown> = Object.fromEntries(
       Object.entries(INTERNAL_DEFAULTS).filter(([field]) => internal[field] === undefined),
     )
-    if (internal.subscriptionTier === undefined) {
-      const gender: unknown = Array.isArray(data.genderIdentity) ? data.genderIdentity[0] : data.genderIdentity
-      const elite = data.isFounder === true || (typeof gender === 'string' && ALWAYS_ELITE_IDENTITIES.includes(gender))
-      missingInternal.subscriptionTier = elite ? 'elite' : 'free'
-    }
+    // Stage C: the stored tier is only ever what was bought; what someone
+    // gets is the server's entitlement (entitlements.ts), which also covers
+    // identity, founders, trials and pre-launch.
+    if (internal.subscriptionTier === undefined) missingInternal.subscriptionTier = 'free'
     // Gender (and age) are locked once onboarding is done (rules then refuse
     // changes to them) — Elite comes from gender, so it can't be switched
     // later. Mobile locks at its onboarding step 2.
     if (data.identityLockedAt == null && data.genderIdentity != null) {
       missing.identityLockedAt = FieldValue.serverTimestamp()
     }
-    if (internal.trialStartedAt === undefined && !trialExempt(planView(data, internal))) {
-      const market = marketFor(await loadLocation(uid, data))
-      if (market && (await marketOpen(market))) Object.assign(missingInternal, newTrial())
+    // The trial: once per phone number (trialHistory, Stage C), never after a
+    // paid plan, and only in a launch city that's open.
+    const matchingNow = await loadMatching(uid, data)
+    if (internal.trialStartedAt === undefined && internal.hadPaidPlan !== true && !trialExempt({ ...planView(data, internal), matchableAs: matchingNow.matchableAs })) {
+      // The verified number: from the token, else the Auth record (sign-ins
+      // that don't carry it on the token).
+      const phone =
+        typeof request.auth.token.phone_number === 'string'
+          ? request.auth.token.phone_number
+          : ((await getAuth().getUser(uid).catch(() => null))?.phoneNumber ?? null)
+      const prior = await priorTrial(phone)
+      if (prior?.hadPaidPlan === true) missingInternal.hadPaidPlan = true
+      else if (prior?.trialStartedAt) {
+        const ends = prior.trialEndsAt as Timestamp
+        Object.assign(missingInternal, { trialStartedAt: prior.trialStartedAt, trialEndsAt: ends, trialExpired: ends.toMillis() <= Date.now() })
+      } else {
+        const cityId = launchCityOf((await getFirestore().doc(`userLocations/${uid}`).get()).data())
+        if (cityId && cityIsOpen((await getFirestore().doc(`config/city_${cityId}`).get()).data())) {
+          const t = newTrial()
+          Object.assign(missingInternal, t)
+          await noteTrialHistory(phone, { trialStartedAt: t.trialStartedAt, trialEndsAt: t.trialEndsAt })
+        }
+      }
     }
     // Explore pool position (see discovery.ts): set once, never changed.
     if (typeof data.sortKey !== 'number') missing.sortKey = Math.random()
@@ -475,6 +495,9 @@ export const likeBack = onCall(
     if (entryMode !== mode || (!bot && !(await likedInMode(likerUid, callerId, mode)))) {
       throw new HttpsError('not-found', 'No like from this person in your queue')
     }
+    // Stage C: liking back from "who liked you" is Spark+ — except a bot's
+    // like (no paid feature ever involves a bot).
+    if (!likerUid.startsWith('zbot-')) await requireTier(callerId, 'spark_plus', 'Liking back')
     if ((await isSuspendedUid(callerId)) || (!bot && (await isSuspendedUid(likerUid))) || (await blockedEitherWay(callerId, likerUid))) {
       throw new HttpsError('failed-precondition', "That profile isn't available.")
     }
@@ -1283,7 +1306,7 @@ function parseStarters(text: string): string[] | null {
 // fallback starters.
 export const generateConversationStarter = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
-  async (request): Promise<{ starters: string[] }> => {
+  async (request): Promise<{ starters: string[]; limited?: boolean }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     await requireActive(request.auth.uid)
     const callerId = request.auth.uid
@@ -1295,8 +1318,12 @@ export const generateConversationStarter = onCall(
     // Stage 2: a Play match is sealed while the caller has no Play access.
     if (play) await requirePlayAccess(callerId)
     const fallback = play ? PLAY_FALLBACK_STARTERS : FALLBACK_STARTERS
-    // Stage B: was unlimited. Over the limit: the stock starters, no AI call.
-    if (!(await reserveSlot(callerId, 'ai_starter', { max: 20, windowMs: DAY_MS }).then(() => true, () => false))) return { starters: fallback }
+    // Stage C: Break the ice (from a profile) is Spark+; the in-chat nudge is
+    // for everyone — both from the plan's starters allowance (Free: 1 a week,
+    // Spark+/Elite: 5 a day). Used up: stock starters, no AI call.
+    const source = (request.data as Record<string, unknown> | null)?.source === 'icebreaker' ? 'icebreaker' : 'nudge'
+    if (source === 'icebreaker' && !otherUid.startsWith('zbot-')) await requireTier(callerId, 'spark_plus', 'Break the ice')
+    if (!(await takeQuota(callerId, 'starters').then(() => true, () => false))) return { starters: fallback, limited: true }
 
     try {
       const db = getFirestore()
@@ -1453,8 +1480,8 @@ export const generateProfileQuestion = onCall(
     await requireActive(request.auth.uid)
     const uid = request.auth.uid
     let fallback = DEFAULT_QUESTION
-    // Stage B: was unlimited. Over the limit: the stock question, no AI call.
-    if (!(await reserveSlot(uid, 'ai_profileQuestion', { max: 20, windowMs: DAY_MS }).then(() => true, () => false))) return { question: fallback }
+    // Stage C: 3 a day for everyone. Over the limit: the stock question, no AI call.
+    if (!(await takeQuota(uid, 'profileQuestion').then(() => true, () => false))) return { question: fallback }
     try {
       const { root, spark } = await loadOwnProfileDocs(uid)
       fallback = QUESTION_FALLBACKS[strings(root.personalityTraits)[0] ?? ''] ?? DEFAULT_QUESTION
@@ -1518,7 +1545,7 @@ export const reviewProfile = onCall(
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     await requireActive(request.auth.uid)
     // Stage B: was unlimited. Reserved before the call, given back if it fails.
-    const refund = await reserveSlot(request.auth.uid, 'ai_sparkReview', { max: 3, windowMs: WEEK_MS }, 'Profile review limit reached. Try again next week.')
+    const refund = await takeQuota(request.auth.uid, 'sparkReview')
     let review: ProfileScorecard | null = null
     try {
       const { root, spark } = await loadOwnProfileDocs(request.auth.uid)
@@ -1562,7 +1589,6 @@ ${scorecardInstructions(SPARK_REVIEW_SECTIONS, { photos: photos.length > 0 })}`
 
 // ─── reviewPlayProfile ───────────────────────────────────────────────────────
 
-const PLAY_REVIEW_WEEKLY_LIMIT = 3
 
 // "How's my Play profile? 🔥" — a scorecard for the caller's saved Play
 // profile, with photo coaching when they opted in (photoAnalysisConsent.play).
@@ -1580,7 +1606,7 @@ export const reviewPlayProfile = onCall(
     ])
     if (!playSnap.exists) throw new HttpsError('failed-precondition', 'Set up your Play profile first.')
     // Reserved before the call, given back if it fails (Stage B).
-    const refund = await reserveSlot(request.auth.uid, 'ai_playReview', { max: PLAY_REVIEW_WEEKLY_LIMIT, windowMs: WEEK_MS }, 'Play profile review limit reached. Try again next week.')
+    const refund = await takeQuota(request.auth.uid, 'playReview')
 
     const play = playSnap.data() ?? {}
     let review: ProfileScorecard | null = null
@@ -1638,6 +1664,8 @@ export const getSentSparks = onCall(
   async (request): Promise<{ sent: SentSpark[] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     await requireActive(request.auth.uid)
+    // Stage C: the Sent tab is part of "who liked you" — Spark+.
+    const callerTier = await requireTier(request.auth.uid, 'spark_plus', 'Sent likes')
     const uid = request.auth.uid
     const mode = (request.data as Record<string, unknown> | null)?.mode === 'play' ? 'play' : 'spark'
     if (mode === 'play') await requirePlayAccess(uid)
@@ -1652,6 +1680,8 @@ export const getSentSparks = onCall(
     const unanswered = pairSnaps
       .filter((p, i) => {
         const other = p.get('userA') === uid ? p.get('userB') : p.get('userA')
+        // Real people only (no paid feature involves a bot).
+        if (typeof other === 'string' && other.startsWith('zbot-')) return false
         const likedBy: unknown = myLikes[i].get('likedBy')
         return p.exists && typeof other === 'string' && !(Array.isArray(likedBy) && likedBy.includes(other))
       })
@@ -1684,7 +1714,8 @@ export const getSentSparks = onCall(
           age: typeof user.age === 'number' && user.age > 0 ? user.age : null,
           sparkScore: mode === 'spark' && typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
           playScore: typeof playScores?.playScore === 'number' ? playScores.playScore : null,
-          tier1Spark: pair.tier1Spark ?? null,
+          // Deep Fit is Elite (Stage C); its home is pairs/{id}/modes/deep.
+          tier1Spark: callerTier === 'elite' ? (await loadSparkDetails(pairSnap.id, pair)).tier1Spark : null,
           likedAt: toMillis(queue?.likedAt) || toMillis(pair.createdAt),
         }
       }),
@@ -1711,36 +1742,6 @@ interface CuriousVisitor {
 
 const CURIOUS_LIMIT = 20
 
-// genderIdentity is a string from Spark onboarding, an array from Play.
-function isWoman(genderIdentity: unknown): boolean {
-  const g = Array.isArray(genderIdentity) ? genderIdentity[0] : genderIdentity
-  if (typeof g !== 'string') return false
-  const v = g.toLowerCase().trim()
-  return v === 'woman' || v === 'cis woman' || v === 'trans_woman'
-}
-
-function toDate(v: unknown): Date | null {
-  if (v instanceof Timestamp) return v.toDate()
-  if (typeof v === 'number' || typeof v === 'string') {
-    const d = new Date(v)
-    return Number.isNaN(d.getTime()) ? null : d
-  }
-  return null
-}
-
-// Elite-level access, as the web app's getUserTier (subscription.ts) grants
-// it: the always-Elite identities, founders, an elite subscription, a trial
-// that hasn't ended, or pre-launch (no trial started yet — free while the
-// network builds). Spark+ and free don't count.
-function hasEliteAccess(user: DocumentData | undefined): boolean {
-  if (!user) return false
-  const g: unknown = Array.isArray(user.genderIdentity) ? user.genderIdentity[0] : user.genderIdentity
-  if (isWoman(g) || (typeof g === 'string' && ALWAYS_ELITE_IDENTITIES.includes(g))) return true
-  if (user.isFounder === true || user.subscriptionTier === 'elite') return true
-  if (user.trialStartedAt == null && user.subscriptionTier !== 'spark_plus') return true
-  const endsAt = toDate(user.trialEndsAt)
-  return user.trialExpired !== true && endsAt !== null && endsAt > new Date()
-}
 
 // Did otherUid reveal the score in this mode? Reveals since the web started
 // recording the mode carry {otherUid}_revealed_{mode}. Older ones don't, so
@@ -1763,7 +1764,7 @@ function revealedAt(pair: DocumentData, uid: string): number {
 // tap "Reveal your score" or open a view that shows the full report (the
 // background prefetch doesn't count). Excludes anyone you've liked or linked with, and anyone who liked you
 // (they're in Sparks, where an unmatched liker's name stays hidden — showing
-// them here would unmask them). Elite-level access (hasEliteAccess) gets the
+// them here would unmask them). Elite (the server entitlement) gets the
 // list; everyone else gets only the count, enforced here so the list can't
 // be fetched directly. With { mode }, only visitors who looked in that mode,
 // shown as they are in it (Play name and photo in Play); without one (older
@@ -1780,12 +1781,12 @@ export const getCuriousVisitors = onCall(
     if (mode === 'play' && !(await playStatus(uid)).access) return { locked: true, count: 0, visitors: [] }
     const db = getFirestore()
 
-    const [me, asA, asB] = await Promise.all([
-      db.collection('users').doc(uid).get(),
+    const [asA, asB] = await Promise.all([
       db.collection('pairs').where('userA', '==', uid).get(),
       db.collection('pairs').where('userB', '==', uid).get(),
     ])
-    const unlocked = hasEliteAccess(planView(me.data(), await loadInternal(uid, me.data())))
+    // Stage C: the server's entitlement decides (Curious is Elite).
+    const unlocked = (await tierNow(uid)) === 'elite'
 
     const revealed = [...asA.docs, ...asB.docs]
       .map((d) => ({ id: d.id, pair: d.data() }))
@@ -1809,6 +1810,7 @@ export const getCuriousVisitors = onCall(
     for (const { id, pair } of candidates) {
       if (visitors.length >= CURIOUS_LIMIT) break
       const otherUid: string = pair.userA === uid ? pair.userB : pair.userA
+      if (otherUid.startsWith('zbot-')) continue // real people only
       const [matchSnap, userSnap, playSnap] = await Promise.all([
         db.collection('matches').doc(id).get(),
         db.collection('users').doc(otherUid).get(),
@@ -1831,7 +1833,7 @@ export const getCuriousVisitors = onCall(
         intent: mode,
         sparkScore: mode !== 'play' && typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
         playScore: typeof playScores?.playScore === 'number' ? playScores.playScore : null,
-        tier1Spark: pair.tier1Spark ?? null,
+        tier1Spark: (await loadSparkDetails(id, pair)).tier1Spark, // Curious is Elite: Deep Fit included
         at: revealedAt(pair, uid),
       })
     }
@@ -1853,6 +1855,27 @@ export { getPhotoUrls, getReviewPdfUrl } from './photoAccess'
 export { exploreOnInternal, exploreOnLocation, exploreOnUser, exploreOnUserDoc, getExploreDeck } from './explore'
 export { photoCleanupOnUser, photoCleanupOnUserDoc } from './photoCleanup'
 export { checkPlayPin, getPlayPinStatus, setPlayPin } from './playPin'
+export { getUsage } from './usage'
+export { retireBotsOnCityClose } from './botRetire'
+export { entitlementOnLocation, entitlementOnMatching } from './playAccess'
+
+// How many people are waiting in "who liked you" — all a Free plan shows
+// (Stage C: the list itself is Spark+, enforced by the rules).
+export const getLikeCount = onCall({ timeoutSeconds: 15, invoker: 'public' }, async (request): Promise<{ count: number; bots: { id: string; data: DocumentData }[] }> => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+  const uid = request.auth.uid
+  await requireActive(uid)
+  const mode = (request.data as Record<string, unknown> | null)?.mode === 'play' ? 'play' : 'spark'
+  if (mode === 'play') await requirePlayAccess(uid)
+  // Real people are counted; a curated profile's like is shown in full (no
+  // paid feature ever involves a bot), so it can be liked back on any plan.
+  const snap = await getFirestore().collection(`users/${uid}/likeQueue`).where('mode', '==', mode).get()
+  const live = snap.docs.filter((d) => d.get('dismissed') !== true)
+  return {
+    count: live.filter((d) => !d.id.startsWith('zbot-')).length,
+    bots: snap.docs.filter((d) => d.id.startsWith('zbot-')).map((d) => ({ id: d.id, data: d.data() })),
+  }
+})
 export { playAccessOnPlan, playAccessOnPlayProfile, playAccessOnProfile } from './playAccess'
 export { actOnPlayConnection, listLockedPlayConnections } from './lockedPlay'
 export { getDistances, grantSmsConsent, recordActivity, refreshAges, setLocation } from './location'

@@ -10,12 +10,12 @@ import { ConfirmModal } from './DeleteProfileControls'
 import { useBilling } from './PaywallGate'
 import LockedPlayConnections from './matches/LockedPlayConnections'
 
-// Trial over and no plan: blocks the app (no close button, no Escape) until
-// they subscribe, sign out, or delete. Women and founders are Elite for life, so their
-// tier is never 'free' and this never shows. /upgrade sits outside the app
-// layout, so Checkout's return page is never covered.
-// Play needs Elite: Play-only accounts see only Elite; in Play with a Spark
-// profile they can also drop to Spark, where Spark+ is offered.
+// Trial over and no plan. Stage C (freemium): shown once, then they carry
+// on with Free (Explore, matching and chat, 10 likes a day…) and paid
+// features show their own upgrade prompts. Play-only accounts are the
+// exception — Free has no Play — so for them it stays until they subscribe,
+// sign out or delete. /upgrade sits outside the app layout, so Checkout's
+// return page is never covered.
 export default function TrialExpiry() {
   const uid = useAuthStore((s) => s.user?.uid) ?? null
   const expired = useSubscriptionStore((s) => s.uid === uid && s.tier === 'free' && s.trialEnded)
@@ -28,6 +28,22 @@ export default function TrialExpiry() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   // Safety stays reachable while everything else is locked (Stage 2).
   const [safety, setSafety] = useState(false)
+  const seenKey = uid ? `zylove_trial_ended_seen_${uid}` : ''
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return !!seenKey && localStorage.getItem(seenKey) === '1'
+    } catch {
+      return false
+    }
+  })
+  const continueFree = () => {
+    try {
+      localStorage.setItem(seenKey, '1')
+    } catch {
+      // shown again next time — harmless
+    }
+    setDismissed(true)
+  }
 
   useEffect(() => {
     if (!uid || !expired) return
@@ -45,6 +61,8 @@ export default function TrialExpiry() {
   if (!uid || !expired) return null
   const known = playOnly?.uid === uid
   const eliteOnly = known && (playOnly.value || mode === 'play')
+  // Spark users carry on with Free once they've seen this.
+  if (known && !playOnly.value && dismissed) return null
 
   async function confirmAccountDeletion() {
     setDeleting(true)
@@ -71,7 +89,11 @@ export default function TrialExpiry() {
         <h2 id="trial-expiry-title" className="text-xl font-bold">
           Your free trial has ended.
         </h2>
-        <p className="mt-2 text-sm text-white/60">Subscribe to keep your access.</p>
+        <p className="mt-2 text-sm text-white/60">
+          {known && playOnly.value
+            ? 'Play is part of Elite. Subscribe to keep your access.'
+            : "You're on Free now: Explore, matching and chat, 10 likes a day. Upgrade to see who liked you, the full compatibility report and more."}
+        </p>
 
         {!known ? (
           <div className="mx-auto mt-8 h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white" />
@@ -85,14 +107,17 @@ export default function TrialExpiry() {
             <button type="button" onClick={() => void checkout('elite')} disabled={pending !== null} className={`${option} bg-[#E03131]`}>
               {pending === 'elite' ? 'Taking you to checkout…' : '🔥 Subscribe to Elite — $30/mo'}
             </button>
-            {mode === 'play' && !playOnly.value && (
+            {!playOnly.value && (
               <button
                 type="button"
-                onClick={() => setMode('spark')}
+                onClick={() => {
+                  if (mode === 'play') setMode('spark')
+                  continueFree()
+                }}
                 disabled={pending !== null}
                 className="w-full rounded-xl border border-white/20 py-3 font-semibold text-white hover:bg-white/10"
               >
-                Switch to Spark
+                Continue with Free
               </button>
             )}
             {error && <p className="text-sm text-red-400">{error}</p>}

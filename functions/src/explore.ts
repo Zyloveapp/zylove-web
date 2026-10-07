@@ -31,6 +31,7 @@ const SCAN = 60
 const MAX_ACTED = 5000
 const LOCAL_MILES = 50
 const DEFAULT_RADIUS_MILES = 25
+export const MAX_RADIUS_MILES = 100
 export const DAILY_DECK_CALLS = 150
 export const DAILY_NEW_PROFILES = 500
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -185,15 +186,25 @@ function milesBetween(a: DocumentData, b: DocumentData): number | null {
     : null
 }
 
+const PLAY_CARD_FIELDS = ['age', 'genderIdentity', 'pronouns', 'locationLabel', 'verificationStatus', 'isFounder', 'founderBadge', 'founderCity', 'zyloveScoreTier', 'heightCm']
+function pickPlayCardFields(profile: DocumentData): DocumentData {
+  return Object.fromEntries(PLAY_CARD_FIELDS.filter((f) => profile[f] !== undefined).map((f) => [f, profile[f]]))
+}
+
 // The same rules the app's Explore applied (discover.ts isEligible / withinRadius).
 function eligible(me: DocumentData, c: DocumentData, mode: Mode, founding: boolean): boolean {
   if (c.uid === me.uid) return false
   if (!(mode === 'play' ? c.playActive : c.sparkActive)) return false
   if (c.age !== null && me.ageMin && me.ageMax && (c.age < me.ageMin || c.age > me.ageMax)) return false
-  if (!founding && c.bot) return false
-  if (!founding && me.radiusMiles !== null) {
+  // Stage C (decision 1): real people are always within the viewer's own
+  // distance, at most 100 miles (an old "no limit" counts as 100); bots
+  // show at any distance, and only while the city is founding.
+  if (c.bot) {
+    if (!founding) return false
+  } else {
+    const radius = Math.min(me.radiusMiles === null ? MAX_RADIUS_MILES : me.radiusMiles || DEFAULT_RADIUS_MILES, MAX_RADIUS_MILES)
     const miles = milesBetween(me, c)
-    if (miles !== null && miles > (me.radiusMiles || DEFAULT_RADIUS_MILES)) return false
+    if (miles !== null && miles > radius) return false
   }
   return mutuallyAttracted(me, c)
 }
@@ -305,7 +316,10 @@ export const getExploreDeck = onCall(
       const miles = milesBetween(me, d)
       cards.push({
         uid: d.uid,
-        profile,
+        // Stage C (Play pseudonymity, display level): a Play card carries
+        // only what Play shows from the public profile — never the Spark
+        // name, photos, bio or prompts.
+        profile: mode === 'play' ? pickPlayCardFields(profile) : profile,
         ...(playProfile ? { playProfile } : {}),
         distanceMiles: miles === null ? null : bucketMiles(miles),
         sameMarket: !!me.marketCityId && d.marketCityId === me.marketCityId,

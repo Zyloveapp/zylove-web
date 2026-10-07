@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import CuratedBadge from '../CuratedBadge'
 import { useNavigate } from 'react-router-dom'
 import {
   ENCRYPTION_KEY_MISSING,
@@ -665,6 +666,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
             {match.age !== null && <span className="font-normal text-white/50">, {match.age}</span>}
             {nearby && <span className="font-normal text-white/50"> · Nearby</span>}
           </span>
+          <CuratedBadge uid={partnerUid} />
         </button>
         <button
           type="button"
@@ -675,6 +677,12 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
           •••
         </button>
       </header>
+      {botChat && (
+        <p className="shrink-0 border-b border-white/10 bg-white/[0.04] px-4 py-2 text-center text-xs text-white/50 lg:px-6">
+          {match.name} is a Zylove curated profile, here while your city's community is being built — not a real member. Curated
+          profiles are removed from your city once its founding circle is full.
+        </p>
+      )}
       {keyChangedFor === partnerUid && (
         <div className="flex shrink-0 items-start gap-3 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs text-amber-200 lg:px-6">
           <span className="flex-1">

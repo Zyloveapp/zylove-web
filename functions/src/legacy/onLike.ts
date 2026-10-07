@@ -12,6 +12,8 @@ import { requirePlayAccess } from "../playAccess";
 import { markActed } from "../explore";
 import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
 import { blockedEitherWay, likedInMode, recordLike } from "../likes";
+import { takeQuota } from "../usage";
+import { loadSparkDetails, writeSparkDetails } from "../pairSpark";
 
 export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
@@ -40,6 +42,8 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   if (!likedUserSnap.exists || (await isSuspendedUid(likedId, likedUserSnap.data())) || (await blockedEitherWay(likerId, likedId))) {
     throw new HttpsError("failed-precondition", "That profile isn't available.");
   }
+  // Stage C: Free has 10 likes a day (usage.ts); Spark+ and Elite, unlimited.
+  await takeQuota(likerId, "likes");
   // Stage 2: a Play like needs Play access on both sides.
   const play = await bothHavePlay(likerId, likedId);
   if (mode === "play") {
@@ -81,14 +85,14 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
       userB,
       createdAt:         admin.firestore.Timestamp.now(),
       sparkScore,
-      sparkBreakdown,
-      triggeredDealbreakers,
-      ...(sparkTier1 && { tier1Spark: sparkTier1 }),
       scoreCalculatedAt: admin.firestore.Timestamp.now(),
       scoreVersion:      1,
     };
 
-    await pairRef.set(pair);
+    const pairBatch = db.batch();
+    pairBatch.set(pairRef, pair);
+    writeSparkDetails(pairBatch, pid, { breakdown: sparkBreakdown, dealbreakers: triggeredDealbreakers, tier1: sparkTier1 }, false);
+    await pairBatch.commit();
     if (playResult) await setPlayScores(pid, playFields(playResult.score, playResult.breakdown, playResult.tier1));
   }
   const playScores = mode === "play" ? await loadPlayScores(pid, pair) : undefined;
@@ -132,6 +136,8 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   // says "consume on match," and writing unconditionally keeps the
   // logic symmetric with the not-matched path.
   const likerDataForQueue = (likerSnap.data() ?? {}) as any;
+  // Stage C: the report's details live in pairs/{id}/modes/spark.
+  const sparkDetails = await loadSparkDetails(pid, pair);
   // A Play like shows the liker's Play profile — never their Spark one.
   const likerPlay = mode === "play"
     ? (await db.doc(`users/${likerId}/playProfile/data`).get()).data() ?? {}
@@ -140,11 +146,11 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
     likerUid:              likerId,
     likedAt:               Date.now(),
     compatibilityScore:    mode === "play" ? (playScores?.playScore ?? 0) : (pair.sparkScore ?? 0),
-    dealbreakersTriggered: mode === "play" ? [] : (pair.triggeredDealbreakers ?? []),
+    dealbreakersTriggered: mode === "play" ? [] : sparkDetails.triggeredDealbreakers,
     istopPicks:            false,
     breakdown:             mode === "play"
       ? (playScores?.playBreakdown ?? {})
-      : (pair.sparkBreakdown ?? {}),
+      : sparkDetails.sparkBreakdown,
     dismissed:             false,
     isExpired:             false,
     action:                "like",

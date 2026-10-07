@@ -163,12 +163,17 @@ export const mirrorPlan = onDocumentWritten({ document: 'userInternal/{uid}', me
   if (!after) return
   const changed = (f: string) => JSON.stringify(before[f] ?? null) !== JSON.stringify(after[f] ?? null)
   // The plan, and (Stage 2) the Play flags — so the app knows its own Play access.
-  const fields = [...PLAN_FIELDS, 'playEntitled', 'playAccess', 'playAccessUntil']
+  const fields = [...PLAN_FIELDS, 'playEntitled', 'playAccess', 'playAccessUntil', 'entitlement'] // Stage C: the tier
   const billing = typeof after.stripeCustomerId === 'string' && after.stripeCustomerId !== ''
   const billingBefore = typeof before.stripeCustomerId === 'string' && before.stripeCustomerId !== ''
   if (!fields.some(changed) && billing === billingBefore && event.data?.before.exists) return
-  const mirror: DocumentData = { hasBillingAccount: billing }
-  for (const f of fields) mirror[f] = after[f] === undefined ? FieldValue.delete() : after[f]
+  // Stage C: mirror the record as it is NOW, not as this event saw it — a
+  // late-running trigger for an older write would otherwise put back (or
+  // delete) a stale value over a newer one.
+  const now = (await internalRef(uid).get()).data()
+  if (!now) return
+  const mirror: DocumentData = { hasBillingAccount: typeof now.stripeCustomerId === 'string' && now.stripeCustomerId !== '' }
+  for (const f of fields) mirror[f] = now[f] === undefined ? FieldValue.delete() : now[f]
   // Only for users that exist (a stray internal doc mustn't create a profile).
   if (!(await userRef(uid).get()).exists) return
   await accountRef(uid).set(mirror, { merge: true })

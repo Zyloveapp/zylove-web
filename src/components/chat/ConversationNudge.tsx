@@ -33,7 +33,7 @@ interface ConversationNudgeProps {
   onPick: (text: string) => void
 }
 
-type Sheet = { starters: string[] | null }
+type Sheet = { starters: string[] | null; limited?: boolean }
 
 // "✦ Need a spark?" (Play: "Need inspiration? 🔥") banner above the chat input when a conversation stalls.
 export default function ConversationNudge({ matchId, partnerUid, mode, messages, suppressed, onPick }: ConversationNudgeProps) {
@@ -60,11 +60,12 @@ export default function ConversationNudge({ matchId, partnerUid, mode, messages,
 
   async function open() {
     setSheet({ starters: null })
-    const { data } = await httpsCallable<{ matchId: string; otherUid: string }, { starters: string[] }>(
+    // Free: 1 a week; Spark+/Elite: 5 a day (Stage C) — past that, stock ideas.
+    const { data } = await httpsCallable<{ matchId: string; otherUid: string; source: 'nudge' }, { starters: string[]; limited?: boolean }>(
       functions,
       'generateConversationStarter',
-    )({ matchId, otherUid: partnerUid }).catch(() => ({ data: { starters: [] as string[] } }))
-    setSheet((s) => (s ? { starters: data.starters } : s))
+    )({ matchId, otherUid: partnerUid, source: 'nudge' }).catch(() => ({ data: { starters: [] as string[], limited: false } }))
+    setSheet((s) => (s ? { starters: data.starters, limited: data.limited === true } : s))
   }
 
   function dismiss() {
@@ -143,6 +144,14 @@ export default function ConversationNudge({ matchId, partnerUid, mode, messages,
                 ))
               )}
             </div>
+            {sheet.limited && (
+              <p className="mt-3 text-center text-xs text-white/50">
+                You've used your AI conversation starters for now — these are ideas to try.{' '}
+                <a href="/upgrade" className="underline hover:text-white">
+                  Spark+ gets 5 a day
+                </a>
+              </p>
+            )}
             <button
               type="button"
               onClick={dismiss}

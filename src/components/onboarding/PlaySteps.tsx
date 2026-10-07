@@ -173,7 +173,7 @@ export function PlayWelcomeStep() {
       <h1 className="text-5xl font-bold text-white">🔴 Play</h1>
       <p className="mt-4 text-xl text-white/80">Same you. Different energy. Entirely yours.</p>
       <p className="mt-4 text-white/50">
-        Your Spark profile stays completely separate. What happens in Play, stays in Play.
+        Play stays sealed: your Play profile never crosses into Spark, and your Spark profile never shows in Play.
       </p>
     </div>
   )

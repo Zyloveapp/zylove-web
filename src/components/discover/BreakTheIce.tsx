@@ -5,10 +5,11 @@ import { functions } from '../../services/firebase'
 const MAX_CALLS = 3
 
 function fetchStarters(matchId: string, otherUid: string): Promise<string[]> {
-  return httpsCallable<{ matchId: string; otherUid: string }, { starters: string[] }>(
+  // Break the ice is Spark+ (Stage C; the server checks).
+  return httpsCallable<{ matchId: string; otherUid: string; source: 'icebreaker' }, { starters: string[] }>(
     functions,
     'generateConversationStarter',
-  )({ matchId, otherUid }).then(({ data }) => data.starters.filter((s) => s.trim()))
+  )({ matchId, otherUid, source: 'icebreaker' }).then(({ data }) => data.starters.filter((s) => s.trim()))
 }
 
 // "💬 Break the ice" — an AI opener for someone you're linked with. Each call

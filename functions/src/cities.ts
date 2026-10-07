@@ -61,3 +61,52 @@ export function getNearestCity(lat: number, lng: number): ZyloveCity | null {
   }
   return best?.city ?? null
 }
+
+// Stage C (decision 1): someone more than 50 miles from every launch city is
+// linked to the nearest of these (or of the launch cities); their free
+// period and trial wait for that city to open. Adding a city here to
+// ZYLOVE_CITIES (same id) makes it a launch city for everyone linked to it.
+export const MAJOR_CITIES: ZyloveCity[] = [
+  { id: 'salt_lake_city', name: 'Salt Lake City', state: 'UT', lat: 40.7608, lng: -111.891, radiusMiles: 50 },
+  { id: 'sacramento', name: 'Sacramento', state: 'CA', lat: 38.5816, lng: -121.4944, radiusMiles: 50 },
+  { id: 'albuquerque', name: 'Albuquerque', state: 'NM', lat: 35.0844, lng: -106.6504, radiusMiles: 50 },
+  { id: 'tucson', name: 'Tucson', state: 'AZ', lat: 32.2226, lng: -110.9747, radiusMiles: 50 },
+  { id: 'el_paso', name: 'El Paso', state: 'TX', lat: 31.7619, lng: -106.485, radiusMiles: 50 },
+  { id: 'boise', name: 'Boise', state: 'ID', lat: 43.615, lng: -116.2023, radiusMiles: 50 },
+  { id: 'spokane', name: 'Spokane', state: 'WA', lat: 47.6588, lng: -117.426, radiusMiles: 50 },
+  { id: 'oklahoma_city', name: 'Oklahoma City', state: 'OK', lat: 35.4676, lng: -97.5164, radiusMiles: 50 },
+  { id: 'kansas_city', name: 'Kansas City', state: 'MO', lat: 39.0997, lng: -94.5786, radiusMiles: 50 },
+  { id: 'st_louis', name: 'St. Louis', state: 'MO', lat: 38.627, lng: -90.1994, radiusMiles: 50 },
+  { id: 'omaha', name: 'Omaha', state: 'NE', lat: 41.2565, lng: -95.9345, radiusMiles: 50 },
+  { id: 'milwaukee', name: 'Milwaukee', state: 'WI', lat: 43.0389, lng: -87.9065, radiusMiles: 50 },
+  { id: 'detroit', name: 'Detroit', state: 'MI', lat: 42.3314, lng: -83.0458, radiusMiles: 50 },
+  { id: 'indianapolis', name: 'Indianapolis', state: 'IN', lat: 39.7684, lng: -86.1581, radiusMiles: 50 },
+  { id: 'columbus', name: 'Columbus', state: 'OH', lat: 39.9612, lng: -82.9988, radiusMiles: 50 },
+  { id: 'cleveland', name: 'Cleveland', state: 'OH', lat: 41.4993, lng: -81.6944, radiusMiles: 50 },
+  { id: 'cincinnati', name: 'Cincinnati', state: 'OH', lat: 39.1031, lng: -84.512, radiusMiles: 50 },
+  { id: 'pittsburgh', name: 'Pittsburgh', state: 'PA', lat: 40.4406, lng: -79.9959, radiusMiles: 50 },
+  { id: 'buffalo', name: 'Buffalo', state: 'NY', lat: 42.8864, lng: -78.8784, radiusMiles: 50 },
+  { id: 'baltimore', name: 'Baltimore', state: 'MD', lat: 39.2904, lng: -76.6122, radiusMiles: 50 },
+  { id: 'richmond', name: 'Richmond', state: 'VA', lat: 37.5407, lng: -77.436, radiusMiles: 50 },
+  { id: 'raleigh', name: 'Raleigh', state: 'NC', lat: 35.7796, lng: -78.6382, radiusMiles: 50 },
+  { id: 'orlando', name: 'Orlando', state: 'FL', lat: 28.5383, lng: -81.3792, radiusMiles: 50 },
+  { id: 'jacksonville', name: 'Jacksonville', state: 'FL', lat: 30.3322, lng: -81.6557, radiusMiles: 50 },
+  { id: 'birmingham', name: 'Birmingham', state: 'AL', lat: 33.5186, lng: -86.8104, radiusMiles: 50 },
+  { id: 'memphis', name: 'Memphis', state: 'TN', lat: 35.1495, lng: -90.049, radiusMiles: 50 },
+  { id: 'louisville', name: 'Louisville', state: 'KY', lat: 38.2527, lng: -85.7585, radiusMiles: 50 },
+  { id: 'hartford', name: 'Hartford', state: 'CT', lat: 41.7658, lng: -72.6734, radiusMiles: 50 },
+  { id: 'providence', name: 'Providence', state: 'RI', lat: 41.824, lng: -71.4128, radiusMiles: 50 },
+  { id: 'honolulu', name: 'Honolulu', state: 'HI', lat: 21.3069, lng: -157.8583, radiusMiles: 50 },
+  { id: 'anchorage', name: 'Anchorage', state: 'AK', lat: 61.2181, lng: -149.9003, radiusMiles: 50 },
+]
+
+// The city someone outside every launch radius is linked to: the nearest of
+// the launch and major cities, at any distance.
+export function getLinkedCity(lat: number, lng: number): ZyloveCity {
+  let best: { city: ZyloveCity; miles: number } | null = null
+  for (const city of [...ZYLOVE_CITIES, ...MAJOR_CITIES]) {
+    const miles = distanceMiles(lat, lng, city.lat, city.lng)
+    if (!best || miles < best.miles) best = { city, miles }
+  }
+  return best!.city
+}

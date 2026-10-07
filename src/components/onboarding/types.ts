@@ -109,7 +109,7 @@ export interface OnboardingDraft {
   // null on a profile refresh (the intention steps only run once).
   intentionAnswers: string[]
   onboardingPath: OnboardingPath | null
-  radiusMiles: number | null // null = no limit (same as Settings → Discovery)
+  radiusMiles: number | null // 1–100 miles (Stage C); null only on older drafts, read as 100
   ageMin: number
   ageMax: number
   selectedPromptIds: string[]

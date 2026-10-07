@@ -80,6 +80,16 @@ export function subscribeSparks(
 // Live queue plus the entries the user passed on ("Viewed"), for one mode.
 // Same client-side filtering as subscribeSparks; expired entries are dropped
 // from both.
+// Free (Stage C): how many real people liked you, and curated profiles'
+// likes in full — the list itself is Spark+ (the rules refuse it).
+export async function fetchFreeSparks(mode: Mode): Promise<{ count: number; live: SparkEntry[]; viewed: SparkEntry[] }> {
+  const { data } = await httpsCallable<{ mode: Mode }, { count: number; bots: { id: string; data: DocumentData }[] }>(functions, 'getLikeCount')({ mode })
+  const live: SparkEntry[] = []
+  const viewed: SparkEntry[] = []
+  for (const b of data.bots) (b.data.dismissed === true ? viewed : live).push(toSpark(b.id, b.data))
+  return { count: data.count, live, viewed }
+}
+
 export function subscribeSparkQueue(
   uid: string,
   mode: Mode,

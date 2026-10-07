@@ -3,6 +3,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { UserDoc } from "./types";
 import { normalizeE164 } from "./utils/phone";
+import { priorTrial } from "../trial";
 import { ROOT_SCRUB, clearPrivateData, deletionView, identityRef, internalRef, isSuspendedUid, loadMatching, loadPrivateProfile, matchingRef, profileRef } from "../userData";
 
 
@@ -229,6 +230,7 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
   // Build restored user doc from recovery — explicit, no spread. Every
   // field is a conscious decision.
   const now = admin.firestore.Timestamp.now();
+  const priorTrialDoc = await priorTrial(phoneNumber);
   const previousUid = recovery.previousUid;
 
   // The phone number stays in Auth; birthday goes to private/identity and
@@ -247,8 +249,9 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
     photoURLs:   recovery.photoURLs ?? [],
     bio:         recovery.bio ?? "",
 
-    // Policy state
-    isFounder: recovery.isFounder ?? false,
+    // Policy state. Stage C: founder status isn't restored — deletion
+    // revoked it and gave the spot back (Stage B); they can claim again.
+    isFounder: false,
 
     // Behavior score — explicit reset to neutral
     behaviorScore: 50,
@@ -283,7 +286,13 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
   const until = recovery.suspension?.suspendedUntil as admin.firestore.Timestamp | null | undefined;
   const stillSuspended = !!recovery.suspension && (!until || until.toMillis() > Date.now());
   batch.set(internalRef(newUid), {
-    subscriptionTier: recovery.isFounder ? "elite" : (recovery.subscriptionTier ?? "free"),
+    // Stage C: no tier is re-granted (a paid plan is Stripe's to say, and
+    // its subscription belonged to the old account); a past paid plan and
+    // the trial they had stay on record, so neither comes back fresh.
+    subscriptionTier: "free",
+    ...((recovery.subscriptionTier === "elite" || recovery.subscriptionTier === "spark_plus") && !recovery.isFounder ? { hadPaidPlan: true } : {}),
+    ...(priorTrialDoc?.trialStartedAt ? { trialStartedAt: priorTrialDoc.trialStartedAt, trialEndsAt: priorTrialDoc.trialEndsAt, trialExpired: (priorTrialDoc.trialEndsAt as admin.firestore.Timestamp).toMillis() <= Date.now() } : {}),
+    ...(priorTrialDoc?.hadPaidPlan ? { hadPaidPlan: true } : {}),
     reportCount: typeof recovery.reportCount === "number" ? recovery.reportCount : 0,
     isSuspended: stillSuspended,
     ...(stillSuspended ? {
@@ -329,7 +338,7 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
 
   return {
     success: true,
-    isFounder: recovery.isFounder ?? false,
+    isFounder: false, // Stage C: not restored
   };
 });
 

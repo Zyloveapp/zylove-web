@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import CuratedBadge from '../CuratedBadge'
 import { displayAge, type DiscoverProfile } from '../../services/discover'
 import type { Mode } from '../../store/modeStore'
 import CompatibilityBlock from './CompatibilityBlock'
@@ -85,6 +86,7 @@ export default function ProfileDetails({
         {!anonymous && (
           <>
             <div className="mt-2 flex flex-wrap gap-2 empty:hidden">
+              <CuratedBadge uid={profile.uid} />
               <FounderBadge profile={profile} />
               <TierBadge tier={(profile as Record<string, unknown>).zyloveScoreTier} />
             </div>

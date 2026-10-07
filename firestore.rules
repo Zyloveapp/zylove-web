@@ -60,6 +60,28 @@ service cloud.firestore {
       return request.auth != null && hasPlay(request.auth.uid);
     }
 
+    // ─── Plans (Stage C) ─────────────────────────────────────────────────────
+    // userInternal/{uid}.entitlement = { tier, until } is decided server-side
+    // (functions/src/entitlements.ts). A trial's tier ends at `until`, on the
+    // second. Bots (zbot-) are Elite.
+    function tierRank(uid) {
+      let e = get(/databases/$(database)/documents/userInternal/$(uid)).data.get('entitlement', {});
+      let live = e.get('until', null) == null || request.time < e.until;
+      return uid.matches('^zbot-.*$') ? 2
+           : !live ? 0
+           : e.get('tier', 'free') == 'elite' ? 2
+           : e.get('tier', 'free') == 'spark_plus' ? 1
+           : 0;
+    }
+    function viewerHasSparkPlus() {
+      return request.auth != null && exists(/databases/$(database)/documents/userInternal/$(request.auth.uid))
+          && tierRank(request.auth.uid) >= 1;
+    }
+    function viewerHasElite() {
+      return request.auth != null && exists(/databases/$(database)/documents/userInternal/$(request.auth.uid))
+          && tierRank(request.auth.uid) >= 2;
+    }
+
     // Account state (Stage 3): suspension is server-only, in
     // userInternal/{uid}.isSuspended; deleted profiles are flagged isDeleted
     // on the public doc. Bots and brand-new accounts may have no userInternal.
@@ -211,7 +233,8 @@ service cloud.firestore {
             && (!('matchableAs' in d) || d.matchableAs is list)
             && (!('ageMin' in d) || d.ageMin is int)
             && (!('ageMax' in d) || d.ageMax is int)
-            && (!('radiusMiles' in d) || d.radiusMiles == null || d.radiusMiles is number);
+            // Stage C: the viewer's own distance, 1–100 miles (no "no limit").
+            && (!('radiusMiles' in d) || (d.radiusMiles is number && d.radiusMiles >= 1 && d.radiusMiles <= 100));
       }
       // matchableAs (how off-map identities are matched) stays identity-locked,
       // as it was on the public doc.
@@ -343,7 +366,10 @@ service cloud.firestore {
       // create one (Stage A). Play likes (mode 'play') carry the liker's Play
       // profile: the owner needs Play access to read them (queries filter on mode).
       match /likeQueue/{doc} {
-        allow read: if isUser(uid) && isSignedIn()
+        // Stage C: the list (who, not how many) is Spark+; Free gets the
+        // count from getLikeCount.
+        // A bot's like is visible on every plan (no paid feature involves a bot).
+        allow read: if isUser(uid) && isSignedIn() && (viewerHasSparkPlus() || doc.matches('^zbot-.*$'))
                     && (resource.data.get('mode', 'spark') != 'play' || viewerHasPlay());
         // The owner may dismiss an entry (and nothing else) or delete it.
         allow update: if isSignedIn() && isUser(uid)
@@ -388,8 +414,9 @@ service cloud.firestore {
       }
 
       // Zylove score — owner read only; CF-only writes
+      // The Zylove Score page is Elite (Stage C).
       match /zyloveScore/{doc} {
-        allow read: if isUser(uid) && isSignedIn();
+        allow read: if isUser(uid) && isSignedIn() && viewerHasElite();
         allow write: if false;
       }
     }
@@ -410,6 +437,16 @@ service cloud.firestore {
                         request.auth.uid + '_revealed_spark', request.auth.uid + '_revealed_play']);
       allow create, delete: if false;
 
+      // Stage C: the compatibility report beyond the score — breakdown and
+      // dealbreakers for Spark+, Deep Fit for Elite. Server-written.
+      match /modes/spark {
+        allow read: if isSignedIn() && isPairParticipant(pairId) && viewerHasSparkPlus();
+        allow write: if false;
+      }
+      match /modes/deep {
+        allow read: if isSignedIn() && isPairParticipant(pairId) && viewerHasElite();
+        allow write: if false;
+      }
       match /modes/play {
         allow read: if isSignedIn() && isPairParticipant(pairId) && viewerHasPlay();
         allow write: if false;
@@ -480,6 +517,8 @@ service cloud.firestore {
                                  'keyNonceForRecipient', 'timerSeconds', 'firstViewedAt', 'photoExpiresAt',
                                  'destructedAt', 'sentAt', 'status'])
             && d.messageType == 'photo'
+            // Sending photos in chat is Spark+ (Stage C); receiving isn't.
+            && viewerHasSparkPlus()
             && d.storageRef is string
             && d.storageRef.matches('^chat-photos/' + matchId + '/' + request.auth.uid + '_[A-Za-z0-9._-]+$')
             && d.get('timerSeconds', 0) is int && d.get('timerSeconds', 0) >= 0 && d.get('timerSeconds', 0) <= 86400

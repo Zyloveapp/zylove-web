@@ -15,7 +15,6 @@ const OPTIONS: { value: string; label: string }[] = [
   { value: '25', label: '25 mi' },
   { value: '50', label: '50 mi' },
   { value: '100', label: '100 mi' },
-  { value: 'none', label: 'No limit' },
 ]
 const DEFAULT = '25'
 const DEFAULT_AGES = { min: 21, max: 45 }
@@ -29,16 +28,16 @@ function toAges(d: Record<string, unknown> | undefined): { min: number; max: num
 }
 
 function toOption(v: unknown): string {
-  if (v === null) return 'none'
-  return typeof v === 'number' && v > 0 ? String(v) : DEFAULT
+  // Stage C: at most 100 miles — an old "no limit" (null) shows as 100.
+  if (v === null) return '100'
+  return typeof v === 'number' && v > 0 ? String(Math.min(v, 100)) : DEFAULT
 }
 
 // Settings → Discovery: max distance (radiusMiles) and age range (ageMin /
 // ageMax) for the Explore feed, in both modes — in the owner-only
-// private/matching (Stage 3). During the founding
-// period (the viewer's city hasn't filled its founding circle, or they're
-// outside every launch city) Explore ignores distance, so the control is
-// locked; it unlocks live when config/city_{id}.botsActive goes false.
+// private/matching (Stage 3). Stage C: distance always applies to real
+// members (1–100 miles); during the founding period only Zylove curated
+// profiles may show from further away, which the note under it says.
 export default function DiscoverySettings() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const [loaded, setLoaded] = useState<{
@@ -105,11 +104,9 @@ export default function DiscoverySettings() {
   }
 
   async function change(next: string) {
-    // Explore ignores distance during the founding period; nothing to save.
-    if (founding) return
     setError(false)
     try {
-      await setDoc(matchingDoc(uid), { radiusMiles: next === 'none' ? null : Number(next) }, { merge: true })
+      await setDoc(matchingDoc(uid), { radiusMiles: Math.min(Number(next), 100) }, { merge: true })
     } catch {
       setError(true)
     }
@@ -123,13 +120,13 @@ export default function DiscoverySettings() {
       <h2 className="px-5 pt-4 text-xs font-semibold uppercase tracking-widest text-white/40">Discovery</h2>
       <LocationSettings />
       <label className={`flex items-center justify-between gap-4 border-t border-white/5 px-5 pt-4 ${founding ? 'pb-2' : 'pb-4'}`}>
-        <span className={founding ? 'opacity-50' : undefined}>
+        <span>
           <span className="block font-medium">Maximum distance</span>
           <span className="block text-sm text-white/40">Profiles without a location are always shown.</span>
         </span>
         <select
           value={value ?? DEFAULT}
-          disabled={value === null || !distanceReady || founding}
+          disabled={value === null || !distanceReady}
           onChange={(e) => void change(e.target.value)}
           className="shrink-0 rounded-xl border border-white/10 bg-gray-900 px-3 py-2 text-white focus:border-white/30 focus:outline-none disabled:opacity-50"
         >
@@ -142,7 +139,8 @@ export default function DiscoverySettings() {
       </label>
       {founding && (
         <p className="px-5 pb-4 text-sm text-white/50">
-          📍 Showing everyone while your city grows. Distance filtering unlocks when your city's founding circle is complete.
+          📍 While your city's founding circle fills, Zylove curated profiles can appear from any distance. Real members always
+          show within your distance.
         </p>
       )}
       <div className="border-t border-white/5 px-5 py-4">

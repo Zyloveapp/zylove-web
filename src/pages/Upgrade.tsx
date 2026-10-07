@@ -8,8 +8,32 @@ import { PLAN_NAMES, type PaidTier } from '../services/billing'
 import { useBilling } from '../components/PaywallGate'
 import { usePageTitle } from '../components/public/usePageTitle'
 
-const SPARK_PLUS = ['See who sent you a Spark', 'Full compatibility reports', 'Encrypted photo sharing', 'Conversation starters', 'Vibe checks']
-const ELITE_EXTRAS = ['Play mode', 'Zylove Score', 'Top Picks']
+// The plans exactly as enforced (functions/src/usage.ts, entitlements.ts).
+const FREE = [
+  'Explore, matching and chat with your matches',
+  '10 likes a day',
+  'Your compatibility score',
+  'How many people liked you',
+  'Vibe checks',
+  '1 conversation starter a week',
+  'AI bio, profile review and Go Deeper — once each, at onboarding',
+]
+const SPARK_PLUS = [
+  'Unlimited likes',
+  'See who liked you — and like them back',
+  'Top Picks and your Sent list',
+  'Full compatibility reports and Break the ice',
+  'Encrypted photo sharing in chat',
+  '5 conversation starters a day',
+  'AI bio, profile review and Go Deeper — 2 each a month',
+]
+const ELITE_EXTRAS = [
+  'Curious — who looked at your score',
+  'Your Zylove Score page',
+  'Play mode, with its own AI tools',
+  'Deep Fit — compatibility from both sides',
+  'AI tools — 5 each a month, in Spark and in Play',
+]
 
 function Plan({
   id,
@@ -187,10 +211,22 @@ export default function Upgrade() {
             )}
             {trialEnded && (
               <section className="rounded-2xl border border-white/15 bg-white/5 p-6">
-                <h2 className="text-lg font-bold">Your trial has ended — subscribe to continue</h2>
+                <h2 className="text-lg font-bold">Your trial has ended — you're on Free</h2>
+                <p className="mt-1 text-sm text-white/70">Upgrade any time to get everything back.</p>
               </section>
             )}
             {error && <p className="text-center text-sm text-red-400">{error}</p>}
+            <section className={`rounded-2xl border bg-white/5 p-6 ${tier === 'free' ? 'border-white/40' : 'border-white/10'}`}>
+              <div className="flex items-baseline justify-between gap-3">
+                <h2 className="text-lg font-bold">Free</h2>
+                <span className="text-sm text-white/60">$0</span>
+              </div>
+              <ul className="mt-3 space-y-1.5 text-sm text-white/70">
+                {FREE.map((f) => (
+                  <li key={f}>· {f}</li>
+                ))}
+              </ul>
+            </section>
             <Plan
               id="spark-plus"
               name="Spark+"

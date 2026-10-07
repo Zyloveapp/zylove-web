@@ -8,6 +8,7 @@ import { UserDoc, PairDoc } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { bothHavePlay, playFields, setPlayScores } from "../pairPlay";
 import { isSuspendedUid, withPrivateProfile } from "../userData";
+import { writeSparkDetails } from "../pairSpark";
 
 // Rescores every pair of userId. Spark scores on the pair doc; Play scores
 // (Stage 2) in pairs/{id}/modes/play, and only while both people have Play
@@ -57,11 +58,13 @@ async function rescorePairs(userId: string, afterRoot: UserDoc): Promise<void> {
 
       const { score: sparkScore, breakdown: sparkBreakdown, triggeredDealbreakers, tier1: sparkTier1 } = calculateSparkScore(after,     otherDoc);
 
+      // Stage C: the details go to the plan-gated sub-docs (pairSpark.ts).
+      writeSparkDetails(batch, pairSnap.id, { breakdown: sparkBreakdown, dealbreakers: triggeredDealbreakers, tier1: sparkTier1 }, false);
       batch.update(pairSnap.ref, {
         sparkScore,
-        sparkBreakdown,
-        triggeredDealbreakers,
-        ...(sparkTier1 && { tier1Spark: sparkTier1 }),
+        sparkBreakdown: admin.firestore.FieldValue.delete(),
+        triggeredDealbreakers: admin.firestore.FieldValue.delete(),
+        tier1Spark: admin.firestore.FieldValue.delete(),
         // Older pair docs carried the Play scores; they live in the subdoc now.
         playScore: admin.firestore.FieldValue.delete(),
         playBreakdown: admin.firestore.FieldValue.delete(),

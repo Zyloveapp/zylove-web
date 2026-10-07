@@ -2,12 +2,12 @@ import { doc, getDoc, onSnapshot, type DocumentData, type Unsubscribe } from 'fi
 import { db } from './firebase'
 import { cityById, getNearestCity, type ZyloveCity } from '../config/cities'
 
-// Web tier logic. Women and other non-male identities, and founders, are
-// Elite for life. Everyone else is free while the network builds in their
-// city ('prelaunch': no trialStartedAt). When discovery opens in their
-// market, the server starts a 30-day trial (functions/src/trial.ts), then
-// Free until they pay. Mobile still only treats woman / trans_woman as
-// Elite — web is the launch surface.
+// Plans (Stage C): the server decides — users/{uid}/private/account
+// .entitlement = { tier, source, until, cityId } (functions/src/entitlements.ts),
+// and enforces every paid feature itself. This file only reads it to show
+// the right screens: 'trial' and 'prelaunch' are Elite access with their own
+// banners. Without a readable entitlement the app shows Free (it never
+// fails open).
 
 export type Tier = 'elite' | 'spark_plus' | 'trial' | 'prelaunch' | 'free'
 export type Feature =
@@ -19,6 +19,9 @@ export type Feature =
   | 'zylove_score'
   | 'conversation_starters'
   | 'vibe_check'
+  | 'top_picks'
+  | 'curious'
+  | 'deep_fit'
 
 export interface TierFields {
   subscriptionTier?: unknown
@@ -36,10 +39,25 @@ export interface TierFields {
   locationLng?: unknown
   // There's a Stripe customer to manage (Settings → Membership).
   hasBillingAccount?: unknown
+  // The server's decision (Stage C).
+  entitlement?: unknown
 }
 
-// Stored as 'nonbinary'; 'non_binary' accepted too.
-const ALWAYS_ELITE_IDENTITIES = ['woman', 'trans_woman', 'nonbinary', 'non_binary', 'genderfluid', 'agender', 'self_describe']
+interface ServerEntitlement {
+  tier: 'free' | 'spark_plus' | 'elite'
+  source: 'identity' | 'founder' | 'paid' | 'trial' | 'prelaunch' | 'waiting' | 'free'
+  until: Date | null
+  cityId: string | null
+}
+
+export function entitlementOf(user: TierFields): ServerEntitlement | null {
+  const e = user.entitlement as Record<string, unknown> | null | undefined
+  if (!e || typeof e !== 'object') return null
+  const tier = e.tier === 'elite' || e.tier === 'spark_plus' ? e.tier : 'free'
+  const sources = ['identity', 'founder', 'paid', 'trial', 'prelaunch', 'waiting', 'free'] as const
+  const source = sources.find((x) => x === e.source) ?? 'free'
+  return { tier, source, until: toDate(e.until), cityId: typeof e.cityId === 'string' ? e.cityId : null }
+}
 
 function toDate(v: unknown): Date | null {
   if (v && typeof v === 'object' && 'toDate' in v && typeof v.toDate === 'function') return v.toDate() as Date
@@ -50,18 +68,16 @@ function toDate(v: unknown): Date | null {
   return null
 }
 
-function gender(user: TierFields): string {
-  const g = Array.isArray(user.genderIdentity) ? user.genderIdentity[0] : user.genderIdentity
-  return typeof g === 'string' ? g : ''
-}
-
-// Complimentary Elite by gender identity (founders aside).
-export function hasEliteIdentity(user: TierFields): boolean {
-  return ALWAYS_ELITE_IDENTITIES.includes(gender(user))
-}
-
+// Complimentary Elite — by how they're matched, or as a founder (server-decided).
 export function isAlwaysElite(user: TierFields): boolean {
-  return hasEliteIdentity(user) || user.isFounder === true
+  const e = entitlementOf(user)
+  return e?.tier === 'elite' && (e.source === 'identity' || e.source === 'founder')
+}
+
+// Free until their linked city opens (no launch city near them yet).
+export function waitingForCity(user: TierFields): string | null {
+  const e = entitlementOf(user)
+  return e?.source === 'waiting' ? e.cityId : null
 }
 
 // The server has started this user's trial (their market opened).
@@ -70,24 +86,21 @@ export function trialStarted(user: TierFields): boolean {
 }
 
 export function getUserTier(user: TierFields): Tier {
-  if (isAlwaysElite(user)) return 'elite'
-  if (user.subscriptionTier === 'elite') return 'elite'
-  if (user.subscriptionTier === 'spark_plus') return 'spark_plus'
-  // No trial yet: their market hasn't opened.
-  if (!trialStarted(user)) return 'prelaunch'
-  const endsAt = toDate(user.trialEndsAt)
-  if (user.trialExpired !== true && endsAt && endsAt > new Date()) return 'trial'
-  return 'free'
+  const e = entitlementOf(user)
+  if (!e) return 'free'
+  if (e.until && e.until <= new Date()) return 'free' // a trial ends on the dot
+  if (e.tier === 'elite') return e.source === 'trial' ? 'trial' : e.source === 'prelaunch' ? 'prelaunch' : 'elite'
+  return e.tier
 }
 
-const ACCESS: Record<Tier, readonly Feature[]> = {
-  elite: ['explore', 'sparks', 'compatibility', 'photo_sharing', 'play_mode', 'zylove_score', 'conversation_starters', 'vibe_check'],
-  spark_plus: ['explore', 'sparks', 'compatibility', 'photo_sharing', 'conversation_starters', 'vibe_check'],
-  trial: ['explore', 'sparks', 'compatibility', 'photo_sharing', 'play_mode', 'zylove_score', 'conversation_starters', 'vibe_check'],
-  // Free while the network builds: everything a trial gets.
-  prelaunch: ['explore', 'sparks', 'compatibility', 'photo_sharing', 'play_mode', 'zylove_score', 'conversation_starters', 'vibe_check'],
-  free: ['explore'],
-}
+// The plans as sold (Upgrade page): Free — Explore, matching and chat, 10
+// likes a day, the score, Vibe check, a conversation starter a week; Spark+
+// adds who liked you, Top Picks, the full report and Break the ice, photos in
+// chat; Elite adds Curious, the Zylove Score page, Play and Deep Fit.
+const FREE: readonly Feature[] = ['explore', 'vibe_check', 'conversation_starters']
+const SPARK_PLUS: readonly Feature[] = [...FREE, 'sparks', 'top_picks', 'compatibility', 'photo_sharing']
+const ELITE: readonly Feature[] = [...SPARK_PLUS, 'curious', 'zylove_score', 'play_mode', 'deep_fit']
+const ACCESS: Record<Tier, readonly Feature[]> = { elite: ELITE, trial: ELITE, prelaunch: ELITE, spark_plus: SPARK_PLUS, free: FREE }
 
 export function canAccess(tier: Tier, feature: Feature): boolean {
   return ACCESS[tier].includes(feature)
@@ -114,7 +127,7 @@ export function getSubscriptionStatus(user: TierFields): SubscriptionStatus | nu
 // checkTrialStatus, or its end date has simply passed) — not just "no plan",
 // and never a pre-launch user.
 export function hasTrialEnded(user: TierFields): boolean {
-  if (!trialStarted(user) || getUserTier(user) !== 'free') return false
+  if (!trialStarted(user) || getUserTier(user) !== 'free' || entitlementOf(user)?.source === 'paid') return false
   const endsAt = toDate(user.trialEndsAt)
   return user.trialExpired === true || (endsAt !== null && endsAt <= new Date())
 }
@@ -183,6 +196,8 @@ export function accountView(root: DocumentData | undefined, account: DocumentDat
   view.playEntitled = account?.playEntitled
   view.playAccess = account?.playAccess
   view.playAccessUntil = account?.playAccessUntil ?? null
+  // The plan as the server decided it (Stage C).
+  view.entitlement = account?.entitlement ?? null
   return view
 }
 
@@ -246,6 +261,8 @@ export function subscribeTierFields(uid: string, onChange: (fields: TierFields) 
         locationLat: d.locationLat,
         locationLng: d.locationLng,
         hasBillingAccount: d.hasBillingAccount,
+        // The server's decision (Stage C) — what the tier comes from.
+        entitlement: d.entitlement,
       }),
     onError,
   )
