@@ -11,6 +11,8 @@ import { LEGACY_RUNTIME } from "./legacyOptions";
 import { setPlayVisibility } from "../playAccess";
 import { internalRef, isSuspendedUid } from "../userData";
 import { setBlocked } from "../explore";
+import { clearLikes } from "../likes";
+import { liftBlock } from "../trust";
 
 const REPORT_TIERS = {
   spam: 1, fake_profile: 1, low_effort: 1, misleading_photos: 1, inappropriate_username: 1,
@@ -87,7 +89,7 @@ export const requestAccountDeletion = onCall(LEGACY_RUNTIME, async (request) => 
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
   const db = admin.firestore();
   const uid = request.auth.uid;
-  const reason = typeof request.data?.reason === "string" ? request.data.reason : null;
+  const reason = typeof request.data?.reason === "string" ? request.data.reason.slice(0, 500) : null;
   const now = Date.now();
   const scheduledFor = now + GRACE_PERIOD_MS;
 
@@ -96,8 +98,13 @@ export const requestAccountDeletion = onCall(LEGACY_RUNTIME, async (request) => 
   if (!snap.exists) throw new HttpsError("not-found", "User not found");
 
   // Suspended and the pending deletion: server-only (userInternal, Stage 3).
+  // Stage A: suspendedForDeletion says this request did the suspending, so
+  // cancelling lifts only that — never a moderation suspension.
+  const internal = (await internalRef(uid).get()).data() ?? {};
+  const alreadySuspended = internal.isSuspended === true && internal.suspendedForDeletion !== true;
   await internalRef(uid).set({
     isSuspended: true,
+    suspendedForDeletion: !alreadySuspended,
     deletionRequestedAt: now,
     deletionScheduledFor: scheduledFor,
     deletionReason: reason,
@@ -131,12 +138,21 @@ export const cancelAccountDeletion = onCall(LEGACY_RUNTIME, async (request) => {
   const uid = request.auth.uid;
 
   const userRef = db.collection("users").doc(uid);
+  const internal = (await internalRef(uid).get()).data() ?? {};
+  if (!internal.deletionRequestedAt) throw new HttpsError("failed-precondition", "No deletion to cancel");
+  // Stage A: lift only the suspension the deletion request set.
+  const liftSuspension = internal.suspendedForDeletion === true;
   await internalRef(uid).set({
-    isSuspended: false,
+    ...(liftSuspension ? { isSuspended: false } : {}),
+    suspendedForDeletion: admin.firestore.FieldValue.delete(),
     deletionRequestedAt: admin.firestore.FieldValue.delete(),
     deletionScheduledFor: admin.firestore.FieldValue.delete(),
     deletionReason: admin.firestore.FieldValue.delete(),
   }, { merge: true });
+  if (!liftSuspension) {
+    await db.collection("deletionRequests").doc(uid).delete().catch(() => {});
+    return { success: true };
+  }
   await userRef.update({
     sparkVisibility: "active",
     playVisibility: admin.firestore.FieldValue.delete(), // lives on the Play profile (Stage 2)
@@ -263,7 +279,9 @@ export const blockUser = onCall(LEGACY_RUNTIME, async (request) => {
     matchId?: string;
   };
 
-  if (!targetUid) throw new HttpsError("invalid-argument", "targetUid required");
+  if (typeof targetUid !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(targetUid)) {
+    throw new HttpsError("invalid-argument", "targetUid required");
+  }
   if (uid === targetUid) throw new HttpsError("invalid-argument", "Cannot block yourself");
 
   // Suspension check
@@ -277,19 +295,32 @@ export const blockUser = onCall(LEGACY_RUNTIME, async (request) => {
 
 // Mirror block (both directions) and, with a matchId, the match soft-ended.
 // Shared with lockedPlay.ts (blocking a Play connection while Play is locked).
+// Stage A: the match must be the two of theirs (anyone's id was accepted);
+// both mirror docs record who blocked (blockedBy), which is what unblocking
+// checks; and their likes go, so liking again can't re-create the match.
 export async function blockPair(uid: string, targetUid: string, matchId?: string): Promise<void> {
   const db = admin.firestore();
   const now = admin.firestore.Timestamp.now();
   const batch = db.batch();
 
+  let mode: "spark" | "play" | null = null;
+  if (matchId) {
+    const match = (await db.collection("matches").doc(matchId).get()).data();
+    const users: unknown[] = Array.isArray(match?.users) ? match!.users : [];
+    if (!match || matchId !== [uid, targetUid].sort().join("_") || !users.includes(uid) || !users.includes(targetUid)) {
+      throw new HttpsError("permission-denied", "Not your match");
+    }
+    mode = match.mode === "play" ? "play" : "spark";
+  }
+
   // Mirror block — both directions
   batch.set(
     db.collection(`users/${uid}/blockedUsers`).doc(targetUid),
-    { uid: targetUid, blockedAt: now },
+    { uid: targetUid, blockedAt: now, blockedBy: uid, ...(mode ? { mode } : {}) },
   );
   batch.set(
     db.collection(`users/${targetUid}/blockedUsers`).doc(uid),
-    { uid, blockedAt: now },
+    { uid, blockedAt: now, blockedBy: uid, ...(mode ? { mode } : {}) },
   );
 
   // Soft-delete match if provided
@@ -302,6 +333,7 @@ export async function blockPair(uid: string, targetUid: string, matchId?: string
   }
 
   await batch.commit();
+  await clearLikes(uid, targetUid, null);
   // Explore (Stage 3): neither is shown to the other.
   await setBlocked(uid, targetUid, true);
 }
@@ -316,19 +348,11 @@ export const unblockUser = onCall(LEGACY_RUNTIME, async (request) => {
   if (!uid) throw new HttpsError("unauthenticated", "Not signed in");
 
   const { targetUid } = request.data as { targetUid: string };
-  if (!targetUid) throw new HttpsError("invalid-argument", "targetUid required");
-
-  const db = admin.firestore();
-  const batch = db.batch();
-
-  batch.delete(
-    db.collection(`users/${uid}/blockedUsers`).doc(targetUid),
-  );
-  batch.delete(
-    db.collection(`users/${targetUid}/blockedUsers`).doc(uid),
-  );
-
-  await batch.commit();
-  await setBlocked(uid, targetUid, false);
+  if (typeof targetUid !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(targetUid)) {
+    throw new HttpsError("invalid-argument", "targetUid required");
+  }
+  // Stage A: only a block the caller placed (as unblockMember) — the person
+  // blocked could lift it here.
+  await liftBlock(uid, targetUid);
   return { success: true };
 });

@@ -11,14 +11,18 @@ import { internalRef, isSuspendedUid, withPrivateProfile } from "../userData";
 import { requirePlayAccess } from "../playAccess";
 import { markActed } from "../explore";
 import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
+import { blockedEitherWay, likedInMode, recordLike } from "../likes";
 
 export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
 
   const db      = admin.firestore();
   const likerId = request.auth.uid;
-  const likedId: string = request.data.likedUserId;
-  const mode: string    = request.data.mode === "play" ? "play" : "spark";
+  const likedId: string = request.data?.likedUserId;
+  const mode: "spark" | "play" = request.data?.mode === "play" ? "play" : "spark";
+  if (typeof likedId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(likedId) || likedId === likerId) {
+    throw new HttpsError("invalid-argument", "likedUserId required");
+  }
 
   const pid      = pairId(likerId, likedId);
   const pairRef  = db.collection("pairs").doc(pid);
@@ -31,6 +35,10 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
 
   if (await isSuspendedUid(likerId, likerSnap.data())) {
     throw new HttpsError("permission-denied", "Account suspended");
+  }
+  // Stage A: not someone who's gone, suspended or blocked (either way).
+  if (!likedUserSnap.exists || (await isSuspendedUid(likedId, likedUserSnap.data())) || (await blockedEitherWay(likerId, likedId))) {
+    throw new HttpsError("failed-precondition", "That profile isn't available.");
   }
   // Stage 2: a Play like needs Play access on both sides.
   const play = await bothHavePlay(likerId, likedId);
@@ -91,9 +99,15 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
 
   const likedUser = likedUserSnap.data() as UserDoc;
   const isUserA   = pair.userA === likerId;
-  const otherLiked = isUserA ? pair.userBLiked : pair.userALiked;
   const likerField = isUserA ? "userALiked" : "userBLiked";
+  // Stage A: a match needs the other person's like in THIS mode.
+  const otherLiked = await likedInMode(likedId, likerId, mode, pair);
+  await recordLike(pid, mode, likerId);
+  // A live match between them stays as it is (never overwritten).
+  const existingMatch = (await db.collection("matches").doc(pid).get()).data();
+  const live = !!existingMatch && existingMatch.isBlocked !== true && !existingMatch.unmatchedAt;
   const matched   = otherLiked;
+  const createMatch = otherLiked && !live;
 
   // Explore (Stage 3): acted on in this mode — out of the liker's deck.
   await markActed(likerId, mode as "spark" | "play", likedId);
@@ -173,7 +187,7 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
     },
   });
 
-  if (matched) {
+  if (createMatch) {
     const [userA, userB] = [likerId, likedId].sort();
     const matchId  = `${userA}_${userB}`;
     const matchRef = db.collection("matches").doc(matchId);

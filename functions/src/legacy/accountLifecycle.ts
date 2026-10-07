@@ -42,6 +42,10 @@ const auth = admin.auth();
   const previousPairIds = [...asA.docs, ...asB.docs].map((d) => d.id);
   // Birthday, plan and report count live off the public doc now.
   const priv = await deletionView(uid, user as any);
+  // Stage A: a moderation suspension survives delete → restore (not the one
+  // a pending deletion sets).
+  const internal = (await internalRef(uid).get()).data() ?? {};
+  const modSuspended = internal.isSuspended === true && internal.suspendedForDeletion !== true;
 
   // Capture recovery data — every field needed to restore identity lock +
   // policy state. Behavior score intentionally NOT captured; restored
@@ -71,6 +75,12 @@ const auth = admin.auth();
     isFounder: (user as any).isFounder ?? false,
     subscriptionTier: priv.subscriptionTier,
     reportCount:      priv.reportCount,
+    suspension: modSuspended ? {
+      suspendedUntil: internal.suspendedUntil ?? null,
+      suspendSource:  internal.suspendSource ?? null,
+      suspendReason:  internal.suspendReason ?? null,
+      suspendedBy:    internal.suspendedBy ?? null,
+    } : null,
 
     // Ban flag (set manually via admin SDK for bad actors)
     banned: false,
@@ -268,10 +278,21 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
   batch.set(profileRef(newUid), { mode: recovery.mode === "play" ? "play" : "spark" }, { merge: true });
   // Matching preferences are owner-only (Stage 3).
   batch.set(matchingRef(newUid), { matchableAs: recovery.matchableAs ?? [] }, { merge: true });
+  // Stage A: a suspension in force when they deleted comes back with them,
+  // and so does their report count.
+  const until = recovery.suspension?.suspendedUntil as admin.firestore.Timestamp | null | undefined;
+  const stillSuspended = !!recovery.suspension && (!until || until.toMillis() > Date.now());
   batch.set(internalRef(newUid), {
     subscriptionTier: recovery.isFounder ? "elite" : (recovery.subscriptionTier ?? "free"),
-    reportCount: 0,
-    isSuspended: false,
+    reportCount: typeof recovery.reportCount === "number" ? recovery.reportCount : 0,
+    isSuspended: stillSuspended,
+    ...(stillSuspended ? {
+      suspendedAt: now,
+      ...(until ? { suspendedUntil: until } : {}),
+      suspendSource: recovery.suspension.suspendSource ?? "admin",
+      suspendReason: recovery.suspension.suspendReason ?? null,
+      suspendedBy: recovery.suspension.suspendedBy ?? null,
+    } : {}),
   }, { merge: true });
 
   // Re-link pair docs from previousUid to newUid. Handles userA/userB AND

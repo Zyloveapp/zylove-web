@@ -15,6 +15,7 @@ import { getNearestCity } from './cities'
 import { claimFounderSpot, type FounderResult } from './founders'
 import { revokeFounderStatus } from './founderActivity'
 import { SMS_SECRETS } from './sms'
+import { liftSuspension, setAuthDisabled } from './reports'
 import { ROOT_SCRUB, clearPrivateData, deletionView, internalRef, isAdminAuth, loadLocation, loadMatching, loadPrivateProfile } from './userData'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -341,13 +342,15 @@ export const adminUserAction = onCall(
 
     if (action === 'suspend' || action === 'unsuspend') {
       const suspend = action === 'suspend'
-      // Suspension lives in the server-only userInternal (Stage 3).
-      await internalRef(uid).set(
-        suspend
-          ? { isSuspended: true, suspendedAt: FieldValue.serverTimestamp(), suspendedBy: adminUid }
-          : { isSuspended: false, suspendedAt: FieldValue.delete(), suspendedBy: FieldValue.delete() },
-        { merge: true },
-      )
+      // Suspension lives in the server-only userInternal (Stage 3). Stage A:
+      // sign-in follows it, as adminModerate's does (signed-in sessions end).
+      if (suspend) {
+        await internalRef(uid).set(
+          { isSuspended: true, suspendedAt: FieldValue.serverTimestamp(), suspendedBy: adminUid, suspendSource: 'admin', suspendedForDeletion: FieldValue.delete() },
+          { merge: true },
+        )
+        await setAuthDisabled(uid, true)
+      } else await liftSuspension(uid)
       await log()
       return { ok: true }
     }

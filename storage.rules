@@ -89,7 +89,10 @@ service firebase.storage {
                     && resource == null
                     && noServerMetadata();
       allow update: if false;
-      allow delete: if isUser(uid) && isSignedIn();
+      // Stage A: no client deletes. A deleted name could be uploaded again
+      // with new bytes while Firestore still lists it as published; the
+      // server deletes a photo once it's off every list (cleanupPhotoFiles).
+      allow delete: if false;
     }
 
     // ─── Chat photos ─────────────────────────────────────────────────────────
@@ -106,8 +109,12 @@ service firebase.storage {
         request.auth.uid in firestore.get(
           /databases/(default)/documents/matches/$(matchId)
         ).data.users;
+      // A new file only, named for its sender (Stage A: the other participant
+      // can't replace it); the app uploads ciphertext as image/x-zylove-encrypted.
       allow create: if isSignedIn()
-        && (isImage() || request.resource.contentType == 'image/x-zylove-encrypted')
+        && request.resource.contentType == 'image/x-zylove-encrypted'
+        && resource == null
+        && filename.matches(request.auth.uid + '_[A-Za-z0-9._-]+')
         && isUnderSizeLimit() &&
         request.auth.uid in firestore.get(
           /databases/(default)/documents/matches/$(matchId)

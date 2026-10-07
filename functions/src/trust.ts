@@ -86,6 +86,17 @@ async function blockedByCaller(uid: string, mode: 'spark' | 'play' | null = null
     db.collection('blocks').where('blockerUid', '==', uid).get(),
   ])
   const mine = new Set<string>()
+  // Stage A: blocks record who placed them (blockedBy on the mirror docs,
+  // server-written); the match and the legacy collection cover older ones
+  // (both server-only now).
+  const theirs = new Set<string>()
+  for (const d of mirror.docs) {
+    const by: unknown = d.data().blockedBy
+    if (typeof by !== 'string') continue
+    const m: unknown = d.data().mode
+    if (by === uid && (!mode || (m === 'play' ? 'play' : 'spark') === mode)) mine.add(d.id)
+    else if (by !== uid) theirs.add(d.id)
+  }
   for (const m of matches.docs) {
     const other = participants(m.data()).find((u) => u !== uid)
     if (other && (!mode || connectionMode(m.data()) === mode)) mine.add(other)
@@ -98,7 +109,7 @@ async function blockedByCaller(uid: string, mode: 'spark' | 'play' | null = null
   }
   const result = new Map<string, number>()
   for (const d of mirror.docs) {
-    if (!mine.has(d.id)) continue
+    if (!mine.has(d.id) || theirs.has(d.id)) continue
     const at: unknown = d.data().blockedAt
     result.set(d.id, at instanceof Timestamp ? at.toMillis() : 0)
   }
@@ -131,23 +142,26 @@ export const unblockMember = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
-    const uid = request.auth.uid
-    const targetUid = str(request.data, 'targetUid')
-    if (!(await blockedByCaller(uid)).has(targetUid)) {
-      throw new HttpsError('not-found', "You haven't blocked this person")
-    }
-    const db = getFirestore()
-    const legacy = await db.collection('blocks').where('blockerUid', '==', uid).where('blockedUid', '==', targetUid).get()
-    const batch = db.batch()
-    batch.delete(db.doc(`users/${uid}/blockedUsers/${targetUid}`))
-    batch.delete(db.doc(`users/${targetUid}/blockedUsers/${uid}`))
-    for (const d of legacy.docs) batch.delete(d.ref)
-    await batch.commit()
-    // Explore (Stage 3): they can see each other again.
-    await setBlocked(uid, targetUid, false)
+    await liftBlock(request.auth.uid, str(request.data, 'targetUid'))
     return { success: true }
   },
 )
+
+// Lifts a block the caller placed (unblockMember, and mobile's unblockUser).
+export async function liftBlock(uid: string, targetUid: string): Promise<void> {
+  if (!(await blockedByCaller(uid)).has(targetUid)) {
+    throw new HttpsError('not-found', "You haven't blocked this person")
+  }
+  const db = getFirestore()
+  const legacy = await db.collection('blocks').where('blockerUid', '==', uid).where('blockedUid', '==', targetUid).get()
+  const batch = db.batch()
+  batch.delete(db.doc(`users/${uid}/blockedUsers/${targetUid}`))
+  batch.delete(db.doc(`users/${targetUid}/blockedUsers/${uid}`))
+  for (const d of legacy.docs) batch.delete(d.ref)
+  await batch.commit()
+  // Explore (Stage 3): they can see each other again.
+  await setBlocked(uid, targetUid, false)
+}
 
 // ─── Photo consent ───────────────────────────────────────────────────────────
 // Firestore rules stop clients setting photoConsent.status to 'accepted';

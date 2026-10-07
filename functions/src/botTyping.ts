@@ -16,13 +16,13 @@ const MAX_TYPING_MS = 20_000 // longest a reply has ever needed, with margin
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-// Same gate as onBotMessage: a match flagged isBot, or a legacy seed- bot.
+// Same gate as onBotMessage (Stage A): the partner's uid is a bot's (zbot-, or a legacy seed-).
 function botUidFor(match: DocumentData, senderId: string): string | null {
   const users: unknown = match.users ?? match.participants
   if (!Array.isArray(users)) return null
   const other = users.find((u): u is string => typeof u === 'string' && u !== senderId)
   if (!other) return null
-  return match.isBot === true || other.startsWith('seed-') ? other : null
+  return other.startsWith('zbot-') || other.startsWith('seed-') ? other : null
 }
 
 export const botTypingStart = onDocumentCreated(

@@ -6,6 +6,7 @@ import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase
 import { countMessages, generationOf, participants, pastConnectionId } from './matchGeneration'
 import { loadPlayName } from './playName'
 import { purgeMatchContent } from './matchCleanup'
+import { clearLikes } from './likes'
 
 // Behavioral safety signals feeding behaviorRiskScore.
 //
@@ -120,6 +121,10 @@ export const unmatchConnection = onCall(
     if (!match) return { success: true } // already gone
     if (!participants(match).includes(uid)) throw new HttpsError('permission-denied', 'Not a participant in this match')
     if (!isBotMatch(match) && !match.unmatchedAt) await recordPastConnection(matchId, match, Date.now(), null, uid)
+    // Stage A: their likes in this mode go too, so a later like alone can't
+    // bring the match back.
+    const [a, b] = participants(match)
+    if (a && b) await clearLikes(a, b, match.mode === 'play' ? 'play' : 'spark')
     await ref.delete()
     logger.info('unmatchConnection', { matchId })
     return { success: true }

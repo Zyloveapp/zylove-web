@@ -1,4 +1,4 @@
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc, type DocumentData } from 'firebase/firestore'
+import { doc, getDoc, serverTimestamp, updateDoc, type DocumentData } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { friendlyError } from './errors'
@@ -8,7 +8,7 @@ import { primePhotoUrls } from './photoUrls'
 import { loadMatching } from './privateMatching'
 import type { DatingProfile } from '../types/profile'
 import type { Mode } from '../store/modeStore'
-import { loadPlayProfile, parsePlayProfile, type PlayProfileData } from './playProfile'
+import { parsePlayProfile, type PlayProfileData } from './playProfile'
 import { playNameOf } from './displayNames'
 
 // Firestore docs are written by several clients over time, so every field is
@@ -282,45 +282,6 @@ export async function passProfile(uid: string, mode: Mode, targetUid: string): P
   markSwiped(uid, mode, targetUid)
 }
 
-// Same snapshot shape the mobile app and botEngine write; the match lists on
-// both apps read name/photo/age from here. A Play match gets the Play name
-// and Play photo (no Play photo → none, never the Spark one).
-function participantSnapshot(
-  p: DiscoverProfile,
-  play: PlayProfileData | null,
-): { displayName: string; age: number | null; photoURL: string | null } {
-  return {
-    displayName: (play ? playNameOf(play, p) : p.displayName) || 'Someone',
-    age: displayAge(p),
-    photoURL: (play ? play.photoURLs[0] : p.photoURLs?.[0]) ?? null,
-  }
-}
-
-// onLike creates matches/{id} without participantSnapshots, so the liker's
-// client fills them in on a new match.
-async function writeParticipantSnapshots(matchId: string, uid: string, mode: Mode, target: DiscoverProfile): Promise<void> {
-  const isPlay = mode === 'play'
-  const [meSnap, myPlay, theirPlay] = await Promise.all([
-    getDoc(doc(db, 'users', uid)),
-    isPlay ? loadPlayProfile(uid) : Promise.resolve(null),
-    isPlay ? (target.playProfile ?? loadPlayProfile(target.uid)) : Promise.resolve(null),
-  ])
-  if (!meSnap.exists()) return
-  const me = { ...(meSnap.data() as DiscoverProfile), uid }
-  // An empty Play profile still keeps the snapshot on the Play side.
-  const empty = isPlay ? parsePlayProfile({}) : null
-  await setDoc(
-    doc(db, 'matches', matchId),
-    {
-      participantSnapshots: {
-        [uid]: participantSnapshot(me, myPlay ?? empty),
-        [target.uid]: participantSnapshot(target, theirPlay ?? empty),
-      },
-    },
-    { merge: true },
-  )
-}
-
 export async function likeProfile(uid: string, mode: Mode, target: DiscoverProfile): Promise<OnLikeResponse> {
   // Make sure the pair doc exists (usually already done by the prefetch).
   await fetchCompatibility(target.uid).catch(() => {})
@@ -336,12 +297,8 @@ export async function likeProfile(uid: string, mode: Mode, target: DiscoverProfi
     action: 'like',
     mode,
   }).catch(() => {})
-  if (data.matched && data.matchId) {
-    // The match already exists; a failed snapshot write only degrades the list row.
-    await writeParticipantSnapshots(data.matchId, uid, mode, target).catch((err: unknown) =>
-      console.warn('Failed to write participantSnapshots', err),
-    )
-  }
+  // The server writes the match's name/photo snapshots (onLike, Stage A:
+  // clients can't write them any more).
   return data
 }
 

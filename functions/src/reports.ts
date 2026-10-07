@@ -94,7 +94,8 @@ export async function recordReport(input: {
   ])
   if (await isSuspendedUid(reporterUid, reporterSnap.data())) throw new HttpsError('permission-denied', 'Account suspended.')
   const reported = reportedSnap.data()
-  if (isBotUid(reportedUid) || reported?.isBot === true) {
+  // Bots by uid only (Stage A: anyone could set isBot on their own doc before).
+  if (isBotUid(reportedUid)) {
     throw new HttpsError('failed-precondition', "Curated profiles can't be reported.")
   }
   if (!(await wereMatched(matchId, reporterUid, reportedUid))) {
@@ -412,7 +413,7 @@ async function resolveReports(uid: string, status: 'actioned' | 'cleared', actio
   return open.length
 }
 
-async function setAuthDisabled(uid: string, disabled: boolean): Promise<void> {
+export async function setAuthDisabled(uid: string, disabled: boolean): Promise<void> {
   try {
     await getAuth().updateUser(uid, { disabled })
     if (disabled) await getAuth().revokeRefreshTokens(uid)
@@ -488,6 +489,7 @@ export const adminModerate = onCall(
             suspendedUntil: Timestamp.fromMillis(Date.now() + (days as number) * DAY_MS),
             suspendedBy: adminUid,
             suspendSource: 'admin',
+            suspendedForDeletion: FieldValue.delete(),
           },
           { merge: true },
         )

@@ -52,6 +52,7 @@ import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
 import { ALWAYS_ELITE_IDENTITIES, marketFor, marketOpen, newTrial, planView, trialExempt } from './trial'
 import { accountRef, internalRef, isAdminAuth, isSuspendedUid, loadInternal, loadLocation, loadSettings } from './userData'
+import { blockedEitherWay, likedInMode, pairIdOf, recordLike } from './likes'
 import { playStatus, requirePlayAccess, requirePlayEntitled } from './playAccess'
 import { loadPlayScores } from './pairPlay'
 import { markActed } from './explore'
@@ -509,6 +510,18 @@ export const likeBack = onCall(
     const likerQueueRef = db.doc(`users/${likerUid}/likeQueue/${callerId}`)
     const queueEntry = await callerQueueRef.get()
     if (!queueEntry.exists) throw new HttpsError('not-found', 'No like from this person in your queue')
+    // Stage A: the entry is only a pointer — the like itself must be real and
+    // in this mode (bots' likes are server-written queue entries), and
+    // neither side gone, suspended or blocked.
+    const entryMode = queueEntry.get('mode') === 'play' ? 'play' : 'spark'
+    const bot = likerUid.startsWith('zbot-')
+    if (entryMode !== mode || (!bot && !(await likedInMode(likerUid, callerId, mode)))) {
+      throw new HttpsError('not-found', 'No like from this person in your queue')
+    }
+    if ((await isSuspendedUid(callerId)) || (!bot && (await isSuspendedUid(likerUid))) || (await blockedEitherWay(callerId, likerUid))) {
+      throw new HttpsError('failed-precondition', "That profile isn't available.")
+    }
+    if (!bot) await recordLike(pairIdOf(callerId, likerUid), mode, callerId)
 
     const matchId = [callerId, likerUid].sort().join('_')
     const matchRef = db.collection('matches').doc(matchId)
@@ -1858,6 +1871,7 @@ export { mirrorPlan } from './userData'
 export { recordTermsAcceptance } from './legal'
 export { getPhotoUrls, getReviewPdfUrl } from './photoAccess'
 export { exploreOnInternal, exploreOnLocation, exploreOnUser, exploreOnUserDoc, getExploreDeck } from './explore'
+export { photoCleanupOnUser, photoCleanupOnUserDoc } from './photoCleanup'
 export { playAccessOnPlan, playAccessOnPlayProfile, playAccessOnProfile } from './playAccess'
 export { actOnPlayConnection, listLockedPlayConnections } from './lockedPlay'
 export { getDistances, grantSmsConsent, recordActivity, refreshAges, setLocation } from './location'

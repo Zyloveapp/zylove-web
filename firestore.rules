@@ -23,6 +23,20 @@ service cloud.firestore {
               || viewerHasPlay());
     }
 
+    // Blocks (Stage A): a blocked match is read-only for the person who
+    // blocked (evidence for a report) and closed to the person blocked.
+    function matchReadable(m) {
+      return m.get('isBlocked', false) != true || m.get('blockedBy', '') == request.auth.uid;
+    }
+    // New messages and match updates only while the match is live: not
+    // blocked, not unmatched.
+    function matchLive(m) {
+      return m.get('isBlocked', false) != true && m.get('unmatchedAt', null) == null;
+    }
+    function matchDoc(matchId) {
+      return get(/databases/$(database)/documents/matches/$(matchId)).data;
+    }
+
     function isPairParticipant(pairId) {
       // pairId format: uid1_uid2 (sorted), same convention as matches
       return pairId.split('_')[0] == request.auth.uid
@@ -56,11 +70,6 @@ service cloud.firestore {
     function profileVisible(uid) {
       return get(/databases/$(database)/documents/users/$(uid)).data.get('isDeleted', false) != true
           && notSuspended(uid);
-    }
-
-    function isVerified() {
-      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
-          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.phoneVerified == true;
     }
 
     // ─── Users ──────────────────────────────────────────────────────────────
@@ -111,7 +120,12 @@ service cloud.firestore {
         'dealbreakers', 'seekingBodyTypes', 'seekingTraits', 'seekingHeightMinCm', 'seekingHeightMaxCm',
         'suspendedAt', 'suspendedUntil', 'suspendedBy', 'suspendSource', 'suspendReason', 'suspendedPendingReview',
         'bannedAt', 'bannedBy', 'deletionRequestedAt', 'deletionScheduledFor', 'deletionReason',
-        'adminNotice', 'lastWarnedAt', 'lastThankedAt'
+        'adminNotice', 'lastWarnedAt', 'lastThankedAt',
+        // Stage A: server-decided state other code trusts — bot status
+        // (reports refuse bots), deletion, founder status and badge, Explore order
+        'isBot', 'isDeleted', 'deleted', 'deletedAt', 'previousUid', 'sortKey',
+        'founderBadge', 'founderStatus', 'founderCity', 'founderCityId', 'founderRevokedAt', 'founderConvertedAt',
+        'founderLastActiveAt', 'founderWarningSentAt', 'founderThreadMeta'
       ];
     }
 
@@ -152,7 +166,9 @@ service cloud.firestore {
                             .hasAny(['age', 'genderIdentity', 'matchableAs', 'identityLockedAt']))
                     && (resource.data.get('displayName', null) == null
                         || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['displayName']));
-      allow delete: if isUser(uid);
+      // Never deleted by the client: recreating it would reset the identity
+      // lock (Stage A). Account deletion is server-side.
+      allow delete: if false;
 
       // Plan mirror, SMS consent (with the verified phone), Spark photos in
       // review and the saved-location summary. Written by Cloud Functions;
@@ -304,17 +320,18 @@ service cloud.firestore {
         allow read, write: if isUser(uid) && isSignedIn();
       }
 
-      // Like queue — own read only (who liked you); any signed-in user can
-      // write to any user's queue (the designed cross-user write pattern).
-      // Play likes (mode 'play') carry the liker's Play profile: the owner
-      // needs Play access to read them (queries filter on mode).
+      // Like queue — who liked you. Written only by Cloud Functions (onLike,
+      // bots): likeBack treats an entry as a real like, so a client may never
+      // create one (Stage A). Play likes (mode 'play') carry the liker's Play
+      // profile: the owner needs Play access to read them (queries filter on mode).
       match /likeQueue/{doc} {
         allow read: if isUser(uid) && isSignedIn()
                     && (resource.data.get('mode', 'spark') != 'play' || viewerHasPlay());
-        // Self-only client writes (topPicks refresh, dismiss). Cross-user
-        // writes (Super Like, onLike mutual cleanup) go via Callables with
-        // admin SDK which bypass this rule.
-        allow write: if isSignedIn() && isUser(uid);
+        // The owner may dismiss an entry (and nothing else) or delete it.
+        allow update: if isSignedIn() && isUser(uid)
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['dismissed', 'dismissedAt']);
+        allow delete: if isSignedIn() && isUser(uid);
+        allow create: if false;
       }
 
       // Blocked users list — CF-only writes via blockUser Callable.
@@ -394,56 +411,123 @@ service cloud.firestore {
       allow read: if isSignedIn()
                   && resource.data.get('isSuspended', false) != true
                   && request.auth.uid in resource.data.get('users', [])
-                  && (resource.data.get('mode', 'spark') != 'play' || viewerHasPlay());
+                  && (resource.data.get('mode', 'spark') != 'play' || viewerHasPlay())
+                  && matchReadable(resource.data);
       allow create: if false;
-      // Photo consent can only become 'accepted' through the
-      // acceptPhotoConsent Cloud Function (zylove-web), which checks the
-      // other person really asked. Clients may request, decline and pause.
+      // Participants keep the chat's own bookkeeping up to date, nothing
+      // else (Stage A): who's in it, its mode, block/unmatch state, bot
+      // status, generation, snapshots and the SMS clocks are server-only —
+      // callables and triggers trust them. Photo consent can only become
+      // 'accepted' through the acceptPhotoConsent Cloud Function, which
+      // checks the other person really asked; clients may request, decline
+      // and pause.
       allow update: if isSignedIn()
                     && request.auth.uid in resource.data.get('users', [])
                     && (resource.data.get('mode', 'spark') != 'play' || viewerHasPlay())
+                    && matchLive(resource.data)
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                         'lastMessagePreview', 'lastMessageAt', 'lastSenderId', 'hasUnread',
+                         'safetyCardShown', 'safetyCardShownAt', 'photoConsent',
+                         'vibeCheckState_' + request.auth.uid])
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastMessagePreview'])
+                        || request.resource.data.lastMessagePreview == null
+                        || (request.resource.data.lastMessagePreview is string && request.resource.data.lastMessagePreview.size() <= 40))
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastSenderId'])
+                        || request.resource.data.lastSenderId == request.auth.uid)
                     && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['photoConsent'])
                         || request.resource.data.get('photoConsent', {}).get('status', '') != 'accepted'
                         || resource.data.get('photoConsent', {}).get('status', '') == 'accepted');
-      allow delete: if isSignedIn()
-                    && request.auth.uid in resource.data.get('users', []);
+      // Unmatching goes through unmatchConnection; a client can't delete the
+      // chat (and the other person's copy of it).
+      allow delete: if false;
 
       // Messages — both participants can read/write.
       // Read rule additionally enforces self-destruct expiry: after expiresAt
       // passes, only the sender keeps read access (so their UI can render the
       // "📸 Photo destructed" terminal state from destructedAt). The recipient
       // gets denied — defense in depth alongside the sweep nulling ciphertext.
+      // The shapes the app sends (Stage A): a text, an encrypted photo whose
+      // ciphertext is in this match's chat-photos folder under the sender's
+      // name (sweepChatPhotos deletes it with admin rights), or a photo-
+      // consent notice. Server time only; nothing else.
+      function validTextMessage(d) {
+        return d.keys().hasOnly(['ciphertext', 'nonce', 'senderId', 'sentAt', 'status', 'messageType'])
+            && d.messageType == 'text'
+            && d.ciphertext is string && d.ciphertext.size() <= 20000
+            && d.nonce is string && d.nonce != 'system' && d.nonce.size() <= 64;
+      }
+      function validPhotoMessage(d) {
+        return d.keys().hasOnly(['senderId', 'messageType', 'encrypted', 'storageRef', 'photoNonce',
+                                 'encryptedKeyForSender', 'encryptedKeyForRecipient', 'keyNonceForSender',
+                                 'keyNonceForRecipient', 'timerSeconds', 'firstViewedAt', 'photoExpiresAt',
+                                 'destructedAt', 'sentAt', 'status'])
+            && d.messageType == 'photo'
+            && d.storageRef is string
+            && d.storageRef.matches('^chat-photos/' + matchId + '/' + request.auth.uid + '_[A-Za-z0-9._-]+$')
+            && d.get('timerSeconds', 0) is int && d.get('timerSeconds', 0) >= 0 && d.get('timerSeconds', 0) <= 86400
+            && d.get('firstViewedAt', null) == null && d.get('photoExpiresAt', null) == null && d.get('destructedAt', null) == null;
+      }
+      function validConsentMessage(d) {
+        return d.keys().hasOnly(['senderId', 'messageType', 'ciphertext', 'nonce', 'sentAt', 'status'])
+            && d.messageType == 'consent_request'
+            && d.nonce == 'system'
+            && d.ciphertext in ['photo_consent_request', 'photo_consent_declined', 'photo_consent_paused'];
+      }
       match /messages/{messageId} {
+        // Self-destructed photos: after photoExpiresAt only the sender keeps
+        // read access (to show the "destructed" state); the sweep removes
+        // the ciphertext and keys too.
         allow read: if isSignedIn()
                     && isMatchParticipant(matchId)
-                    && (resource.data.get('expiresAt', null) == null
-                        || resource.data.expiresAt > request.time
+                    && matchReadable(matchDoc(matchId))
+                    && (resource.data.get('photoExpiresAt', null) == null
+                        || resource.data.photoExpiresAt > request.time
                         || resource.data.senderId == request.auth.uid);
         allow create: if isSignedIn()
                       && isMatchParticipant(matchId)
-                      && request.resource.data.senderId == request.auth.uid;
+                      && matchLive(matchDoc(matchId))
+                      && request.resource.data.senderId == request.auth.uid
+                      && request.resource.data.sentAt == request.time
+                      && request.resource.data.get('status', 'sent') == 'sent'
+                      && (validTextMessage(request.resource.data)
+                          || validPhotoMessage(request.resource.data)
+                          || validConsentMessage(request.resource.data));
+        // Read receipts by the recipient; "delete for me" adds only yourself;
+        // only the sender revokes a photo.
         allow update: if isSignedIn()
                       && isMatchParticipant(matchId)
+                      && matchReadable(matchDoc(matchId))
                       && request.resource.data.diff(resource.data).affectedKeys()
-                          .hasOnly(['status', 'deletedFor', 'viewedBy', 'viewedAt', 'photoRevoked']);
+                          .hasOnly(['status', 'deletedFor', 'viewedBy', 'viewedAt', 'photoRevoked'])
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'viewedBy', 'viewedAt'])
+                          || resource.data.senderId != request.auth.uid)
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status'])
+                          || request.resource.data.status == 'read')
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['deletedFor'])
+                          || request.resource.data.deletedFor.toSet().difference(resource.data.get('deletedFor', []).toSet())
+                               .hasOnly([request.auth.uid]))
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['photoRevoked'])
+                          || resource.data.senderId == request.auth.uid);
         allow delete: if false;
       }
 
       // Photo consent subcollection — per-match consent state for
       // self-destruct photo sharing. Participants-only.
       match /photoConsent/{doc} {
-        allow read, write: if isSignedIn()
-                           && isMatchParticipant(matchId);
+        allow read: if isSignedIn() && isMatchParticipant(matchId) && matchReadable(matchDoc(matchId));
+        allow write: if isSignedIn() && isMatchParticipant(matchId) && matchLive(matchDoc(matchId));
       }
 
       // Typing indicators — matches/{matchId}/typing/{uid} exists while that
       // participant is typing. Participants read both; each writes only their own.
       match /typing/{typingUid} {
         allow read: if isSignedIn()
-                    && isMatchParticipant(matchId);
+                    && isMatchParticipant(matchId)
+                    && matchReadable(matchDoc(matchId));
         allow write: if isSignedIn()
                      && request.auth.uid == typingUid
-                     && isMatchParticipant(matchId);
+                     && isMatchParticipant(matchId)
+                     && matchLive(matchDoc(matchId));
       }
     }
 
@@ -545,15 +629,10 @@ service cloud.firestore {
 
     // ─── Blocks (legacy top-level collection — prefer users/{uid}/blockedUsers) ─
 
+    // Stage A: no client access — unblockMember trusted it for who blocked
+    // whom. Blocks are users/{uid}/blockedUsers, written by Cloud Functions.
     match /blocks/{blockId} {
-      allow create: if isSignedIn()
-                    && request.resource.data.blockerUid == request.auth.uid;
-      allow read: if isSignedIn()
-                  && (resource.data.blockerUid == request.auth.uid
-                   || resource.data.blockedUid == request.auth.uid);
-      allow delete: if isSignedIn()
-                    && resource.data.blockerUid == request.auth.uid;
-      allow update: if false;
+      allow read, write: if false;
     }
 
     // ─── Notifications ───────────────────────────────────────────────────────

@@ -83,6 +83,17 @@ export const onPhotoUpload = onObjectFinalized(
       ? userRef.collection('playProfile').doc('data')
       : userRef
 
+    // Stage A: new bytes under a name that's still published can't come from
+    // the app (only the server deletes photos now). Never serve them: the
+    // name comes off the published list and the bytes are deleted.
+    const published = (await photoDocRef.get()).data()?.photoURLs
+    if (Array.isArray(published) && published.includes(photoRef)) {
+      console.warn(`[moderation] Re-upload over a published photo refused for uid ${uid}`)
+      await photoDocRef.update({ photoURLs: admin.firestore.FieldValue.arrayRemove(photoRef) })
+      await file.delete({ ignoreNotFound: true })
+      return
+    }
+
     // Helper: append a pending entry + flip hasPendingPhotos:true on the root
     // user doc (the admin photo-review tool queries users where('hasPendingPhotos','==',true)).
     // For Spark, photoDocRef === userRef so the flag is set in one write. For

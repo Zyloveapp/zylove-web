@@ -96,11 +96,11 @@ export const onBotMessage = onDocumentCreated(
     const botUid = usersList.find((u: string) => u !== senderId);
     if (!botUid) return;
 
-    // Gate: accept matches explicitly flagged isBot === true, OR matches where
-    // the partner uid is a seeded bot (uid prefix 'seed-'). This handles
-    // synthetic match docs that don't set isBot at create time.
-    const isBotMatch = match.isBot === true || botUid.startsWith("seed-");
-    if (!isBotMatch) return;
+    // Gate (Stage A): the partner must BE a bot — by uid (zbot-, or the
+    // older seed-). The isBot flag alone isn't enough: a reply here is
+    // written as the partner, from their profile.
+    const isBotMatch = botUid.startsWith("zbot-") || botUid.startsWith("seed-");
+    if (!isBotMatch || match.isBlocked === true || match.unmatchedAt) return;
 
     // Fetch bot persona
     const botDoc = await db.collection("users").doc(botUid).get();

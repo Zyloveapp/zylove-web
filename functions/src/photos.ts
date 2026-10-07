@@ -49,6 +49,9 @@ export const markChatPhotoViewed = onCall(
       }
       const msg = msgSnap.data()
       if (!msg || msg.messageType !== 'photo') throw new HttpsError('not-found', 'Photo not found')
+      // Stage A: only this match's own chat photos start a timer (the sweep
+      // deletes what the message points at).
+      if (!isChatPhotoOf(matchId, msg.storageRef)) throw new HttpsError('not-found', 'Photo not found')
       if (msg.senderId === uid) throw new HttpsError('failed-precondition', 'Senders cannot mark their own photo viewed')
       if (msg.firstViewedAt != null || msg.destructedAt != null) return // already started (or gone)
 
@@ -66,6 +69,11 @@ export const markChatPhotoViewed = onCall(
   },
 )
 
+// A chat photo of this match: chat-photos/{matchId}/{file}, nothing else.
+export function isChatPhotoOf(matchId: string, ref: unknown): ref is string {
+  return typeof ref === 'string' && ref.startsWith(`chat-photos/${matchId}/`) && /^[A-Za-z0-9._-]+$/.test(ref.slice(`chat-photos/${matchId}/`.length))
+}
+
 // Every 5 minutes: delete expired photos' ciphertext from Storage and strip
 // the wrapped keys from the message, so nothing left can be decrypted.
 export const sweepChatPhotos = onSchedule(
@@ -81,7 +89,11 @@ export const sweepChatPhotos = onSchedule(
       const msgRef = db.doc(`matches/${matchId}/messages/${messageId}`)
       const msg = (await msgRef.get()).data()
       if (msg && msg.destructedAt == null) {
-        if (typeof msg.storageRef === 'string' && msg.storageRef) {
+        // Stage A: only ever a file in this match's chat-photos folder — the
+        // sender wrote storageRef, and this runs with admin rights.
+        if (typeof msg.storageRef === 'string' && msg.storageRef && !isChatPhotoOf(matchId, msg.storageRef)) {
+          logger.warn('sweepChatPhotos: storageRef outside the match folder, not deleted', { matchId, messageId })
+        } else if (typeof msg.storageRef === 'string' && msg.storageRef) {
           try {
             await bucket.file(msg.storageRef).delete({ ignoreNotFound: true })
           } catch (err) {

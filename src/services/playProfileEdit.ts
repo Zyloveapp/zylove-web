@@ -1,8 +1,6 @@
 import { arrayRemove, doc, updateDoc } from 'firebase/firestore'
-import { deleteObject, ref } from 'firebase/storage'
-import { db, storage } from './firebase'
+import { db } from './firebase'
 import { answeredGoDeeper, answeredPrompts, descriptorFields, type PlayDraft } from './playOnboarding'
-import { isPhotoRef } from './photoUrls'
 
 // The Edit Play profile page (/edit-play-profile): section-by-section edits
 // of a saved Play profile. Only changed fields are written, to
@@ -58,26 +56,8 @@ export async function savePlayEdits(uid: string, before: PlayDraft, after: PlayD
   await updateDoc(doc(db, `users/${uid}/playProfile/data`), { ...playProfile, lastUpdated: Date.now() })
 }
 
-// Storage path of a published photo: signed URL (storage.googleapis.com/
-// {bucket}/{path}) or Firebase download URL (…/o/{path}).
-function storagePathOf(url: string): string | null {
-  // Stored since Stage 1b: the path itself.
-  if (isPhotoRef(url)) return url
-  try {
-    const u = new URL(url)
-    const firebase = /\/o\/(.+)$/.exec(u.pathname)
-    if (firebase) return decodeURIComponent(firebase[1])
-    if (u.hostname === 'storage.googleapis.com') return decodeURIComponent(u.pathname.split('/').slice(2).join('/'))
-  } catch {
-    // Not a URL we can map to a path.
-  }
-  return null
-}
-
 // Removes a Play photo now. mirrorPlayOnlyPhotos keeps a Play-only account's
 // root photoURLs in step.
 export async function removePlayPhoto(uid: string, url: string): Promise<void> {
   await updateDoc(doc(db, `users/${uid}/playProfile/data`), { photoURLs: arrayRemove(url), lastUpdated: Date.now() })
-  const path = storagePathOf(url)
-  if (path?.startsWith(`photos/${uid}/play/`)) await deleteObject(ref(storage, path)).catch(() => {})
 }
