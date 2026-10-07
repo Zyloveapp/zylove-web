@@ -65,6 +65,10 @@ import { openerHash } from '../../services/openerHash'
 import { hasLink, looksLikeCode } from '../../services/scamRules'
 import { useAuthStore } from '../../store/authStore'
 import { IncomingSafety } from './ChatSafety'
+import { ContactCardMessage, ContactNotice, ContactSheet } from './ContactExchange'
+import { useContactExchange } from './useContactExchange'
+import { CONTACT_CODES, parseCard, requestContact, respondContact, revokeContact, saveDefaults, savedDefaults, sendContactCard, setPendingCard, UNLOCK_MESSAGES, type ContactCard, type ContactCode } from '../../services/contactExchange'
+import { CONTACT_MASK, detectContact, maskContact } from '../../services/contactDetect'
 import { LINKS_LATER, useCanSendLinks, useSenderTrust } from './useChatSafety'
 import { usePlayIdentity } from '../matches/usePlayIdentity'
 import { useDistanceMiles } from '../DistanceLabel'
@@ -162,6 +166,11 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   // A message that looks like a one-time code waits for a second Send.
   const [confirmCode, setConfirmCode] = useState<string | null>(null)
   const senderTrust = useSenderTrust(partnerUid, isBotUid(partnerUid))
+  // T&S Phase 3: Share contact.
+  const [contactSheet, setContactSheet] = useState<'share' | 'shareBack' | 'resend' | null>(null)
+  const [contactBusy, setContactBusy] = useState(false)
+  const [contactError, setContactError] = useState<string | null>(null)
+  const [contactNotice, setContactNotice] = useState<{ text: string; cancel?: boolean } | null>(null)
   const canSendLinks = useCanSendLinks(uid, useAuthStore((s) => s.user?.metadata.creationTime))
   const offerExitReview = useExitReviewStore((s) => s.offer)
   const [consentState, setConsentState] = useState<{ matchId: string; consent: PhotoConsent | null } | null>(null)
@@ -399,10 +408,92 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   const ownBubble = match.mode === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
   // Never fall back to plaintext just because the partner's key failed to load.
   const canSend = partnerKey !== null && !partnerKey.error
+  const contact = useContactExchange({
+    matchId,
+    uid,
+    partnerUid,
+    partnerKey: partnerKey && !partnerKey.error && partnerKey.key ? partnerKey.key : null,
+    messages: rawMessages,
+  })
+  const latestContactNoticeId = useMemo(
+    () => [...(messages ?? [])].reverse().find((m) => m.messageType === 'contact_request' && m.nonce === 'system')?.id ?? null,
+    [messages],
+  )
+
+  function contactFailed(err: unknown) {
+    setContactError(friendlyError(err, "Couldn't do that. Try again."))
+  }
+
+  function handleContactTap() {
+    setContactError(null)
+    const ce = contact.ce
+    if (isBotUid(partnerUid)) return setContactNotice({ text: "Contact details can't be shared with a curated profile." })
+    if (contact.needsCard) return setContactSheet('resend')
+    if (ce?.status === 'pending') {
+      return setContactNotice(
+        ce.requestedBy === uid ? { text: `Waiting for ${match.name} to answer your contact request.`, cancel: true } : { text: `${match.name} asked to share contact details — answer above.` },
+      )
+    }
+    if (ce?.status === 'accepted') return setContactNotice({ text: 'Contact details are shared in this chat. Use "Take back" on a card to remove them.' })
+    if (!contact.unlocked) {
+      return setContactNotice({
+        text: `Share contact unlocks once you've both sent ${UNLOCK_MESSAGES} messages (you ${Math.min(contact.counts.mine, UNLOCK_MESSAGES)}/${UNLOCK_MESSAGES} · ${match.name} ${Math.min(contact.counts.theirs, UNLOCK_MESSAGES)}/${UNLOCK_MESSAGES}).`,
+      })
+    }
+    setContactNotice(null)
+    setContactSheet('share')
+  }
+
+  async function confirmContact(card: ContactCard) {
+    if (!contactSheet) return
+    setContactBusy(true)
+    setContactError(null)
+    saveDefaults(uid, card)
+    try {
+      if (contactSheet === 'share') {
+        // Kept on this device until they accept; it goes out then.
+        setPendingCard(uid, matchId, card)
+        await requestContact(matchId).catch((err: unknown) => {
+          setPendingCard(uid, matchId, null)
+          throw err
+        })
+      } else {
+        if (contactSheet === 'shareBack') await respondContact(matchId, true, true)
+        await sendContactCard(matchId, uid, card, partnerKey?.key ?? '')
+      }
+      setContactSheet(null)
+    } catch (err) {
+      contactFailed(err)
+    } finally {
+      setContactBusy(false)
+    }
+  }
+
+  async function contactAction(action: () => Promise<unknown>) {
+    setContactBusy(true)
+    setContactError(null)
+    try {
+      await action()
+      setContactNotice(null)
+    } catch (err) {
+      contactFailed(err)
+    } finally {
+      setContactBusy(false)
+    }
+  }
 
   async function handleSend(e?: FormEvent) {
     e?.preventDefault()
     if (!trimmed || tooLong || sending || !canSend) return
+    // T&S Phase 3 (on this device): contact details only through Share contact.
+    if (detectContact(trimmed).length > 0) {
+      setSendError(
+        isBotUid(partnerUid)
+          ? "Phone numbers, handles and emails can't be sent in chat."
+          : `Phone numbers, handles and emails can't be sent in chat — use Share contact 🪪 instead${contact.unlocked ? '' : ` (it unlocks once you've both sent ${UNLOCK_MESSAGES} messages)`}.`,
+      )
+      return
+    }
     // T&S Phase 2 (on this device only): no links in an account's first
     // 48 hours, and a code-like message is sent only on a second Send.
     if (!isBotUid(partnerUid) && hasLink(trimmed) && !canSendLinks) {
@@ -616,6 +707,40 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
                   />
                 )
               }
+              // T&S Phase 3: contact-exchange notices and cards.
+              if (m.messageType === 'contact_request' && m.nonce === 'system' && (CONTACT_CODES as readonly string[]).includes(m.ciphertext)) {
+                return (
+                  <ContactNotice
+                    key={m.id}
+                    code={m.ciphertext as ContactCode}
+                    isMine={m.senderId === uid}
+                    partnerName={match.name}
+                    live={m.id === latestContactNoticeId && contact.ce?.status === 'pending'}
+                    busy={contactBusy}
+                    onReceiveOnly={() => void contactAction(() => respondContact(matchId, true, false))}
+                    onShareBack={() => {
+                      setContactError(null)
+                      setContactSheet('shareBack')
+                    }}
+                    onDecline={() => void contactAction(() => respondContact(matchId, false))}
+                  />
+                )
+              }
+              if (m.messageType === 'contact_card') {
+                const own = m.senderId === uid
+                return (
+                  <div key={m.id} className={`flex flex-col ${own ? 'items-end' : 'items-start'}`}>
+                    <ContactCardMessage
+                      card={m.nonce === 'revoked' || !m.ciphertext ? null : parseCard(m.text)}
+                      removed={m.nonce === 'revoked' || !m.ciphertext || contact.ce?.status === 'revoked'}
+                      isMine={own}
+                      partnerName={match.name}
+                      onTakeBack={contact.ce?.status === 'accepted' ? () => void contactAction(() => revokeContact(matchId)) : null}
+                    />
+                    <span className="mt-1 text-xs text-white/30">{messageTime(m.sentAt)}</span>
+                  </div>
+                )
+              }
               if (m.messageType === 'photo' && m.photo) {
                 const own = m.senderId === uid
                 return (
@@ -641,8 +766,10 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
                 )
               }
               const own = m.senderId === uid
+              // T&S Phase 3: contact details that slipped through are masked here.
+              const masked = !own && m.messageType === 'text' && detectContact(m.text).length > 0
               const body =
-                m.messageType === 'photo' ? "📷 Photo — can't be shown here" : m.text
+                m.messageType === 'photo' ? "📷 Photo — can't be shown here" : masked ? maskContact(m.text) : m.text
               const safety =
                 !own && !botChat && m.messageType === 'text' ? (
                   <IncomingSafety
@@ -664,6 +791,11 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
                   >
                     {body}
                   </div>
+                  {masked && (
+                    <p className="mt-1 max-w-[75%] text-xs text-white/40">
+                      {CONTACT_MASK} Contact details are hidden in chat — use Share contact 🪪 to swap them safely.
+                    </p>
+                  )}
                   {safety}
                   <span className="mt-1 text-xs text-white/30">
                     {messageTime(m.sentAt)}
@@ -784,6 +916,17 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
           suppressed={showFirstChat || showVibeCheck || showReview || showReport || showPhotoPicker || showPhotoBanner}
           onPick={setText}
         />
+        {contactNotice && (
+          <div className="mb-2 flex items-center justify-center gap-3 text-center text-sm text-white/60">
+            <span>🪪 {contactNotice.text}</span>
+            {contactNotice.cancel && (
+              <button type="button" onClick={() => void contactAction(() => revokeContact(matchId))} disabled={contactBusy} className="font-semibold text-[#7C9BFF] hover:text-white disabled:opacity-50">
+                Cancel request
+              </button>
+            )}
+          </div>
+        )}
+        {contactError && !contactSheet && <p className="mb-2 text-center text-sm text-red-400">{contactError}</p>}
         {photoNotice && (
           <div className="mb-2 flex items-center justify-center gap-3 text-sm text-white/60">
             <span>{photoNotice.text}</span>
@@ -853,6 +996,16 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
                 }`}
               >
                 <CameraIcon className="h-6 w-6" />
+              </button>
+              <button
+                type="button"
+                onClick={handleContactTap}
+                disabled={contactBusy}
+                aria-label="Share contact"
+                title={contact.unlocked ? 'Share contact' : `Unlocks once you've both sent ${UNLOCK_MESSAGES} messages`}
+                className={`rounded-xl p-2 text-xl leading-none hover:bg-white/10 disabled:opacity-40 ${contact.unlocked ? '' : 'opacity-50'}`}
+              >
+                🪪
               </button>
               <textarea
                 ref={inputRef}
@@ -981,6 +1134,23 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
           name={match.name}
           initialCategories={reportPreset}
           onClose={() => setShowReport(false)}
+        />
+      )}
+
+      {contactSheet && (
+        <ContactSheet
+          title={contactSheet === 'share' ? `Share contact with ${match.name}` : contactSheet === 'shareBack' ? `Share yours back with ${match.name}` : `Send your card to ${match.name}`}
+          intro={
+            contactSheet === 'share'
+              ? `Pick what goes on your card. ${match.name} chooses whether to accept; your card is only sent if they do.`
+              : 'Pick what goes on your card. It is end-to-end encrypted — Zylove can’t read it.'
+          }
+          initial={savedDefaults(uid)}
+          confirmLabel={contactSheet === 'share' ? 'Send request' : contactSheet === 'shareBack' ? 'Accept and share' : 'Send card'}
+          busy={contactBusy}
+          error={contactError}
+          onConfirm={(card) => void confirmContact(card)}
+          onClose={() => setContactSheet(null)}
         />
       )}
 

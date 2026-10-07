@@ -552,6 +552,23 @@ service cloud.firestore {
             && d.nonce == 'system'
             && d.ciphertext in ['photo_consent_request', 'photo_consent_declined', 'photo_consent_paused'];
       }
+      // T&S Phase 3: a contact card — end-to-end encrypted (never a stub or
+      // system nonce), never to a curated profile, and only while the
+      // exchange is accepted (which only the respondContactExchange callable
+      // sets, after requestContactExchange checked both people sent 3+
+      // messages): from the person who asked, or from the other person if
+      // they chose to share back. Requests, answers and revokes are
+      // server-written notices.
+      function validContactCard(d, m) {
+        return d.keys().hasOnly(['ciphertext', 'nonce', 'senderId', 'sentAt', 'status', 'messageType'])
+            && d.messageType == 'contact_card'
+            && d.ciphertext is string && d.ciphertext.size() > 0 && d.ciphertext.size() <= 4000
+            && d.nonce is string && d.nonce.size() <= 64 && !(d.nonce in ['stub', 'stub-nonce', 'system', 'revoked'])
+            && !partnerIsBot(m)
+            && m.get('contactExchange', {}).get('status', '') == 'accepted'
+            && (m.contactExchange.get('requestedBy', '') == request.auth.uid
+                || m.contactExchange.get('shareBack', false) == true);
+      }
       match /messages/{messageId} {
         // Self-destructed photos: after photoExpiresAt only the sender keeps
         // read access (to show the "destructed" state); the sweep removes
@@ -570,7 +587,8 @@ service cloud.firestore {
                       && request.resource.data.get('status', 'sent') == 'sent'
                       && (validTextMessage(request.resource.data, matchDoc(matchId))
                           || validPhotoMessage(request.resource.data)
-                          || validConsentMessage(request.resource.data));
+                          || validConsentMessage(request.resource.data)
+                          || validContactCard(request.resource.data, matchDoc(matchId)));
         // Read receipts by the recipient; "delete for me" adds only yourself;
         // only the sender revokes a photo.
         allow update: if isSignedIn()

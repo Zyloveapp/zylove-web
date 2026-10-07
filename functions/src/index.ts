@@ -2191,3 +2191,5 @@ export { adminSearchUsers, adminTrustAction, adminTrustDetail, adminTrustQueue, 
 export { purgeScamTraps } from './scamTraps'
 export { refreshGeoDb } from './geo'
 export { adminGetProbation, adminSetProbation } from './probation'
+// T&S Phase 3: contact exchange.
+export { requestContactExchange, respondContactExchange, revokeContactExchange } from './contactExchange'

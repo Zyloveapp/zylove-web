@@ -4,6 +4,8 @@ import { decryptMessage } from './encryption'
 import { getPrivateKey, keysReady } from './keys'
 import { fetchPublicUserDoc } from './publicUserDoc'
 import { CONSENT_CODES, type ConsentCode } from './chat'
+import { CONTACT_CODES, CONTACT_PREVIEWS, type ContactCode } from './contactExchange'
+import { maskContact } from './contactDetect'
 import type { MatchEntry } from './matches'
 
 // Chat list previews. The match doc only ever carries a generic
@@ -72,6 +74,11 @@ async function fetchPreview(match: MatchEntry, uid: string): Promise<ChatPreview
   const ciphertext = typeof data.ciphertext === 'string' ? data.ciphertext : ''
 
   if (messageType === 'photo') return { text: '📷 Photo', fromMe }
+  // T&S Phase 3: a card never shows in the list, and nor do contact details.
+  if (messageType === 'contact_card') return { text: '🪪 Contact card', fromMe }
+  if (messageType === 'contact_request' && (CONTACT_CODES as readonly string[]).includes(ciphertext)) {
+    return { text: CONTACT_PREVIEWS[ciphertext as ContactCode], fromMe }
+  }
   if (messageType === 'consent_request' && (CONSENT_CODES as readonly string[]).includes(ciphertext)) {
     return { text: CONSENT_PREVIEWS[ciphertext as ConsentCode], fromMe }
   }
@@ -81,5 +88,5 @@ async function fetchPreview(match: MatchEntry, uid: string): Promise<ChatPreview
   const partnerKey = typeof partner?.publicKey === 'string' ? partner.publicKey : ''
   // The box key is shared, so the same keys open both sides' messages.
   const text = decryptMessage(ciphertext, nonce, partnerKey, privateKey ?? '')
-  return { text: text ? truncate(text) : '🔒 Encrypted message', fromMe }
+  return { text: text ? truncate(fromMe ? text : maskContact(text)) : '🔒 Encrypted message', fromMe }
 }

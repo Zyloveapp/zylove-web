@@ -69,6 +69,9 @@ export interface Features {
   aiPhotos: number // photos that look AI-generated or deepfaked
   stolenPhotos: number // photos found elsewhere on the web
   countryMismatch: string | null // e.g. "IP: MX · phone: GB · city: US"
+  // T&S Phase 3 (counts only)
+  contactRequests24h: number // "Share contact" requests in the last day
+  contactFastAfterUnlock7d: number // requests within 5 minutes of the chat unlocking, last 7 days
 }
 
 export interface Reason {
@@ -173,6 +176,10 @@ export function scoreFeatures(f: Features, baseline: Baseline | null): { score: 
   if (f.aiPhotos > 0) add('ai_photo', 40, `${plural(f.aiPhotos, 'photo looks', 'photos look')} AI-generated or deepfaked`)
   if (f.stolenPhotos > 0) add('stolen_photo', 40, `${plural(f.stolenPhotos, 'photo appears', 'photos appear')} elsewhere on the web`)
   if (f.countryMismatch) add('country_mismatch', 40, `Signup countries disagree (${f.countryMismatch})`)
+
+  // T&S Phase 3 — contact requests (weak on their own).
+  if (f.contactRequests24h >= 5) add('contact_rush', 20, `Asked ${f.contactRequests24h} matches for contact details within a day`)
+  if (f.contactFastAfterUnlock7d >= 3) add('contact_fast', 15, `Asked for contact details the moment a chat unlocked, ${f.contactFastAfterUnlock7d} times this week`)
 
   // Compared with their own group (only big enough groups).
   if (baseline && baseline.n >= MIN_COHORT) {
@@ -286,6 +293,15 @@ export function featuresOf(input: {
     aiPhotos: num((s.photoFlags as DocumentData | undefined)?.ai),
     stolenPhotos: num((s.photoFlags as DocumentData | undefined)?.stolen),
     countryMismatch: typeof (s.countryMismatch as DocumentData | undefined)?.text === 'string' ? (s.countryMismatch as DocumentData).text : null,
+    ...contactFeatures(s.contactRequests as DocumentData | undefined, now),
+  }
+}
+
+function contactFeatures(c: DocumentData | undefined, now: number): Pick<Features, 'contactRequests24h' | 'contactFastAfterUnlock7d'> {
+  const recent = Array.isArray(c?.recent) ? (c!.recent as { at: number; fast: boolean }[]) : []
+  return {
+    contactRequests24h: recent.filter((r) => now - num(r.at) < DAY_MS).length,
+    contactFastAfterUnlock7d: recent.filter((r) => r.fast && now - num(r.at) < 7 * DAY_MS).length,
   }
 }
 
@@ -484,7 +500,7 @@ export const computeTrustScores = onSchedule(
 )
 
 // Strong signals rescore at once rather than waiting for the night.
-const IMMEDIATE = ['bannedDeviceMatch', 'bannedIpMatch', 'duplicateOpener', 'receivedBlockCount', 'scamTrap', 'photoFlags', 'countryMismatch'] as const
+const IMMEDIATE = ['bannedDeviceMatch', 'bannedIpMatch', 'duplicateOpener', 'receivedBlockCount', 'scamTrap', 'photoFlags', 'countryMismatch', 'contactRequests'] as const
 export const trustOnSignals = onDocumentWritten({ document: 'behaviorSignals/{uid}', memory: '256MiB', timeoutSeconds: 60 }, async (event) => {
   const before = event.data?.before.data() ?? {}
   const after = event.data?.after.data()
