@@ -359,3 +359,21 @@ test('sign-in: the code screen says where to look and offers Resend', async ({ b
   await expect(page.getByText('We sent a new code.')).toBeVisible({ timeout: 20000 })
   await ctx.close()
 })
+
+// ─── Legal notice names only what changed ────────────────────────────────────
+
+test('legal notice: only the Privacy Policy changed since they last saw it → the title says so', async ({ browser }) => {
+  const a = await seedUser('Ann', {}, { legal: { terms: '2026-10-07.2', privacy: '2026-10-07.2' } })
+  const ctx = await browser.newContext(CONTEXT)
+  const page = await ctx.newPage()
+  await offline(page)
+  await quietFirstRun(page, a.uid)
+  await signIn(page, a.phone, { expectPath: /\/discover/ })
+  const notice = page.getByRole('dialog', { name: "We've updated our Privacy Policy" })
+  await expect(notice).toBeVisible({ timeout: 20000 })
+  await expect(notice.getByText(/the updated Privacy Policy applies/)).toBeVisible()
+  await expect(page.getByRole('dialog', { name: /Terms and Privacy/ })).toHaveCount(0)
+  await notice.getByRole('button', { name: 'Got it' }).click()
+  await expect(notice).toBeHidden()
+  await ctx.close()
+})

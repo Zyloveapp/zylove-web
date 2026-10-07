@@ -11,14 +11,15 @@ import { LEGAL_UPDATE, LEGAL_VERSIONS } from '../config/legal'
 // change (Privacy §11, Terms §15). Shown once per version until "Got it",
 // which the server records in users/{uid}/legalAcceptance/notice. Anyone who
 // accepted the current versions at onboarding (legalAcceptance/main) never
-// sees it.
-function isCurrent(d: Record<string, unknown> | undefined): boolean {
-  return d?.termsVersion === LEGAL_VERSIONS.terms && d?.privacyVersion === LEGAL_VERSIONS.privacy
-}
+// sees it. The title names only what changed since they last saw it.
+type Due = { uid: string; terms: boolean; privacy: boolean }
+
+const TITLE = (d: Due) =>
+  d.terms && d.privacy ? "We've updated our Terms and Privacy Policy" : d.terms ? "We've updated our Terms" : "We've updated our Privacy Policy"
 
 export default function LegalUpdateNotice() {
   const uid = useAuthStore((s) => s.user?.uid) ?? null
-  const [due, setDue] = useState<string | null>(null)
+  const [due, setDue] = useState<Due | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -27,7 +28,11 @@ export default function LegalUpdateNotice() {
     const ref = (id: string) => doc(db, 'users', uid, 'legalAcceptance', id)
     Promise.all([getDoc(ref('main')), getDoc(ref('notice'))])
       .then(([main, notice]) => {
-        if (!cancelled && !isCurrent(main.data()) && !isCurrent(notice.data())) setDue(uid)
+        const seen = (field: 'termsVersion' | 'privacyVersion', version: string) =>
+          main.data()?.[field] === version || notice.data()?.[field] === version
+        const terms = !seen('termsVersion', LEGAL_VERSIONS.terms)
+        const privacy = !seen('privacyVersion', LEGAL_VERSIONS.privacy)
+        if (!cancelled && (terms || privacy)) setDue({ uid, terms, privacy })
       })
       // Unreadable: try again next time rather than nag now.
       .catch(() => {})
@@ -36,7 +41,7 @@ export default function LegalUpdateNotice() {
     }
   }, [uid])
 
-  if (!uid || due !== uid) return null
+  if (!uid || due?.uid !== uid) return null
 
   async function acknowledge() {
     setBusy(true)
@@ -55,7 +60,7 @@ export default function LegalUpdateNotice() {
     >
       <div className="w-full rounded-t-2xl border border-[#1B4FD8]/40 bg-gray-900 px-6 pt-6 text-white pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] lg:max-w-md lg:rounded-2xl lg:pb-6">
         <h2 id="legal-update-title" className="text-xl font-bold">
-          We've updated our Terms and Privacy Policy
+          {TITLE(due)}
         </h2>
         <p className="mt-2 text-sm text-white/60">Updated {LEGAL_UPDATE.updated}. What changed:</p>
         <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-white/80">
@@ -76,7 +81,7 @@ export default function LegalUpdateNotice() {
           <Link to="/sms-terms" target="_blank" rel="noreferrer" className="text-[#7C9BFF] underline hover:text-white">
             SMS Terms
           </Link>
-          . If you keep using Zylove from {LEGAL_UPDATE.effective}, the updated Terms apply. If you don't agree, you can delete
+          . If you keep using Zylove from {LEGAL_UPDATE.effective}, {due.terms ? 'the updated Terms apply' : 'the updated Privacy Policy applies'}. If you don't agree, you can delete
           your account in Settings.
         </p>
         <button
