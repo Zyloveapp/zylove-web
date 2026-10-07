@@ -191,7 +191,8 @@ function milesBetween(a: DocumentData, b: DocumentData): number | null {
     : null
 }
 
-const PLAY_CARD_FIELDS = ['age', 'genderIdentity', 'pronouns', 'locationLabel', 'verificationStatus', 'isFounder', 'founderBadge', 'founderCity', 'zyloveScoreTier', 'heightCm']
+// T&S Phase 2: "Member since" and the reply band show on Play cards too.
+const PLAY_CARD_FIELDS = ['age', 'genderIdentity', 'pronouns', 'locationLabel', 'verificationStatus', 'isFounder', 'founderBadge', 'founderCity', 'zyloveScoreTier', 'heightCm', 'memberSince', 'replyBand']
 function pickPlayCardFields(profile: DocumentData): DocumentData {
   return Object.fromEntries(PLAY_CARD_FIELDS.filter((f) => profile[f] !== undefined).map((f) => [f, profile[f]]))
 }

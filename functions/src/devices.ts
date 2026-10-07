@@ -5,6 +5,7 @@ import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
 import { FieldValue, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { clientIp } from './legal'
+import { recordCountryCheck } from './geo'
 const isBotUid = (uid: string): boolean => /^(zbot|seed)-/.test(uid)
 
 // T&S Phase 1 — device and network signals.
@@ -72,6 +73,8 @@ export const recordDevice = onCall(
       if (net) values.push(['net', net])
     }
     await recordSightings(uid, values.map(([kind, v]) => ({ kind, hash: hashValue(kind, v) })), ua)
+    // T&S Phase 2: the account's signup country, once (country only).
+    await recordCountryCheck(uid, ip).catch((err: unknown) => logger.warn('recordDevice: country check failed', { message: err instanceof Error ? err.message : String(err) }))
     return { ok: true }
   },
 )

@@ -5,7 +5,7 @@ import { audit, requireAdminAudited } from './audit'
 import { linkedAccounts } from './devices'
 import { refreshEntry } from './explore'
 import { FLAG_RETENTION_MS, type Features, type Reason } from './trustScore'
-import { suspendAccount } from './reports'
+import { liftSuspension, suspendAccount } from './reports'
 import { isAdminUid } from './userData'
 
 // T&S Phase 1 — the admin trust dashboard (/admin/trust) and user directory.
@@ -75,7 +75,7 @@ export const adminTrustQueue = onCall({ timeoutSeconds: 60, memory: '256MiB', in
 export const adminTrustDetail = onCall({ timeoutSeconds: 60, memory: '256MiB', invoker: 'public' }, async (request) => {
   const uid = uidArg(request.data)
   await requireAdminAudited(request.auth, { action: 'trust.detail', target: uid })
-  const [profile, flag, root, internal, signals, reports, history, linked] = await Promise.all([
+  const [profile, flag, root, internal, signals, reports, history, linked, traps, photoSignals] = await Promise.all([
     db().doc(`trustProfiles/${uid}`).get(),
     db().doc(`trustFlags/${uid}`).get(),
     db().doc(`users/${uid}`).get(),
@@ -84,6 +84,8 @@ export const adminTrustDetail = onCall({ timeoutSeconds: 60, memory: '256MiB', i
     db().collection('reports').where('reportedUid', '==', uid).get(),
     db().collection('adminAudit').where('target', '==', uid).orderBy('at', 'desc').limit(25).get(),
     linkedAccounts(uid),
+    db().collection('scamTrapHits').where('uid', '==', uid).get(),
+    db().doc(`photoSignals/${uid}`).get(),
   ])
   if (!root.exists) throw new HttpsError('not-found', 'No such account.')
   const p = profile.data()
@@ -115,6 +117,21 @@ export const adminTrustDetail = onCall({ timeoutSeconds: 60, memory: '256MiB', i
     visibilityReduced: n.visibilityReduced === true,
     suspended: n.isSuspended === true,
     suspendedUntil: ms(n.suspendedUntil),
+    // T&S Phase 2
+    suspendedPendingReview: n.suspendedPendingReview === true,
+    suspendSource: str(n.suspendSource) || null,
+    countryCheck: n.countryCheck ? { ip: n.countryCheck.ip ?? null, phone: n.countryCheck.phone ?? null, city: n.countryCheck.city ?? null } : null,
+    // What they sent curated profiles that matched scam patterns (excerpts only).
+    scamTraps: traps.docs
+      .map((d) => ({ hits: (d.get('hits') ?? []) as string[], excerpt: str(d.get('excerpt')), at: ms(d.get('at')) }))
+      .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
+      .slice(0, 20),
+    photoChecks: Object.values((photoSignals.data()?.photos ?? {}) as Record<string, DocumentData>).map((ph) => ({
+      path: str(ph.path),
+      ai: typeof ph.ai === 'number' ? ph.ai : null,
+      deepfake: typeof ph.deepfake === 'number' ? ph.deepfake : null,
+      web: ph.web ? { full: Number(ph.web.full ?? 0), pages: Number(ph.web.pages ?? 0), sample: (ph.web.sample ?? []) as string[] } : null,
+    })),
     score: p?.score ?? null,
     reasons: (p?.reasons ?? []) as Reason[],
     features: (p?.features ?? null) as Features | null,
@@ -160,12 +177,12 @@ export const adminViewProfile = onCall({ timeoutSeconds: 30, memory: '256MiB', i
   }
 })
 
-const TRUST_ACTIONS = ['dismiss', 'reduce_visibility', 'restore_visibility', 'suspend'] as const
+const TRUST_ACTIONS = ['dismiss', 'reduce_visibility', 'restore_visibility', 'suspend', 'lift_suspension'] as const
 type TrustAction = (typeof TRUST_ACTIONS)[number]
 const SUSPEND_DAYS = [30, 60, 90]
 
-// Dismiss the flag, reduce or restore visibility, or suspend — each with a
-// reason, logged. (Selfie verification requests wait for item 9.)
+// Dismiss the flag, reduce or restore visibility, suspend or lift a
+// suspension — each with a reason, logged. (Selfie verification requests wait for item 9.)
 export const adminTrustAction = onCall({ timeoutSeconds: 60, memory: '256MiB', invoker: 'public' }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
   const data = (request.data ?? {}) as Record<string, unknown>
@@ -219,6 +236,13 @@ export const adminTrustAction = onCall({ timeoutSeconds: 60, memory: '256MiB', i
       await suspendAccount(uid, days, adminUid, 'trust')
       await refreshEntry(uid)
       if ((await flagRef.get()).exists) await close('actioned')
+      break
+    // T&S Phase 2: e.g. an automatic scam suspension that review cleared.
+    case 'lift_suspension':
+      if ((await db().doc(`userInternal/${uid}`).get()).data()?.isSuspended !== true) throw new HttpsError('failed-precondition', 'Not suspended.')
+      await liftSuspension(uid)
+      await refreshEntry(uid)
+      if ((await flagRef.get()).exists) await close('dismissed')
       break
   }
   return { ok: true }

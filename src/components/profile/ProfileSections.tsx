@@ -5,6 +5,7 @@ import { cmToFeetInches } from '../../types/profile'
 import HowIOperate from './HowIOperate'
 import { goDeeperAnswers } from './goDeeper'
 import TierBadge, { badgeTier, type BadgeTier } from '../TierBadge'
+import TrustLine from '../TrustLine'
 import FounderBadge from '../FounderBadge'
 import DistanceLabel from '../DistanceLabel'
 import { useAuthStore } from '../../store/authStore'
@@ -139,6 +140,7 @@ export function ProfileHeader({ profile: p, nameFallback }: { profile: DiscoverP
           <FounderBadge profile={p} />
         </div>
       )}
+      <TrustLine profile={p as Record<string, unknown>} className="mt-2" />
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-white/60">
         <DistanceLabel profile={p} />
         {typeof p.heightCm === 'number' && p.heightCm > 0 && <span>📏 {cmToFeetInches(p.heightCm)}</span>}

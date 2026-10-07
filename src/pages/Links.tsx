@@ -8,6 +8,8 @@ import ChatView from '../components/chat/ChatView'
 import NoMatches from '../components/matches/NoMatches'
 import IgnitedRow from '../components/matches/IgnitedRow'
 import LockedPlayConnections from '../components/matches/LockedPlayConnections'
+import SafetyTipsCard from '../components/matches/SafetyTipsCard'
+import { isBotUid } from '../services/zyloveScore'
 import {
   hasMessages,
   isUnread,
@@ -113,6 +115,8 @@ export default function Links() {
 
   return (
     <div className="flex h-[calc(100dvh-7rem)] lg:h-[calc(100dvh-7.5rem)] bg-gray-950 text-white">
+      {/* T&S Phase 2: safety tips, once, at the first match with a real member. */}
+      <SafetyTipsCard uid={uid} firstMatch={matches.some((m) => !m.ended && !isBotUid(m.partnerUid))} />
       <aside
         className={`w-full shrink-0 flex-col border-white/10 lg:flex lg:w-80 lg:border-r ${active ? 'hidden' : 'flex'}`}
       >

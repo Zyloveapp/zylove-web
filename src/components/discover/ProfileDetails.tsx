@@ -4,6 +4,7 @@ import { displayAge, type DiscoverProfile } from '../../services/discover'
 import type { Mode } from '../../store/modeStore'
 import CompatibilityBlock from './CompatibilityBlock'
 import TierBadge from '../TierBadge'
+import TrustLine from '../TrustLine'
 import FounderBadge from '../FounderBadge'
 import DistanceLabel from '../DistanceLabel'
 import { PlayDetailsBody } from '../profile/PlayProfileSections'
@@ -90,6 +91,7 @@ export default function ProfileDetails({
               <FounderBadge profile={profile} />
               <TierBadge tier={(profile as Record<string, unknown>).zyloveScoreTier} />
             </div>
+            <TrustLine profile={profile as Record<string, unknown>} className="mt-2" />
             <DistanceLabel profile={profile} prefix="" className="mt-1 block text-sm text-white/40" />
           </>
         )}

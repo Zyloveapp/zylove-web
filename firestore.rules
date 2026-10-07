@@ -163,7 +163,10 @@ service cloud.firestore {
         'founderLastActiveAt', 'founderWarningSentAt', 'founderThreadMeta',
         // T&S Phase 1: account age comes from Firebase Auth, written by the
         // server ("Member since"; createdAt is the client's and can't be trusted)
-        'memberSince', 'accountCreatedAt'
+        'memberSince', 'accountCreatedAt',
+        // T&S Phase 2: the reply band ("Usually replies") and, for a new
+        // account's first 48 hours, when that ends (links note)
+        'replyBand', 'newUntil'
       ];
     }
 
@@ -252,14 +255,16 @@ service cloud.firestore {
 
       // The owner's preferences: texts and AI photo coaching. These keys only.
       function settingsKeys() {
-        return ['smsNotificationsEnabled', 'smsNotifications', 'smsQuietHours', 'photoAnalysisConsent'];
+        return ['smsNotificationsEnabled', 'smsNotifications', 'smsQuietHours', 'photoAnalysisConsent', 'safetyTipsSeenAt'];
       }
       function validSettings(d) {
         return d.keys().hasOnly(settingsKeys())
             && (!('smsNotificationsEnabled' in d) || d.smsNotificationsEnabled is map || d.smsNotificationsEnabled is bool)
             && (!('smsNotifications' in d) || d.smsNotifications is map)
             && (!('smsQuietHours' in d) || d.smsQuietHours is map)
-            && (!('photoAnalysisConsent' in d) || d.photoAnalysisConsent is map);
+            && (!('photoAnalysisConsent' in d) || d.photoAnalysisConsent is map)
+            // T&S Phase 2: when the first-match safety card was seen (ms).
+            && (!('safetyTipsSeenAt' in d) || d.safetyTipsSeenAt is int);
       }
       match /private/settings {
         allow read: if isSignedIn() && isUser(uid);

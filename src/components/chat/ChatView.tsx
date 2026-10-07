@@ -62,6 +62,10 @@ import VibeCelebration, { CELEBRATION_MS } from './VibeCelebration'
 import { firstChatSeen, firstChatSeenRemotely } from './firstChatSeen'
 import { fetchPublicUserDoc } from '../../services/publicUserDoc'
 import { openerHash } from '../../services/openerHash'
+import { hasLink, looksLikeCode } from '../../services/scamRules'
+import { useAuthStore } from '../../store/authStore'
+import { IncomingSafety } from './ChatSafety'
+import { LINKS_LATER, useCanSendLinks, useSenderTrust } from './useChatSafety'
 import { usePlayIdentity } from '../matches/usePlayIdentity'
 import { useDistanceMiles } from '../DistanceLabel'
 import { friendlyError } from '../../services/errors'
@@ -153,6 +157,12 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   const [showReview, setShowReview] = useState(false)
   const [showActions, setShowActions] = useState(false)
   const [showReport, setShowReport] = useState(false)
+  // T&S Phase 2: "Report" on a scam banner opens the report with Scam chosen.
+  const [reportPreset, setReportPreset] = useState<string[]>([])
+  // A message that looks like a one-time code waits for a second Send.
+  const [confirmCode, setConfirmCode] = useState<string | null>(null)
+  const senderTrust = useSenderTrust(partnerUid, isBotUid(partnerUid))
+  const canSendLinks = useCanSendLinks(uid, useAuthStore((s) => s.user?.metadata.creationTime))
   const offerExitReview = useExitReviewStore((s) => s.offer)
   const [consentState, setConsentState] = useState<{ matchId: string; consent: PhotoConsent | null } | null>(null)
   const [showPhotoBanner, setShowPhotoBanner] = useState(false)
@@ -393,6 +403,18 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   async function handleSend(e?: FormEvent) {
     e?.preventDefault()
     if (!trimmed || tooLong || sending || !canSend) return
+    // T&S Phase 2 (on this device only): no links in an account's first
+    // 48 hours, and a code-like message is sent only on a second Send.
+    if (!isBotUid(partnerUid) && hasLink(trimmed) && !canSendLinks) {
+      setSendError(LINKS_LATER)
+      return
+    }
+    if (!isBotUid(partnerUid) && looksLikeCode(trimmed) && confirmCode !== trimmed) {
+      setConfirmCode(trimmed)
+      setSendError(null)
+      return
+    }
+    setConfirmCode(null)
     const sent = trimmed
     setSending(true)
     setSendError(null)
@@ -621,6 +643,18 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
               const own = m.senderId === uid
               const body =
                 m.messageType === 'photo' ? "📷 Photo — can't be shown here" : m.text
+              const safety =
+                !own && !botChat && m.messageType === 'text' ? (
+                  <IncomingSafety
+                    text={m.text}
+                    sentAt={m.sentAt}
+                    sender={senderTrust}
+                    onReport={() => {
+                      setReportPreset(['scam'])
+                      setShowReport(true)
+                    }}
+                  />
+                ) : null
               return (
                 <div key={m.id} className={`flex flex-col ${own ? 'items-end' : 'items-start'}`}>
                   <div
@@ -630,6 +664,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
                   >
                     {body}
                   </div>
+                  {safety}
                   <span className="mt-1 text-xs text-white/30">
                     {messageTime(m.sentAt)}
                     {m.id === lastReadOwnId && ' · Read'}
@@ -765,6 +800,12 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
           </div>
         )}
         {sendError && <p className="mb-2 text-center text-sm text-red-400">{sendError}</p>}
+        {confirmCode !== null && confirmCode === trimmed && (
+          <p role="alert" className="mb-2 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-center text-sm text-red-200">
+            🛡 This looks like a verification code. Never share codes — anyone asking for one is trying to get into an account. Tap
+            Send again only if you're sure.
+          </p>
+        )}
         {!online && !match.ended && (
           <p className="mb-2 text-center text-sm text-amber-200/80" role="status">
             You're offline. Messages you send will go out when you reconnect — keep this tab open.
@@ -871,6 +912,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
             humanPartner === partnerUid
               ? () => {
                   setShowActions(false)
+                  setReportPreset([])
                   setShowReport(true)
                 }
               : undefined
@@ -931,7 +973,15 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
       )}
 
       {showReport && (
-        <ReportModal mode={match.mode} matchId={matchId} generation={match.startedAt} partnerUid={partnerUid} name={match.name} onClose={() => setShowReport(false)} />
+        <ReportModal
+          mode={match.mode}
+          matchId={matchId}
+          generation={match.startedAt}
+          partnerUid={partnerUid}
+          name={match.name}
+          initialCategories={reportPreset}
+          onClose={() => setShowReport(false)}
+        />
       )}
 
       {showReview && (

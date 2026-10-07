@@ -8,14 +8,14 @@ import {
   type ModerateAction,
   type ReportedUser,
 } from '../../services/adminReports'
-import { REVIEW_CATEGORY_DEFS } from '../../types/reviewCategories'
+import { REPORT_ONLY_CATEGORY_DEFS, REVIEW_CATEGORY_DEFS } from '../../types/reviewCategories'
 import StoredImg from '../../components/StoredImg'
 
 // /admin/reports: everyone reported, urgent first, with the moderation
 // actions; and a "good actors" tab for thank-you notes. Reporter identities
 // are never shown (the server returns counts only).
 
-const LABELS = new Map(REVIEW_CATEGORY_DEFS.map((c) => [c.id, `${c.emoji} ${c.label}`]))
+const LABELS = new Map([...REVIEW_CATEGORY_DEFS, ...REPORT_ONLY_CATEGORY_DEFS].map((c) => [c.id, `${c.emoji} ${c.label}`]))
 const label = (id: string) => LABELS.get(id) ?? id.replace(/_/g, ' ')
 
 const fmtDate = (ms: number | null) =>

@@ -281,6 +281,8 @@ export async function clearPrivateData(uid: string): Promise<void> {
     // T&S Phase 1: device sightings and the account's trust profile.
     removeDeviceData(uid),
     db().doc(`trustProfiles/${uid}`).delete(),
+    // T&S Phase 2: AI / web-match results for its photos.
+    db().doc(`photoSignals/${uid}`).delete(),
   ])
 }
 

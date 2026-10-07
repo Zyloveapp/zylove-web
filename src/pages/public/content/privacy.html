@@ -112,6 +112,22 @@
               <td><strong>Behaviour-based safety checks</strong></td>
               <td>Counts and timing of how you use Zylove — for example how often you like, pass or choose "maybe", how quickly you swipe, how many conversations you start and how often they get replies, unmatches, reports and blocks. <strong>Never the content of your messages.</strong> When you send the first message in a chat, your device also sends a one-way fingerprint (hash) of it, so we can spot the same opener pasted to many people; the message can't be recovered from it, and we keep it for 14 days. These signals produce a safety score compared with similar members. A high score is reviewed by a person — it never bans anyone automatically.</td>
             </tr>
+            <tr>
+              <td><strong>Signup country</strong></td>
+              <td>When you first use Zylove, we look up which country your IP address is in and which country your phone number belongs to. The IP lookup uses MaxMind's GeoLite2 database on our own servers — your address isn't sent to MaxMind. We keep only the two country codes, never the address. If they disagree with each other or with your city, a person reviews the account.</td>
+            </tr>
+            <tr>
+              <td><strong>On-device message checks</strong></td>
+              <td>Your device checks the messages you receive for common scam patterns — requests for money, gift cards or a verification code, or pressure to move to another app — and shows you a safety note. This happens only on your device; nothing about your messages is sent to us. During an account's first 48 hours it can't send links, and a link it sent shows the recipient a safety note; for that, your public profile records when your first 48 hours end (to the hour). Founding members are exempt.</td>
+            </tr>
+            <tr>
+              <td><strong>Messages to Zylove curated profiles</strong></td>
+              <td>During a city's launch, some profiles are Zylove curated profiles (see our Terms, section 2.4). Messages you send them are not end-to-end encrypted, and they are checked for the same scam patterns. If one matches, we keep only the matching excerpt (at most 200 characters) for 90 days, for a person to review.</td>
+            </tr>
+            <tr>
+              <td><strong>Photo checks</strong></td>
+              <td>Your profile photos are checked for signs of being AI-generated or deepfaked (Sightengine), and searched for on public web pages to find stolen photos (Google Cloud Vision). A match only sends the account to a person for review — it never removes a photo or an account by itself. The results are kept with your account and deleted with it.</td>
+            </tr>
           </tbody>
         </table>
         <h3>Biometric data</h3>
@@ -141,6 +157,8 @@
           <li>Run our behavioral reputation system — users who treat people well are rewarded</li>
           <li>Review accounts flagged by our safety checks. A person reviews every flag, and any action is graduated — for example showing a profile less often in Explore while it's reviewed, or a suspension</li>
           <li>Recognize accounts used from the same device, or from a device used by a banned account</li>
+          <li>Suspend an account until a person reviews it when two people report it as a scam within 30 days — only if those two accounts are each at least 48 hours old and not linked to each other by device or network. This is never a ban</li>
+          <li>In cities where we turn it on, limit likes and chat photos during a new account's first week</li>
           <li>Verify age (18+) before granting access to the platform</li>
         </ul>
         <h3>To power AI features</h3>
@@ -210,7 +228,17 @@
             <tr>
               <td><strong>Sightengine</strong></td>
               <td>Sightengine SAS</td>
-              <td>Profile photos for content moderation (nudity, gore, offensive content detection)</td>
+              <td>Profile photos for content moderation (nudity, gore, offensive content detection) and AI-generated / deepfake detection</td>
+            </tr>
+            <tr>
+              <td><strong>Google Cloud Vision</strong></td>
+              <td>Google LLC</td>
+              <td>Profile photos, to find copies of them on public web pages (stolen-photo check)</td>
+            </tr>
+            <tr>
+              <td><strong>MaxMind GeoLite2</strong></td>
+              <td>MaxMind, Inc.</td>
+              <td>Nothing is sent: we use their country database on our own servers to find the country of an IP address. This product includes GeoLite2 data created by MaxMind, available from <a href="https://www.maxmind.com">https://www.maxmind.com</a>.</td>
             </tr>
             <tr>
               <td><strong>Twilio</strong></td>
@@ -239,6 +267,9 @@
         <h3>With other users</h3>
         <p>
           Your public profile — name, age, photos, bio, intent, and any lifestyle data you choose to show — is visible to other Zylove users in discovery and on your profile. You control visibility toggles for most fields.
+        </p>
+        <p>
+          Your profile also shows the month you joined ("Member since") and, once at least 5 people have messaged you first, "Usually replies" if you answer most of them. We never show a reply percentage.
         </p>
         <p>
           Your phone number, exact location, email address, and sensitive attributes (religion, politics) are <strong>never shown</strong> to other users unless you voluntarily include them in your bio.
@@ -301,6 +332,9 @@
           <li>First-message fingerprints: 14 days</li>
           <li>A reported chat kept for the reporter: 30 days after the chat ends</li>
           <li>Records of what our team views and does on accounts: 2 years. Every view, download and action by our team is logged</li>
+          <li>Signup country (country codes only): as long as your account exists</li>
+          <li>Excerpts of scam-like messages sent to Zylove curated profiles: 90 days</li>
+          <li>Photo check results: deleted with your account</li>
           <li>Anonymized, aggregated data may be retained indefinitely for product improvement</li>
         </ul>
         <p>

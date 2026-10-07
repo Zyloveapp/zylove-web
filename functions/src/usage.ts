@@ -2,6 +2,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { getFirestore } from 'firebase-admin/firestore'
 import { recordCapHit } from './trustSignals'
 import { tierNow, type Tier } from './entitlements'
+import { probationOf } from './probation'
 
 // Stage C: every paid or limited feature's allowance, per tier, enforced
 // here — the app only shows what's left (getUsage). Periods are calendar
@@ -65,9 +66,19 @@ const LIMIT_TEXT: Record<Period, string> = { day: 'today', week: 'this week', mo
 
 // Takes one use of `feature` for `uid` (or refuses), returning a refund for
 // when the thing it paid for didn't happen.
+// T&S Phase 2: a new account in a city with probation on gets fewer likes
+// a day, whatever the plan (no upgrade prompt for that cap).
+async function allowanceFor(uid: string, feature: Feature, t: Tier): Promise<{ rule: Allowance; probation: boolean }> {
+  const rule: Allowance = QUOTAS[feature][t]
+  if (feature !== 'likes') return { rule, probation: false }
+  const p = await probationOf(uid)
+  if (!p || (rule.max !== null && rule.max <= p.likesPerDay)) return { rule, probation: false }
+  return { rule: { max: p.likesPerDay, period: 'day' }, probation: true }
+}
+
 export async function takeQuota(uid: string, feature: Feature, tier?: Tier): Promise<() => Promise<void>> {
   const t = tier ?? (await tierNow(uid))
-  const rule: Allowance = QUOTAS[feature][t]
+  const { rule, probation } = await allowanceFor(uid, feature, t)
   if (rule.max === 0) throw new HttpsError('permission-denied', 'Not included in your plan.', { upgrade: t === 'free' ? 'spark_plus' : 'elite' })
   const key = periodKey(rule.period)
   await db().runTransaction(async (tx) => {
@@ -77,7 +88,7 @@ export async function takeQuota(uid: string, feature: Feature, tier?: Tier): Pro
       // T&S Phase 1: hitting the like cap is a behaviour signal.
       if (feature === 'likes') void recordCapHit(uid)
       throw new HttpsError('resource-exhausted', `You've used all ${rule.max} ${LIMIT_TEXT[rule.period] === 'on your plan' ? 'included in your plan' : `for ${LIMIT_TEXT[rule.period]}`}.`, {
-        upgrade: t === 'elite' ? null : t === 'free' ? 'spark_plus' : 'elite',
+        upgrade: probation || t === 'elite' ? null : t === 'free' ? 'spark_plus' : 'elite',
       })
     }
     const next: Record<string, number> = { life: (cur.life ?? 0) + 1 }
@@ -104,7 +115,7 @@ export const getUsage = onCall({ timeoutSeconds: 15, invoker: 'public' }, async 
   const [tier, snap] = await Promise.all([tierNow(uid), usageRef(uid).get()])
   const out: Record<string, { used: number; limit: number | null; period: Period }> = {}
   for (const f of Object.keys(QUOTAS) as Feature[]) {
-    const rule: Allowance = QUOTAS[f][tier]
+    const { rule } = await allowanceFor(uid, f, tier)
     const cur = (snap.get(f) ?? {}) as Record<string, number>
     out[f] = { used: cur[periodKey(rule.period)] ?? 0, limit: rule.max, period: rule.period }
   }

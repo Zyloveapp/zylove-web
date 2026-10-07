@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import ProbationPanel from '../../components/admin/ProbationPanel'
 import { cityStats, type CityRow, type CityStats } from '../../services/adminTools'
 
 const REFRESH_MS = 60_000
@@ -119,6 +120,7 @@ export default function AdminCities() {
           location; bots excluded.
         </p>
       )}
+      <ProbationPanel />
     </div>
   )
 }

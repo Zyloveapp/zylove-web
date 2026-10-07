@@ -18,6 +18,13 @@ import {
 // (dismiss, reduce visibility, suspend), each with a reason. A directory
 // tab searches by name, user id or phone. Everything here is audit-logged.
 
+const hostOf = (u: string) => {
+  try {
+    return new URL(u).hostname
+  } catch {
+    return 'link'
+  }
+}
 const fmtDate = (ms: number | null) =>
   ms === null ? '—' : new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 
@@ -92,6 +99,7 @@ const ACTIONS: { id: TrustAction; label: string; tone: string }[] = [
   { id: 'reduce_visibility', label: 'Reduce visibility', tone: 'bg-white/15' },
   { id: 'restore_visibility', label: 'Restore visibility', tone: 'bg-white/10' },
   { id: 'suspend', label: 'Suspend', tone: 'bg-amber-600' },
+  { id: 'lift_suspension', label: 'Lift suspension', tone: 'bg-emerald-700' },
 ]
 
 function Detail({ uid, onClose, onChanged }: { uid: string; onClose: () => void; onChanged: () => void }) {
@@ -150,7 +158,7 @@ function Detail({ uid, onClose, onChanged }: { uid: string; onClose: () => void;
         >
           View profile (logged)
         </button>
-        {ACTIONS.filter((a) => (a.id === 'restore_visibility' ? d.visibilityReduced : a.id === 'reduce_visibility' ? !d.visibilityReduced : a.id === 'dismiss' ? d.flag?.status === 'open' : !d.suspended)).map((a) => (
+        {ACTIONS.filter((a) => (a.id === 'restore_visibility' ? d.visibilityReduced : a.id === 'reduce_visibility' ? !d.visibilityReduced : a.id === 'dismiss' ? d.flag?.status === 'open' : a.id === 'lift_suspension' ? d.suspended : !d.suspended)).map((a) => (
           <button key={a.id} type="button" onClick={() => setPending(a.id)} className={`rounded-lg px-3 py-1.5 text-sm ${a.tone} hover:opacity-90`}>
             {a.label}
           </button>
@@ -236,6 +244,54 @@ function Detail({ uid, onClose, onChanged }: { uid: string; onClose: () => void;
           <p className="text-sm text-white/50">None in the last 90 days.</p>
         )}
       </section>
+
+      {d.suspendedPendingReview && (
+        <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          Suspended {d.suspendSource === 'auto_scam' ? 'automatically after scam reports from unlinked accounts' : ''} — pending your
+          review. Suspend for 30/60/90 days to confirm, or lift the suspension.
+        </p>
+      )}
+
+      {d.scamTraps.length > 0 && (
+        <section>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/40">Sent to curated profiles (scam patterns)</h3>
+          <ul className="space-y-2">
+            {d.scamTraps.map((t, i) => (
+              <li key={i} className="rounded-lg bg-white/5 px-3 py-2 text-sm">
+                <span className="text-white/40">
+                  {fmtDate(t.at)} · {t.hits.join(', ')}
+                </span>
+                <span className="mt-1 block italic text-white/80">“{t.excerpt}”</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {d.photoChecks.length > 0 && (
+        <section>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/40">Photo checks (AI-generated · found on the web)</h3>
+          <ul className="space-y-1 text-sm">
+            {d.photoChecks.map((p) => (
+              <li key={p.path}>
+                AI {p.ai === null ? '—' : `${Math.round(p.ai * 100)}%`} · deepfake {p.deepfake === null ? '—' : `${Math.round(p.deepfake * 100)}%`} ·{' '}
+                {p.web === null ? 'web not checked' : `${p.web.full} copies on ${p.web.pages} pages`}
+                {p.web?.sample.map((u) => (
+                  <a key={u} href={u} target="_blank" rel="noreferrer noopener" className="ml-2 text-[#7C9BFF] underline">
+                    {hostOf(u)}
+                  </a>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {d.countryCheck && (
+        <p className="text-sm text-white/50">
+          Signup country — IP: {d.countryCheck.ip ?? 'unknown'} · phone: {d.countryCheck.phone ?? 'unknown'} · city: {d.countryCheck.city ?? 'unknown'}
+        </p>
+      )}
 
       <section>
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/40">Reports and blocks</h3>

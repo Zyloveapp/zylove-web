@@ -71,6 +71,7 @@ import {
   REVIEW_TONE,
 } from './shared/reviewCategories'
 import { updateSearchName } from './searchName'
+import { NEW_ACCOUNT_MS } from './shared/scamRules'
 import { PLAY_PROMPTS, SPARK_PROMPTS, UNIVERSAL_PROMPTS } from './shared/profile'
 
 initializeApp()
@@ -390,6 +391,13 @@ export const initUserDefaults = onCall(
         if (typeof internal.accountCreatedAt !== 'number') missingInternal.accountCreatedAt = created
         if (typeof data.memberSince !== 'string') missing.memberSince = memberSinceOf(created)
       }
+    }
+    // T&S Phase 2: while an account is under 48 hours old, its profile says
+    // until when (to the hour), so a recipient's app can put a safety note on
+    // links it sent then. Older accounts never get the field.
+    const createdAt = typeof internal.accountCreatedAt === 'number' ? internal.accountCreatedAt : (missingInternal.accountCreatedAt as number | undefined)
+    if (typeof data.newUntil !== 'number' && typeof createdAt === 'number' && Date.now() < createdAt + NEW_ACCOUNT_MS) {
+      missing.newUntil = Math.ceil((createdAt + NEW_ACCOUNT_MS) / 3_600_000) * 3_600_000
     }
     // T&S Phase 1: the admin directory's name index.
     if (typeof data.displayName === 'string' && internal.searchName !== data.displayName.trim().toLowerCase()) {
@@ -2179,3 +2187,7 @@ export { purgeOpenerHashes, trustOnMessage } from './trustSignals'
 export { purgeDeviceSightings, recordDevice } from './devices'
 export { computeTrustScores, trustOnSignals } from './trustScore'
 export { adminSearchUsers, adminTrustAction, adminTrustDetail, adminTrustQueue, adminViewProfile } from './trustAdmin'
+// T&S Phase 2: anti-scam.
+export { purgeScamTraps } from './scamTraps'
+export { refreshGeoDb } from './geo'
+export { adminGetProbation, adminSetProbation } from './probation'

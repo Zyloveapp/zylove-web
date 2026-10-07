@@ -47,9 +47,15 @@ export interface TrustDetail {
   reports: { total: number; reporters: number; urgent: number; pending: number; byCategory: Record<string, number> }
   blocksReceived: number
   history: { action: string; actor: string; reason: string | null; at: number | null }[]
+  // T&S Phase 2
+  suspendedPendingReview: boolean
+  suspendSource: string | null
+  countryCheck: { ip: string | null; phone: string | null; city: string | null } | null
+  scamTraps: { hits: string[]; excerpt: string; at: number | null }[]
+  photoChecks: { path: string; ai: number | null; deepfake: number | null; web: { full: number; pages: number; sample: string[] } | null }[]
 }
 
-export type TrustAction = 'dismiss' | 'reduce_visibility' | 'restore_visibility' | 'suspend'
+export type TrustAction = 'dismiss' | 'reduce_visibility' | 'restore_visibility' | 'suspend' | 'lift_suspension'
 
 const call = <Req, Res>(name: string) => (data: Req) => httpsCallable<Req, Res>(functions, name)(data).then((r) => r.data)
 
@@ -60,3 +66,15 @@ export const viewProfile = (uid: string) =>
 export const trustAction = (uid: string, action: TrustAction, reason: string, days?: number) =>
   call<{ uid: string; action: TrustAction; reason: string; days?: number }, { ok: true }>('adminTrustAction')({ uid, action, reason, ...(days ? { days } : {}) })
 export const searchUsers = (q: string) => call<{ q: string }, { results: TrustSummary[] }>('adminSearchUsers')({ q })
+
+// T&S Phase 2: the per-city probation switch (server-only, off by default).
+export interface ProbationCity {
+  cityId: string
+  name: string
+  enabled: boolean
+  days: number
+  likesPerDay: number
+}
+export const getProbation = () => call<Record<string, never>, { cities: ProbationCity[] }>('adminGetProbation')({})
+export const setProbation = (cityId: string, enabled: boolean, reason: string) =>
+  call<{ cityId: string; enabled: boolean; reason: string }, { ok: true }>('adminSetProbation')({ cityId, enabled, reason })

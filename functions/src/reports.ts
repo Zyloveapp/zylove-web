@@ -9,8 +9,10 @@
 //     and a reportCount past onBeforeSignIn's threshold, so the number can
 //     never sign in or create an account again.
 //
-// Nothing is automatic: a report only queues. No thresholds, no blocks, no
-// suspensions — every action on an account is an admin's, from the dashboard.
+// Nothing is automatic, with one exception: a report only queues, and every
+// action on an account is an admin's, from the dashboard — except that 2
+// "scam" reports within 30 days from unlinked accounts at least 48h old
+// suspend the account pending an admin's review (scamReports.ts; never a ban).
 //
 // Admins work the queue from /admin/reports (adminGetReports, adminModerate).
 // Reporter identities never leave the server.
@@ -21,7 +23,8 @@ import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
-import { REVIEW_TONE } from './shared/reviewCategories'
+import { REPORT_ONLY_IDS, REVIEW_TONE } from './shared/reviewCategories'
+import { checkScamSuspension } from './scamReports'
 import { SMS_SECRETS, textAccount } from './sms'
 import { phoneHash, wereMatched } from './trust'
 import { softDeleteAccount } from './adminActivity'
@@ -88,7 +91,7 @@ export async function recordReport(input: {
   if (reportedUid === reporterUid) throw new HttpsError('invalid-argument', "You can't report yourself.")
   const categories = [...new Set(input.categories)]
   if (categories.length === 0) throw new HttpsError('invalid-argument', 'Pick what happened.')
-  if (!categories.every((c) => REVIEW_TONE.get(c) === 'negative')) throw new HttpsError('invalid-argument', 'Unknown report category.')
+  if (!categories.every((c) => REVIEW_TONE.get(c) === 'negative' || REPORT_ONLY_IDS.has(c))) throw new HttpsError('invalid-argument', 'Unknown report category.')
 
   const [reporterSnap, reportedSnap] = await Promise.all([
     db().doc(`users/${reporterUid}`).get(),
@@ -139,6 +142,8 @@ export async function recordReport(input: {
     )
   })
   logger.info('recordReport', { source, categories, urgent: categories.some((c) => URGENT.has(c)) })
+  // T&S Phase 2: enough independent scam reports suspend pending review.
+  if (categories.includes('scam')) await checkScamSuspension(reportedUid)
 
 }
 

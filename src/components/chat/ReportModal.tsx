@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { FirebaseError } from 'firebase/app'
 import { submitReport } from '../../services/safety'
-import { REVIEW_CATEGORY_DEFS } from '../../types/reviewCategories'
+import { REPORT_ONLY_CATEGORY_DEFS, REVIEW_CATEGORY_DEFS } from '../../types/reviewCategories'
 import { useModeStore, type Mode } from '../../store/modeStore'
 
-// Safety first, then the rest of the negative categories.
-const ORDER = ['felt_unsafe', 'aggressive', 'pushed_boundaries', 'inappropriate', 'pressured_me', 'disrespectful']
-const REPORT_CATEGORIES = REVIEW_CATEGORY_DEFS.filter((c) => c.tone === 'negative').sort((a, b) => {
+// Safety first (scam included — T&S Phase 2), then the rest of the negative categories.
+const ORDER = ['felt_unsafe', 'aggressive', 'scam', 'pushed_boundaries', 'inappropriate', 'pressured_me', 'disrespectful']
+const REPORT_CATEGORIES = [...REPORT_ONLY_CATEGORY_DEFS, ...REVIEW_CATEGORY_DEFS.filter((c) => c.tone === 'negative')].sort((a, b) => {
   const ia = ORDER.indexOf(a.id)
   const ib = ORDER.indexOf(b.id)
   return (ia === -1 ? ORDER.length : ia) - (ib === -1 ? ORDER.length : ib)
@@ -30,6 +30,7 @@ export default function ReportModal({
   onClose,
   mode,
   send,
+  initialCategories = [],
 }: {
   matchId: string
   // Which match between these two (MatchEntry.startedAt); 0 if unknown.
@@ -41,10 +42,12 @@ export default function ReportModal({
   mode?: Mode
   // Sends the report another way (a hidden Play connection: by match only).
   send?: (categories: string[]) => Promise<void>
+  // Chosen when it opens (a scam banner's Report: ['scam']).
+  initialCategories?: string[]
 }) {
   const currentMode = useModeStore((s) => s.mode)
   const accentBg = (mode ?? currentMode) === 'play' ? 'bg-[#E03131]' : 'bg-[#1B4FD8]'
-  const [selected, setSelected] = useState<string[]>([])
+  const [selected, setSelected] = useState<string[]>(initialCategories)
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)

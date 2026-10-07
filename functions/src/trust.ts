@@ -7,6 +7,7 @@ import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase
 import { loadPlayName } from './playName'
 import { connectionMode } from './behavior'
 import { setBlocked } from './explore'
+import { probationOf } from './probation'
 
 // Trust & safety: phone-level bans, the caller's blocked list, and
 // server-side photo consent acceptance.
@@ -179,6 +180,12 @@ export const acceptPhotoConsent = onCall(
     const matchId = str(request.data, 'matchId')
     const db = getFirestore()
     const matchRef = db.collection('matches').doc(matchId)
+
+    // T&S Phase 2: no chat photos while either person is on probation.
+    const people = participants((await matchRef.get()).data())
+    if (people.includes(uid) && (await Promise.all(people.map((p) => probationOf(p)))).some((p) => p?.noChatPhotos)) {
+      throw new HttpsError('failed-precondition', 'Photo sharing opens up once both accounts are a little older.')
+    }
 
     const requests = await matchRef.collection('messages').where('ciphertext', '==', 'photo_consent_request').get()
     const latestRequester = requests.docs

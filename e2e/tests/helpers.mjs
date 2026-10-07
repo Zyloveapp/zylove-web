@@ -174,15 +174,17 @@ export async function offline(page) {
 }
 
 // Pre-dismiss first-run modals that aren't under test.
-export async function quietFirstRun(page, uid, { keyBackup = true } = {}) {
+export async function quietFirstRun(page, uid, { keyBackup = true, safetyTips = true } = {}) {
   await page.addInitScript(
-    ([u, kb]) => {
+    ([u, kb, st]) => {
       if (kb) localStorage.setItem(`zylove_keybackup_snooze_${u}`, String(Date.now()))
+      // T&S Phase 2: the first-match safety card (SafetyTipsCard).
+      if (st) localStorage.setItem(`zylove_safety_tips_${u}`, '1')
       sessionStorage.setItem('zylove_early_modal_seen', '1')
       sessionStorage.setItem('zylove_bot_banner_dismissed', '1')
       sessionStorage.setItem('zylove_location_granted', '1')
     },
-    [uid, keyBackup],
+    [uid, keyBackup, safetyTips],
   )
 }
 

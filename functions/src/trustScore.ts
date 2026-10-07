@@ -62,6 +62,13 @@ export interface Features {
   seriousReviewFlags: number // felt_unsafe / aggressive review-threshold hits
   otherReviewFlags: number
   behaviorRiskScore: number
+  // T&S Phase 2
+  scamTrapHits: number // scam-like messages to curated profiles (90 days)
+  scamTrapKinds: string[]
+  scamReporters30d: number // distinct people who reported them as a scam
+  aiPhotos: number // photos that look AI-generated or deepfaked
+  stolenPhotos: number // photos found elsewhere on the web
+  countryMismatch: string | null // e.g. "IP: MX · phone: GB · city: US"
 }
 
 export interface Reason {
@@ -100,6 +107,18 @@ export function baselineOf(rows: Features[]): Baseline {
     stats[f.key] = { median: med, mad: median(xs.map((x) => Math.abs(x - med))), n: xs.length }
   }
   return { n: rows.length, stats }
+}
+
+const SCAM_KIND_TEXT: Record<string, string> = {
+  code: 'asked for a code',
+  giftCard: 'gift cards',
+  moneyRequest: 'asked for money',
+  crypto: 'crypto',
+  offPlatform: 'another messenger',
+  leavingApp: 'leaving the app',
+  investmentPitch: 'investment pitch',
+  overseas: 'overseas story',
+  urgency: 'urgency',
 }
 
 const fmt = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(v < 1 ? 2 : 1))
@@ -146,6 +165,15 @@ export function scoreFeatures(f: Features, baseline: Baseline | null): { score: 
   if (f.photoRejections90d >= 2) add('photo_rejections', 10, `${f.photoRejections90d} photos rejected in moderation`)
   if (f.behaviorRiskScore > 60) add('behavior_risk', 10, `Older behaviour risk score ${Math.round(f.behaviorRiskScore)}`)
 
+  // T&S Phase 2 — anti-scam.
+  if (f.scamTrapHits > 0) {
+    add('scam_trap', 45, `Sent ${plural(f.scamTrapHits, 'scam-like message')} to a curated profile (${f.scamTrapKinds.map((k) => SCAM_KIND_TEXT[k] ?? k).join(', ')})`)
+  }
+  if (f.scamReporters30d > 0) add('scam_reports', f.scamReporters30d >= 2 ? 40 : 20, `Reported as a scam by ${plural(f.scamReporters30d, 'person', 'people')} in 30 days`)
+  if (f.aiPhotos > 0) add('ai_photo', 40, `${plural(f.aiPhotos, 'photo looks', 'photos look')} AI-generated or deepfaked`)
+  if (f.stolenPhotos > 0) add('stolen_photo', 40, `${plural(f.stolenPhotos, 'photo appears', 'photos appear')} elsewhere on the web`)
+  if (f.countryMismatch) add('country_mismatch', 40, `Signup countries disagree (${f.countryMismatch})`)
+
   // Compared with their own group (only big enough groups).
   if (baseline && baseline.n >= MIN_COHORT) {
     for (const c of COHORT_FEATURES) {
@@ -161,6 +189,15 @@ export function scoreFeatures(f: Features, baseline: Baseline | null): { score: 
 
   reasons.sort((a, b) => b.points - a.points)
   return { score: Math.min(100, reasons.reduce((n, r) => n + r.points, 0)), reasons }
+}
+
+// The public reply band (T&S Phase 2): "Usually replies" once someone has
+// had 5+ people write first and answered at least 70% of them. Nothing is
+// shown below that — a band, never a percentage, and never a negative one.
+export const REPLY_BAND_MIN_CONVERSATIONS = 5
+export function replyBandOf(f: Pick<Features, 'conversationsReceived' | 'repliesGiven'>): 'usually' | null {
+  if (f.conversationsReceived < REPLY_BAND_MIN_CONVERSATIONS) return null
+  return f.repliesGiven / f.conversationsReceived >= 0.7 ? 'usually' : null
 }
 
 // ─── Loading ─────────────────────────────────────────────────────────────────
@@ -198,7 +235,7 @@ export function featuresOf(input: {
   account?: DocumentData
   signals?: DocumentData
   swipes?: SwipeAgg
-  reports?: { reporters: Set<string>; urgent: number }
+  reports?: { reporters: Set<string>; urgent: number; scamReporters30d?: Set<string> }
   reviewFlags?: string[]
   photoRejections90d?: number
   linked?: { via: string[] }[]
@@ -243,6 +280,12 @@ export function featuresOf(input: {
     seriousReviewFlags: (input.reviewFlags ?? []).filter((c) => c === 'felt_unsafe' || c === 'aggressive').length,
     otherReviewFlags: (input.reviewFlags ?? []).filter((c) => c !== 'felt_unsafe' && c !== 'aggressive').length,
     behaviorRiskScore: num(s.behaviorRiskScore),
+    scamTrapHits: num((s.scamTrap as DocumentData | undefined)?.count),
+    scamTrapKinds: Array.isArray((s.scamTrap as DocumentData | undefined)?.hits) ? ((s.scamTrap as DocumentData).hits as string[]) : [],
+    scamReporters30d: input.reports?.scamReporters30d?.size ?? 0,
+    aiPhotos: num((s.photoFlags as DocumentData | undefined)?.ai),
+    stolenPhotos: num((s.photoFlags as DocumentData | undefined)?.stolen),
+    countryMismatch: typeof (s.countryMismatch as DocumentData | undefined)?.text === 'string' ? (s.countryMismatch as DocumentData).text : null,
   }
 }
 
@@ -331,14 +374,16 @@ export async function rescoreTrust(uid: string): Promise<{ score: number; flagge
   return { score: result.score, flagged }
 }
 
-function reportsAgg(rows: DocumentData[], now = Date.now()): Map<string, { reporters: Set<string>; urgent: number }> {
-  const out = new Map<string, { reporters: Set<string>; urgent: number }>()
+function reportsAgg(rows: DocumentData[], now = Date.now()): Map<string, { reporters: Set<string>; urgent: number; scamReporters30d: Set<string> }> {
+  const out = new Map<string, { reporters: Set<string>; urgent: number; scamReporters30d: Set<string> }>()
   for (const r of rows) {
     const at = num(r.reportedAt) || toMs(r.updatedAt)
     if (!r.reportedUid || now - at > 90 * DAY_MS) continue
-    const cur = out.get(r.reportedUid) ?? { reporters: new Set<string>(), urgent: 0 }
+    const cur = out.get(r.reportedUid) ?? { reporters: new Set<string>(), urgent: 0, scamReporters30d: new Set<string>() }
     if (typeof r.reporterUid === 'string') cur.reporters.add(r.reporterUid)
     if (r.priority === 'urgent') cur.urgent++
+    const cats = Array.isArray(r.categories) ? (r.categories as string[]) : [r.category]
+    if (cats.includes('scam') && now - at <= 30 * DAY_MS && typeof r.reporterUid === 'string') cur.scamReporters30d.add(r.reporterUid)
     out.set(r.reportedUid, cur)
   }
   return out
@@ -422,15 +467,24 @@ export const computeTrustScores = onSchedule(
     }
     let flagged = 0
     for (const r of rows) if (await save(r.uid, r.cohort, r.f, scoreFeatures(r.f, baselines.get(r.cohort) ?? null))) flagged++
+    // The public reply band, written only when it changes.
+    const byUid = new Map(live.map((u) => [u.id, u.data()]))
+    let bands = 0
+    for (const r of rows) {
+      const band = replyBandOf(r.f)
+      if ((byUid.get(r.uid)?.replyBand ?? null) === band) continue
+      await db().doc(`users/${r.uid}`).update({ replyBand: band ?? FieldValue.delete() })
+      bands++
+    }
     // Closed flags past retention go.
     const old = await db().collection('trustFlags').where('expiresAt', '<=', Timestamp.now()).get()
     await Promise.all(old.docs.map((d) => d.ref.delete()))
-    logger.info('computeTrustScores', { accounts: rows.length, cohorts: cohorts.size, openFlags: flagged, expired: old.size })
+    logger.info('computeTrustScores', { accounts: rows.length, cohorts: cohorts.size, openFlags: flagged, expired: old.size, replyBands: bands })
   },
 )
 
 // Strong signals rescore at once rather than waiting for the night.
-const IMMEDIATE = ['bannedDeviceMatch', 'bannedIpMatch', 'duplicateOpener', 'receivedBlockCount'] as const
+const IMMEDIATE = ['bannedDeviceMatch', 'bannedIpMatch', 'duplicateOpener', 'receivedBlockCount', 'scamTrap', 'photoFlags', 'countryMismatch'] as const
 export const trustOnSignals = onDocumentWritten({ document: 'behaviorSignals/{uid}', memory: '256MiB', timeoutSeconds: 60 }, async (event) => {
   const before = event.data?.before.data() ?? {}
   const after = event.data?.after.data()

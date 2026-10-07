@@ -25,6 +25,7 @@ import { LEGACY_RUNTIME } from './legacyOptions'
 import { stripPhotoMetadata } from '../photoMetadata'
 import { takeRateLimit } from '../rateLimits'
 import { accountRef, internalRef } from '../userData'
+import { recordPhotoSignal, webMatches } from '../photoChecks'
 
 // Sightengine score limits per mode (flag when a score is above its limit).
 // nudity-2.1 categories + gore-2.0 / offensive probabilities.
@@ -177,7 +178,8 @@ export const onPhotoUpload = onObjectFinalized(
 
       const form = new FormData()
       form.append('media', new Blob([new Uint8Array(bytes)], { type: contentType }), filename)
-      form.append('models', 'nudity-2.1,offensive,gore-2.0,faces')
+      // T&S Phase 2: genai + deepfake ride along (flag for review only).
+      form.append('models', 'nudity-2.1,offensive,gore-2.0,faces,genai,deepfake')
       form.append('api_user', sightengineUser.value())
       form.append('api_secret', sightengineSecret.value())
 
@@ -189,6 +191,16 @@ export const onPhotoUpload = onObjectFinalized(
         throw new Error(`sightengine_http_${response.status}`)
       }
       const result = (await response.json()) as any
+
+      // T&S Phase 2: AI-generated / deepfake scores and where else on the
+      // web this image appears. Review signals only — they never change the
+      // moderation outcome below, and a failure here is just logged.
+      await (async () => {
+        const web = await webMatches(event.data.bucket, filePath)
+        const ai = typeof result.type?.ai_generated === 'number' ? result.type.ai_generated : null
+        const deepfake = typeof result.type?.deepfake === 'number' ? result.type.deepfake : null
+        await recordPhotoSignal(uid, { path: photoRef, ai, deepfake, web })
+      })().catch((err: unknown) => console.warn(`[photoChecks] failed for uid ${uid}: ${err instanceof Error ? err.message : err}`))
 
       // First-photo face gate — first photo must clearly show a face
       const existingDoc = await photoDocRef.get()

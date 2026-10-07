@@ -248,8 +248,8 @@ test('sign-out: every zylove_* key cleared; the chat key forgotten unless "Remem
   await dialog.getByRole('button', { name: 'Sign out' }).click()
   await expect(page).toHaveURL(/\/login/, { timeout: 20000 })
   await page.waitForLoadState('load')
-  // (the test's own init script re-adds its keybackup snooze on every load)
-  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('zylove_') && !k.startsWith('zylove_keybackup_snooze_'))).catch(() => null)).toEqual([])
+  // (the test's own init script re-adds its keybackup snooze and safety-card flag on every load)
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('zylove_') && !k.startsWith('zylove_keybackup_snooze_') && !k.startsWith('zylove_safety_tips_'))).catch(() => null)).toEqual([])
   const keyGone = () => page.evaluate(
     (uid) =>
       new Promise((res) => {

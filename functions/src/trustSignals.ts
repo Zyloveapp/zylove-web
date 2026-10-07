@@ -3,6 +3,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 import { generationOf, participants } from './matchGeneration'
+import { recordScamTrap } from './scamTraps'
 
 // T&S Phase 1 — behaviour signals that need no message content.
 //
@@ -63,9 +64,13 @@ export const trustOnMessage = onDocumentCreated(
     const match = (await db().doc(`matches/${event.params.matchId}`).get()).data()
     const users = participants(match)
     const recipient = users.find((u) => u !== sender)
-    if (typeof sender !== 'string' || !recipient || match?.isBot === true || users.some((u) => /^(zbot|seed)-/.test(u))) {
-      return void (await dropHash())
+    const botChat = match?.isBot === true || users.some((u) => /^(zbot|seed)-/.test(u))
+    // T&S Phase 2: what a person sends a curated profile is plaintext — the
+    // one place the server may read a message — and is checked for scams.
+    if (botChat && typeof sender === 'string' && !/^(zbot|seed)-/.test(sender) && type === 'text' && (m.nonce === 'stub' || m.nonce === 'stub-nonce') && typeof m.ciphertext === 'string') {
+      await recordScamTrap(sender, event.params.matchId, event.params.messageId, m.ciphertext)
     }
+    if (typeof sender !== 'string' || !recipient || botChat) return void (await dropHash())
     const statsRef = db().doc(`matchStats/${event.params.matchId}_${generationOf(match)}`)
     const { firstFromSender, otherStarted } = await db().runTransaction(async (tx) => {
       const s = (await tx.get(statsRef)).data() ?? {}

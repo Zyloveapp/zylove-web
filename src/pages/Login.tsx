@@ -71,6 +71,14 @@ function SignInCard() {
   const [submitting, setSubmitting] = useState(false)
   // Which step of sending a code is running, for the button label.
   const [sendStep, setSendStep] = useState<'verifying' | 'sending'>('sending')
+  // Resend opens 30 seconds after each code goes out.
+  const [canResend, setCanResend] = useState(false)
+  const [resent, setResent] = useState(false)
+  useEffect(() => {
+    if (!confirmation) return
+    const t = setTimeout(() => setCanResend(true), 30_000)
+    return () => clearTimeout(t)
+  }, [confirmation])
 
   // Dev-only shortcut past phone auth. Defined behind the DEV check so the
   // handler and its credentials are dropped from production builds entirely.
@@ -108,7 +116,21 @@ function SignInCard() {
       setError('Enter your 10-digit phone number, e.g. (555) 123-4567.')
       return
     }
+    await sendCode(e164)
+  }
 
+  // A fresh reCAPTCHA each time: the invisible one can't be reused.
+  async function handleResend() {
+    const e164 = toE164(phone)
+    if (!e164 || submitting) return
+    setError(null)
+    setResent(false)
+    clearRecaptcha()
+    initRecaptcha()
+    if (await sendCode(e164)) setResent(true)
+  }
+
+  async function sendCode(e164: string): Promise<boolean> {
     setSubmitting(true)
     try {
       setSendStep('verifying')
@@ -119,13 +141,17 @@ function SignInCard() {
             ? 'Too many attempts for this number. Try again in an hour.'
             : "This number type isn't supported. Please use a mobile phone number to sign up for Zylove.",
         )
-        return
+        return false
       }
       setSendStep('sending')
-      setConfirmation(await sendOtp(e164))
+      const next = await sendOtp(e164)
+      setCanResend(false)
+      setConfirmation(next)
       setCode('')
+      return true
     } catch (err) {
       setError(errorMessage(err))
+      return false
     } finally {
       setSubmitting(false)
     }
@@ -219,6 +245,7 @@ function SignInCard() {
         <form onSubmit={handleVerify} className="space-y-4">
           <h2 className="text-lg font-semibold text-white">Enter your code</h2>
           <p className="text-sm text-white/60">We texted a 6-digit code to +1 {formatPhone(phone)}.</p>
+          {resent && <p className="text-sm text-emerald-400">We sent a new code.</p>}
           <input
             type="text"
             inputMode="numeric"
@@ -233,6 +260,15 @@ function SignInCard() {
           {error && <p className="text-sm text-red-400">{error}</p>}
           <button type="submit" disabled={submitting || code.length !== 6} className={buttonClass}>
             {submitting ? 'Verifying…' : 'Verify'}
+          </button>
+          <p className="text-sm text-white/50">Didn't get it? Check Junk / Unknown Senders in Messages, then tap Resend.</p>
+          <button
+            type="button"
+            onClick={() => void handleResend()}
+            disabled={submitting || !canResend}
+            className="w-full rounded-xl border border-white/15 px-4 py-2.5 text-sm font-semibold text-white/80 transition-colors hover:border-white/30 hover:text-white disabled:opacity-40"
+          >
+            {canResend ? 'Resend code' : 'Resend code (in 30 seconds)'}
           </button>
           <button
             type="button"
