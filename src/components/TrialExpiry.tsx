@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { signOutAndWipe } from '../services/signOut'
-import { useNavigate } from 'react-router-dom'
 import { SUPPORT_EMAIL } from '../services/errors'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
@@ -22,7 +21,6 @@ export default function TrialExpiry() {
   const expired = useSubscriptionStore((s) => s.uid === uid && s.tier === 'free' && s.trialEnded)
   const mode = useModeStore((s) => s.mode)
   const setMode = useModeStore((s) => s.setMode)
-  const navigate = useNavigate()
   const { pending, error, checkout } = useBilling()
   const [playOnly, setPlayOnly] = useState<{ uid: string; value: boolean } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -54,7 +52,7 @@ export default function TrialExpiry() {
     try {
       await deleteAccount()
       await signOutAndWipe({ keepChatKey: 'ifNoBackup' })
-      navigate('/login', { replace: true })
+      // signOutAndWipe loads /login itself (a fresh page).
     } catch {
       setDeleteError("Couldn't delete your account. Try again.")
       setDeleting(false)

@@ -240,7 +240,7 @@ export default function DeleteProfileControls({ uid }: { uid: string }) {
 
   async function leaveSignedOut() {
     await signOutAndWipe({ keepChatKey: false })
-    navigate('/login', { replace: true })
+    // signOutAndWipe loads /login itself (a fresh page).
   }
 
   async function confirmProfile() {
