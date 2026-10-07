@@ -346,6 +346,15 @@ function RevealedScore({
       {qualifier && <p className="mt-0.5 text-xs text-white/50">{qualifier}</p>}
       <p className="mt-1 text-xs text-white/35">{score.deep ? '✦ Deep compatibility score' : 'Compatibility estimate'}</p>
 
+      {/* Right under the score, so it's read before anything that lines up. */}
+      {fullAccess && dealbreakers.length > 0 && (
+        <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3">
+          <p className="text-sm text-amber-400">
+            You flagged a dealbreaker — {dealbreakerLabel(dealbreakers[0])} — this is your call to make.
+          </p>
+        </div>
+      )}
+
       {v2 && tier1 && (
         <DeepFitDetail
           fitsYou={tier1.fitFor[viewerUid] ?? null}
@@ -404,13 +413,6 @@ function RevealedScore({
 
       {fullAccess && comparison}
 
-      {fullAccess && dealbreakers.length > 0 && (
-        <div className="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3">
-          <p className="text-sm text-amber-400">
-            You flagged a dealbreaker — {dealbreakerLabel(dealbreakers[0])} — this is your call to make.
-          </p>
-        </div>
-      )}
 
       {fullAccess && breakTheIce}
 

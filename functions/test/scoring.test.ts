@@ -108,6 +108,7 @@ test('a dealbreaker pair never scores high, however well everything else fits', 
   assert.ok(deep(r) <= DEALBREAKER_CAP, `Deep Fit ${deep(r)}`)
   assert.ok(r.score <= DEALBREAKER_CAP, `headline ${r.score}`)
   assert.ok(r.tier1!.directions.ab <= DEALBREAKER_CAP && r.tier1!.directions.ba <= DEALBREAKER_CAP, 'a direction above the cap')
+  assert.equal(r.tier1!.archetype, null, 'no archetype on a dealbreaker pair')
 })
 
 test('orientation mismatch scores 0', () => {

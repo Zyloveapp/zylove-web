@@ -299,7 +299,9 @@ export function calculateSparkScore(
     // only sees the facet-shaped ones.
     const cap = (v: number) => (dealbreakerResult.triggered.length > 0 ? Math.min(DEALBREAKER_CAP, v) : v);
     tier1 = {
-      archetype:      pair.archetype,
+      // A dealbreaker pair gets no archetype: its copy would read as a
+      // romance the score (≤ 35) contradicts.
+      archetype:      dealbreakerResult.triggered.length > 0 ? null : pair.archetype,
       combinedScore:  cap(pair.combinedScore),
       directions:     { ab: cap(pair.displayAB), ba: cap(pair.displayBA) },
       strengths:      pair.strengths,
