@@ -201,6 +201,19 @@ function SignInCard() {
           >
             {submitting ? (sendStep === 'verifying' ? 'Verifying number…' : 'Sending…') : 'Send code'}
           </button>
+          {/* Carrier (A2P) consent wording for the sign-in code — keep it. */}
+          <p className="text-xs leading-relaxed text-white/40">
+            By entering your number, you agree to receive a one-time verification code by SMS. Msg &amp; data rates may apply.
+            See{' '}
+            <Link to="/sms-terms" target="_blank" rel="noreferrer" className="underline hover:text-white">
+              SMS Terms
+            </Link>{' '}
+            and{' '}
+            <Link to="/privacy" target="_blank" rel="noreferrer" className="underline hover:text-white">
+              Privacy Policy
+            </Link>
+            .
+          </p>
         </form>
       ) : (
         <form onSubmit={handleVerify} className="space-y-4">
@@ -304,18 +317,25 @@ export default function Login() {
         </div>
       </section>
 
-      {/* Two modes */}
-      <section className="px-4 py-16">
-        <div className="mx-auto grid max-w-4xl gap-4 sm:grid-cols-2">
-          <div className="rounded-2xl border border-[#1B4FD8]/40 bg-[#1B4FD8]/10 p-6">
-            <p className="text-2xl font-bold">
-              <span className="text-[#1B4FD8]">✦</span> Spark
-            </p>
-            <p className="mt-2 text-white/70">Serious dating. Real compatibility. Something worth keeping.</p>
-          </div>
-          <div className="rounded-2xl border border-[#E03131]/40 bg-[#E03131]/10 p-6">
-            <p className="text-2xl font-bold">🔴 Play</p>
-            <p className="mt-2 text-white/70">Know what you want. Find who gets it.</p>
+      {/* About: the plain-English description and legal name (carrier A2P
+          requirements for the website — keep them). */}
+      <section id="about" className="scroll-mt-4 px-4 py-16">
+        <div className="mx-auto max-w-4xl">
+          <h2 className="text-center text-3xl font-bold">About Zylove</h2>
+          <p className="mx-auto mt-4 max-w-2xl text-center text-white/70">
+            Zylove is a dual-mode dating app for adults 18+, operated by Zylove, LLC. Launching first in Austin, TX.
+          </p>
+          <div className="mt-8 grid gap-4 sm:grid-cols-2">
+            <div className="rounded-2xl border border-[#1B4FD8]/40 bg-[#1B4FD8]/10 p-6">
+              <p className="text-2xl font-bold">
+                <span className="text-[#1B4FD8]">✦</span> Spark
+              </p>
+              <p className="mt-2 text-white/70">Serious dating, matched on real compatibility — for something worth keeping.</p>
+            </div>
+            <div className="rounded-2xl border border-[#E03131]/40 bg-[#E03131]/10 p-6">
+              <p className="text-2xl font-bold">🔴 Play</p>
+              <p className="mt-2 text-white/70">Casual, adult connections with no labels, on a separate private profile.</p>
+            </div>
           </div>
         </div>
       </section>

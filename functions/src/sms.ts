@@ -1,5 +1,10 @@
 // SMS notifications via Twilio's REST API. Nothing here throws: a failed or
 // skipped text must never break the flow that triggered it.
+//
+// Every text goes to an SmsTarget, which only smsTarget() hands out: the
+// person has a consent record, hasn't opted out, has that kind of text on and
+// isn't in quiet hours. deliver() then checks the opt-out registry
+// (smsOptOuts/{phone}, server-only) right before each send.
 
 import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
@@ -14,6 +19,9 @@ const twilioFromNumber = defineSecret('TWILIO_FROM_NUMBER')
 
 // Bind these on every function that calls sendSMS.
 export const SMS_SECRETS = [twilioAccountSid, twilioAuthToken, twilioFromNumber]
+
+// The inbound webhook checks Twilio's signature with the auth token.
+export const TWILIO_AUTH_TOKEN = twilioAuthToken
 
 // Lookup only needs the account credentials.
 export const LOOKUP_SECRETS = [twilioAccountSid, twilioAuthToken]
@@ -51,8 +59,9 @@ export async function lookupLineType(phoneNumber: string): Promise<string | null
   }
 }
 
-// 'billing' (a failed payment) and 'founder' (founder spot at risk / open)
-// have no toggle of their own: on with the master switch.
+// 'billing' (a failed payment), 'founder' (your founder spot is at risk or
+// changed) and 'account' (moderation and account notices) have no toggle of
+// their own: on with the master switch.
 export type SmsPreference = 'newSpark' | 'newMessage' | 'newMatch' | 'quietNudge' | 'billing' | 'founder' | 'account'
 export type SmsMode = 'spark' | 'play'
 
@@ -85,19 +94,68 @@ export function smsPreferenceOn(prefs: unknown, preference: SmsPreference, mode:
 
 const E164 = /^\+[1-9]\d{6,14}$/
 
-// Sends one text. Returns whether Twilio accepted it.
-export async function sendSMS(to: string, body: string): Promise<boolean> {
+// Twilio: "Attempt to send to unsubscribed recipient" (they replied STOP).
+const TWILIO_UNSUBSCRIBED = 21610
+
+// ─── Consent ─────────────────────────────────────────────────────────────────
+
+// The opt-in wording by version, stored with each consent record. Keep in
+// step with src/config/smsConsent.ts (the client shows the text, the server
+// records it from here, never from the client). 'legacy' is the pop-up before
+// 2026-10-06, for clients still running the old build.
+export const SMS_CONSENT_TEXTS: Record<string, string> = {
+  '2026-10-07':
+    'Text me match, message and account notifications from Zylove. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help. See SMS Terms.',
+  legacy:
+    "Get Zylove updates by text. Turn on texts to be notified when founder spots open, get match alerts and never miss a message. We'll text you when something important happens — a new Spark, a message, a match. Standard rates apply. You can turn this off anytime. Message frequency varies. Reply STOP to opt out, HELP for help.",
+}
+export const SMS_CONSENT_SOURCES = ['settings', 'onboarding'] as const
+export type SmsConsentSource = (typeof SMS_CONSENT_SOURCES)[number]
+
+// Sent once, right after someone opts in.
+export const SMS_CONFIRMATION =
+  "Zylove: You're signed up for match, message and account notifications. Msg frequency varies. Msg & data rates may apply. Reply HELP for help, STOP to opt out."
+
+// ─── Opt-outs ────────────────────────────────────────────────────────────────
+
+// smsOptOuts/{E.164 phone}: replied STOP, or Twilio refused the number as
+// unsubscribed. Server-only (rules: default deny). Nothing is sent to a number
+// listed here; START (smsInbound.ts) or a new opt-in in the app removes it.
+export const optOutRef = (phone: string) => getFirestore().doc(`smsOptOuts/${phone}`)
+
+export async function recordOptOut(phone: string, source: 'stop' | 'carrier', keyword?: string): Promise<void> {
+  await optOutRef(phone).set({ optedOutAt: FieldValue.serverTimestamp(), source, ...(keyword ? { keyword } : {}) })
+}
+
+// Our sending number (shown when someone must text START to it), or null.
+export function smsFromNumber(): string | null {
+  try {
+    return twilioFromNumber.value() || null
+  } catch {
+    return null
+  }
+}
+
+export type Delivery = 'sent' | 'opted_out' | 'failed'
+
+// Sends one text unless the number is in the opt-out registry. Fails closed:
+// if the registry can't be read, nothing is sent.
+async function deliver(to: string, body: string): Promise<Delivery> {
   try {
     const sid = twilioAccountSid.value()
     const token = twilioAuthToken.value()
     const from = twilioFromNumber.value()
     if (!sid || !token || !from) {
       logger.warn('sendSMS: Twilio secrets not configured, skipping')
-      return false
+      return 'failed'
     }
     if (!E164.test(to)) {
       logger.warn('sendSMS: recipient is not an E.164 number, skipping')
-      return false
+      return 'failed'
+    }
+    if ((await optOutRef(to).get()).exists) {
+      logger.info('sendSMS: skipped — number opted out')
+      return 'opted_out'
     }
     const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
       method: 'POST',
@@ -110,15 +168,38 @@ export async function sendSMS(to: string, body: string): Promise<boolean> {
     if (!response.ok) {
       // Twilio's error body names the problem (bad number, opted out via STOP…).
       const detail = await response.text().catch(() => '')
+      let code: unknown = null
+      try {
+        code = (JSON.parse(detail) as { code?: unknown }).code
+      } catch {
+        // Not JSON; logged below.
+      }
+      if (code === TWILIO_UNSUBSCRIBED) {
+        // Replied STOP before the inbound webhook existed, or it missed it.
+        await recordOptOut(to, 'carrier').catch(() => {})
+        logger.info('sendSMS: Twilio reports the number unsubscribed; recorded the opt-out')
+        return 'opted_out'
+      }
       logger.error('sendSMS: Twilio rejected the message', { status: response.status, detail: detail.slice(0, 300) })
-      return false
+      return 'failed'
     }
     logger.info('sendSMS: sent')
-    return true
+    return 'sent'
   } catch (err) {
     logger.error('sendSMS failed', { message: err instanceof Error ? err.message : String(err) })
-    return false
+    return 'failed'
   }
+}
+
+// Sends one text to a checked target. Returns whether Twilio accepted it.
+export async function sendSMS(target: SmsTarget, body: string): Promise<boolean> {
+  return (await deliver(target.phone, body)) === 'sent'
+}
+
+// The opt-in confirmation, straight after consent was recorded (the master
+// switch and quiet hours don't apply: they just asked for texts).
+export async function sendConsentConfirmation(phone: string): Promise<Delivery> {
+  return deliver(phone, SMS_CONFIRMATION)
 }
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/
@@ -156,21 +237,30 @@ export function inQuietHours(quiet: unknown, now = new Date()): boolean {
   return from < until ? current >= from && current < until : current >= from || current < until
 }
 
+declare const checked: unique symbol
+
+// Only smsTarget() makes one, so sendSMS can't be handed an unchecked number.
 export interface SmsTarget {
   uid: string
   phone: string
   user: DocumentData
+  readonly [checked]: true
 }
 
-// The user's phone number if they've turned SMS on and this kind of text is
-// enabled, else null. The number comes from Firebase Auth (phone sign-in),
-// falling back to the one recorded at consent (private/account). Preferences
-// live in private/settings (userData.ts).
+// Where to text the user, or null when this text mustn't go: no consent
+// record, opted out (STOP), SMS off for the mode, this kind of text off, or
+// quiet hours. The number is the one recorded with consent (the verified
+// sign-in number at the time); if the sign-in number has since changed, no
+// text until they opt in again. Preferences live in private/settings,
+// consent and opt-out in private/account (userData.ts).
 export async function smsTarget(uid: string, preference: SmsPreference, mode: SmsMode = 'spark'): Promise<SmsTarget | null> {
   try {
     const user = (await userRef(uid).get()).data()
     if (!user) return null
-    const settings = await loadSettings(uid, user)
+    const [settings, account] = await Promise.all([loadSettings(uid, user), loadAccount(uid, user)])
+    const consent: unknown = account.smsConsent
+    if (typeof consent !== 'object' || consent === null) return null
+    if (account.smsOptOut != null) return null
     if (!smsEnabledFor(settings.smsNotificationsEnabled, mode) || !smsPreferenceOn(settings.smsNotifications, preference, mode)) {
       return null
     }
@@ -178,17 +268,28 @@ export async function smsTarget(uid: string, preference: SmsPreference, mode: Sm
       logger.info('Skipped — quiet hours', { preference, mode })
       return null
     }
+    const consentPhone: unknown = (consent as Record<string, unknown>).phone
     const authPhone = await getAuth()
       .getUser(uid)
       .then((u) => u.phoneNumber ?? null)
       .catch(() => null)
-    const consentPhone: unknown = (await loadAccount(uid, user)).smsConsent?.phone
-    const phone = authPhone ?? (typeof consentPhone === 'string' ? consentPhone : null)
-    return phone ? { uid, phone, user } : null
+    if (typeof consentPhone === 'string' && authPhone && consentPhone !== authPhone) {
+      logger.info('Skipped — sign-in number changed since consent', { preference })
+      return null
+    }
+    const phone = typeof consentPhone === 'string' ? consentPhone : authPhone
+    return phone ? ({ uid, phone, user } as SmsTarget) : null
   } catch (err) {
     logger.error('smsTarget failed', { message: err instanceof Error ? err.message : String(err) })
     return null
   }
+}
+
+// Account-level texts (billing, founder, moderation, account notices): either
+// mode's master switch will do. Returns whether one was sent.
+export async function textAccount(uid: string, preference: 'billing' | 'founder' | 'account', body: string): Promise<boolean> {
+  const target = (await smsTarget(uid, preference, 'spark')) ?? (await smsTarget(uid, preference, 'play'))
+  return target ? sendSMS(target, body) : false
 }
 
 const SPARK_SMS_COOLDOWN_MS = 4 * 60 * 60 * 1000

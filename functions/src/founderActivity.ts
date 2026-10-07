@@ -8,16 +8,15 @@
 //   180+                   city closed (botsActive false) → permanent, never checked again
 //                          city still open → converted: Spark+ forever, no longer a founder
 //
-// Revoking frees the spot (city + Austin legacy counters) and texts a few
-// people in that city and half who could claim it (/claim-founder).
-// Every text goes through smsTarget: SMS on, a number on file, not in quiet
-// hours.
+// Revoking frees the spot (city + Austin legacy counters); the app offers it
+// to people in that city and half (onboarding invitation, profile banner).
+// Founders get texts about their own spot only, through smsTarget: consent,
+// SMS on, not opted out, not in quiet hours.
 
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
-import { ZYLOVE_CITIES, distanceMiles } from './cities'
 import { SMS_SECRETS } from './sms'
 import { bucketFor, num, refreshCityMembers, textFounder, type Bucket, type FounderStatus } from './founders'
 import { CLEAR_TRIAL, cityOpen, hasEliteIdentity, hasPaidSubscription, newTrial, planView } from './trial'
@@ -30,12 +29,6 @@ const RULES = {
   launch: { warn: 7, pending: 10, revoke: 14 },
   later: { warn: 23, pending: 26, revoke: 30 },
 }
-// Open-spot texts: 3 per spot, at most 10 per city/half per run, and never
-// more than one claim text per person per day.
-const TEXTS_PER_SPOT = 3
-const MAX_TEXTS_PER_OPENING = 10
-const CLAIM_SMS_COOLDOWN_MS = DAY_MS
-const BOT_PREFIX = 'zbot-'
 const APP_URL = 'zylove.app'
 
 interface FounderRecord {
@@ -145,60 +138,6 @@ export async function revokeFounderStatus(uid: string): Promise<{ cityId: string
   return opened
 }
 
-// ─── Open-spot texts ─────────────────────────────────────────────────────────
-
-// Texts up to min(3 × spots, 10) people within the city's radius, in the
-// half that opened, who aren't founders and haven't had a claim text in the
-// last day. Bots and the people just revoked are skipped; textFounder skips
-// anyone without SMS consent. Reads every unsuspended user and every saved
-// location, which is fine at launch scale.
-async function textOpenSpot(cityId: string, bucket: Bucket, spots: number, skip: Set<string>): Promise<number> {
-  const city = ZYLOVE_CITIES.find((c) => c.id === cityId)
-  if (!city || spots <= 0) return 0
-  const db = getFirestore()
-  const [snap, locSnap, sentSnap] = await Promise.all([
-    db.collection('users').select('locationLat', 'locationLng', 'genderIdentity', 'isFounder', 'claimSMSSentAt', 'isDeleted').get(),
-    db.collection('userLocations').select('lat', 'lng').get(),
-    db.collection('userInternal').where('claimSMSSentAt', '!=', null).select('claimSMSSentAt').get(),
-  ])
-  // Suspended (userInternal, Stage 3) and deleted accounts are skipped.
-  const suspended = new Set((await db.collection('userInternal').where('isSuspended', '==', true).select().get()).docs.map((d) => d.id))
-  const locs = new Map(locSnap.docs.map((d) => [d.id, d.data()]))
-  const sentAt = new Map(sentSnap.docs.map((d) => [d.id, d.data().claimSMSSentAt as unknown]))
-  const now = Date.now()
-  const candidates = snap.docs.filter((d) => {
-    const u = d.data()
-    if (d.id.startsWith(BOT_PREFIX) || skip.has(d.id) || u.isFounder === true) return false
-    if (suspended.has(d.id) || u.isDeleted === true) return false
-    // userLocations, or the root doc's old copy for accounts not migrated.
-    const loc = locs.get(d.id)
-    const lat: unknown = loc?.lat ?? u.locationLat
-    const lng: unknown = loc?.lng ?? u.locationLng
-    if (typeof lat !== 'number' || typeof lng !== 'number') return false
-    if (distanceMiles(lat, lng, city.lat, city.lng) > city.radiusMiles) return false
-    if (bucketFor(u.genderIdentity) !== bucket) return false
-    const last = millis(sentAt.get(d.id) ?? u.claimSMSSentAt)
-    return last === null || now - last >= CLAIM_SMS_COOLDOWN_MS
-  })
-  // Shuffled: nobody is always first in line.
-  for (let i = candidates.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[candidates[i], candidates[j]] = [candidates[j], candidates[i]]
-  }
-
-  const limit = Math.min(spots * TEXTS_PER_SPOT, MAX_TEXTS_PER_OPENING)
-  const body = `✦ A ${city.name} founder spot just opened. You're invited — free Elite while you're a founder. First to claim it wins: ${APP_URL}/claim-founder?city=${city.id}&gender=${bucket}`
-  let sent = 0
-  for (const d of candidates) {
-    if (sent >= limit) break
-    if (!(await textFounder(d.id, body))) continue
-    sent++
-    await internalRef(d.id).set({ claimSMSSentAt: FieldValue.serverTimestamp() }, { merge: true })
-  }
-  logger.info('textOpenSpot', { cityId, bucket, spots, candidates: candidates.length, sent })
-  return sent
-}
-
 // ─── Daily check ─────────────────────────────────────────────────────────────
 
 type Outcome = 'ok' | 'warned' | 'pending' | 'revoked' | 'permanent' | 'converted' | 'reactivated'
@@ -282,7 +221,6 @@ export const checkFounderActivity = onSchedule(
 
     const counts: Partial<Record<Outcome, number>> = {}
     const opened = new Map<string, { cityId: string; bucket: Bucket; spots: number }>()
-    const revoked = new Set<string>()
     const touched = new Set<string>()
     for (const doc of records.docs) {
       const record = { ...(doc.data() as FounderRecord), uid: doc.id }
@@ -291,7 +229,6 @@ export const checkFounderActivity = onSchedule(
         counts[outcome] = (counts[outcome] ?? 0) + 1
         if (outcome !== 'ok' && outcome !== 'warned') touched.add(record.cityId)
         if (outcome === 'revoked') {
-          revoked.add(record.uid)
           const key = `${record.cityId}:${record.bucket}`
           const entry = opened.get(key) ?? { cityId: record.cityId, bucket: record.bucket, spots: 0 }
           entry.spots++
@@ -306,7 +243,9 @@ export const checkFounderActivity = onSchedule(
     }
 
     for (const cityId of touched) await refreshCityMembers(cityId)
-    for (const { cityId, bucket, spots } of opened.values()) await textOpenSpot(cityId, bucket, spots, revoked)
+    // Open spots are offered in the app (onboarding invitation, profile
+    // banner); no texts (SMS is account and match/message notifications only).
+    if (opened.size > 0) logger.info('checkFounderActivity: spots opened', { openings: [...opened.values()] })
     logger.info('checkFounderActivity done', { founders: records.size, ...counts })
   },
 )

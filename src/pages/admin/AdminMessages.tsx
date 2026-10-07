@@ -210,7 +210,7 @@ function BroadcastModal({ founderCount, onClose }: { founderCount: number; onClo
             <p className="mt-4 text-emerald-300">
               ✦ Sent to {result.sent} of {result.total} founders.
             </p>
-            <p className="mt-1 text-sm text-white/50">{result.texted} got a text.</p>
+            <p className="mt-1 text-sm text-white/50">In their founder threads — broadcasts aren't texted.</p>
             <button type="button" onClick={onClose} className="mt-6 w-full rounded-xl bg-[#1B4FD8] py-3 font-semibold text-white">
               Done
             </button>

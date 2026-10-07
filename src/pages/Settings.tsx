@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { MODE_ACCENT, useBackLinkClass, useModeStore } from '../store/modeStore'
 import { hasPin } from '../services/playPin'
@@ -9,7 +9,6 @@ import {
   sectionPreferences,
   setSmsEnabled,
   setQuietHours,
-  setQuietNudge,
   setSmsPreference,
   subscribeSmsSettings,
   type QuietHours,
@@ -414,6 +413,7 @@ export default function Settings() {
   const goBack = useGoBack('/profile')
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [consentOpen, setConsentOpen] = useState(false)
+  const [smsNotice, setSmsNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pinFlow, setPinFlow] = useState(false)
@@ -457,7 +457,16 @@ export default function Settings() {
 
   async function acceptConsent() {
     if (!phone) return
-    await run(() => grantSmsConsent(uid, mode))
+    await run(async () => {
+      const result = await grantSmsConsent(uid, mode, 'settings')
+      // Opted in again after replying STOP: the carrier keeps blocking texts
+      // until they text START.
+      setSmsNotice(
+        result.confirmation === 'opted_out'
+          ? `You replied STOP to our texts before, so your carrier is still blocking them. Text START to ${result.from ?? 'our number'} to get them again.`
+          : null,
+      )
+    })
     setConsentOpen(false)
   }
 
@@ -536,23 +545,6 @@ export default function Settings() {
             )
           })}
 
-          <div
-            className={`flex items-center justify-between gap-4 border-t border-white/5 px-5 py-4 transition-opacity ${
-              enabled ? '' : 'opacity-40'
-            }`}
-          >
-            <span>
-              <span className="block text-sm font-medium">Quiet chat nudge</span>
-              <span className="block text-xs text-white/40">A conversation has gone quiet (Spark and Play)</span>
-            </span>
-            <Switch
-              checked={sms?.preferences.quietNudge ?? false}
-              disabled={!enabled || busy}
-              label="Quiet chat nudge"
-              tone={mode}
-              onChange={(next) => void run(() => setQuietNudge(uid, next))}
-            />
-          </div>
 
           <div className={`border-t border-white/5 px-5 py-4 transition-opacity ${enabled ? '' : 'opacity-40'}`}>
             <h3 className="text-xs font-semibold uppercase tracking-widest text-white/40">Quiet hours</h3>
@@ -587,8 +579,16 @@ export default function Settings() {
 
           {error && <p className="px-5 pb-2 text-sm text-red-400">{error}</p>}
           {loaded === 'error' && <p className="px-5 pb-2 text-sm text-red-400">Couldn't load your notification settings.</p>}
+          {smsNotice && <p className="px-5 pb-2 text-sm text-amber-300">{smsNotice}</p>}
+          {sms?.optedOut && !smsNotice && (
+            <p className="px-5 pb-2 text-sm text-amber-300">You replied STOP, so texts are off. Turn them on to opt back in.</p>
+          )}
           <p className="border-t border-white/5 px-5 py-3 text-xs text-white/40">
-            Standard message rates apply. You can turn off SMS notifications anytime.
+            Message frequency varies. Msg &amp; data rates may apply. Reply STOP to any text to opt out, HELP for help. You can
+            also turn texts off here anytime.{' '}
+            <Link to="/sms-terms" className="underline hover:text-white">
+              SMS Terms
+            </Link>
           </p>
         </Section>
 

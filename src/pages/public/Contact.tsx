@@ -3,6 +3,11 @@ import PublicLayout from '../../components/public/PublicLayout'
 import { MAX_LONG, MAX_SHORT, normalizeEmail, sendContactMessage } from '../../services/publicForms'
 import { SUPPORT_EMAIL } from '../../services/errors'
 
+// Business mailing address for the Company block (a registered agent or
+// business mailbox — never a home address). Until it's set, the block shows
+// the city only.
+const MAILING_ADDRESS: string[] | null = null
+
 const TOPICS = ['Founding circle', 'Press or media', 'Partnership', 'Feedback or ideas', 'Just saying hello']
 
 const input =
@@ -65,6 +70,19 @@ export default function Contact() {
           </p>
           <a href={`mailto:${SUPPORT_EMAIL}`} className="mt-3 inline-block text-sm font-medium text-[#7C9BFF] hover:text-white">
             {SUPPORT_EMAIL} →
+          </a>
+        </div>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-white/40">Company</h2>
+        <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-5 text-sm text-white/60">
+          <p className="font-semibold text-white">Zylove, LLC</p>
+          {(MAILING_ADDRESS ?? ['Austin, Texas', 'United States']).map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+          <a href={`mailto:${SUPPORT_EMAIL}`} className="mt-2 inline-block font-medium text-[#7C9BFF] hover:text-white">
+            {SUPPORT_EMAIL}
           </a>
         </div>
       </section>

@@ -1,11 +1,10 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { logger } from 'firebase-functions'
-import { getAuth } from 'firebase-admin/auth'
 import { getStorage } from 'firebase-admin/storage'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
-import { SMS_SECRETS, sendSMS, smsEnabledFor } from './sms'
+import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
 import { storagePath } from './storagePath'
-import { accountRef, internalRef, isAdminAuth, loadAccount, loadSettings, userRef } from './userData'
+import { accountRef, internalRef, isAdminAuth, userRef } from './userData'
 
 // Admin photo review (/admin/photos). onPhotoUpload parks flagged photos of
 // both modes in users/{uid}/private/account pendingPhotoURLs (owner-only; each
@@ -59,18 +58,11 @@ function millis(v: unknown): number | null {
   return v instanceof Timestamp ? v.toMillis() : typeof v === 'number' ? v : null
 }
 
-// Moderation notices are transactional, but still only go to people who
-// turned SMS on. sendSMS skips quietly while Twilio isn't configured.
-async function textUser(uid: string, user: DocumentData | undefined, mode: Mode, body: string): Promise<void> {
-  // The photo's mode decides which master switch applies.
-  if (!smsEnabledFor((await loadSettings(uid, user)).smsNotificationsEnabled, mode)) return
-  const authPhone = await getAuth()
-    .getUser(uid)
-    .then((u) => u.phoneNumber ?? null)
-    .catch(() => null)
-  const consentPhone: unknown = (await loadAccount(uid, user)).smsConsent?.phone
-  const phone = authPhone ?? (typeof consentPhone === 'string' ? consentPhone : null)
-  if (phone) await sendSMS(phone, body)
+// Moderation notices are account texts: consent, not opted out, the photo's
+// mode switched on, not in quiet hours (smsTarget).
+async function textUser(uid: string, mode: Mode, body: string): Promise<void> {
+  const target = await smsTarget(uid, 'account', mode)
+  if (target) await sendSMS(target, body)
 }
 
 export const listPendingPhotos = onCall(
@@ -128,7 +120,7 @@ export const reviewPendingPhoto = onCall(
     const acctRef = accountRef(targetUid)
     const playRef = rootRef.collection('playProfile').doc('data')
 
-    const { mode, entry, user } = await db.runTransaction(async (tx) => {
+    const { mode, entry } = await db.runTransaction(async (tx) => {
       const [userSnap, accountSnap, playSnap] = await Promise.all([tx.get(rootRef), tx.get(acctRef), tx.get(playRef)])
       // The queues: private/account (both modes), plus the older homes.
       const queues = [
@@ -153,7 +145,7 @@ export const reviewPendingPhoto = onCall(
         tx.set(internalRef(targetUid), { hasPendingPhotos: false }, { merge: true })
         if (userSnap.data()?.hasPendingPhotos !== undefined) tx.update(rootRef, { hasPendingPhotos: FieldValue.delete() })
       }
-      return { mode: where, entry: found, user: userSnap.data() }
+      return { mode: where, entry: found }
     })
 
     if (action === 'reject') {
@@ -180,7 +172,7 @@ export const reviewPendingPhoto = onCall(
       timestamp: Timestamp.now(),
     })
 
-    await textUser(targetUid, user, mode, action === 'approve' ? APPROVED_SMS : REJECTED_SMS).catch((err) =>
+    await textUser(targetUid, mode, action === 'approve' ? APPROVED_SMS : REJECTED_SMS).catch((err) =>
       logger.error('reviewPendingPhoto: SMS failed', { message: String(err) }),
     )
     return { status: action === 'approve' ? 'approved' : 'rejected' }

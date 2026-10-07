@@ -21,6 +21,7 @@ import KeyBackupGate from './components/KeyBackupGate'
 import Login from './pages/Login'
 import Terms from './pages/public/Terms'
 import Privacy from './pages/public/Privacy'
+import SmsTerms from './pages/public/SmsTerms'
 import Community from './pages/public/Community'
 import Join from './pages/public/Join'
 import Contact from './pages/public/Contact'
@@ -51,6 +52,7 @@ import AdminCities from './pages/admin/AdminCities'
 import AdminActivity from './pages/admin/AdminActivity'
 import AdminReports from './pages/admin/AdminReports'
 import AdminNotice from './components/AdminNotice'
+import LegalUpdateNotice from './components/LegalUpdateNotice'
 import { touchLastActive } from './services/adminActivity'
 import { loadPrivateProfile } from './services/privateProfile'
 
@@ -159,6 +161,7 @@ function AppLayout() {
       <TrialExpiry />
       <KeyBackupGate />
       <AdminNotice />
+      <LegalUpdateNotice />
     </div>
   )
 }
@@ -174,6 +177,7 @@ export default function App() {
         <Route path="/join" element={<Join />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
+        <Route path="/sms-terms" element={<SmsTerms />} />
         <Route path="/community" element={<Community />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/upgrade" element={<Upgrade />} />

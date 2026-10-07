@@ -25,7 +25,7 @@ import { onDocumentUpdated } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { FieldPath, FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, getNearestCity } from './cities'
-import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
+import { textAccount } from './sms'
 import { accountRef, internalRef, loadLocation } from './userData'
 
 // Per half (women / men); a city's circle is twice this.
@@ -58,47 +58,18 @@ export function bucketFor(genderIdentity: unknown): Bucket {
 
 export const num = (v: unknown, fallback: number) => (typeof v === 'number' ? v : fallback)
 
-// Account-level founder texts: either mode's SMS switch will do (smsTarget
-// also checks quiet hours and that there's a number).
+// Texts about the founder's own spot (at risk, expiring, converted): either
+// mode's SMS switch will do (smsTarget also checks consent, opt-out, quiet
+// hours and that there's a number).
 export async function textFounder(uid: string, body: string): Promise<boolean> {
-  const target = (await smsTarget(uid, 'founder', 'spark')) ?? (await smsTarget(uid, 'founder', 'play'))
-  return target ? sendSMS(target.phone, body) : false
-}
-
-// The city's founders, current and older (founderCohort only), deduped.
-async function cityFounders(cityId: string, cityName: string) {
-  const users = getFirestore().collection('users')
-  const [byId, byName] = await Promise.all([
-    users.where('founderCityId', '==', cityId).select('isFounder').get(),
-    users.where('founderCohort', '==', cityName).select('isFounder').get(),
-  ])
-  const seen = new Map<string, FirebaseFirestore.DocumentData>()
-  for (const d of [...byId.docs, ...byName.docs]) if (!seen.has(d.id)) seen.set(d.id, d.data())
-  return seen
-}
-
-// Both halves just filled: the city is live (bots off, distance filtering
-// on — discover.ts reads botsActive). Tell its founders.
-async function announceCityLive(cityId: string, cityName: string): Promise<void> {
-  try {
-    const founders = await cityFounders(cityId, cityName)
-    const body = `✦ ${cityName} is live. Your founding circle is complete — real connections, real people, just in your area. Distance filtering is now active. zylove.app`
-    let sent = 0
-    for (const [uid, u] of founders) {
-      if (u.isFounder !== true) continue
-      if (await textFounder(uid, body)) sent++
-    }
-    logger.info('announceCityLive', { cityId, founders: founders.size, sent })
-  } catch (err) {
-    logger.error('announceCityLive failed', { cityId, message: err instanceof Error ? err.message : String(err) })
-  }
+  return textAccount(uid, 'founder', body)
 }
 
 // Location is self-reported (browser geolocation via setLocation, snapped to
 // ~3 miles), so this is a launch-period gate, not proof of residence. It's the
 // stored location (userLocations), never coordinates sent with the call.
 export const assignFounderBadge = onCall(
-  { timeoutSeconds: 60, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
+  { timeoutSeconds: 60, memory: '256MiB', invoker: 'public' },
   async (request): Promise<FounderResult> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const loc = await loadLocation(request.auth.uid)
@@ -110,7 +81,7 @@ export const assignFounderBadge = onCall(
 // The founder claim itself: the city at (lat, lng), its half's counter, the
 // user's founder fields and lifecycle record. Shared by the user's own
 // claim and the admin dashboard's "Make founder" (which passes the user's
-// saved location). The caller must provide SMS_SECRETS (city-live texts).
+// saved location).
 export async function claimFounderSpot(uid: string, lat: number, lng: number, source: string): Promise<FounderResult> {
   const city = getNearestCity(lat, lng)
   if (!city) return { eligible: false, reason: 'outside_coverage' }
@@ -227,7 +198,9 @@ export async function claimFounderSpot(uid: string, lat: number, lng: number, so
   })
   const { closedCity, ...result } = claim
   if (result.eligible) await refreshCityMembers(city.id)
-  if (closedCity) await announceCityLive(city.id, city.name)
+  // City live: shown in the app (LaunchBanner); no texts (SMS is account and
+  // match/message notifications only).
+  if (closedCity) logger.info('City live', { cityId: city.id })
 
   logger.info(source, {
     city: city.id,

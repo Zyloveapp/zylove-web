@@ -22,7 +22,7 @@ import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { REVIEW_TONE } from './shared/reviewCategories'
-import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
+import { SMS_SECRETS, textAccount } from './sms'
 import { phoneHash, wereMatched } from './trust'
 import { softDeleteAccount } from './adminActivity'
 import { accountRef, adminUids, internalRef, isAdminAuth, isAdminUid, isSuspendedUid, loadInternal } from './userData'
@@ -388,11 +388,6 @@ export const adminGetReports = onCall(
 type ModerateAction = 'warn' | 'suspend' | 'unsuspend' | 'ban' | 'clear' | 'thank'
 const ACTIONS: readonly ModerateAction[] = ['warn', 'suspend', 'unsuspend', 'ban', 'clear', 'thank']
 
-// Account-level text: either mode's SMS switch, never in quiet hours.
-async function textAccount(uid: string, body: string): Promise<boolean> {
-  const target = (await smsTarget(uid, 'account', 'spark')) ?? (await smsTarget(uid, 'account', 'play'))
-  return target ? sendSMS(target.phone, body) : false
-}
 
 // The in-app notice AdminNotice shows on their next visit until dismissed.
 function notice(type: 'warning' | 'thanks', message: string) {
@@ -465,7 +460,7 @@ export const adminModerate = onCall(
         // The notice is the owner's alone (private/account); the timestamp is admin data (F-040).
         await accountRef(uid).set({ adminNotice: notice('warning', message ?? DEFAULT_WARNING) }, { merge: true })
         await internalRef(uid).set({ lastWarnedAt: FieldValue.serverTimestamp() }, { merge: true })
-        const texted = await textAccount(uid, 'Zylove: You have an important notice about your account. Open zylove.app to read it.')
+        const texted = await textAccount(uid, 'account', 'Zylove: You have an important notice about your account. Open zylove.app to read it.')
         const resolved = await resolveReports(uid, 'actioned', action, adminUid)
         await log({ texted })
         return { ok: true, resolved, texted }
@@ -474,7 +469,7 @@ export const adminModerate = onCall(
         if (!user || user.isDeleted === true) throw new HttpsError('failed-precondition', 'That account no longer exists.')
         await accountRef(uid).set({ adminNotice: notice('thanks', message ?? DEFAULT_THANKS) }, { merge: true })
         await internalRef(uid).set({ lastThankedAt: FieldValue.serverTimestamp() }, { merge: true })
-        const texted = await textAccount(uid, '✦ Zylove: The team left you a note. Open zylove.app to read it.')
+        const texted = await textAccount(uid, 'account', '✦ Zylove: The team left you a note. Open zylove.app to read it.')
         await log({ texted })
         return { ok: true, texted }
       }

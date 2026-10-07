@@ -32,6 +32,28 @@
     <meta name="theme-color" content="#030712" />
   </head>
   <body>
+    <!-- For visitors and crawlers without JavaScript (the app is a SPA, so
+         this file is every URL's HTML). The business details are carrier
+         (A2P 10DLC) requirements for the website — keep them in step with the
+         landing page, footer and /sms-terms. -->
+    <noscript>
+      <main style="max-width:40rem;margin:0 auto;padding:2rem 1rem;font-family:system-ui,sans-serif;line-height:1.6;color:#e5e7eb;background:#030712">
+        <h1>Zylove</h1>
+        <p>Zylove is a dual-mode dating app for adults 18+, operated by Zylove, LLC. Launching first in Austin, TX.</p>
+        <p><strong>Spark</strong> — serious dating, matched on real compatibility, for something worth keeping.</p>
+        <p><strong>Play</strong> — casual, adult connections with no labels, on a separate private profile.</p>
+        <p>Text messages: one-time sign-in codes, plus account alerts and match and message notifications for people who opt in. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help.</p>
+        <p>
+          <a href="/terms" style="color:#7c9bff">Terms</a> ·
+          <a href="/privacy" style="color:#7c9bff">Privacy</a> ·
+          <a href="/sms-terms" style="color:#7c9bff">SMS Terms</a> ·
+          <a href="/community" style="color:#7c9bff">Community</a> ·
+          <a href="/contact" style="color:#7c9bff">Contact</a>
+        </p>
+        <p>Zylove, LLC · Austin, Texas · <a href="mailto:support@zylove.app" style="color:#7c9bff">support@zylove.app</a></p>
+        <p>© 2026 Zylove, LLC. All rights reserved. JavaScript is required to use the app.</p>
+      </main>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <!-- The CSP (vercel.json) allows this inline script by its sha256 hash: change one, update the other. -->

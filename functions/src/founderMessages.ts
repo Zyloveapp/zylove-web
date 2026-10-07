@@ -12,9 +12,10 @@
 
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { logger } from 'firebase-functions'
+import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type WriteBatch } from 'firebase-admin/firestore'
 import { accountRef, isAdminAuth, requireActive } from './userData'
-import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
+import { SMS_SECRETS, textAccount } from './sms'
 
 const MAX_BODY = 1000
 const PREVIEW_CHARS = 60
@@ -25,7 +26,6 @@ const ADMIN_SMS_COOLDOWN_MS = 10 * 60 * 1000
 const BOT_PREFIX = 'zbot-'
 // Revoked and converted founders no longer have isFounder, but be explicit.
 const FORMER_STATUSES = new Set(['revoked', 'converted'])
-const SMS_CONCURRENCY = 5
 
 function db() {
   return getFirestore()
@@ -68,10 +68,14 @@ async function activeFounders(): Promise<{ id: string; data: DocumentData }[]> {
   return snap.docs.filter((d) => isActiveFounder(d.id, d.data())).map((d) => ({ id: d.id, data: d.data() }))
 }
 
-// Account-level text: either mode's SMS switch, not in quiet hours.
-async function textFounder(uid: string, body: string): Promise<boolean> {
-  const target = (await smsTarget(uid, 'founder', 'spark')) ?? (await smsTarget(uid, 'founder', 'play'))
-  return target ? sendSMS(target.phone, body) : false
+// The admin's own alert texts go through the same checks as everyone's: the
+// account signed in with ADMIN_PHONE needs SMS consent, SMS on, no STOP.
+async function textAdminPhone(body: string): Promise<boolean> {
+  const uid = await getAuth()
+    .getUserByPhoneNumber(ADMIN_PHONE)
+    .then((u) => u.uid)
+    .catch(() => null)
+  return uid ? textAccount(uid, 'account', body) : false
 }
 
 // Adds one admin message to a founder's thread (batched by the caller).
@@ -182,7 +186,7 @@ export const sendFounderMessage = onCall(
 
     if (textAdmin) {
       const city = typeof user.founderCity === 'string' && user.founderCity ? user.founderCity : 'Austin'
-      await sendSMS(ADMIN_PHONE, `✦ New founder message from ${name} in ${city}: ${preview(body)}. Reply at zylove.app/admin/messages`)
+      await textAdminPhone(`✦ New founder message from ${name} in ${city}: ${preview(body)}. Reply at zylove.app/admin/messages`)
     }
     logger.info('sendFounderMessage', { textedAdmin: textAdmin })
     return { success: true }
@@ -206,7 +210,7 @@ export const replyToFounder = onCall(
     // Replying means the admin has read the thread.
     batch.set(db().doc(`founderMessages/${founderUid}`), { adminUnread: false }, { merge: true })
     await batch.commit()
-    await textFounder(founderUid, '✦ You have a message from the Zylove founder. Open it at zylove.app — reply STOP to opt out.')
+    await textAccount(founderUid, 'founder', '✦ You have a message from the Zylove founder. Open it at zylove.app — reply STOP to opt out.')
     return { success: true }
   },
 )
@@ -214,7 +218,7 @@ export const replyToFounder = onCall(
 // ─── Matthew → every founder ─────────────────────────────────────────────────
 
 export const broadcastToFounders = onCall(
-  { timeoutSeconds: 300, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
+  { timeoutSeconds: 300, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ sent: number; failed: number; texted: number; total: number }> => {
     const adminUid = requireAdmin(request.auth)
     const body = parseBody(request.data)
@@ -238,13 +242,10 @@ export const broadcastToFounders = onCall(
       }
     }
 
-    // Texts: SMS on, a number on file, not in quiet hours (smsTarget).
-    const text = `✦ Message from the Zylove founder: ${preview(body, 100)}. Read it at zylove.app`
-    let texted = 0
-    for (let i = 0; i < delivered.length; i += SMS_CONCURRENCY) {
-      const results = await Promise.all(delivered.slice(i, i + SMS_CONCURRENCY).map((uid) => textFounder(uid, text)))
-      texted += results.filter(Boolean).length
-    }
+    // No texts: a broadcast is an announcement, and SMS is account and
+    // match/message notifications only. Founders see it in their thread.
+    // texted stays in the result for clients still on the old build.
+    const texted = 0
     logger.info('broadcastToFounders', { total: founders.length, sent, failed, texted })
     return { sent, failed, texted, total: founders.length }
   },

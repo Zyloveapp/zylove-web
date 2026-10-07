@@ -2,6 +2,7 @@ import { type Unsubscribe } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { functions } from './firebase'
 import { saveSettings, subscribeSettingsView } from './privateSettings'
+import { SMS_CONSENT_VERSION, type SmsConsentSource } from '../config/smsConsent'
 
 export type SmsMode = 'spark' | 'play'
 
@@ -41,7 +42,8 @@ export const SMS_SECTIONS: {
   },
 ]
 
-// Defaults written with consent; quiet nudges start off.
+// Defaults written with consent. quietNudge stays off: the quiet chat nudge
+// is in-app only for now (no SMS).
 const DEFAULT_PREFERENCES: SmsPreferences = {
   spark: { newSpark: true, newMessage: true, newMatch: true },
   play: { newFlame: true, newMessage: true, newMatch: true },
@@ -130,7 +132,10 @@ function parseEnabled(v: unknown): SmsEnabled | null {
 export interface SmsSettings {
   // null: never set up (the field is missing), which drives the ⚙ dot.
   enabled: SmsEnabled | null
+  // A consent record and no STOP since: switching a mode on needs no new opt-in.
   consented: boolean
+  // They replied STOP (texts are off until they opt in again or text START).
+  optedOut: boolean
   preferences: SmsPreferences
   quietHours: QuietHours
 }
@@ -142,7 +147,8 @@ export function subscribeSmsSettings(uid: string, onChange: (s: SmsSettings) => 
       const preferences = parsePreferences(d.smsNotifications)
       onChange({
         enabled: parseEnabled(d.smsNotificationsEnabled),
-        consented: typeof d.smsConsent === 'object' && d.smsConsent !== null,
+        consented: typeof d.smsConsent === 'object' && d.smsConsent !== null && d.smsOptOut == null,
+        optedOut: d.smsOptOut != null,
         preferences,
         quietHours: parseQuietHours(d.smsQuietHours),
       })
@@ -151,17 +157,30 @@ export function subscribeSmsSettings(uid: string, onChange: (s: SmsSettings) => 
   )
 }
 
+// What the server reports after an opt-in: the confirmation text went out,
+// or the carrier still blocks the number after an earlier STOP (then `from`
+// is our number, for them to text START to).
+export interface SmsConsentResult {
+  confirmation: 'sent' | 'opted_out' | 'failed'
+  from: string | null
+}
+
 // First opt-in, from either mode's switch: records consent, turns that mode
 // on (the other stays off), and saves the default preferences and quiet
 // hours (on, 9pm–8am local), so texts respect the night from the start.
-// Consent goes through the server, which records the verified sign-in phone.
-export async function grantSmsConsent(uid: string, mode: SmsMode): Promise<void> {
-  await httpsCallable(functions, 'grantSmsConsent')({})
+// Consent goes through the server, which records the verified sign-in phone,
+// where it was given and which wording was shown (SMS_CONSENT_VERSION).
+export async function grantSmsConsent(uid: string, mode: SmsMode, source: SmsConsentSource): Promise<SmsConsentResult> {
+  const { data } = await httpsCallable<{ textVersion: string; source: SmsConsentSource }, SmsConsentResult>(
+    functions,
+    'grantSmsConsent',
+  )({ textVersion: SMS_CONSENT_VERSION, source })
   await saveSettings(uid, {
     smsNotificationsEnabled: { spark: mode === 'spark', play: mode === 'play' },
     smsNotifications: DEFAULT_PREFERENCES,
     smsQuietHours: defaultQuietHours(),
   })
+  return data
 }
 
 // Saves the whole quiet-hours object, re-stamping the browser's timezone.
@@ -182,6 +201,3 @@ export async function setSmsPreference(uid: string, mode: SmsMode, key: string, 
   await saveSettings(uid, { smsNotifications: { [mode]: { [key]: value } } })
 }
 
-export async function setQuietNudge(uid: string, value: boolean): Promise<void> {
-  await saveSettings(uid, { smsNotifications: { quietNudge: value } })
-}

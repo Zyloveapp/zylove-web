@@ -20,6 +20,8 @@ function settingsView(root: DocumentData | undefined, settings: DocumentData | u
   const view: DocumentData = {}
   for (const k of SETTINGS_KEYS) view[k] = settings?.[k] !== undefined ? settings[k] : root?.[k]
   view.smsConsent = account?.smsConsent ?? root?.smsConsent ?? null
+  // Set by the server when they reply STOP; cleared by START or a new opt-in.
+  view.smsOptOut = account?.smsOptOut ?? null
   return view
 }
 

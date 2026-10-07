@@ -6,6 +6,16 @@ import { distanceMiles, getNearestCity } from './cities'
 import { marketFor } from './trial'
 import { accountRef, identityRef, internalRef, locationRef, userRef, requireActive } from './userData'
 import { takeRateLimit } from './rateLimits'
+import {
+  SMS_CONSENT_SOURCES,
+  SMS_CONSENT_TEXTS,
+  SMS_SECRETS,
+  optOutRef,
+  sendConsentConfirmation,
+  smsFromNumber,
+  type Delivery,
+  type SmsConsentSource,
+} from './sms'
 
 // Locations, server-side (Stage 1a). Nobody reads another user's coordinates:
 // the browser's position goes to setLocation, which snaps it and keeps it in
@@ -226,17 +236,44 @@ export const getDistances = onCall(
 // ─── grantSmsConsent ─────────────────────────────────────────────────────────
 
 // Turns on texts: records consent with the phone number from the caller's
-// verified sign-in (never one the client sends) in private/account.
+// verified sign-in (never one the client sends), where it was given and the
+// exact wording shown (by version; the text comes from SMS_CONSENT_TEXTS, not
+// the client), in private/account. A new opt-in lifts an earlier STOP on our
+// side, then the confirmation text goes out. If the carrier still has the
+// number blocked from a STOP, it comes back opted_out with our number, and
+// the person texts START to it.
 export const grantSmsConsent = onCall(
-  { timeoutSeconds: 20, memory: '256MiB', invoker: 'public' },
-  async (request): Promise<{ ok: true }> => {
+  { timeoutSeconds: 20, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
+  async (request): Promise<{ ok: true; confirmation: Delivery; from: string | null }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    const uid = request.auth.uid
     const phone: unknown = request.auth.token.phone_number
     if (typeof phone !== 'string' || !/^\+[1-9]\d{6,14}$/.test(phone)) {
       throw new HttpsError('failed-precondition', 'Sign in with a phone number to turn on texts.')
     }
-    await accountRef(request.auth.uid).set({ smsConsent: { grantedAt: FieldValue.serverTimestamp(), phone } }, { merge: true })
-    return { ok: true }
+    const data = (request.data ?? {}) as Record<string, unknown>
+    // Clients from before versioned consent send nothing: the old pop-up.
+    const textVersion = data.textVersion === undefined ? 'legacy' : data.textVersion
+    if (typeof textVersion !== 'string' || !(textVersion in SMS_CONSENT_TEXTS)) {
+      throw new HttpsError('invalid-argument', 'Unknown consent text version.')
+    }
+    const source = data.source === undefined ? 'unknown' : data.source
+    if (source !== 'unknown' && !SMS_CONSENT_SOURCES.includes(source as SmsConsentSource)) {
+      throw new HttpsError('invalid-argument', 'Unknown consent source.')
+    }
+    // Each call sends a confirmation text.
+    await takeRateLimit(uid, 'smsConsent', { max: 5, windowMs: 60 * 60 * 1000 })
+
+    await accountRef(uid).set(
+      {
+        smsConsent: { grantedAt: FieldValue.serverTimestamp(), phone, source, textVersion, text: SMS_CONSENT_TEXTS[textVersion] },
+        smsOptOut: FieldValue.delete(),
+      },
+      { merge: true },
+    )
+    await optOutRef(phone).delete()
+    const confirmation = await sendConsentConfirmation(phone)
+    return { ok: true, confirmation, from: confirmation === 'opted_out' ? smsFromNumber() : null }
   },
 )
 

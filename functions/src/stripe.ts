@@ -12,7 +12,7 @@ import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
 import { FieldValue } from 'firebase-admin/firestore'
 import Stripe = require('stripe')
-import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
+import { SMS_SECRETS, textAccount } from './sms'
 import { internalRef, loadInternal } from './userData'
 
 const stripeSecretKey = defineSecret('STRIPE_SECRET_KEY')
@@ -229,8 +229,7 @@ async function onPaymentFailed(invoice: Stripe.Invoice): Promise<void> {
   // One text per invoice (Stripe retries several times), only for people with
   // texts on in either mode, and never in their quiet hours.
   if (invoice.attempt_count !== 1) return
-  const target = (await smsTarget(uid, 'billing', 'spark')) ?? (await smsTarget(uid, 'billing', 'play'))
-  if (target) await sendSMS(target.phone, 'Your Zylove payment failed. Update your payment method at zylove.app/upgrade')
+  await textAccount(uid, 'billing', 'Your Zylove payment failed. Update your payment method at zylove.app/upgrade')
 }
 
 export const stripeWebhook = onRequest(

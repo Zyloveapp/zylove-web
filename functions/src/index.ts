@@ -7,7 +7,6 @@
 import './globalOptions'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/firestore'
-import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
 import { createHash } from 'node:crypto'
@@ -1849,7 +1848,7 @@ export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate, unmatc
 export { markChatPhotoViewed, sweepChatPhotos } from './photos'
 export { checkTrialStatus, onMarketOpened } from './trial'
 export { mirrorPlan } from './userData'
-export { recordTermsAcceptance } from './legal'
+export { acknowledgeLegalUpdate, recordTermsAcceptance } from './legal'
 export { getPhotoUrls, getReviewPdfUrl } from './photoAccess'
 export { exploreOnInternal, exploreOnLocation, exploreOnUser, exploreOnUserDoc, getExploreDeck } from './explore'
 export { photoCleanupOnUser, photoCleanupOnUserDoc } from './photoCleanup'
@@ -1858,6 +1857,7 @@ export { playAccessOnPlan, playAccessOnPlayProfile, playAccessOnProfile } from '
 export { actOnPlayConnection, listLockedPlayConnections } from './lockedPlay'
 export { getDistances, grantSmsConsent, recordActivity, refreshAges, setLocation } from './location'
 export { createCheckoutSession, createPortalSession, stripeWebhook } from './stripe'
+export { twilioInbound } from './smsInbound'
 export {
   broadcastToFounders,
   getFounderThread,
@@ -1876,8 +1876,6 @@ export { adminGetReports, adminModerate, liftExpiredSuspensions, reportAndBan, s
 // never throws, so a texting problem never affects the write that fired it.
 
 const MESSAGE_SMS_COOLDOWN_MS = 5 * 60 * 1000
-const NUDGE_COOLDOWN_MS = 48 * 60 * 60 * 1000
-const HOUR_MS = 60 * 60 * 1000
 
 function millis(v: unknown): number | null {
   if (v instanceof Timestamp) return v.toMillis()
@@ -1899,7 +1897,7 @@ export const smsOnSpark = onDocumentCreated(
     const target = await smsTarget(event.params.uid, 'newSpark', play ? 'play' : 'spark')
     if (!target || !(await claimSparkSmsSlot(target.uid))) return
     await sendSMS(
-      target.phone,
+      target,
       play
         ? "🔥 Someone's interested on Zylove Play. Check your Flames. zylove.app/sparks"
         : '✦ Someone feels a Spark with you on Zylove. Open your Sparks to see more. zylove.app/sparks',
@@ -1950,7 +1948,7 @@ export const smsOnMessage = onDocumentCreated(
     if (!claimed) return
 
     const senderName = await nameFor(senderId, match.participantSnapshots, match.mode)
-    await sendSMS(target.phone, `💬 ${senderName} sent you a message on Zylove. zylove.app/matches`)
+    await sendSMS(target, `💬 ${senderName} sent you a message on Zylove. zylove.app/matches`)
   },
 )
 
@@ -1972,51 +1970,15 @@ export const smsOnMatch = onDocumentCreated(
         const body = play
           ? "🔥 You're now entangled on Zylove Play. zylove.app/matches"
           : `✦ Sparks are flying. You and ${await nameFor(otherUid, match.participantSnapshots, match.mode)} connected on Zylove. zylove.app/matches`
-        await sendSMS(target.phone, body)
+        await sendSMS(target, body)
       }),
     )
   },
 )
 
-// Quiet chat nudge: conversations whose last message was 24–48h ago. Each
-// match is nudged at most once per 48h. Runs at 9am, 3pm and 9pm Central so
-// nobody gets a nudge in the middle of the night.
-export const nudgeQuietChats = onSchedule(
-  { schedule: '0 9,15,21 * * *', timeZone: 'America/Chicago', secrets: SMS_SECRETS, timeoutSeconds: 300 },
-  async () => {
-    const db = getFirestore()
-    const now = Date.now()
-    const quiet = await db
-      .collection('matches')
-      .where('lastMessageAt', '>=', Timestamp.fromMillis(now - 48 * HOUR_MS))
-      .where('lastMessageAt', '<=', Timestamp.fromMillis(now - 24 * HOUR_MS))
-      .get()
-
-    let sent = 0
-    for (const doc of quiet.docs) {
-      const match = doc.data()
-      if (match.isBlocked === true) continue
-      const lastNudge = millis(match.lastNudgeSmsAt)
-      if (lastNudge !== null && now - lastNudge < NUDGE_COOLDOWN_MS) continue
-      const users = participantsOf(match)
-      if (users.length !== 2) continue
-
-      let nudged = false
-      for (const uid of users) {
-        // The chat's own mode decides which master switch applies.
-        const target = await smsTarget(uid, 'quietNudge', match.mode === 'play' ? 'play' : 'spark')
-        if (!target) continue
-        const otherName = await nameFor(users.find((u) => u !== uid) ?? '', match.participantSnapshots, match.mode)
-        if (await sendSMS(target.phone, `☕ Your conversation with ${otherName} has been quiet. Need a spark? zylove.app/matches`)) {
-          nudged = true
-          sent++
-        }
-      }
-      if (nudged) await doc.ref.update({ lastNudgeSmsAt: FieldValue.serverTimestamp() })
-    }
-    logger.info('nudgeQuietChats: done', { candidates: quiet.size, sent })
-  },
-)
+// Quiet chat nudge: in-app only (ConversationNudge in the chat) while the
+// A2P campaign covers account and match/message texts only. The old
+// nudgeQuietChats SMS job is retired; add it back once the campaign allows it.
 
 // ─── validatePhoneNumber ─────────────────────────────────────────────────────
 
