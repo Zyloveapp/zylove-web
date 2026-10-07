@@ -257,3 +257,9 @@ export function subscribePublicKey(
     onError,
   )
 }
+
+// Forgets this browser's copy of the chat key (sign-out without "remember
+// this device"). The chat PIN backup brings it back on the next sign-in.
+export async function deletePrivateKey(uid: string): Promise<void> {
+  await withStore('readwrite', (s) => s.delete(storageKey(uid))).catch(() => {})
+}

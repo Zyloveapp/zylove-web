@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
+import { signOutAndWipe } from '../services/signOut'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { signOut } from 'firebase/auth'
-import { auth } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import { isOnBreak, setVisibility, subscribeVisibility, type VisibilityState } from '../services/visibility'
@@ -77,7 +76,7 @@ export default function PauseGuard() {
             </button>
             <button
               type="button"
-              onClick={() => void signOut(auth).then(() => navigate('/login', { replace: true }))}
+              onClick={() => void signOutAndWipe({ keepChatKey: 'ifNoBackup' })}
               className="underline hover:text-white/70"
             >
               Sign out

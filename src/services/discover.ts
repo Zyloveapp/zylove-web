@@ -29,31 +29,23 @@ export type DiscoverProfile = Partial<Omit<DatingProfile, 'attractedTo'>> & {
   distanceMiles?: number
 }
 
-// ─── Swiped list (per user + mode, this browser only) ───────────────────────
+// ─── Swiped this session ─────────────────────────────────────────────────────
+// The server keeps who's been acted on (exploreState, Stage 3) and leaves
+// them out of the deck. This in-memory copy only covers a deck fetched while
+// a swipe is still on its way. Stage B: nothing is kept in localStorage (old
+// zylove_swiped_* keys are cleared on sign-out).
 
-function swipedKey(uid: string, mode: Mode): string {
-  return `zylove_swiped_${uid}_${mode}`
-}
+const swipedThisSession = new Map<string, Set<string>>()
 
 export function loadSwiped(uid: string, mode: Mode): Set<string> {
-  try {
-    const raw = localStorage.getItem(swipedKey(uid, mode))
-    const parsed: unknown = raw ? JSON.parse(raw) : []
-    return new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [])
-  } catch {
-    return new Set()
-  }
+  return new Set(swipedThisSession.get(`${uid}:${mode}`) ?? [])
 }
 
 export function markSwiped(uid: string, mode: Mode, targetUid: string): void {
-  try {
-    const list = [...loadSwiped(uid, mode)]
-    if (!list.includes(targetUid)) list.push(targetUid)
-    // Cap so the key can't grow without bound (mobile keeps the last 500).
-    localStorage.setItem(swipedKey(uid, mode), JSON.stringify(list.slice(-500)))
-  } catch {
-    // Storage unavailable (private mode etc.) — the card still advances.
-  }
+  const key = `${uid}:${mode}`
+  const set = swipedThisSession.get(key) ?? new Set<string>()
+  set.add(targetUid)
+  swipedThisSession.set(key, set)
 }
 
 // ─── Viewer profile ──────────────────────────────────────────────────────────

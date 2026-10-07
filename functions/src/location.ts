@@ -4,7 +4,7 @@ import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { distanceMiles, getNearestCity } from './cities'
 import { marketFor } from './trial'
-import { accountRef, identityRef, internalRef, locationRef, userRef } from './userData'
+import { accountRef, identityRef, internalRef, locationRef, userRef, requireActive } from './userData'
 import { takeRateLimit } from './rateLimits'
 
 // Locations, server-side (Stage 1a). Nobody reads another user's coordinates:
@@ -67,6 +67,7 @@ export const setLocation = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ changed: boolean; label: string | null; marketCityId: string | null }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid)
     const uid = request.auth.uid
     const data = (request.data ?? {}) as Record<string, unknown>
     const lat = snap(coord(data.lat, 90))
@@ -153,10 +154,36 @@ function coordsFrom(loc: DocumentData | undefined, root: DocumentData | undefine
 
 // How far the caller is from each of `uids` (up to MAX_UIDS). Anyone without
 // a saved location — or the caller, if they have none — is left out.
+// Of `uids`, those `uid` may get a distance for (getDistances).
+async function visibleTo(uid: string, uids: string[]): Promise<Set<string>> {
+  const db = getFirestore()
+  const [state, matches, queue] = await Promise.all([
+    db.doc(`exploreState/${uid}`).get(),
+    db.collection('matches').where('users', 'array-contains', uid).select('users').get(),
+    db.collection(`users/${uid}/likeQueue`).select().get(),
+  ])
+  const st = state.data() ?? {}
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+  const known = new Set<string>([
+    ...list(st.spark?.deck), ...list(st.spark?.acted), ...list(st.play?.deck), ...list(st.play?.acted),
+    ...matches.docs.flatMap((d) => list(d.get('users'))),
+    ...queue.docs.map((d) => d.id),
+  ])
+  const blocked = new Set(list(st.blocked))
+  const candidates = uids.filter((u) => known.has(u) && !blocked.has(u))
+  if (!candidates.length) return new Set()
+  const [internals, roots] = await Promise.all([
+    db.getAll(...candidates.map((u) => db.doc(`userInternal/${u}`))),
+    db.getAll(...candidates.map(userRef)),
+  ])
+  return new Set(candidates.filter((_, i) => internals[i].get('isSuspended') !== true && roots[i].get('isDeleted') !== true && roots[i].exists))
+}
+
 export const getDistances = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ distances: Record<string, Distance> }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid)
     const uid = request.auth.uid
     const raw = (request.data as Record<string, unknown> | null)?.uids
     if (!Array.isArray(raw) || raw.length > MAX_UIDS || !raw.every((u) => typeof u === 'string' && UID_RE.test(u))) {
@@ -170,6 +197,11 @@ export const getDistances = onCall(
     const me = coordsFrom(myLoc.data(), myRoot.data())
     if (!me || uids.length === 0) return { distances: {} }
     const myMarket = marketFor(me)
+    // Stage B (F-055): only people the caller has a reason to see — in their
+    // Explore deck or already seen there, matched, or who liked them — and
+    // not blocked either way, suspended or deleted. Any uid used to work, so
+    // a blocked person could narrow down someone's ~1-mile cell by moving.
+    const visible = await visibleTo(uid, uids)
 
     const locs = await db.getAll(...uids.map(locationRef))
     const missing = uids.filter((_, i) => typeof locs[i].data()?.lat !== 'number')
@@ -178,6 +210,7 @@ export const getDistances = onCall(
 
     const distances: Record<string, Distance> = {}
     uids.forEach((u, i) => {
+      if (!visible.has(u)) return
       const them = coordsFrom(locs[i].data(), rootOf.get(u))
       if (!them) return
       const miles = distanceMiles(me.lat, me.lng, them.lat, them.lng)

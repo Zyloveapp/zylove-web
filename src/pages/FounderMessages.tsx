@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
+import { subscribeAccountView } from '../services/subscription'
 import { Navigate } from 'react-router-dom'
-import { doc, onSnapshot } from 'firebase/firestore'
-import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { useBackLinkClass, useModeStore } from '../store/modeStore'
 import {
@@ -30,10 +29,11 @@ export default function FounderMessages() {
 
   useEffect(() => {
     if (!uid) return
-    return onSnapshot(
-      doc(db, 'users', uid),
-      (snap) => {
-        const d = snap.data() ?? {}
+    // The account view: the public doc plus private/account, where founder
+    // status and the thread summary live (Stage B).
+    return subscribeAccountView(
+      uid,
+      (d) => {
         const meta = parseThreadMeta(d.founderThreadMeta)
         setFounder({ uid, isFounder: d.isFounder === true, lastMessageAt: meta?.lastMessageAt ?? null, hasUnread: meta?.hasUnread === true })
       },

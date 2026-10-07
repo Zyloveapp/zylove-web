@@ -1,7 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { signOut } from 'firebase/auth'
-import { auth } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { MODE_ACCENT, useBackLinkClass, useModeStore } from '../store/modeStore'
 import { hasPin } from '../services/playPin'
@@ -18,6 +16,7 @@ import {
   type SmsSettings,
 } from '../services/notifications'
 import PlayPinFlow from '../components/PlayPinFlow'
+import SignOutDialog from '../components/SignOutDialog'
 import SmsConsentModal from '../components/SmsConsentModal'
 import DiscoverySettings from '../components/DiscoverySettings'
 import InstallAppSection from '../components/InstallAppSection'
@@ -468,10 +467,7 @@ export default function Settings() {
     void run(() => setQuietHours(uid, { enabled: on, from, until, ...patch }))
   }
 
-  async function handleSignOut() {
-    await signOut(auth)
-    navigate('/login', { replace: true })
-  }
+  const [signingOut, setSigningOut] = useState(false)
 
   return (
     <div
@@ -689,13 +685,15 @@ export default function Settings() {
           <DeleteProfileControls uid={uid} />
           <button
             type="button"
-            onClick={handleSignOut}
+            onClick={() => setSigningOut(true)}
             className="w-full border-t border-white/5 px-5 py-4 text-left font-medium text-red-400 hover:bg-white/[0.03]"
           >
             Sign out
           </button>
         </Section>
       </div>
+
+      {signingOut && <SignOutDialog onClose={() => setSigningOut(false)} />}
 
       {consentOpen && (
         <SmsConsentModal busy={busy} onAccept={acceptConsent} onDecline={() => setConsentOpen(false)} />

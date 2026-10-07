@@ -2,7 +2,7 @@ import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { getStorage } from 'firebase-admin/storage'
-import { FieldValue, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
+import { FieldValue, Timestamp, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 
 // Where a user's non-public data lives (Stage 1a). users/{uid} is readable by
 // every signed-in user (Explore, profiles, chat), so only profile fields stay
@@ -249,9 +249,15 @@ export async function removePlayData(uid: string): Promise<void> {
 }
 
 // Removes the user's private docs, server-only record, location and (Stage 2)
-// all their Play data.
+// all their Play data — and (Stage B, F-057) everything else that's theirs
+// or about them that a deleted account shouldn't leave behind. Every deletion
+// path runs this (deleteAccount, the grace-period job, the admin delete, the
+// nightly purge). Kept: the public doc's remains (anonymised, for a restore),
+// their published photo files (a restore reuses them; the nightly purge
+// removes them) and legalAcceptance (the record of what they agreed to).
 export async function clearPrivateData(uid: string): Promise<void> {
   await removePlayData(uid)
+  await removeTraces(uid)
   await Promise.all([
     accountRef(uid).delete(),
     settingsRef(uid).delete(),
@@ -263,7 +269,70 @@ export async function clearPrivateData(uid: string): Promise<void> {
     internalRef(uid).delete(),
     locationRef(uid).delete(),
     db().doc(`rateLimits/${uid}`).delete(),
+    db().doc(`playPins/${uid}`).delete(),
+    db().doc(`keyBackups/${uid}`).delete(),
+    db().doc(`behaviorSignals/${uid}`).delete(),
   ])
+}
+
+// Stage B (F-057): what's left of someone in other people's data and in
+// their own subcollections.
+async function removeTraces(uid: string): Promise<void> {
+  const firestore = db()
+  const [pairsA, pairsB, matches] = await Promise.all([
+    firestore.collection('pairs').where('userA', '==', uid).get(),
+    firestore.collection('pairs').where('userB', '==', uid).get(),
+    firestore.collection('matches').where('users', 'array-contains', uid).get(),
+  ])
+  const refs: DocumentReference[] = []
+  for (const p of [...pairsA.docs, ...pairsB.docs]) {
+    const other = p.get('userA') === uid ? p.get('userB') : p.get('userA')
+    // Their like (either mode) in the other person's queue, and the likes.
+    if (typeof other === 'string') refs.push(firestore.doc(`users/${other}/likeQueue/${uid}`))
+    refs.push(firestore.doc(`pairs/${p.id}/likes/spark`), firestore.doc(`pairs/${p.id}/likes/play`))
+  }
+  for (let i = 0; i < refs.length; i += 400) {
+    const batch = firestore.batch()
+    for (const r of refs.slice(i, i + 400)) batch.delete(r)
+    await batch.commit()
+  }
+  // Their chats end: the other person keeps a read-only conversation with
+  // "Deleted User" (no new messages — the rules refuse them once unmatched).
+  const now = Timestamp.now()
+  for (const m of matches.docs) {
+    if (m.get('unmatchedAt')) continue
+    await m.ref.update({
+      unmatchedAt: now,
+      unmatchedBy: uid,
+      [`participantSnapshots.${uid}.displayName`]: 'Deleted User',
+      [`participantSnapshots.${uid}.photoURL`]: null,
+    })
+  }
+  // Their own records, besides the private docs cleared by the caller.
+  for (const sub of ['likeQueue', 'profileReviews', 'zyloveScore', 'freeTierState', 'seekingPreferences', 'settings', 'profileViews', 'matches', 'matchIndex']) {
+    await firestore.recursiveDelete(firestore.collection(`users/${uid}/${sub}`)).catch((err) =>
+      logger.warn('clearPrivateData: subcollection delete failed', { sub, message: String(err) }),
+    )
+  }
+  await firestore.recursiveDelete(firestore.doc(`founderMessages/${uid}`)).catch(() => {})
+  // Founder status ends with the account (as the deletion warning says); the
+  // spot goes back to the city.
+  const { revokeFounderStatus } = await import('./founderActivity')
+  await revokeFounderStatus(uid).catch((err) => logger.warn('clearPrivateData: founder revoke failed', { message: String(err) }))
+  await getStorage()
+    .bucket()
+    .deleteFiles({ prefix: `reviews/${uid}/` })
+    .catch((err) => logger.warn('clearPrivateData: review PDFs delete failed', { message: String(err) }))
+}
+
+// Stage B (F-058): user-facing callables refuse suspended accounts (a
+// pending deletion counts — cancelling it lifts that). Reporting, blocking,
+// unmatching and deleting stay open to them.
+export async function requireActive(uid: string): Promise<void> {
+  if (await isSuspendedUid(uid)) {
+    const { HttpsError } = await import('firebase-functions/v2/https')
+    throw new HttpsError('permission-denied', 'Account suspended')
+  }
 }
 
 // Whether `uid` holds the admin claim (authoritative: Firebase Auth).

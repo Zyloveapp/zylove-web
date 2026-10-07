@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { BrowserRouter, Outlet, Routes, Route, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Outlet, Routes, Route, useNavigate, useSearchParams } from 'react-router-dom'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from './services/firebase'
 import { useAuthStore } from './store/authStore'
@@ -26,6 +26,7 @@ import Join from './pages/public/Join'
 import Contact from './pages/public/Contact'
 import Onboarding from './pages/Onboarding'
 import PlayOnboarding from './pages/PlayOnboarding'
+import PlayGate from './components/PlayGate'
 import Discover from './pages/Discover'
 import Links from './pages/Links'
 import Sparks from './pages/Sparks'
@@ -80,6 +81,19 @@ declare global {
   }
 }
 
+// Editing an existing Play profile (?edit=true) shows Play data, so it needs
+// Play unlocked; a first-time Play onboarding has nothing to protect yet.
+function PlayOnboardingRoute() {
+  const [params] = useSearchParams()
+  return params.get('edit') === 'true' ? (
+    <PlayGate>
+      <PlayOnboarding />
+    </PlayGate>
+  ) : (
+    <PlayOnboarding />
+  )
+}
+
 function AppLayout() {
   const uid = useAuthStore((s) => s.user?.uid)
   const navigate = useNavigate()
@@ -128,7 +142,7 @@ function AppLayout() {
     if (!uid || startupDone.has(uid)) return
     startupDone.add(uid)
     // Pull the Play PIN into this browser's cache (Settings reads it sync).
-    void loadPin(uid)
+    void loadPin(uid).catch(() => {})
     void touchLastActive(uid)
     void founderHeartbeat(uid)
   }, [uid])
@@ -166,7 +180,7 @@ export default function App() {
         <Route path="/onboarding" element={<Onboarding />} />
         <Route element={<AuthGuard />}>
           {/* Full-screen flow: no header or nav. */}
-          <Route path="/play-onboarding" element={<PlayOnboarding />} />
+          <Route path="/play-onboarding" element={<PlayOnboardingRoute />} />
           <Route element={<PauseGuard />}>
             <Route element={<AppLayout />}>
               <Route path="/discover" element={<Discover />} />
@@ -174,7 +188,14 @@ export default function App() {
               <Route path="/sparks" element={<Sparks />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/profile/edit" element={<EditProfile />} />
-              <Route path="/edit-play-profile" element={<EditPlayProfile />} />
+              <Route
+                path="/edit-play-profile"
+                element={
+                  <PlayGate>
+                    <EditPlayProfile />
+                  </PlayGate>
+                }
+              />
               <Route path="/profile/:uid" element={<ViewProfile />} />
               <Route path="/profile/go-deeper" element={<GoDeeper />} />
               <Route path="/zylove-score" element={<ZyloveScore />} />

@@ -11,6 +11,7 @@
 import * as admin from "firebase-admin";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
+import { takeRateLimit } from "../rateLimits";
 import {
   sendPush,
   getToken,
@@ -101,6 +102,9 @@ export const onBotMessage = onDocumentCreated(
     // written as the partner, from their profile.
     const isBotMatch = botUid.startsWith("zbot-") || botUid.startsWith("seed-");
     if (!isBotMatch || match.isBlocked === true || match.unmatchedAt) return;
+    // Stage B (F-054): bot replies are AI calls — at most 100 a day per person.
+    const underLimit = await takeRateLimit(senderId, "botReplies", { max: 100, windowMs: 24 * 60 * 60 * 1000 }).then(() => true, () => false);
+    if (!underLimit) return;
 
     // Fetch bot persona
     const botDoc = await db.collection("users").doc(botUid).get();
@@ -130,7 +134,7 @@ export const onBotMessage = onDocumentCreated(
         const msg = d.data();
         return {
           role: msg.senderId === botUid ? "assistant" : "user",
-          content: msg.ciphertext || "",
+          content: String(msg.ciphertext || "").slice(0, 2000),
         };
       })
       .filter((m) => m.content);

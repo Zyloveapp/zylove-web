@@ -65,7 +65,7 @@ export interface PairDoc {
   userA: string;
   userB: string;
   createdAt: Timestamp;
-  initiatedBy: string;
+  initiatedBy?: string;
   sparkScore: number;
   sparkBreakdown: SparkBreakdown;
   // Stage 2: Play scores live in pairs/{id}/modes/play (../pairPlay.ts);
@@ -75,9 +75,9 @@ export interface PairDoc {
   triggeredDealbreakers?: string[];
   scoreCalculatedAt: Timestamp;
   scoreVersion: number;
-  userALiked: boolean;
-  userBLiked: boolean;
-  matched: boolean;
+  userALiked?: boolean;
+  userBLiked?: boolean;
+  matched?: boolean;
   matchedAt?: Timestamp;
   tier1Spark?: { archetype: unknown; combinedScore: number; asymmetryGap: number; dataConfidence: number };
 }

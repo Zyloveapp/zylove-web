@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import { markPlayActive, onPlayLocked, playSessionExpired, trackPlayActivity } from '../services/playSession'
@@ -6,11 +7,13 @@ import PlayPinFlow from './PlayPinFlow'
 
 // Covers Play with the PIN after 2 minutes without activity (on load, or on
 // coming back to the tab). Unlocking drops the user back exactly where they
-// were — no navigation, no transition. Cancelling leaves Play for Spark.
+// were — no navigation, no transition. Cancelling leaves Play for Spark and
+// goes to Explore, so the Play screen underneath isn't left showing.
 export default function PlayLock() {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const mode = useModeStore((s) => s.mode)
   const setMode = useModeStore((s) => s.setMode)
+  const navigate = useNavigate()
   const [locked, setLocked] = useState(() => mode === 'play' && playSessionExpired())
 
   // Every way of locking (on load, on return, idle check) passes through here.
@@ -48,6 +51,7 @@ export default function PlayLock() {
       onCancel={() => {
         setLocked(false)
         setMode('spark')
+        navigate('/discover', { replace: true })
       }}
     />
   )

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { signOutAndWipe } from '../services/signOut'
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
-import { signOut } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
 import { useAuthStore } from '../store/authStore'
-import { auth, db } from '../services/firebase'
+import { db } from '../services/firebase'
 import { friendlyError } from '../services/errors'
 import { useModeStore } from '../store/modeStore'
 import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
@@ -468,9 +468,7 @@ export default function Onboarding() {
   function signOutOfOnboarding() {
     finished.current = true
     clearDraft(uid, flow)
-    signOut(auth)
-      .catch(() => {})
-      .finally(() => navigate('/login', { replace: true }))
+    void signOutAndWipe({ keepChatKey: 'ifNoBackup' })
   }
 
   if (firstRun) {

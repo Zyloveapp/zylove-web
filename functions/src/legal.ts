@@ -14,7 +14,7 @@ import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 
 // The "Last updated" dates of src/pages/public/content/{terms,privacy}.html.
 // Bump these whenever either document changes.
-export const LEGAL_VERSIONS = { terms: '2026-10-05', privacy: '2026-10-05' } as const
+export const LEGAL_VERSIONS = { terms: '2026-10-07', privacy: '2026-10-07' } as const
 
 // Mirrors CONSENT_IDS in src/services/onboarding.ts: every box on the Terms
 // step must be ticked.
@@ -22,7 +22,7 @@ export const REQUIRED_CONSENTS = ['age', 'terms', 'privacy', 'matching', 'conduc
 
 // The caller's address: the first X-Forwarded-For hop (Cloud Run's proxy
 // sets it), else the connection's own.
-function clientIp(
+export function clientIp(
   raw: { headers: Record<string, string | string[] | undefined>; ip?: string; socket?: { remoteAddress?: string } } | undefined,
 ): string | null {
   const fwd = raw?.headers['x-forwarded-for']

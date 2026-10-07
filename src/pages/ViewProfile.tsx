@@ -40,15 +40,17 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
   useEffect(() => {
     if (!targetUid || targetUid === uid) return
     let cancelled = false
-    // Play data is loaded up front too: which one shows depends on the mode,
-    // which isn't known until the links list arrives.
-    Promise.all([loadOwnProfile(targetUid).catch(() => null), loadPlayProfile(targetUid)]).then(([data, play]) => {
-      if (!cancelled) setLoaded({ uid: targetUid, data, play })
-    })
+    // Play data only while in Play (Stage B: not fetched into a Spark
+    // session, where the Play lock doesn't cover it).
+    Promise.all([loadOwnProfile(targetUid).catch(() => null), mode === 'play' ? loadPlayProfile(targetUid) : Promise.resolve(null)]).then(
+      ([data, play]) => {
+        if (!cancelled) setLoaded({ uid: targetUid, data, play })
+      },
+    )
     return () => {
       cancelled = true
     }
-  }, [targetUid, uid])
+  }, [targetUid, uid, mode])
 
   // Every link; only one in the current mode counts (filtered below).
   useEffect(() => {

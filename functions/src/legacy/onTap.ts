@@ -7,10 +7,11 @@ import { calculateSparkScore, calculatePlayScore } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
-import { loadMatching, withPrivateProfile } from "../userData";
+import { loadMatching, requireActive, withPrivateProfile } from "../userData";
 
 export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
+  await requireActive(request.auth.uid);
 
   const db       = admin.firestore();
   const tapperId = request.auth.uid;
@@ -81,16 +82,12 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
     userA,
     userB,
     createdAt:         admin.firestore.Timestamp.now(),
-    initiatedBy:       tapperId,
     sparkScore,
     sparkBreakdown,
     triggeredDealbreakers,
     ...(sparkTier1 && { tier1Spark: sparkTier1 }),
     scoreCalculatedAt: admin.firestore.Timestamp.now(),
     scoreVersion:      1,
-    userALiked:        false,
-    userBLiked:        false,
-    matched:           false,
   };
 
   await pairRef.set(pairData);

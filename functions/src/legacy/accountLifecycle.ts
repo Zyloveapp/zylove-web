@@ -322,6 +322,10 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
   batch.delete(recoveryRef);
 
   await batch.commit();
+  // Stage B (F-057): the old uid's leftover subcollections too — the nightly
+  // purge never finds them once its root doc is gone. Its published photo
+  // files stay: the restored profile still points at them.
+  await db.recursiveDelete(db.collection("users").doc(previousUid)).catch(() => {});
 
   return {
     success: true,

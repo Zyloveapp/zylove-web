@@ -51,8 +51,10 @@ export { processBotLikeBacks, queueBotLikeBack } from './botLikeBack'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
 import { ALWAYS_ELITE_IDENTITIES, marketFor, marketOpen, newTrial, planView, trialExempt } from './trial'
-import { accountRef, internalRef, isAdminAuth, isSuspendedUid, loadInternal, loadLocation, loadSettings } from './userData'
+import { accountRef, internalRef, isAdminAuth, isSuspendedUid, loadInternal, loadLocation, loadSettings, requireActive } from './userData'
 import { blockedEitherWay, likedInMode, pairIdOf, recordLike } from './likes'
+import { reserveSlot, takeRateLimit } from './rateLimits'
+import { clientIp } from './legal'
 import { playStatus, requirePlayAccess, requirePlayEntitled } from './playAccess'
 import { loadPlayScores } from './pairPlay'
 import { markActed } from './explore'
@@ -105,6 +107,10 @@ export const generateSparkBio = onCall(
   async (request): Promise<BioResponse> => {
     // invoker is public (org policy), so gate spend on a signed-in caller.
     if (!request.auth) return { bio: '' }
+    if (!(await requireActive(request.auth.uid).then(() => true, () => false))) return { bio: '' }
+    // Stage B: was unlimited. Over the limit the app falls back to its own template.
+    const refund = await reserveSlot(request.auth.uid, 'ai_sparkBio', { max: 5, windowMs: DAY_MS }).catch(() => null)
+    if (!refund) return { bio: '' }
 
     try {
       const input = parseBioRequest(request.data)
@@ -124,13 +130,16 @@ export const generateSparkBio = onCall(
 
       if (!response.ok) {
         logger.error('generateSparkBio: Anthropic API error', { status: response.status })
+        await refund()
         return { bio: '' }
       }
 
-      const bio = extractText(await response.json())
-      return { bio: truncateAtWord(bio, MAX_BIO_LENGTH) }
+      const bio = truncateAtWord(extractText(await response.json()), MAX_BIO_LENGTH)
+      if (!bio) await refund()
+      return { bio }
     } catch (err) {
       logger.error('generateSparkBio failed', { message: err instanceof Error ? err.message : String(err) })
+      await refund()
       return { bio: '' }
     }
   },
@@ -140,12 +149,6 @@ export const generateSparkBio = onCall(
 const PLAY_BIO_WEEKLY_LIMIT = 3
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
-// Successful generations in the last week, from userInternal/{uid}.bioGenerations.play
-// (a list of epoch-ms timestamps).
-function recentGenerations(data: DocumentData | undefined, now: number): number[] {
-  const raw: unknown = data?.bioGenerations?.play
-  return Array.isArray(raw) ? raw.filter((t): t is number => typeof t === 'number' && now - t < WEEK_MS) : []
-}
 
 // Writes a Play bio from Play onboarding answers. Unlike generateSparkBio this
 // is rate limited (3 per rolling week), so hitting the limit is an error the
@@ -155,14 +158,11 @@ export const generatePlayBio = onCall(
   async (request): Promise<BioResponse> => {
     // invoker is public (org policy), so gate spend on a signed-in caller.
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to generate a bio.')
+    await requireActive(request.auth.uid)
     await requirePlayEntitled(request.auth.uid)
-    // Rate-limit counters live in userInternal (server-only; userData.ts).
-    const userRef = internalRef(request.auth.uid)
-
-    const snap = await userRef.get()
-    if (recentGenerations(snap.data(), Date.now()).length >= PLAY_BIO_WEEKLY_LIMIT) {
-      throw new HttpsError('resource-exhausted', 'Play bio generation limit reached. Try again next week.')
-    }
+    // Stage B: the slot is reserved before the call (parallel calls can't
+    // overrun the limit) and given back if nothing comes of it.
+    const refund = await reserveSlot(request.auth.uid, 'ai_playBio', { max: PLAY_BIO_WEEKLY_LIMIT, windowMs: WEEK_MS }, 'Play bio generation limit reached. Try again next week.')
 
     try {
       const input = parsePlayBioRequest(request.data)
@@ -182,22 +182,17 @@ export const generatePlayBio = onCall(
 
       if (!response.ok) {
         logger.error('generatePlayBio: Anthropic API error', { status: response.status })
+        await refund()
         return { bio: '' }
       }
 
       const bio = truncateAtWord(extractText(await response.json()), MAX_BIO_LENGTH)
-      if (!bio) return { bio: '' }
-
-      // Only successful generations count. Re-checked in the transaction so
-      // parallel calls can't record past the limit.
-      await getFirestore().runTransaction(async (tx) => {
-        const now = Date.now()
-        const recent = recentGenerations((await tx.get(userRef)).data(), now)
-        tx.set(userRef, { bioGenerations: { play: [...recent, now].slice(-PLAY_BIO_WEEKLY_LIMIT) } }, { merge: true })
-      })
+      // Only successful generations count.
+      if (!bio) await refund()
       return { bio }
     } catch (err) {
       logger.error('generatePlayBio failed', { message: err instanceof Error ? err.message : String(err) })
+      await refund()
       return { bio: '' }
     }
   },
@@ -209,10 +204,6 @@ export const generatePlayBio = onCall(
 const PLAY_GO_DEEPER_WEEKLY_LIMIT = 3
 const GO_DEEPER_TEMPERATURES = [0.9, 1.0] as const
 
-function recentGoDeeper(data: DocumentData | undefined, now: number): number[] {
-  const raw: unknown = data?.goDeeperGenerations?.play
-  return Array.isArray(raw) ? raw.filter((t): t is number => typeof t === 'number' && now - t < WEEK_MS) : []
-}
 
 // One question from the shared prompt, or '' on any API failure.
 async function askGoDeeper(prompt: string, temperature: number): Promise<string> {
@@ -248,16 +239,11 @@ export const generatePlayGoDeeper = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ questions: [string, string] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to generate questions.')
+    await requireActive(request.auth.uid)
     await requirePlayEntitled(request.auth.uid)
-    // Rate-limit counters live in userInternal (server-only; userData.ts).
-    const userRef = internalRef(request.auth.uid)
-
-    const snap = await userRef.get()
-    if (recentGoDeeper(snap.data(), Date.now()).length >= PLAY_GO_DEEPER_WEEKLY_LIMIT) {
-      throw new HttpsError('resource-exhausted', 'Go Deeper limit reached. Try again next week.')
-    }
-
     const input = parsePlayGoDeeperRequest(request.data)
+    // Reserved before the calls, given back if they fail (Stage B).
+    const refund = await reserveSlot(request.auth.uid, 'ai_playGoDeeper', { max: PLAY_GO_DEEPER_WEEKLY_LIMIT, windowMs: WEEK_MS }, 'Go Deeper limit reached. Try again next week.')
     let first = ''
     let second = ''
     try {
@@ -271,19 +257,9 @@ export const generatePlayGoDeeper = onCall(
       logger.error('generatePlayGoDeeper failed', { message: err instanceof Error ? err.message : String(err) })
     }
     if (!first || !second || sameQuestion(first, second)) {
+      await refund()
       throw new HttpsError('unavailable', "Couldn't generate questions right now.")
     }
-
-    // Re-checked in the transaction so parallel calls can't record past the limit.
-    await getFirestore().runTransaction(async (tx) => {
-      const now = Date.now()
-      const recent = recentGoDeeper((await tx.get(userRef)).data(), now)
-      tx.set(
-        userRef,
-        { goDeeperGenerations: { play: [...recent, now].slice(-PLAY_GO_DEEPER_WEEKLY_LIMIT) } },
-        { merge: true },
-      )
-    })
     return { questions: [first, second] }
   },
 )
@@ -292,10 +268,6 @@ export const generatePlayGoDeeper = onCall(
 
 const SPARK_GO_DEEPER_WEEKLY_LIMIT = 3
 
-function recentSparkGoDeeper(data: DocumentData | undefined, now: number): number[] {
-  const raw: unknown = data?.goDeeperGenerations?.spark
-  return Array.isArray(raw) ? raw.filter((t): t is number => typeof t === 'number' && now - t < WEEK_MS) : []
-}
 
 // Spark onboarding's Go Deeper: two personal questions from the user's Spark
 // answers, same two-call shape as generatePlayGoDeeper (the second sees the
@@ -304,15 +276,10 @@ export const generateSparkGoDeeper = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ questions: [string, string] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to generate questions.')
-    // Rate-limit counters live in userInternal (server-only; userData.ts).
-    const userRef = internalRef(request.auth.uid)
-
-    const snap = await userRef.get()
-    if (recentSparkGoDeeper(snap.data(), Date.now()).length >= SPARK_GO_DEEPER_WEEKLY_LIMIT) {
-      throw new HttpsError('resource-exhausted', 'Go Deeper limit reached. Try again next week.')
-    }
-
+    await requireActive(request.auth.uid)
     const input = parseSparkGoDeeperRequest(request.data)
+    // Reserved before the calls, given back if they fail (Stage B).
+    const refund = await reserveSlot(request.auth.uid, 'ai_sparkGoDeeper', { max: SPARK_GO_DEEPER_WEEKLY_LIMIT, windowMs: WEEK_MS }, 'Go Deeper limit reached. Try again next week.')
     let first = ''
     let second = ''
     try {
@@ -329,18 +296,9 @@ export const generateSparkGoDeeper = onCall(
       logger.error('generateSparkGoDeeper failed', { message: err instanceof Error ? err.message : String(err) })
     }
     if (!first || !second || sameQuestion(first, second)) {
+      await refund()
       throw new HttpsError('unavailable', "Couldn't generate questions right now.")
     }
-
-    await getFirestore().runTransaction(async (tx) => {
-      const now = Date.now()
-      const recent = recentSparkGoDeeper((await tx.get(userRef)).data(), now)
-      tx.set(
-        userRef,
-        { goDeeperGenerations: { spark: [...recent, now].slice(-SPARK_GO_DEEPER_WEEKLY_LIMIT) } },
-        { merge: true },
-      )
-    })
     return { questions: [first, second] }
   },
 )
@@ -648,6 +606,7 @@ export const recordVibeRating = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid)
     const callerId = request.auth.uid
     const matchId = requireString(request.data, 'matchId')
     const otherUid = requireString(request.data, 'otherUid')
@@ -1050,6 +1009,7 @@ export const submitReview = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true; newScore: number; newTier: ZyloveScoreTier }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid)
     const callerId = request.auth.uid
     const matchId = requireString(request.data, 'matchId')
     const reviewedUid = requireString(request.data, 'reviewedUid')
@@ -1326,6 +1286,7 @@ export const generateConversationStarter = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ starters: string[] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid)
     const callerId = request.auth.uid
     const matchId = requireString(request.data, 'matchId')
     const otherUid = requireString(request.data, 'otherUid')
@@ -1335,6 +1296,8 @@ export const generateConversationStarter = onCall(
     // Stage 2: a Play match is sealed while the caller has no Play access.
     if (play) await requirePlayAccess(callerId)
     const fallback = play ? PLAY_FALLBACK_STARTERS : FALLBACK_STARTERS
+    // Stage B: was unlimited. Over the limit: the stock starters, no AI call.
+    if (!(await reserveSlot(callerId, 'ai_starter', { max: 20, windowMs: DAY_MS }).then(() => true, () => false))) return { starters: fallback }
 
     try {
       const db = getFirestore()
@@ -1488,8 +1451,11 @@ export const generateProfileQuestion = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ question: string }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid)
     const uid = request.auth.uid
     let fallback = DEFAULT_QUESTION
+    // Stage B: was unlimited. Over the limit: the stock question, no AI call.
+    if (!(await reserveSlot(uid, 'ai_profileQuestion', { max: 20, windowMs: DAY_MS }).then(() => true, () => false))) return { question: fallback }
     try {
       const { root, spark } = await loadOwnProfileDocs(uid)
       fallback = QUESTION_FALLBACKS[strings(root.personalityTraits)[0] ?? ''] ?? DEFAULT_QUESTION
@@ -1551,6 +1517,9 @@ export const reviewProfile = onCall(
   { timeoutSeconds: 120, memory: '512MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ review: ProfileScorecard }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid)
+    // Stage B: was unlimited. Reserved before the call, given back if it fails.
+    const refund = await reserveSlot(request.auth.uid, 'ai_sparkReview', { max: 3, windowMs: WEEK_MS }, 'Profile review limit reached. Try again next week.')
     let review: ProfileScorecard | null = null
     try {
       const { root, spark } = await loadOwnProfileDocs(request.auth.uid)
@@ -1583,7 +1552,10 @@ ${scorecardInstructions(SPARK_REVIEW_SECTIONS, { photos: photos.length > 0 })}`
     } catch (err) {
       logger.error('reviewProfile failed', { message: err instanceof Error ? err.message : String(err) })
     }
-    if (!review) throw new HttpsError('unavailable', "Couldn't generate review. Try again.")
+    if (!review) {
+      await refund()
+      throw new HttpsError('unavailable', "Couldn't generate review. Try again.")
+    }
     await saveReviewHistory(request.auth.uid, 'spark', review)
     return { review }
   },
@@ -1593,12 +1565,6 @@ ${scorecardInstructions(SPARK_REVIEW_SECTIONS, { photos: photos.length > 0 })}`
 
 const PLAY_REVIEW_WEEKLY_LIMIT = 3
 
-// Successful Play reviews in the last week (userInternal/{uid}.profileReviews.play).
-function recentPlayReviews(data: DocumentData | undefined, now: number): number[] {
-  const raw: unknown = data?.profileReviews?.play
-  return Array.isArray(raw) ? raw.filter((t): t is number => typeof t === 'number' && now - t < WEEK_MS) : []
-}
-
 // "How's my Play profile? 🔥" — a scorecard for the caller's saved Play
 // profile, with photo coaching when they opted in (photoAnalysisConsent.play).
 // 3 per rolling week; only successful reviews count.
@@ -1606,38 +1572,38 @@ export const reviewPlayProfile = onCall(
   { timeoutSeconds: 120, memory: '512MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ review: ProfileScorecard }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid)
     await requirePlayEntitled(request.auth.uid)
     const db = getFirestore()
-    const userRef = internalRef(request.auth.uid) // review counter (server-only)
-    const [userSnap, playSnap, settings] = await Promise.all([
-      userRef.get(),
+    const [playSnap, settings] = await Promise.all([
       db.doc(`users/${request.auth.uid}/playProfile/data`).get(),
       loadSettings(request.auth.uid),
     ])
-    if (recentPlayReviews(userSnap.data(), Date.now()).length >= PLAY_REVIEW_WEEKLY_LIMIT) {
-      throw new HttpsError('resource-exhausted', 'Play profile review limit reached. Try again next week.')
-    }
     if (!playSnap.exists) throw new HttpsError('failed-precondition', 'Set up your Play profile first.')
+    // Reserved before the call, given back if it fails (Stage B).
+    const refund = await reserveSlot(request.auth.uid, 'ai_playReview', { max: PLAY_REVIEW_WEEKLY_LIMIT, windowMs: WEEK_MS }, 'Play profile review limit reached. Try again next week.')
 
     const play = playSnap.data() ?? {}
-    const photos = photoConsent(settings, 'play') ? await loadReviewPhotos(request.auth.uid, play.photoURLs) : []
-    const reply = await askClaudeWithPhotos(
-      'reviewPlayProfile',
-      buildPlayReviewPrompt(play, photos.length),
-      photos,
-      photos.length > 0 ? REVIEW_WITH_PHOTOS_MAX_TOKENS : REVIEW_MAX_TOKENS,
-    )
-    const review = parseScorecard(reply, PLAY_REVIEW_SECTIONS, { photos: photos.length > 0 })
+    let review: ProfileScorecard | null = null
+    try {
+      const photos = photoConsent(settings, 'play') ? await loadReviewPhotos(request.auth.uid, play.photoURLs) : []
+      const reply = await askClaudeWithPhotos(
+        'reviewPlayProfile',
+        buildPlayReviewPrompt(play, photos.length),
+        photos,
+        photos.length > 0 ? REVIEW_WITH_PHOTOS_MAX_TOKENS : REVIEW_MAX_TOKENS,
+      )
+      review = parseScorecard(reply, PLAY_REVIEW_SECTIONS, { photos: photos.length > 0 })
+      if (!review) logger.error('reviewPlayProfile: reply was not a valid scorecard', { length: reply.length })
+    } catch (err) {
+      await refund()
+      throw err
+    }
     // Unparseable replies don't count toward the weekly limit.
     if (!review) {
-      logger.error('reviewPlayProfile: reply was not a valid scorecard', { length: reply.length })
+      await refund()
       throw new HttpsError('unavailable', "Couldn't generate review. Try again.")
     }
-    await db.runTransaction(async (tx) => {
-      const now = Date.now()
-      const recent = recentPlayReviews((await tx.get(userRef)).data(), now)
-      tx.set(userRef, { profileReviews: { play: [...recent, now].slice(-PLAY_REVIEW_WEEKLY_LIMIT) } }, { merge: true })
-    })
     await saveReviewHistory(request.auth.uid, 'play', review)
     return { review }
   },
@@ -1672,20 +1638,29 @@ export const getSentSparks = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ sent: SentSpark[] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid)
     const uid = request.auth.uid
     const mode = (request.data as Record<string, unknown> | null)?.mode === 'play' ? 'play' : 'spark'
     if (mode === 'play') await requirePlayAccess(uid)
     const db = getFirestore()
-    const pairs = db.collection('pairs')
 
-    const [asA, asB] = await Promise.all([
-      pairs.where('userA', '==', uid).where('userALiked', '==', true).where('matched', '==', false).limit(SENT_LIMIT).get(),
-      pairs.where('userB', '==', uid).where('userBLiked', '==', true).where('matched', '==', false).limit(SENT_LIMIT).get(),
-    ])
+    // Stage B: likes per mode (pairs/{id}/likes/{mode}, server-only) — the
+    // pair doc no longer says who liked whom (its participants could read it).
+    const myLikes = (await db.collectionGroup('likes').where('likedBy', 'array-contains', uid).get()).docs.filter(
+      (d) => d.id === mode && d.ref.parent.parent?.parent.id === 'pairs',
+    )
+    const pairSnaps = myLikes.length ? await db.getAll(...myLikes.map((d) => d.ref.parent.parent!)) : []
+    const unanswered = pairSnaps
+      .filter((p, i) => {
+        const other = p.get('userA') === uid ? p.get('userB') : p.get('userA')
+        const likedBy: unknown = myLikes[i].get('likedBy')
+        return p.exists && typeof other === 'string' && !(Array.isArray(likedBy) && likedBy.includes(other))
+      })
+      .slice(0, SENT_LIMIT)
 
     const sent = await Promise.all(
-      [...asA.docs, ...asB.docs].map(async (pairSnap): Promise<SentSpark | null> => {
-        const pair = pairSnap.data()
+      unanswered.map(async (pairSnap): Promise<SentSpark | null> => {
+        const pair = pairSnap.data() ?? {}
         const otherUid: unknown = pair.userA === uid ? pair.userB : pair.userA
         if (typeof otherUid !== 'string') return null
         const [matchSnap, userSnap, queueSnap, play] = await Promise.all([
@@ -1798,6 +1773,7 @@ export const getCuriousVisitors = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ locked: boolean; count: number; visitors: CuriousVisitor[] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid)
     const uid = request.auth.uid
     const rawMode = (request.data as Record<string, unknown> | null)?.mode
     const mode = rawMode === 'play' || rawMode === 'spark' ? rawMode : null
@@ -1812,7 +1788,7 @@ export const getCuriousVisitors = onCall(
     ])
     const unlocked = hasEliteAccess(planView(me.data(), await loadInternal(uid, me.data())))
 
-    const candidates = [...asA.docs, ...asB.docs]
+    const revealed = [...asA.docs, ...asB.docs]
       .map((d) => ({ id: d.id, pair: d.data() }))
       .filter(({ pair }) => {
         const iAmA = pair.userA === uid
@@ -1823,7 +1799,12 @@ export const getCuriousVisitors = onCall(
         // Neither side has liked: I haven't, and they haven't (Sparks covers that).
         return pair.userALiked !== true && pair.userBLiked !== true
       })
-      .sort((a, b) => revealedAt(b.pair, uid) - revealedAt(a.pair, uid))
+    // Likes per mode (Stage B) — a like in either mode rules them out.
+    const likeSnaps = revealed.length
+      ? await db.getAll(...revealed.flatMap(({ id }) => [db.doc(`pairs/${id}/likes/spark`), db.doc(`pairs/${id}/likes/play`)]))
+      : []
+    const liked = (i: number) => [likeSnaps[2 * i], likeSnaps[2 * i + 1]].some((x) => (x?.get('likedBy') ?? []).length > 0)
+    const candidates = revealed.filter((_, i) => !liked(i)).sort((a, b) => revealedAt(b.pair, uid) - revealedAt(a.pair, uid))
 
     const visitors: CuriousVisitor[] = []
     for (const { id, pair } of candidates) {
@@ -1872,6 +1853,7 @@ export { recordTermsAcceptance } from './legal'
 export { getPhotoUrls, getReviewPdfUrl } from './photoAccess'
 export { exploreOnInternal, exploreOnLocation, exploreOnUser, exploreOnUserDoc, getExploreDeck } from './explore'
 export { photoCleanupOnUser, photoCleanupOnUserDoc } from './photoCleanup'
+export { checkPlayPin, getPlayPinStatus, setPlayPin } from './playPin'
 export { playAccessOnPlan, playAccessOnPlayProfile, playAccessOnProfile } from './playAccess'
 export { actOnPlayConnection, listLockedPlayConnections } from './lockedPlay'
 export { getDistances, grantSmsConsent, recordActivity, refreshAges, setLocation } from './location'
@@ -2098,6 +2080,8 @@ async function phoneHasAccount(phoneNumber: string): Promise<boolean> {
   }
 }
 
+const PHONE_LOOKUP_DAILY_BUDGET = 1000
+
 // Runs before the OTP is sent so VoIP / virtual / landline numbers can't sign
 // up. Callable without auth (it gates sign-in). Order: rate limit first (it
 // also stops this being used to probe which numbers have accounts), then
@@ -2124,6 +2108,29 @@ export const validatePhoneNumber = onCall(
 
     // Existing users are never locked out, and don't cost a Lookup.
     if (await phoneHasAccount(phoneNumber)) return { allowed: true }
+
+    // Stage B (F-054): the paid Lookup is also limited per caller address
+    // (new random numbers each time got past the per-number limit) and by a
+    // daily budget. Past either: no Lookup — the number is allowed, as on
+    // any Lookup failure, so real people aren't locked out by a flood.
+    const ip = clientIp(request.rawRequest as never) ?? 'unknown'
+    const ipKey = `ip_${createHash('sha256').update(ip).digest('hex').slice(0, 32)}`
+    const perIp = await takeRateLimit(ipKey, 'phoneLookup', { max: 10, windowMs: 60 * 60 * 1000 }).then(() => true, () => false)
+    if (!perIp) return { allowed: false, reason: 'rate_limited' }
+    const day = new Date().toISOString().slice(0, 10)
+    const budgetRef = getFirestore().doc(`rateLimits/_phoneLookup_${day}`)
+    const spent = await getFirestore()
+      .runTransaction(async (tx) => {
+        const n = ((await tx.get(budgetRef)).get('count') as number | undefined) ?? 0
+        if (n >= PHONE_LOOKUP_DAILY_BUDGET) return false
+        tx.set(budgetRef, { count: n + 1 }, { merge: true })
+        return true
+      })
+      .catch(() => true)
+    if (!spent) {
+      logger.warn('validatePhoneNumber: daily Lookup budget reached — allowing without a Lookup')
+      return { allowed: true }
+    }
 
     const lineType = await lookupLineType(phoneNumber)
     if (lineType !== null && BLOCKED_LINE_TYPES.has(lineType)) {

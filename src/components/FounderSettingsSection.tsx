@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
+import { subscribeAccountView } from '../services/subscription'
 import { useNavigate } from 'react-router-dom'
-import { doc, onSnapshot } from 'firebase/firestore'
-import { db } from '../services/firebase'
 import { parseThreadMeta, type FounderThreadMeta } from '../services/founderMessages'
 import { claimFounderBadge, founderOffer, spotsRemaining, type FounderOffer } from '../services/founders'
 import FounderInviteModal from './FounderInvite'
@@ -41,10 +40,11 @@ export default function FounderSettingsSection({ uid }: { uid: string }) {
 
   useEffect(() => {
     if (!uid) return
-    return onSnapshot(
-      doc(db, 'users', uid),
-      (snap) => {
-        const d = snap.data() ?? {}
+    // The account view: the public doc plus private/account, where founder
+    // status and the thread summary live (Stage B).
+    return subscribeAccountView(
+      uid,
+      (d) => {
         setUser({ uid, isFounder: d.isFounder === true, founderStatus: d.founderStatus, meta: parseThreadMeta(d.founderThreadMeta) })
       },
       () => setUser(null),

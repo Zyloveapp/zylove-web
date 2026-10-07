@@ -22,6 +22,8 @@ import { onObjectFinalized } from 'firebase-functions/v2/storage'
 import { defineSecret } from 'firebase-functions/params'
 import { sendPush } from './notifications'
 import { LEGACY_RUNTIME } from './legacyOptions'
+import { stripPhotoMetadata } from '../photoMetadata'
+import { takeRateLimit } from '../rateLimits'
 import { accountRef, internalRef } from '../userData'
 
 // Sightengine score limits per mode (flag when a score is above its limit).
@@ -69,6 +71,17 @@ export const onPhotoUpload = onObjectFinalized(
     // Server-side copies (scripts/migrate-stage1b.mjs moving photos to new
     // names) were moderated as originals; the rules stop clients setting this.
     if (event.data.metadata?.zyloveCopy === '1') return
+
+    // Stage B (F-054): every upload is a paid moderation call and may page
+    // the admins — at most 30 a day per person, and 10 waiting for review.
+    // Past either, the upload is removed unmoderated.
+    const overLimit = await takeRateLimit(uid, 'photoUploads', { max: 30, windowMs: 24 * 60 * 60 * 1000 }).then(() => false, () => true)
+    const waiting = ((await accountRef(uid).get()).data()?.pendingPhotoURLs ?? []) as unknown[]
+    if (overLimit || (Array.isArray(waiting) && waiting.length >= 10)) {
+      console.warn(`[moderation] Upload limit reached for uid ${uid}; removed ${filePath}`)
+      await admin.storage().bucket(event.data.bucket).file(filePath).delete({ ignoreNotFound: true })
+      return
+    }
 
     // Firestore stores the Storage path, never a URL (F-021): viewers get
     // short-lived signed URLs from getPhotoUrls (photoAccess.ts), which
@@ -129,6 +142,23 @@ export const onPhotoUpload = onObjectFinalized(
         )
       } catch (e) {
         console.error('[onPhotoUpload] Admin notify failed:', e)
+      }
+    }
+
+    // Stage B (F-052): metadata (EXIF GPS and the like) is stripped before
+    // anything else — moderation included — sees the photo. The cleaned file
+    // replaces the upload, marked zyloveCopy so that save doesn't come back
+    // through here. Anything that isn't a well-formed JPEG/PNG is removed.
+    {
+      const [raw] = await file.download()
+      const clean = stripPhotoMetadata(raw)
+      if (!clean) {
+        console.warn(`[moderation] Unsupported or malformed photo removed for uid ${uid}: ${filePath}`)
+        await file.delete({ ignoreNotFound: true })
+        return
+      }
+      if (clean.bytes.length !== raw.length) {
+        await file.save(clean.bytes, { contentType: clean.contentType, resumable: false, metadata: { metadata: { zyloveCopy: '1' } } })
       }
     }
 

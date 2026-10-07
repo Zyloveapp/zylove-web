@@ -26,7 +26,7 @@ import { logger } from 'firebase-functions'
 import { FieldPath, FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, getNearestCity } from './cities'
 import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
-import { internalRef, loadLocation } from './userData'
+import { accountRef, internalRef, loadLocation } from './userData'
 
 // Per half (women / men); a city's circle is twice this.
 export const DEFAULT_FOUNDER_TARGET = 50
@@ -69,8 +69,8 @@ export async function textFounder(uid: string, body: string): Promise<boolean> {
 async function cityFounders(cityId: string, cityName: string) {
   const users = getFirestore().collection('users')
   const [byId, byName] = await Promise.all([
-    users.where('founderCityId', '==', cityId).select('isFounder', 'founderStatus').get(),
-    users.where('founderCohort', '==', cityName).select('isFounder', 'founderStatus').get(),
+    users.where('founderCityId', '==', cityId).select('isFounder').get(),
+    users.where('founderCohort', '==', cityName).select('isFounder').get(),
   ])
   const seen = new Map<string, FirebaseFirestore.DocumentData>()
   for (const d of [...byId.docs, ...byName.docs]) if (!seen.has(d.id)) seen.set(d.id, d.data())
@@ -202,10 +202,10 @@ export async function claimFounderSpot(uid: string, lat: number, lng: number, so
       founderBadge: `${city.badgeName ?? city.name} Founder`,
       founderNumber: cohortNumber,
       founderBadgeAssignedAt: FieldValue.serverTimestamp(),
-      founderStatus: 'active',
-      founderStatusAcceptedAt: FieldValue.serverTimestamp(),
-      founderLastActiveAt: FieldValue.serverTimestamp(),
     })
+    // Stage B (F-056): status and activity aren't public — the owner's copy
+    // (founderRecords/{uid} is the server's).
+    tx.set(accountRef(uid), { founderStatus: 'active' }, { merge: true })
 
     // Elite, as a founder code gave (plan fields live in userInternal).
     tx.set(internalRef(uid), { subscriptionTier: 'elite' }, { merge: true })
@@ -248,17 +248,17 @@ export async function refreshCityMembers(cityId: string): Promise<void> {
     const users = db.collection('users')
     // Older founders have only founderCohort (the city name).
     const [byId, byName] = await Promise.all([
-      users.where('founderCityId', '==', city.id).select('isFounder', 'founderStatus').get(),
-      users.where('founderCohort', '==', city.name).select('isFounder', 'founderStatus').get(),
+      users.where('founderCityId', '==', city.id).select('isFounder').get(),
+      users.where('founderCohort', '==', city.name).select('isFounder').get(),
     ])
-    const seen = new Set<string>()
+    // Status from founderRecords (Stage B: no longer on the public doc);
+    // older founders without a record count.
+    const ids = [...new Set([...byId.docs, ...byName.docs].filter((d) => d.get('isFounder') === true).map((d) => d.id))]
+    const records = ids.length ? await db.getAll(...ids.map((id) => db.doc(`founderRecords/${id}`))) : []
     let members = 0
-    for (const d of [...byId.docs, ...byName.docs]) {
-      if (seen.has(d.id)) continue
-      seen.add(d.id)
-      const u = d.data()
-      const status: unknown = u.founderStatus
-      if (u.isFounder === true && (status === undefined || (typeof status === 'string' && MEMBER_STATUSES.has(status)))) members++
+    for (const r of records) {
+      const status: unknown = r.get('status')
+      if (status === undefined || (typeof status === 'string' && MEMBER_STATUSES.has(status))) members++
     }
     const stamp = { members, updatedAt: FieldValue.serverTimestamp() }
     await db.doc(`publicStats/city_${city.id}`).set(stamp, { merge: true })

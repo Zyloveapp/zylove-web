@@ -80,16 +80,12 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
       userA,
       userB,
       createdAt:         admin.firestore.Timestamp.now(),
-      initiatedBy:       likerId,
       sparkScore,
       sparkBreakdown,
       triggeredDealbreakers,
       ...(sparkTier1 && { tier1Spark: sparkTier1 }),
       scoreCalculatedAt: admin.firestore.Timestamp.now(),
       scoreVersion:      1,
-      userALiked:        false,
-      userBLiked:        false,
-      matched:           false,
     };
 
     await pairRef.set(pair);
@@ -98,8 +94,6 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   const playScores = mode === "play" ? await loadPlayScores(pid, pair) : undefined;
 
   const likedUser = likedUserSnap.data() as UserDoc;
-  const isUserA   = pair.userA === likerId;
-  const likerField = isUserA ? "userALiked" : "userBLiked";
   // Stage A: a match needs the other person's like in THIS mode.
   const otherLiked = await likedInMode(likedId, likerId, mode, pair);
   await recordLike(pid, mode, likerId);
@@ -112,11 +106,9 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   // Explore (Stage 3): acted on in this mode — out of the liker's deck.
   await markActed(likerId, mode as "spark" | "play", likedId);
 
-  await pairRef.update({
-    [likerField]: true,
-    matched,
-    ...(matched ? { matchedAt: admin.firestore.Timestamp.now() } : {}),
-  });
+  // Stage B: who liked whom (and whether they matched) is no longer on the
+  // pair doc, which both people can read — a Spark-only partner could see a
+  // Play like there. It's in pairs/{id}/likes/{mode} (server-only).
 
   // Skip stat write for bot profiles — avoids creating stub docs
   const isBotTarget = likedId.startsWith("seed-");
@@ -233,7 +225,7 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
       },
       hasUnread:          false,
       isBlocked:          false,
-      isBot:              (pair as any).isBot === true,
+      isBot:              likedId.startsWith("zbot-") || likerId.startsWith("zbot-"),
       // Only this mode's score (Stage 2: no Play data on Spark matches).
       ...(mode === "play" ? { playScore: playScores?.playScore ?? 0 } : { sparkScore: pair.sparkScore ?? 0 }),
       revealViewedAt:     null,

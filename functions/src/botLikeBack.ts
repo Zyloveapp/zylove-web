@@ -162,16 +162,14 @@ async function likeBack(pendingRef: FirebaseFirestore.DocumentReference, pending
   // Suspension is in userInternal (Stage 3).
   const likerSuspended = await isSuspendedUid(likerUid)
   const created = await db.runTransaction(async (tx) => {
-    const [match, pair, bot, liker] = await Promise.all([tx.get(matchRef), tx.get(pairRef), tx.get(botRef), tx.get(likerRef)])
+    const [match, bot, liker] = await Promise.all([tx.get(matchRef), tx.get(botRef), tx.get(likerRef)])
     tx.delete(pendingRef)
     // Already matched (the bot liked them first), or either side is gone.
     if (match.exists || !bot.exists || !liker.exists || likerSuspended) return null
-    const botField = pair.data()?.userA === botUid ? 'userALiked' : 'userBLiked'
-    tx.set(
-      pairRef,
-      { userA, userB, [botField]: true, matched: true, matchedAt: Timestamp.now(), isBot: true },
-      { merge: true },
-    )
+    // Stage B: the like is recorded per mode, server-only; the pair doc
+    // (readable by both) only names the two people.
+    tx.set(pairRef, { userA, userB }, { merge: true })
+    tx.set(db.doc(`pairs/${matchId}/likes/${mode}`), { likedBy: FieldValue.arrayUnion(botUid, likerUid) }, { merge: true })
     const now = Timestamp.now()
     tx.create(matchRef, {
       matchId,

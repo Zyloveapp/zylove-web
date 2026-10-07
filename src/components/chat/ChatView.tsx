@@ -2,6 +2,8 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type F
 import { useNavigate } from 'react-router-dom'
 import {
   ENCRYPTION_KEY_MISSING,
+  RECIPIENT_NO_KEY,
+  rememberPartnerKey,
   MAX_MESSAGE_LENGTH,
   consentCode,
   markMessagesRead,
@@ -214,14 +216,21 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     }
   }, [matchId])
 
+  const [keyChangedFor, setKeyChangedFor] = useState<string | null>(null)
   useEffect(
     () =>
       subscribePublicKey(
         partnerUid,
-        (key) => setPartnerKeyState({ partnerUid, key, error: false }),
+        (key) => {
+          setPartnerKeyState({ partnerUid, key, error: false })
+          // Stage B: the key this device first saw for them is remembered;
+          // a different one later (new device, PIN reset — or a swapped key)
+          // is pointed out.
+          if (key && rememberPartnerKey(uid, partnerUid, key) === 'changed') setKeyChangedFor(partnerUid)
+        },
         () => setPartnerKeyState({ partnerUid, key: '', error: true }),
       ),
-    [partnerUid],
+    [partnerUid, uid],
   )
 
   // This device's chat key status; a PIN unlock or reset (KeyBackupGate)
@@ -253,7 +262,13 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     if (rawMessages === null || !keysLoaded) return null
     return rawMessages.map((m) => {
       const text = decryptMessage(m.ciphertext, m.nonce, partnerKey.key, myPrivateKey ?? '')
-      return { ...m, text: text ?? UNDECRYPTABLE, undecryptable: text === null && m.messageType === 'text' }
+      return {
+        ...m,
+        text: text ?? UNDECRYPTABLE,
+        undecryptable: text === null && m.messageType === 'text',
+        // Sent unencrypted (bots, or older apps): marked as such (Stage B).
+        plaintext: m.messageType === 'text' && (m.nonce === 'stub' || m.nonce === 'stub-nonce'),
+      }
     })
   }, [rawMessages, keysLoaded, partnerKey, myPrivateKey])
 
@@ -389,12 +404,14 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
       setSendError(
         err instanceof Error && err.message === ENCRYPTION_KEY_MISSING
           ? 'To send messages here, unlock your chats with your chat PIN (Settings → Chat PIN).'
-          : friendlyError(err, "Couldn't send. Try again."),
+          : err instanceof Error && err.message === RECIPIENT_NO_KEY
+            ? `${match.name} hasn't set up encrypted chat yet, so this can't be sent. You can message them once they open Zylove on the web.`
+            : friendlyError(err, "Couldn't send. Try again."),
       )
     }
     let delivered: Promise<void>
     try {
-      delivered = (await sendMessage(matchId, uid, sent, partnerKey.key)).delivered
+      delivered = (await sendMessage(matchId, uid, sent, partnerKey.key, partnerUid)).delivered
     } catch (err) {
       restore(err)
       return
@@ -549,7 +566,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     [messages, uid],
   )
 
-  function renderMessage(m: ChatMessage & { text: string; undecryptable: boolean }) {
+  function renderMessage(m: ChatMessage & { text: string; undecryptable: boolean; plaintext: boolean }) {
               if (m.undecryptable) {
                 return m.id === firstUndecryptableId ? (
                   <p key={m.id} className="mx-auto max-w-xs text-center text-xs italic text-white/40">
@@ -611,6 +628,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
                   <span className="mt-1 text-xs text-white/30">
                     {messageTime(m.sentAt)}
                     {m.id === lastReadOwnId && ' · Read'}
+                    {m.plaintext && !botChat && ' · Not encrypted'}
                   </span>
                 </div>
               )
@@ -657,6 +675,17 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
           •••
         </button>
       </header>
+      {keyChangedFor === partnerUid && (
+        <div className="flex shrink-0 items-start gap-3 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs text-amber-200 lg:px-6">
+          <span className="flex-1">
+            🔑 {match.name}'s chat key changed — usually a new device or a chat PIN reset. Messages are still encrypted. If you didn't expect
+            this, check with them another way.
+          </span>
+          <button type="button" onClick={() => setKeyChangedFor(null)} className="text-amber-200/70 hover:text-white" aria-label="Dismiss">
+            ✕
+          </button>
+        </div>
+      )}
 
       <div className="relative min-h-0 flex-1">
       {celebrating && <VibeCelebration mode={match.mode === 'play' ? 'play' : 'spark'} />}

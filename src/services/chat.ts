@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore'
 import { db } from './firebase'
 import { encryptMessage, isRealPublicKey } from './encryption'
+import { isBotUid } from './zyloveScore'
 import { getSendingKey } from './keys'
 
 // Message format shared with the mobile app. `ciphertext` holds a base64
@@ -132,10 +133,14 @@ export function subscribeMessages(
 }
 
 export const ENCRYPTION_KEY_MISSING = 'encryption_key_missing'
+// The partner has no usable public key (Stage B, F-051): nothing is sent —
+// plaintext goes only to bots.
+export const RECIPIENT_NO_KEY = 'recipient_no_key'
 
-// Encrypts to the recipient's public key. Plaintext (nonce 'stub') is only
-// allowed when the recipient has no real key — bots and legacy mobile users.
-// If the recipient has a real key but we can't encrypt (own private key
+// Encrypts to the recipient's public key. Plaintext (nonce 'stub') goes only
+// to bots (by uid); a person without a usable key gets nothing until they
+// have one (RECIPIENT_NO_KEY) — they could otherwise force plaintext by
+// breaking their own key. If the recipient has a real key but we can't encrypt (own private key
 // missing or unreadable), the send is refused rather than leaking plaintext.
 //
 // Resolves once the message is written locally — it shows in the thread at
@@ -148,9 +153,11 @@ export async function sendMessage(
   uid: string,
   text: string,
   recipientPublicKey: string,
+  recipientUid: string,
 ): Promise<{ delivered: Promise<void> }> {
-  const privateKey = await getSendingKey(uid)
   const recipientHasKey = isRealPublicKey(recipientPublicKey)
+  if (!recipientHasKey && !isBotUid(recipientUid)) throw new Error(RECIPIENT_NO_KEY)
+  const privateKey = await getSendingKey(uid)
   if (recipientHasKey && !privateKey) throw new Error(ENCRYPTION_KEY_MISSING)
   const { ciphertext, nonce } =
     recipientHasKey && privateKey ? encryptMessage(text, recipientPublicKey, privateKey) : { ciphertext: text, nonce: 'stub' }
@@ -190,4 +197,18 @@ export async function markMessagesRead(matchId: string, messageIds: string[]): P
     batch.update(doc(db, `matches/${matchId}/messages/${id}`), { status: 'read' })
   }
   await batch.commit()
+}
+
+// The partner key this device has seen for someone, per signed-in user
+// (Stage B): 'first' the first time, 'same', or 'changed' (the new key is
+// remembered). Cleared on sign-out with the rest of zylove_* storage.
+export function rememberPartnerKey(uid: string, partnerUid: string, key: string): 'first' | 'same' | 'changed' {
+  const k = `zylove_peerkey_${uid}_${partnerUid}`
+  try {
+    const seen = localStorage.getItem(k)
+    localStorage.setItem(k, key)
+    return seen === null ? 'first' : seen === key ? 'same' : 'changed'
+  } catch {
+    return 'first'
+  }
 }

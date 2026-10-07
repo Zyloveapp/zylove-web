@@ -72,6 +72,19 @@ service cloud.firestore {
           && notSuspended(uid);
     }
 
+    // Blocks (Stage B, F-055): the person blocked can't read the blocker's
+    // profile. The one who placed the block still can — their read-only
+    // chat needs the other's public key. users/{uid}/blockedUsers/{viewer}
+    // exists on both sides of a block, recording who placed it (blockedBy).
+    function notBlockedFrom(uid) {
+      return !exists(/databases/$(database)/documents/users/$(uid)/blockedUsers/$(request.auth.uid))
+          || get(/databases/$(database)/documents/users/$(uid)/blockedUsers/$(request.auth.uid)).data.get('blockedBy', '') == request.auth.uid;
+    }
+    // A match between the viewer and uid exists (match ids are the sorted pair).
+    function matchedWith(uid) {
+      return exists(/databases/$(database)/documents/matches/$(uid < request.auth.uid ? uid + '_' + request.auth.uid : request.auth.uid + '_' + uid));
+    }
+
     // ─── Users ──────────────────────────────────────────────────────────────
     // users/{uid} is the public profile: every signed-in user can read it
     // (Explore, profiles, chat), so it holds profile fields only. Everything
@@ -146,7 +159,7 @@ service cloud.firestore {
       allow get: if isSignedIn()
                  && (resource == null
                      || isUser(uid)
-                     || (resource.data.get('isDeleted', false) != true && notSuspended(uid)));
+                     || (resource.data.get('isDeleted', false) != true && notSuspended(uid) && notBlockedFrom(uid)));
       allow list: if false;
       allow create: if isUser(uid) && isSignedIn()
                     && !request.resource.data.keys().hasAny(serverOnlyUserFields())
@@ -272,7 +285,7 @@ service cloud.firestore {
       // Spark profile subcollection
       match /sparkProfile/{doc} {
         allow read: if isSignedIn()
-                    && profileVisible(uid);
+                    && (isUser(uid) || (profileVisible(uid) && notBlockedFrom(uid)));
         allow write: if isUser(uid) && isSignedIn();
       }
 
@@ -291,7 +304,10 @@ service cloud.firestore {
         allow read: if isSignedIn()
                     && (isUser(uid)
                         || (viewerHasPlay() && hasPlay(uid)
-                            && profileVisible(uid)));
+                            && profileVisible(uid)
+                            && notBlockedFrom(uid)
+                            // Hidden from Play (Stage B): only their matches still see it.
+                            && (resource == null || resource.data.get('playVisibility', 'active') != 'hidden' || matchedWith(uid))));
         allow create: if isUser(uid) && isSignedIn()
                       && request.resource.data.get('photoURLs', []).size() == 0
                       && !request.resource.data.keys().hasAny(playServerFields());
@@ -304,8 +320,10 @@ service cloud.firestore {
       }
 
       // Visibility settings — own only
+      // settings/playPin held the Play PIN's hash; it's server-only now
+      // (Stage B: checked by checkPlayPin, upgraded into playPins/{uid}).
       match /settings/{doc} {
-        allow read, write: if isUser(uid) && isSignedIn();
+        allow read, write: if isUser(uid) && isSignedIn() && doc != 'playPin';
       }
 
       // Saved "How's my profile?" reviews — written by zylove-web's

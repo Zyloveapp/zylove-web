@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
+import { signOutAndWipe } from '../services/signOut'
 import { useNavigate } from 'react-router-dom'
-import { signOut } from 'firebase/auth'
-import { auth } from '../services/firebase'
 import { SUPPORT_EMAIL } from '../services/errors'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
@@ -54,7 +53,7 @@ export default function TrialExpiry() {
     setDeleteError(null)
     try {
       await deleteAccount()
-      await signOut(auth).catch(() => {})
+      await signOutAndWipe({ keepChatKey: 'ifNoBackup' })
       navigate('/login', { replace: true })
     } catch {
       setDeleteError("Couldn't delete your account. Try again.")
@@ -102,7 +101,7 @@ export default function TrialExpiry() {
             {/* Never a trap: they can always leave and come back later. */}
             <button
               type="button"
-              onClick={() => void signOut(auth).then(() => navigate('/login', { replace: true }))}
+              onClick={() => void signOutAndWipe({ keepChatKey: 'ifNoBackup' })}
               disabled={pending !== null}
               className="w-full rounded-xl border border-white/15 py-3 font-semibold text-white/80 hover:bg-white/10"
             >

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
+import { signOutAndWipe } from '../services/signOut'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { doc, getDoc } from 'firebase/firestore'
-import { signOut } from 'firebase/auth'
-import { auth, db } from '../services/firebase'
+import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
 import { isPlayOnlyUser } from '../services/playOnboarding'
@@ -78,7 +78,7 @@ export default function AuthGuard() {
         >
           Try again
         </button>
-        <button type="button" onClick={() => void signOut(auth)} className="text-sm text-white/40 underline hover:text-white/70">
+        <button type="button" onClick={() => void signOutAndWipe({ keepChatKey: 'ifNoBackup' })} className="text-sm text-white/40 underline hover:text-white/70">
           Sign out
         </button>
       </div>

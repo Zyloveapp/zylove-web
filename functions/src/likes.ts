@@ -3,8 +3,9 @@ import { FieldValue, getFirestore, type DocumentData } from 'firebase-admin/fire
 // Likes per mode (Stage A). pairs/{pairId}/likes/{mode} = { likedBy: [uid] },
 // server-only (the rules' default deny): who liked whom in which mode. A
 // match needs a like from each side IN THE SAME MODE — a Spark like never
-// completes a Play match or the other way round. The pair doc's userALiked /
-// userBLiked stay (sent likes read them) but don't say which mode.
+// completes a Play match or the other way round. Stage B: the pair doc keeps
+// no like state at all (both people can read it); older pairs' userALiked /
+// userBLiked are moved here by scripts/migrate-stageB.mjs.
 
 export type LikeMode = 'spark' | 'play'
 
@@ -37,8 +38,6 @@ export async function clearLikes(a: string, b: string, mode: LikeMode | null): P
   const pairId = pairIdOf(a, b)
   const batch = db().batch()
   for (const m of mode ? [mode] : (['spark', 'play'] as const)) batch.delete(likesRef(pairId, m))
-  const pairRef = db().doc(`pairs/${pairId}`)
-  if ((await pairRef.get()).exists) batch.update(pairRef, { userALiked: false, userBLiked: false, matched: false })
   batch.delete(db().doc(`users/${a}/likeQueue/${b}`))
   batch.delete(db().doc(`users/${b}/likeQueue/${a}`))
   await batch.commit()

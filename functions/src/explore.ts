@@ -289,15 +289,18 @@ export const getExploreDeck = onCall(
 
     // Cards: the public profile (and, in Play, the Play profile), a coarse distance, signed photos.
     const uids = deck.map((d) => d.uid)
-    const [roots, plays] = await Promise.all([
+    const [roots, plays, internals] = await Promise.all([
       uids.length ? db().getAll(...uids.map((u) => userRef(u))) : Promise.resolve([]),
       mode === 'play' && uids.length ? db().getAll(...uids.map((u) => db().doc(`users/${u}/playProfile/data`))) : Promise.resolve([]),
+      // Stage B (F-055): suspension re-checked as the cards go out, not
+      // trusted from the index (a missed refresh would have shown them).
+      uids.length ? db().getAll(...uids.map((u) => db().doc(`userInternal/${u}`))) : Promise.resolve([]),
     ])
     const cards: Card[] = []
     const refs: string[] = []
     deck.forEach((d, i) => {
       const profile = roots[i]?.data()
-      if (!profile) return
+      if (!profile || profile.isDeleted === true || (!isBotUid(d.uid) && internals[i]?.get('isSuspended') === true)) return
       const playProfile = mode === 'play' ? plays[i]?.data() : undefined
       const miles = milesBetween(me, d)
       cards.push({

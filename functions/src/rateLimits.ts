@@ -31,3 +31,33 @@ export async function takeRateLimitUpTo(uid: string, key: string, n: number, { m
     return take
   })
 }
+
+// Reserves one use of a paid feature (an AI call) BEFORE it's made (Stage B,
+// F-054): a transaction takes a slot in the window or refuses, so parallel
+// calls can't overrun the limit. The returned refund gives the slot back
+// when the call fails or produces nothing.
+export async function reserveSlot(
+  uid: string,
+  key: string,
+  { max, windowMs }: { max: number; windowMs: number },
+  message = 'Limit reached. Try again later.',
+): Promise<() => Promise<void>> {
+  const db = getFirestore()
+  const ref = db.doc(`rateLimits/${uid}`)
+  const stamp = Date.now() + Math.random() / 10 // unique, so a refund takes back exactly this slot
+  await db.runTransaction(async (tx) => {
+    const now = Date.now()
+    const raw: unknown = (await tx.get(ref)).data()?.[key]
+    const recent = (Array.isArray(raw) ? raw : []).filter((t): t is number => typeof t === 'number' && now - t < windowMs)
+    if (recent.length >= max) throw new HttpsError('resource-exhausted', message)
+    tx.set(ref, { [key]: [...recent, stamp] }, { merge: true })
+  })
+  return async () => {
+    await db
+      .runTransaction(async (tx) => {
+        const raw: unknown = (await tx.get(ref)).data()?.[key]
+        if (Array.isArray(raw)) tx.set(ref, { [key]: raw.filter((t) => t !== stamp) }, { merge: true })
+      })
+      .catch(() => {})
+  }
+}

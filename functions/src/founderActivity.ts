@@ -21,7 +21,7 @@ import { ZYLOVE_CITIES, distanceMiles } from './cities'
 import { SMS_SECRETS } from './sms'
 import { bucketFor, num, refreshCityMembers, textFounder, type Bucket, type FounderStatus } from './founders'
 import { CLEAR_TRIAL, cityOpen, hasEliteIdentity, hasPaidSubscription, newTrial, planView } from './trial'
-import { internalRef, loadInternal } from './userData'
+import { accountRef, internalRef, loadInternal } from './userData'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const LAUNCH_WINDOW_DAYS = 90
@@ -76,7 +76,7 @@ export const founderHeartbeat = onCall(
     const reactivated = record.status === 'pending_revocation'
     const now = FieldValue.serverTimestamp()
     await ref.update({ lastActiveAt: now, status: 'active', warningSentAt: null, pendingAt: null })
-    await db.doc(`users/${uid}`).update({ founderLastActiveAt: now, founderStatus: 'active' })
+    await accountRef(uid).set({ founderStatus: 'active' }, { merge: true })
     if (reactivated) {
       logger.info('founderHeartbeat: reactivated', { cityId: record.cityId })
       await refreshCityMembers(record.cityId)
@@ -131,7 +131,8 @@ export async function revokeFounderStatus(uid: string): Promise<{ cityId: string
       const plan = hasEliteIdentity(user)
         ? { subscriptionTier: 'elite' }
         : { subscriptionTier: 'free', ...(cityOpen(citySnap.data()) ? newTrial() : CLEAR_TRIAL) }
-      tx.update(userRef, { isFounder: false, founderStatus: 'revoked', founderRevokedAt: FieldValue.serverTimestamp() })
+      tx.update(userRef, { isFounder: false })
+      tx.set(accountRef(uid), { founderStatus: 'revoked' }, { merge: true })
       if (!hasPaidSubscription(planView(user, planSnap.data()))) tx.set(planRef, plan, { merge: true })
     }
     return { cityId: record.cityId, bucket }
@@ -214,7 +215,7 @@ async function checkOne(record: FounderRecord, cityClosed: boolean, now: number)
   if (ageDays >= FOUNDER_WINDOW_DAYS) {
     if (cityClosed) {
       await recordRef.update({ status: 'permanent' satisfies FounderStatus, permanentAt: FieldValue.serverTimestamp() })
-      await userRef.update({ founderStatus: 'permanent' })
+      await accountRef(record.uid).set({ founderStatus: 'permanent' }, { merge: true })
       return 'permanent'
     }
     // The city never filled: thank them with Spark+ for good. Their spot
@@ -222,7 +223,8 @@ async function checkOne(record: FounderRecord, cityClosed: boolean, now: number)
     // members.
     const plan = await loadInternal(record.uid)
     await recordRef.update({ status: 'converted' satisfies FounderStatus, convertedAt: FieldValue.serverTimestamp() })
-    await userRef.update({ isFounder: false, founderStatus: 'converted', founderConvertedAt: FieldValue.serverTimestamp() })
+    await userRef.update({ isFounder: false })
+    await accountRef(record.uid).set({ founderStatus: 'converted' }, { merge: true })
     if (!hasPaidSubscription(plan)) await internalRef(record.uid).set({ subscriptionTier: 'spark_plus' }, { merge: true })
     await textFounder(
       record.uid,
@@ -237,7 +239,7 @@ async function checkOne(record: FounderRecord, cityClosed: boolean, now: number)
   if (idleDays >= rules.pending) {
     if (record.status === 'pending_revocation') return 'ok'
     await recordRef.update({ status: 'pending_revocation' satisfies FounderStatus, pendingAt: FieldValue.serverTimestamp() })
-    await userRef.update({ founderStatus: 'pending_revocation' })
+    await accountRef(record.uid).set({ founderStatus: 'pending_revocation' }, { merge: true })
     await textFounder(record.uid, `✦ Your Zylove founder spot expires in 4 days. Log in to keep it: ${APP_URL}`)
     return 'pending'
   }
@@ -245,7 +247,6 @@ async function checkOne(record: FounderRecord, cityClosed: boolean, now: number)
   if (idleDays >= rules.warn) {
     if (record.warningSentAt) return 'ok'
     await recordRef.update({ warningSentAt: FieldValue.serverTimestamp() })
-    await userRef.update({ founderWarningSentAt: FieldValue.serverTimestamp() })
     await textFounder(
       record.uid,
       `✦ Hey — your ${record.cityName} founder spot is at risk. Log in to Zylove to keep it: ${APP_URL}`,
@@ -256,7 +257,7 @@ async function checkOne(record: FounderRecord, cityClosed: boolean, now: number)
   // Active again (the heartbeat normally does this first).
   if (record.status === 'pending_revocation') {
     await recordRef.update({ status: 'active' satisfies FounderStatus, warningSentAt: null, pendingAt: null })
-    await userRef.update({ founderStatus: 'active' })
+    await accountRef(record.uid).set({ founderStatus: 'active' }, { merge: true })
     return 'reactivated'
   }
   return 'ok'

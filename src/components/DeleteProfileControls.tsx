@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
+import { signOutAndWipe } from '../services/signOut'
+import { subscribeAccountView } from '../services/subscription'
 import { useNavigate } from 'react-router-dom'
-import { signOut } from 'firebase/auth'
-import { doc, onSnapshot } from 'firebase/firestore'
-import { auth, db } from '../services/firebase'
 import { useModeStore } from '../store/modeStore'
 import { deleteAccount, deletePlayProfile, deleteSparkProfile } from '../services/profileDeletion'
 import { setVisibility } from '../services/visibility'
@@ -202,10 +201,11 @@ export default function DeleteProfileControls({ uid }: { uid: string }) {
 
   useEffect(() => {
     if (!uid) return
-    return onSnapshot(
-      doc(db, 'users', uid),
-      (snap) => {
-        const d = snap.data() ?? {}
+    // The account view: the public doc plus private/account, where founder
+    // status and the thread summary live (Stage B).
+    return subscribeAccountView(
+      uid,
+      (d) => {
         const isFounder = d.isFounder === true && d.founderStatus !== 'revoked'
         const city = typeof d.founderCity === 'string' && d.founderCity ? d.founderCity : 'Austin'
         const badge = typeof d.founderBadge === 'string' && d.founderBadge ? d.founderBadge : `${city} Founder`
@@ -239,7 +239,7 @@ export default function DeleteProfileControls({ uid }: { uid: string }) {
   }
 
   async function leaveSignedOut() {
-    await signOut(auth).catch(() => {})
+    await signOutAndWipe({ keepChatKey: false })
     navigate('/login', { replace: true })
   }
 

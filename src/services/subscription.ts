@@ -175,6 +175,10 @@ export function accountView(root: DocumentData | undefined, account: DocumentDat
     }
     if (typeof loc.label === 'string' && loc.label) view.locationLabel = loc.label
   }
+  // Founder status and the founder↔team thread summary (Stage B: off the
+  // public doc; older accounts still have the root copies).
+  if (account?.founderStatus !== undefined) view.founderStatus = account.founderStatus
+  if (account?.founderThreadMeta !== undefined) view.founderThreadMeta = account.founderThreadMeta
   // Play access as the server decided it (Stage 2; functions/src/playAccess.ts).
   view.playEntitled = account?.playEntitled
   view.playAccess = account?.playAccess

@@ -1,124 +1,72 @@
 import { RecaptchaVerifier, reauthenticateWithPhoneNumber, type ConfirmationResult } from 'firebase/auth'
-import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore'
-import { auth, db } from './firebase'
+import { FirebaseError } from 'firebase/app'
+import { httpsCallable } from 'firebase/functions'
+import { auth, functions } from './firebase'
 
-// Play mode PIN: a privacy lock for shared devices. Only a SHA-256 hash of
-// "{uid}:{pin}" is kept — never the PIN. The hash lives in
-// users/{uid}/settings/playPin (readable only by its owner), so it survives
-// signing out, cleared site data, Safari's storage expiry and switching
-// between the browser and the home-screen app. localStorage holds a cached
-// copy so checks work offline. It hides Play from someone else at the
-// keyboard; it isn't account security.
+// Play mode PIN: a privacy lock for shared devices. Checked server-side
+// (functions/src/playPin.ts, Stage B): the server keeps a salted hash and
+// counts wrong guesses, so nothing on this device can be used to guess the
+// PIN offline. The browser keeps nothing about the PIN — only, in memory,
+// whether one is set. It hides Play from someone else at the keyboard; it
+// isn't account security.
 
 export const PIN_LENGTH = 4
-const MAX_ATTEMPTS = 3
-const LOCKOUT_MS = 30_000
 
-function hashKey(uid: string): string {
-  return `zylove_play_pin_${uid}`
-}
-
-function lockKey(uid: string): string {
-  return `zylove_play_pin_lock_${uid}`
-}
-
-async function hashPin(uid: string, pin: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${uid}:${pin}`))
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
-}
-
-function read(key: string): string | null {
+// Left behind by builds that cached the PIN's hash and lockout here.
+export function forgetLocalPinData(): void {
   try {
-    return localStorage.getItem(key)
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith('zylove_play_pin_')) localStorage.removeItem(k)
+    }
   } catch {
-    return null
+    // ignore
   }
 }
+forgetLocalPinData()
 
-function write(key: string, value: string | null): void {
-  try {
-    if (value === null) localStorage.removeItem(key)
-    else localStorage.setItem(key, value)
-  } catch {
-    // Storage unavailable — the PIN can't persist in this browser.
-  }
-}
+const known = new Map<string, { hasPin: boolean; lockedUntil: number }>()
 
-const remoteRef = (uid: string) => doc(db, `users/${uid}/settings/playPin`)
-
-// From the cache: accurate once loadPin has run for this user.
+// Whether a PIN is set, as of the last loadPin (false until then).
 export function hasPin(uid: string): boolean {
-  return read(hashKey(uid)) !== null
+  return known.get(uid)?.hasPin === true
 }
 
-// Syncs the cache with Firestore and resolves whether a PIN is set. A PIN
-// only this browser knows (set before PINs were stored remotely) is uploaded.
-// If Firestore can't be reached, the cache answers.
+// Asks the server whether a PIN is set. Throws when it can't tell — callers
+// must not treat that as "no PIN" (that would offer to set a new one).
 export async function loadPin(uid: string): Promise<boolean> {
   if (!uid) return false
-  const local = read(hashKey(uid))
-  try {
-    const remote: unknown = (await getDoc(remoteRef(uid))).data()?.hash
-    if (typeof remote === 'string' && remote) {
-      write(hashKey(uid), remote)
-      return true
-    }
-    if (local) await setDoc(remoteRef(uid), { hash: local, updatedAt: serverTimestamp() })
-  } catch {
-    // Offline or unreadable — fall back to the cache.
-  }
-  return local !== null
-}
-
-export async function savePin(uid: string, pin: string): Promise<void> {
-  const hash = await hashPin(uid, pin)
-  write(hashKey(uid), hash)
-  write(lockKey(uid), null)
-  await setDoc(remoteRef(uid), { hash, updatedAt: serverTimestamp() })
-}
-
-export async function clearPin(uid: string): Promise<void> {
-  write(hashKey(uid), null)
-  write(lockKey(uid), null)
-  await deleteDoc(remoteRef(uid))
-}
-
-// ─── Attempts ────────────────────────────────────────────────────────────────
-// Kept in localStorage so a reload doesn't reset the lockout.
-
-interface LockState {
-  fails: number
-  until: number // epoch ms; 0 when not locked
-}
-
-function readLock(uid: string): LockState {
-  try {
-    const parsed: unknown = JSON.parse(read(lockKey(uid)) ?? '{}')
-    const s = parsed as Partial<LockState>
-    return { fails: typeof s.fails === 'number' ? s.fails : 0, until: typeof s.until === 'number' ? s.until : 0 }
-  } catch {
-    return { fails: 0, until: 0 }
-  }
+  const { data } = await httpsCallable<Record<string, never>, { hasPin: boolean; lockedUntil: number }>(functions, 'getPlayPinStatus')({})
+  known.set(uid, data)
+  return data.hasPin
 }
 
 // Epoch ms the lockout ends, or 0 when entry is allowed.
 export function lockedUntil(uid: string): number {
-  const { until } = readLock(uid)
+  const until = known.get(uid)?.lockedUntil ?? 0
   return until > Date.now() ? until : 0
 }
 
-export type PinCheck = 'ok' | 'wrong' | 'locked'
+export type PinCheck = 'ok' | 'wrong' | 'locked' | 'error'
 
 export async function checkPin(uid: string, pin: string): Promise<PinCheck> {
-  if (lockedUntil(uid)) return 'locked'
-  if ((await hashPin(uid, pin)) === read(hashKey(uid))) {
-    write(lockKey(uid), null)
-    return 'ok'
+  try {
+    const { data } = await httpsCallable<{ pin: string }, { result: 'ok' | 'wrong' | 'locked'; lockedUntil?: number }>(functions, 'checkPlayPin')({ pin })
+    if (data.result === 'locked') known.set(uid, { hasPin: true, lockedUntil: data.lockedUntil ?? Date.now() + 60_000 })
+    return data.result
+  } catch {
+    return 'error'
   }
-  const fails = readLock(uid).fails + 1
-  const locked = fails >= MAX_ATTEMPTS
-  write(lockKey(uid), JSON.stringify(locked ? { fails: 0, until: Date.now() + LOCKOUT_MS } : { fails, until: 0 }))
-  return locked ? 'locked' : 'wrong'
+}
+
+// Sets the PIN: the first one; a change (with the current PIN); or a reset
+// right after the SMS re-verification. Throws with a message for the user.
+export async function savePin(uid: string, pin: string, opts: { currentPin?: string; reset?: boolean } = {}): Promise<void> {
+  try {
+    await httpsCallable(functions, 'setPlayPin')({ pin, ...opts })
+    known.set(uid, { hasPin: true, lockedUntil: 0 })
+  } catch (err) {
+    throw new Error(err instanceof FirebaseError && err.message ? err.message : "Couldn't save your PIN. Try again.")
+  }
 }
 
 // ─── Reset by SMS ────────────────────────────────────────────────────────────

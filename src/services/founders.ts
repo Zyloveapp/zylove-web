@@ -149,7 +149,7 @@ export async function founderHeartbeat(uid: string): Promise<void> {
   try {
     const last = Number(localStorage.getItem(heartbeatKey(uid)))
     if (last > 0 && Date.now() - last < HEARTBEAT_MS) return
-    const user = (await getDoc(doc(db, 'users', uid))).data()
+    const user = await loadAccountView(uid)
     if (user?.isFounder !== true || (user.founderStatus !== 'active' && user.founderStatus !== 'pending_revocation')) return
     await httpsCallable(functions, 'founderHeartbeat', { timeout: 10_000 })({})
     localStorage.setItem(heartbeatKey(uid), String(Date.now()))

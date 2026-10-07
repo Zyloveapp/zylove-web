@@ -2,7 +2,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { getStorage } from 'firebase-admin/storage'
 import { getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { defaultBucket, isPhotoRef } from './storagePath'
-import { isAdminAuth } from './userData'
+import { isAdminAuth, requireActive } from './userData'
 import { takeRateLimit } from './rateLimits'
 import { playStatus } from './playAccess'
 
@@ -40,6 +40,7 @@ export const getPhotoUrls = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ urls: Record<string, string>; expiresAt: number }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid)
     const viewer = request.auth.uid
     const raw = (request.data as Record<string, unknown> | null)?.refs
     if (!Array.isArray(raw) || raw.length > MAX_REFS || !raw.every(isPhotoRef)) {

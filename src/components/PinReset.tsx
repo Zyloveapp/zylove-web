@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { ConfirmationResult, RecaptchaVerifier } from 'firebase/auth'
 import { PinScreen } from './PinPad'
-import { accountPhone, clearPin, maskPhone, sendResetCode } from '../services/playPin'
+import { accountPhone, maskPhone, sendResetCode } from '../services/playPin'
 
 interface PinResetProps {
   uid: string
@@ -10,8 +10,9 @@ interface PinResetProps {
 }
 
 // "Forgot your PIN?" — texts a code to the account's own phone number; a
-// verified code clears the old PIN so a new one can be set.
-export default function PinReset({ uid, onVerified, onCancel }: PinResetProps) {
+// verified code lets a new PIN replace the old one (the server accepts a
+// reset for a few minutes after the re-verification).
+export default function PinReset({ onVerified, onCancel }: PinResetProps) {
   const phone = accountPhone()
   const captcha = useRef<HTMLDivElement>(null)
   const verifier = useRef<RecaptchaVerifier | null>(null)
@@ -48,8 +49,6 @@ export default function PinReset({ uid, onVerified, onCancel }: PinResetProps) {
     setError(null)
     try {
       await confirmation.confirm(code)
-      // Setting the new PIN overwrites the old one anyway.
-      await clearPin(uid).catch(() => {})
       onVerified()
     } catch {
       setError("That code didn't work. Check it and try again.")

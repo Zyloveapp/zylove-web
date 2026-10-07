@@ -13,7 +13,7 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type WriteBatch } from 'firebase-admin/firestore'
-import { isAdminAuth } from './userData'
+import { accountRef, isAdminAuth, requireActive } from './userData'
 import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
 
 const MAX_BODY = 1000
@@ -51,6 +51,8 @@ function displayName(user: DocumentData | undefined): string {
   return typeof n === 'string' && n.trim() ? n.trim() : 'A founder'
 }
 
+// Revoked and converted founders have isFounder false (founderActivity.ts);
+// older docs may still carry a public founderStatus.
 function isActiveFounder(id: string, user: DocumentData): boolean {
   return !id.startsWith(BOT_PREFIX) && user.isFounder === true && !FORMER_STATUSES.has(String(user.founderStatus))
 }
@@ -98,8 +100,10 @@ function writeAdminMessage(batch: WriteBatch, adminUid: string, founderUid: stri
     },
     { merge: true },
   )
+  // Stage B (F-056): message previews in the owner's private/account, not
+  // on the public profile.
   batch.set(
-    db().doc(`users/${founderUid}`),
+    accountRef(founderUid),
     {
       founderThreadMeta: {
         hasUnread: true,
@@ -122,6 +126,7 @@ export const sendFounderMessage = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid)
     const uid = request.auth.uid
     const body = parseBody(request.data)
     const user = (await db().doc(`users/${uid}`).get()).data()
@@ -161,7 +166,7 @@ export const sendFounderMessage = onCall(
         { merge: true },
       )
       tx.set(
-        db().doc(`users/${uid}`),
+        accountRef(uid),
         {
           founderThreadMeta: {
             hasUnread: false,
@@ -259,7 +264,7 @@ export const markFounderThreadRead = onCall(
       .get()
     const batch = db().batch()
     for (const d of unread.docs) batch.update(d.ref, { readAt: FieldValue.serverTimestamp() })
-    batch.set(db().doc(`users/${uid}`), { founderThreadMeta: { hasUnread: false } }, { merge: true })
+    batch.set(accountRef(uid), { founderThreadMeta: { hasUnread: false } }, { merge: true })
     await batch.commit()
     return { success: true }
   },

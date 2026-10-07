@@ -10,7 +10,7 @@ import { db, storage } from './firebase'
 // (both modes). Clients never publish photos themselves. The target doc must
 // already exist: the function only updates it.
 
-export type ModerationOutcome = 'approved' | 'pending' | 'timeout' | 'failed'
+export type ModerationOutcome = 'approved' | 'pending' | 'timeout' | 'failed' | 'unsupported'
 
 export interface ModeratedPhoto {
   outcome: ModerationOutcome
@@ -23,6 +23,9 @@ export const MODERATION_MESSAGES: Record<Exclude<ModerationOutcome, 'approved'>,
   pending: 'Photo is under review. It will appear once approved.',
   timeout: 'Photo upload is taking longer than expected. Try again.',
   failed: "Couldn't upload that photo. Try again.",
+  // Stage B (F-052): a photo this browser can't re-encode would go up with
+  // its metadata — GPS location included.
+  unsupported: "This browser can't prepare that photo (often an iPhone HEIC photo). Choose a JPEG or PNG, or save it as JPEG first.",
 }
 
 function strings(v: unknown): string[] {
@@ -75,7 +78,8 @@ const JPEG_QUALITY = 0.85
 const TRANSPARENT_FILL = '#ffffff'
 
 // The resized JPEG, or null when the browser can't decode the file (e.g.
-// HEIC outside Safari) — the original is then uploaded as before.
+// HEIC outside Safari) — nothing is uploaded then (Stage B): the original
+// would carry its metadata, GPS location included.
 async function resizeForUpload(file: Blob): Promise<Blob | null> {
   try {
     const bitmap = await createImageBitmap(file)
@@ -107,14 +111,13 @@ export async function uploadModeratedPhoto(
   onUploaded?: () => void,
 ): Promise<ModeratedPhoto> {
   const resized = await resizeForUpload(file)
-  // The Storage rule wants an image/* content type: the resized photo is
-  // always image/jpeg; an original keeps its own type.
-  const ext = resized ? 'jpg' : file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : 'jpg'
-  const fileName = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`
+  if (!resized) {
+    onUploaded?.()
+    return { outcome: 'unsupported', url: null }
+  }
+  const fileName = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}.jpg`
   try {
-    await uploadBytes(ref(storage, `photos/${uid}/${mode}/${fileName}`), resized ?? file, {
-      contentType: resized ? 'image/jpeg' : file.type,
-    })
+    await uploadBytes(ref(storage, `photos/${uid}/${mode}/${fileName}`), resized, { contentType: 'image/jpeg' })
   } catch (err) {
     console.error('Profile photo upload failed:', err)
     onUploaded?.()
@@ -157,6 +160,6 @@ export async function uploadModeratedPhotos(
     files.map((f) => uploadModeratedPhoto(uid, mode, f, () => onProgress?.(++uploaded, files.length))),
   )
   const outcomes = new Set(results.map((r) => r.outcome))
-  const notices = (['pending', 'timeout', 'failed'] as const).filter((o) => outcomes.has(o)).map((o) => MODERATION_MESSAGES[o])
+  const notices = (['pending', 'timeout', 'failed', 'unsupported'] as const).filter((o) => outcomes.has(o)).map((o) => MODERATION_MESSAGES[o])
   return { results, notices }
 }

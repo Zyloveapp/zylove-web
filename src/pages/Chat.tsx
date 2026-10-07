@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/authStore'
 import { toEntry, type MatchEntry } from '../services/matches'
 import ChatView from '../components/chat/ChatView'
 import { useModeStore } from '../store/modeStore'
+import PlayGate from '../components/PlayGate'
 
 type Loaded = { matchId: string; match: MatchEntry | null }
 
@@ -49,9 +50,11 @@ export default function Chat() {
     )
   }
 
-  return (
+  const view = (
     <div className={container}>
       <ChatView key={matchId} uid={uid} match={loaded.match} onBack={() => navigate('/matches')} />
     </div>
   )
+  // A Play chat needs Play unlocked, however it was reached (Stage B).
+  return loaded.match.mode === 'play' ? <PlayGate>{view}</PlayGate> : view
 }

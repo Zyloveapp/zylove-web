@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { requireActive } from './userData'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { beforeUserSignedIn } from 'firebase-functions/v2/identity'
 import { logger } from 'firebase-functions'
@@ -173,6 +174,7 @@ export const acceptPhotoConsent = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid)
     const uid = request.auth.uid
     const matchId = str(request.data, 'matchId')
     const db = getFirestore()

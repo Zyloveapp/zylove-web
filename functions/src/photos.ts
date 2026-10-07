@@ -1,4 +1,5 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
+import { requireActive } from './userData'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { logger } from 'firebase-functions'
 import { getStorage } from 'firebase-admin/storage'
@@ -31,6 +32,7 @@ export const markChatPhotoViewed = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid)
     const uid = request.auth.uid
     const data = (request.data ?? {}) as Record<string, unknown>
     const { matchId, messageId } = data

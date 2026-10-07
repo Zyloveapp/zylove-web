@@ -284,11 +284,8 @@ export const blockUser = onCall(LEGACY_RUNTIME, async (request) => {
   }
   if (uid === targetUid) throw new HttpsError("invalid-argument", "Cannot block yourself");
 
-  // Suspension check
-  if (await isSuspendedUid(uid)) {
-    throw new HttpsError("permission-denied", "Account suspended");
-  }
-
+  // Stage B: blocking stays open to suspended accounts (as reporting does) —
+  // it only ever protects them.
   await blockPair(uid, targetUid, matchId);
   return { success: true };
 });

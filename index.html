@@ -34,6 +34,7 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <!-- The CSP (vercel.json) allows this inline script by its sha256 hash: change one, update the other. -->
     <script>
       // Not on localhost: a service worker there would cache the dev server.
       if ('serviceWorker' in navigator && location.hostname !== 'localhost') {
