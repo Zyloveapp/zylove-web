@@ -118,24 +118,9 @@
 <p>
   On mobile, Zylove uses your device's biometric authentication (Face ID or Touch ID) to verify your identity when switching between Spark and Play modes. <strong>We never store biometric data.</strong> Authentication is handled entirely by your device's operating system (Apple Secure Enclave / Android Keystore). Zylove receives only a pass/fail result.
 </p>
-<h3>Selfie & liveness verification</h3>
-<p>
-  To verify that you are a real person and that your photos are authentic, Zylove may ask you to complete a liveness check — a short gesture-based prompt (such as blinking, turning your head, or smiling) captured by your front-facing camera. This process:
-</p>
-<ul>
-  <li>Is required for full profile visibility and unlocks a "Verified" badge — unverified profiles have reduced discovery reach</li>
-  <li>Captures a short video or image sequence for the sole purpose of liveness detection</li>
-  <li>Is processed by our photo moderation provider (Sightengine) to confirm a live human is present</li>
-  <li>Is <strong>not</strong> used for facial recognition or identity matching against external databases</li>
-  <li>Verification media is stored separately from your profile photos, is never shown to other users, and is deleted within 90 days of verification</li>
-  <li>A pass/fail result and verification timestamp are stored on your account</li>
-</ul>
-<div class="callout callout-blue">
-  <strong>We do not perform facial recognition.</strong> Liveness verification confirms you are a real person present at the time of verification — it does not identify who you are or match your face against any database.
-</div>
         <h3>Photos</h3>
         <p>
-          Photos you upload are stored securely in Google Firebase Storage and associated with your account. Selfie verification photos (if used) are stored separately and are not shown to other users — they are reviewed by our Trust & Safety team only.
+          Photos you upload are stored securely in Google Firebase Storage and associated with your account.
         </p>
       </section>
       <!-- 3. How we use it -->
@@ -157,7 +142,6 @@
           <li>Review accounts flagged by our safety checks. A person reviews every flag, and any action is graduated — for example showing a profile less often in Explore while it's reviewed, or a suspension</li>
           <li>Recognize accounts used from the same device, or from a device used by a banned account</li>
           <li>Verify age (18+) before granting access to the platform</li>
-          <li>Verify identity via selfie verification (optional but encouraged)</li>
         </ul>
         <h3>To power AI features</h3>
         <ul>
@@ -216,7 +200,7 @@
             <tr>
               <td><strong>Firebase Storage</strong></td>
               <td>Google</td>
-              <td>Profile photos, verification photos</td>
+              <td>Profile photos</td>
             </tr>
             <tr>
               <td><strong>Anthropic Claude API</strong></td>
@@ -226,7 +210,7 @@
             <tr>
               <td><strong>Sightengine</strong></td>
               <td>Sightengine SAS</td>
-              <td>Profile photos for content moderation (nudity, gore, offensive content detection); liveness verification photos</td>
+              <td>Profile photos for content moderation (nudity, gore, offensive content detection)</td>
             </tr>
             <tr>
               <td><strong>Twilio</strong></td>

@@ -76,7 +76,7 @@ export default function LegalUpdateNotice() {
           <Link to="/sms-terms" target="_blank" rel="noreferrer" className="text-[#7C9BFF] underline hover:text-white">
             SMS Terms
           </Link>
-          . If you keep using Zylove after {LEGAL_UPDATE.effective}, the updated Terms apply. If you don't agree, you can delete
+          . If you keep using Zylove from {LEGAL_UPDATE.effective}, the updated Terms apply. If you don't agree, you can delete
           your account in Settings.
         </p>
         <button
