@@ -70,6 +70,7 @@ import {
   POINTS_PER_POSITIVE,
   REVIEW_TONE,
 } from './shared/reviewCategories'
+import { updateSearchName } from './searchName'
 import { PLAY_PROMPTS, SPARK_PROMPTS, UNIVERSAL_PROMPTS } from './shared/profile'
 
 initializeApp()
@@ -321,6 +322,12 @@ const INTERNAL_DEFAULTS = {
 // anyone without one whose market has opened — existing users too, since the
 // app calls this on every load. In a pre-launch market (or none) there's no
 // clock yet.
+// "2026-10": the month an account was created, Central time.
+export function memberSinceOf(ms: number): string {
+  const f = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit' }).format(new Date(ms))
+  return f.slice(0, 7)
+}
+
 export const initUserDefaults = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
@@ -373,6 +380,20 @@ export const initUserDefaults = onCall(
           await noteTrialHistory(phone, { trialStartedAt: t.trialStartedAt, trialEndsAt: t.trialEndsAt })
         }
       }
+    }
+    // T&S Phase 1: account age from Firebase Auth — the client's createdAt
+    // can be rewritten. accountCreatedAt (ms) stays server-side; the profile
+    // shows only the month ("Member since").
+    if (typeof internal.accountCreatedAt !== 'number' || typeof data.memberSince !== 'string') {
+      const created = Date.parse((await getAuth().getUser(uid).catch(() => null))?.metadata.creationTime ?? '')
+      if (Number.isFinite(created)) {
+        if (typeof internal.accountCreatedAt !== 'number') missingInternal.accountCreatedAt = created
+        if (typeof data.memberSince !== 'string') missing.memberSince = memberSinceOf(created)
+      }
+    }
+    // T&S Phase 1: the admin directory's name index.
+    if (typeof data.displayName === 'string' && internal.searchName !== data.displayName.trim().toLowerCase()) {
+      await updateSearchName(uid, data.displayName)
     }
     // Explore pool position (see discovery.ts): set once, never changed.
     if (typeof data.sortKey !== 'number') missing.sortKey = Math.random()
@@ -1856,7 +1877,7 @@ export const getCuriousVisitors = onCall(
 
 // Bot chats: "typing…" while a bot reply is on its way (see botTyping.ts).
 export { botTypingStart, botTypingStop } from './botTyping'
-export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate, unmatchConnection } from './behavior'
+export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate, purgePreservedChats, unmatchConnection } from './behavior'
 export { markChatPhotoViewed, sweepChatPhotos } from './photos'
 export { checkTrialStatus, onMarketOpened } from './trial'
 export { mirrorPlan } from './userData'
@@ -2153,3 +2174,8 @@ export { recordSwipe } from './legacy/recordSwipe'
 export { blockUser, unblockUser } from './legacy/trustSafety'
 // Batch (d): demo-mode bot chat replies.
 export { onBotMessage } from './legacy/onBotMessage'
+export { purgeAdminAudit } from './audit'
+export { purgeOpenerHashes, trustOnMessage } from './trustSignals'
+export { purgeDeviceSightings, recordDevice } from './devices'
+export { computeTrustScores, trustOnSignals } from './trustScore'
+export { adminSearchUsers, adminTrustAction, adminTrustDetail, adminTrustQueue, adminViewProfile } from './trustAdmin'

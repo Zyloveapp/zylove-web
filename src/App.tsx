@@ -18,6 +18,7 @@ import ReviewPrompter from './components/ReviewPrompter'
 import PlayLock from './components/PlayLock'
 import TrialExpiry from './components/TrialExpiry'
 import KeyBackupGate from './components/KeyBackupGate'
+import DeviceSync from './components/DeviceSync'
 import Login from './pages/Login'
 import Terms from './pages/public/Terms'
 import Privacy from './pages/public/Privacy'
@@ -51,6 +52,7 @@ import AdminDeletions from './pages/admin/AdminDeletions'
 import AdminCities from './pages/admin/AdminCities'
 import AdminActivity from './pages/admin/AdminActivity'
 import AdminReports from './pages/admin/AdminReports'
+import AdminTrust from './pages/admin/AdminTrust'
 import AdminNotice from './components/AdminNotice'
 import LegalUpdateNotice from './components/LegalUpdateNotice'
 import { touchLastActive } from './services/adminActivity'
@@ -160,6 +162,7 @@ function AppLayout() {
       <PlayLock />
       <TrialExpiry />
       <KeyBackupGate />
+      <DeviceSync />
       <AdminNotice />
       <LegalUpdateNotice />
     </div>
@@ -217,6 +220,7 @@ export default function App() {
                 <Route path="/admin/cities" element={<AdminCities />} />
                 <Route path="/admin/activity" element={<AdminActivity />} />
                 <Route path="/admin/reports" element={<AdminReports />} />
+                <Route path="/admin/trust" element={<AdminTrust />} />
               </Route>
             </Route>
           </Route>

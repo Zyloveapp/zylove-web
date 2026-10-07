@@ -15,7 +15,7 @@ export const recordSwipe = onCall(LEGACY_RUNTIME, async (request) => {
   const uid = request.auth.uid;
   const { targetUid, action, mode } = request.data as {
     targetUid: string;
-    action: "like" | "pass" | "superlike";
+    action: "like" | "pass" | "superlike" | "maybe";
     mode: "spark" | "play";
   };
 
@@ -27,7 +27,9 @@ export const recordSwipe = onCall(LEGACY_RUNTIME, async (request) => {
   // Stage 2: swiping in Play needs Play access.
   if (mode === "play") await requirePlayAccess(uid);
 
-  const validActions = ["like", "pass", "superlike"];
+  // "maybe" (T&S Phase 1) is recorded for behaviour signals only — the card
+  // stays in the deck.
+  const validActions = ["like", "pass", "superlike", "maybe"];
   if (!validActions.includes(action)) {
     throw new HttpsError("invalid-argument", "Invalid action");
   }
@@ -45,7 +47,7 @@ export const recordSwipe = onCall(LEGACY_RUNTIME, async (request) => {
     timestamp: admin.firestore.Timestamp.now(),
   });
   // Explore (Stage 3): never shown again in this mode; the deck moves on.
-  await markActed(uid, mode, targetUid);
+  if (action !== "maybe") await markActed(uid, mode, targetUid);
 
   return { success: true };
 });

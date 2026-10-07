@@ -34,6 +34,8 @@ export interface MatchEntry {
   mode: Mode
   // Blocked or unmatched; mobile's unmatch deletes the doc instead.
   ended: boolean
+  // A reported chat kept read-only for its reporter until then (ms), else null.
+  preservedUntil: number | null
 }
 
 // Firestore Timestamp, epoch ms, or missing → epoch ms.
@@ -57,8 +59,10 @@ function str(v: unknown): string | null {
 }
 
 export function toEntry(matchId: string, data: DocumentData, uid: string): MatchEntry | null {
-  // 'participants' is the legacy name for 'users'.
-  const users: unknown = data.users ?? data.participants
+  // 'participants' is the legacy name for 'users'. A reported chat kept for
+  // its reporter after an unmatch lists only the reporter in users; the
+  // pair is in pairUsers (T&S Phase 1).
+  const users: unknown = Array.isArray(data.pairUsers) ? data.pairUsers : (data.users ?? data.participants)
   const partnerUid = Array.isArray(users) ? users.find((u): u is string => typeof u === 'string' && u !== uid) : undefined
   if (!partnerUid) return null
 
@@ -79,6 +83,7 @@ export function toEntry(matchId: string, data: DocumentData, uid: string): Match
     lastSenderId: str(data.lastSenderId),
     mode: data.mode === 'play' ? 'play' : 'spark',
     ended: data.isBlocked === true || (data.unmatchedAt !== undefined && data.unmatchedAt !== null),
+    preservedUntil: toMillis(data.preservedUntil) || null,
   }
 }
 

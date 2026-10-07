@@ -1,5 +1,5 @@
 import { logger } from 'firebase-functions'
-import { Timestamp, getFirestore } from 'firebase-admin/firestore'
+import { Timestamp, getFirestore, FieldPath } from 'firebase-admin/firestore'
 import { getStorage } from 'firebase-admin/storage'
 import { generationOf } from './matchGeneration'
 
@@ -40,6 +40,14 @@ export async function purgeMatchContent(matchId: string, cutoff: number | null):
     return Number.isFinite(created) && created < limit
   })
   await Promise.all(doomed.map((f) => f.delete({ ignoreNotFound: true })))
+
+  // T&S Phase 1: the match's message counts go with its content.
+  const stats = await db.collection('matchStats').where(FieldPath.documentId(), '>=', `${matchId}_`).where(FieldPath.documentId(), '<', `${matchId}_\uf8ff`).get()
+  await Promise.all(
+    stats.docs
+      .filter((d) => limit === null || Number(d.id.slice(matchId.length + 1)) < limit)
+      .map((d) => d.ref.delete()),
+  )
 
   logger.info('purgeMatchContent', { matchId, cutoff: limit, messages: deleted, photos: doomed.length })
 }

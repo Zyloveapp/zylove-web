@@ -12,6 +12,7 @@ import {
   actionErrorMessage,
   ensureUserDefaults,
   likeProfile,
+  maybeProfile,
   noteOnScreen,
   passProfile,
   prefetchCompatibility,
@@ -108,6 +109,7 @@ function Explore() {
     if (!current || busy) return
     setActionError(null)
     if (action === 'maybe') {
+      maybeProfile(mode, current.uid)
       advance(true)
       return
     }

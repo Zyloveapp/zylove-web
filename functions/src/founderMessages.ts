@@ -15,6 +15,7 @@ import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type WriteBatch } from 'firebase-admin/firestore'
 import { accountRef, isAdminAuth, requireActive } from './userData'
+import { audit } from './audit'
 import { SMS_SECRETS, textAccount } from './sms'
 
 const MAX_BODY = 1000
@@ -199,6 +200,7 @@ export const replyToFounder = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
   async (request): Promise<{ success: true }> => {
     const adminUid = requireAdmin(request.auth)
+    await audit({ actor: adminUid, action: 'founder.reply', target: typeof request.data?.founderUid === 'string' ? request.data.founderUid : null })
     const data = (request.data ?? {}) as Record<string, unknown>
     const founderUid = parseUid(data.founderUid)
     const body = parseBody(data)
@@ -221,6 +223,7 @@ export const broadcastToFounders = onCall(
   { timeoutSeconds: 300, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ sent: number; failed: number; texted: number; total: number }> => {
     const adminUid = requireAdmin(request.auth)
+    await audit({ actor: adminUid, action: 'founder.broadcast' })
     const body = parseBody(request.data)
     const founders = (await activeFounders()).filter((f) => f.id !== adminUid)
 
@@ -287,6 +290,7 @@ export const getFounderThreads = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ threads: FounderThreadSummary[]; founderCount: number }> => {
     const adminUid = requireAdmin(request.auth)
+    await audit({ actor: adminUid, action: 'founder.threads_list' })
     const [snap, founders] = await Promise.all([
       db().collection('founderMessages').orderBy('lastMessageAt', 'desc').get(),
       activeFounders(),
@@ -327,7 +331,10 @@ export const getFounderThread = onCall(
     const caller = request.auth.uid
     const asked = (request.data as Record<string, unknown> | null)?.founderUid
     const founderUid = asked === undefined || asked === null ? caller : parseUid(asked)
-    if (founderUid !== caller) requireAdmin(request.auth)
+    if (founderUid !== caller) {
+      requireAdmin(request.auth)
+      await audit({ actor: caller, action: 'founder.thread_view', target: founderUid })
+    }
 
     const snap = await db().collection(`founderMessages/${founderUid}/thread`).orderBy('createdAt', 'asc').get()
     if (founderUid !== caller) {

@@ -22,6 +22,7 @@ import { getStorage } from 'firebase-admin/storage'
 import { isAdminAuth } from './userData'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, getNearestCity } from './cities'
+import { audit, requireAdminAudited } from './audit'
 import { revokeFounderStatus } from './founderActivity'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -62,7 +63,7 @@ export interface PendingDeletion {
 export const adminListDeletions = onCall(
   { timeoutSeconds: 60, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ deletions: PendingDeletion[] }> => {
-    requireAdmin(request.auth)
+    await requireAdminAudited(request.auth, { action: 'deletions.list' })
     const db = getFirestore()
     const [records, deletedUsers, requests] = await Promise.all([
       db.collection('deletedAccounts').get(),
@@ -205,6 +206,7 @@ export const adminPurgeAccount = onCall(
       adminUid,
       keptBannedRecord,
     })
+    await audit({ actor: adminUid, action: 'account.purge', target: uid, detail: { keptBannedRecord } })
     logger.info('adminPurgeAccount', { keptBannedRecord })
     return { purged: true, keptBannedRecord }
   },
@@ -239,7 +241,7 @@ export interface CityStats {
 export const adminCityStats = onCall(
   { timeoutSeconds: 120, memory: '512MiB', invoker: 'public' },
   async (request): Promise<CityStats> => {
-    requireAdmin(request.auth)
+    await requireAdminAudited(request.auth, { action: 'cities.view' })
     const db = getFirestore()
     const now = Date.now()
     const [configs, users, internals, locations] = await Promise.all([

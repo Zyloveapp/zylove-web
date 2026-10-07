@@ -61,6 +61,7 @@ import VibeCheckModal from './VibeCheckModal'
 import VibeCelebration, { CELEBRATION_MS } from './VibeCelebration'
 import { firstChatSeen, firstChatSeenRemotely } from './firstChatSeen'
 import { fetchPublicUserDoc } from '../../services/publicUserDoc'
+import { openerHash } from '../../services/openerHash'
 import { usePlayIdentity } from '../matches/usePlayIdentity'
 import { useDistanceMiles } from '../DistanceLabel'
 import { friendlyError } from '../../services/errors'
@@ -412,7 +413,10 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     }
     let delivered: Promise<void>
     try {
-      delivered = (await sendMessage(matchId, uid, sent, partnerKey.key, partnerUid)).delivered
+      // My first message in this chat: its on-device hash goes along (duplicate-opener check).
+      const firstFromMe = !(rawMessages ?? []).some((m) => m.senderId === uid && m.nonce !== 'system')
+      const fh = firstFromMe ? await openerHash(sent, match.name).catch(() => null) : null
+      delivered = (await sendMessage(matchId, uid, sent, partnerKey.key, partnerUid, fh)).delivered
     } catch (err) {
       restore(err)
       return
@@ -782,7 +786,11 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
           <p className="mb-2 text-center text-sm text-red-400">Couldn't load encryption keys. Reopen the chat to retry.</p>
         )}
         {match.ended ? (
-          <p className="py-2 text-center text-sm text-white/40">This connection has ended.</p>
+          <p className="py-2 text-center text-sm text-white/40">
+            This connection has ended.
+            {match.preservedUntil !== null &&
+              ` You reported it, so this chat stays here, read-only and still encrypted, until ${new Date(match.preservedUntil).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}.`}
+          </p>
         ) : partnerUnavailable ? (
           <p className="py-2 text-center text-sm text-white/40">This connection isn't available right now.</p>
         ) : (

@@ -8,6 +8,7 @@ import { isBotUid, playStatus, requirePlayAccess } from './playAccess'
 import { isSuspendedUid, loadInternal, loadLocation, loadMatching, loadPrivateProfile, userRef } from './userData'
 import { takeRateLimit, takeRateLimitUpTo } from './rateLimits'
 import { signPhotoRefs } from './photoAccess'
+import { recordCapHit } from './trustSignals'
 import { bucketMiles } from './location'
 
 // Server-side Explore (Stage 3). Clients can no longer list users/{uid}
@@ -26,6 +27,8 @@ import { bucketMiles } from './location'
 // of the ones swiped. On top: a burst limit, a daily cap on calls and a
 // daily cap on new people revealed.
 
+// T&S Phase 1: share of reduced-visibility profiles left out of a deck refill.
+const REDUCED_SKIP = 0.8
 const DECK_SIZE = 20
 const SCAN = 60
 const MAX_ACTED = 5000
@@ -102,6 +105,8 @@ export async function buildEntry(uid: string): Promise<DocumentData | null> {
     lng: loc?.lng ?? null,
     marketCityId: loc ? (marketFor(loc)?.id ?? null) : null,
     label: typeof root.locationLabel === 'string' ? root.locationLabel : '',
+    // T&S Phase 1: an admin reduced this account's visibility (trust review).
+    reduced: internal.visibilityReduced === true,
   }
 }
 
@@ -227,7 +232,10 @@ export const getExploreDeck = onCall(
     const mode: Mode = (request.data as Record<string, unknown> | null)?.mode === 'play' ? 'play' : 'spark'
     if (mode === 'play') await requirePlayAccess(uid)
     await takeRateLimit(uid, 'exploreBurst', { max: 30, windowMs: 10 * 60 * 1000 })
-    await takeRateLimit(uid, 'exploreDay', { max: DAILY_DECK_CALLS, windowMs: DAY_MS })
+    await takeRateLimit(uid, 'exploreDay', { max: DAILY_DECK_CALLS, windowMs: DAY_MS }).catch(async (err: unknown) => {
+      await recordCapHit(uid) // T&S Phase 1: a deck cap hit is a behaviour signal
+      throw err
+    })
 
     const root = (await userRef(uid).get()).data()
     if (!root || (await isSuspendedUid(uid, root))) throw new HttpsError('failed-precondition', 'Profile not available')
@@ -282,17 +290,21 @@ export const getExploreDeck = onCall(
         for (const d of (await q.get()).docs) {
           const c = { ...d.data(), uid: d.id }
           if (excluded.has(c.uid) || inDeck.has(c.uid) || found.some((f) => f.uid === c.uid)) continue
+          // Reduced visibility (trust review): usually skipped, never first.
+          if ((c as DocumentData).reduced === true && Math.random() < REDUCED_SKIP) continue
           if (eligible(me, c, mode, founding)) found.push(c)
         }
       }
       // Today's cap on new people (counted as they're revealed).
       const allowed = await takeRateLimitUpTo(uid, 'exploreNew', Math.min(need, found.length), { max: DAILY_NEW_PROFILES, windowMs: DAY_MS })
+      if (allowed < Math.min(need, found.length)) await recordCapHit(uid)
       exhausted = found.length < need
       // Local first, then bots, then everyone else — each shuffled.
       const fresh = found.slice(0, allowed)
       const real = fresh.filter((c) => !c.bot)
       const local = real.filter((c) => isLocal(me, c))
       const ordered = [...shuffle(local), ...shuffle(fresh.filter((c) => c.bot)), ...shuffle(real.filter((c) => !local.includes(c)))]
+        .sort((a, b) => Number(a.reduced === true) - Number(b.reduced === true))
       deck.push(...ordered)
       need = DECK_SIZE - deck.length
     }

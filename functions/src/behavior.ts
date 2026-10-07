@@ -62,7 +62,7 @@ function nameIn(match: DocumentData, uid: string): Promise<string> {
   return connectionMode(match) === 'play' ? loadPlayName(uid) : Promise.resolve(displayName(match, uid))
 }
 
-async function bump(uid: string, field: string): Promise<void> {
+export async function bump(uid: string, field: string): Promise<void> {
   await getFirestore()
     .collection(SIGNALS)
     .doc(uid)
@@ -105,6 +105,33 @@ async function recordPastConnection(
 
 // ─── unmatchConnection ───────────────────────────────────────────────────────
 
+// How long a reported chat stays readable to its reporter after an unmatch.
+export const PRESERVE_REPORTED_MS = 30 * DAY_MS
+
+// Participants with an open (pending) report against the other one for this
+// match's generation — reports/{reporter}_{reported}_{generation}.
+async function openReporters(matchId: string, match: DocumentData, a: string, b: string): Promise<string[]> {
+  const gen = generationOf(match)
+  const db = getFirestore()
+  const out: string[] = []
+  for (const [reporter, reported] of [[a, b], [b, a]]) {
+    const r = (await db.doc(`reports/${reporter}_${reported}_${gen}`).get()).data()
+    if (r && r.status === 'pending' && r.matchId === matchId) out.push(reporter)
+  }
+  return out
+}
+
+// Deletes preserved chats whose 30 days are up; the delete purges their
+// messages and photos (onMatchBehaviorUpdate → purgeMatchContent).
+export const purgePreservedChats = onSchedule(
+  { schedule: '30 2 * * *', timeZone: 'America/Chicago', timeoutSeconds: 300, memory: '256MiB' },
+  async () => {
+    const due = await getFirestore().collection('matches').where('preservedUntil', '<=', Timestamp.now()).limit(500).get()
+    for (const d of due.docs) await d.ref.delete()
+    logger.info('purgePreservedChats', { deleted: due.size })
+  },
+)
+
 // Web unmatch: ends the match for good, as mobile's does. Records the past
 // connection first — so the exit review and "Report a past connection" work
 // straight away — then deletes the match doc, which sets off the purge of its
@@ -125,6 +152,22 @@ export const unmatchConnection = onCall(
     // bring the match back.
     const [a, b] = participants(match)
     if (a && b) await clearLikes(a, b, match.mode === 'play' ? 'play' : 'spark')
+    // T&S Phase 1: a chat with an open report is kept for the reporter —
+    // read-only, still end-to-end encrypted — for PRESERVE_REPORTED_MS, then
+    // deleted (purgePreservedChats). The other person loses it at once.
+    const reporters = a && b ? await openReporters(matchId, match, a, b) : []
+    if (reporters.length) {
+      await ref.update({
+        users: reporters,
+        pairUsers: [a, b],
+        unmatchedAt: FieldValue.serverTimestamp(),
+        unmatchedBy: uid,
+        preservedFor: reporters,
+        preservedUntil: Timestamp.fromMillis(Date.now() + PRESERVE_REPORTED_MS),
+      })
+      logger.info('unmatchConnection: preserved for reporter', { matchId, reporters: reporters.length })
+      return { success: true }
+    }
     await ref.delete()
     logger.info('unmatchConnection', { matchId })
     return { success: true }
@@ -192,6 +235,11 @@ export const onMatchBehaviorUpdate = onDocumentWritten(
             ? (recorded.sentCounts as Record<string, number>)
             : await recordPastConnection(matchId, before, endedAt, replaced ? afterGen : null)
 
+        // T&S Phase 1: ended after both had written — attributed to whoever ended it.
+        if (unmatchedNow && users.every((u) => num(sent[u]) > 0)) {
+          const ender: unknown = after?.unmatchedBy ?? recorded?.endedBy
+          if (typeof ender === 'string' && users.includes(ender)) await bump(ender, 'unmatchAfterExchangeCount')
+        }
         // Matched, talked, gone within a day — attributed to whoever ended it.
         if (unmatchedNow && matchedAt && endedAt - matchedAt < FAST_UNMATCH_MS && users.every((u) => num(sent[u]) > 0)) {
           let unmatcher: unknown = after?.unmatchedBy ?? recorded?.endedBy

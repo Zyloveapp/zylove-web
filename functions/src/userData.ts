@@ -2,6 +2,7 @@ import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { getStorage } from 'firebase-admin/storage'
+import { removeDeviceData } from './devices'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 
 // Where a user's non-public data lives (Stage 1a). users/{uid} is readable by
@@ -277,6 +278,9 @@ export async function clearPrivateData(uid: string): Promise<void> {
     db().doc(`playPins/${uid}`).delete(),
     db().doc(`keyBackups/${uid}`).delete(),
     db().doc(`behaviorSignals/${uid}`).delete(),
+    // T&S Phase 1: device sightings and the account's trust profile.
+    removeDeviceData(uid),
+    db().doc(`trustProfiles/${uid}`).delete(),
   ])
 }
 

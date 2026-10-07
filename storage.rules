@@ -127,7 +127,11 @@ service firebase.storage {
         && isUnderSizeLimit() &&
         request.auth.uid in firestore.get(
           /databases/(default)/documents/matches/$(matchId)
-        ).data.users;
+        ).data.users
+        // T&S Phase 1: only once the other person accepted photo sharing.
+        && firestore.get(
+          /databases/(default)/documents/matches/$(matchId)
+        ).data.get('photoConsent', {}).get('status', '') == 'accepted';
       allow update: if false;
       allow delete: if false;
     }

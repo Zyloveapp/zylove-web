@@ -128,8 +128,14 @@ export const onBotMessage = onDocumentCreated(
       .limit(8)
       .get();
 
+    // T&S Phase 1: real text messages only — never system notes, consent
+    // codes or photo messages.
     const history = historySnap.docs
       .reverse()
+      .filter((d) => {
+        const msg = d.data();
+        return (msg.messageType ?? "text") === "text" && msg.nonce !== "system";
+      })
       .map((d) => {
         const msg = d.data();
         return {
@@ -195,9 +201,10 @@ export const onBotMessage = onDocumentCreated(
         isBot: true,
       });
 
-    // Update match preview
+    // Update match preview — generic, like a person's (the app decrypts the
+    // real preview itself; plaintext never sits on the match doc).
     await matchRef.update({
-      lastMessagePreview: replyText,
+      lastMessagePreview: "New message",
       lastMessageAt: admin.firestore.FieldValue.serverTimestamp(),
       hasUnread: true,
     });

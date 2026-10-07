@@ -4,6 +4,7 @@ import { getStorage } from 'firebase-admin/storage'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
 import { storagePath } from './storagePath'
+import { requireAdminAudited, audit } from './audit'
 import { accountRef, internalRef, isAdminAuth, userRef } from './userData'
 
 // Admin photo review (/admin/photos). onPhotoUpload parks flagged photos of
@@ -68,7 +69,7 @@ async function textUser(uid: string, mode: Mode, body: string): Promise<void> {
 export const listPendingPhotos = onCall(
   { timeoutSeconds: 60, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ photos: PendingPhoto[] }> => {
-    requireAdmin(request.auth)
+    await requireAdminAudited(request.auth, { action: 'photos.pending_list' })
     const db = getFirestore()
     // Flagged in userInternal; the root-doc flag covers accounts not yet migrated.
     const [flagged, legacy] = await Promise.all([
@@ -104,7 +105,7 @@ export const listPendingPhotos = onCall(
 // drop it from pending, delete the file (best effort) and stamp the
 // rejection on the root doc, as mobile's rejectPhoto does. Either way the
 // user is texted, hasPendingPhotos is cleared once both queues are empty,
-// and a moderationLog row is written.
+// and an adminAudit entry is written.
 export const reviewPendingPhoto = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: SMS_SECRETS, invoker: 'public' },
   async (request): Promise<{ status: 'approved' | 'rejected' }> => {
@@ -162,15 +163,9 @@ export const reviewPendingPhoto = onCall(
       }
     }
 
-    await db.collection('moderationLog').add({
-      action: action === 'approve' ? 'approved' : 'rejected',
-      photoUrl,
-      targetUid,
-      adminUid,
-      mode,
-      source: 'web',
-      timestamp: Timestamp.now(),
-    })
+    // T&S Phase 1: the one admin audit log (replaces moderationLog). The
+    // photo is identified by its mode only, never its URL.
+    await audit({ actor: adminUid, action: action === 'approve' ? 'photo.approve' : 'photo.reject', target: targetUid, detail: { mode } })
 
     await textUser(targetUid, mode, action === 'approve' ? APPROVED_SMS : REJECTED_SMS).catch((err) =>
       logger.error('reviewPendingPhoto: SMS failed', { message: String(err) }),

@@ -1,4 +1,5 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
+import { updateSearchName } from './searchName'
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 
 // Changing a public name after it's first set goes through here: the
@@ -75,6 +76,8 @@ export const updateDisplayName = onCall(
       // Never create it: a sparkProfile doc would end a Play-only account.
       if (mirrorSnap.exists) tx.update(mirrorRef, { [fields.name]: name })
     })
+    // T&S Phase 1: the admin directory searches the Spark display name.
+    if (mode === 'spark') await updateSearchName(request.auth.uid, name)
     return { success: true }
   },
 )

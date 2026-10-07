@@ -120,6 +120,25 @@ export default function ChatActionsSheet({ name, onReport, onEnd, onClose, photo
             {confirm === 'unmatch' && (
               <p className="mt-2 text-sm text-white/60">Your conversation and any shared photos will be deleted for both of you.</p>
             )}
+            {confirm === 'unmatch' && onReport && (
+              <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-sm text-white/70">
+                  Something wrong? Report first — a reported chat stays readable to you for 30 days, still encrypted, so you
+                  can add it as evidence. {name} won't be notified.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirm(null)
+                    onReport()
+                  }}
+                  disabled={busy}
+                  className="mt-2 text-sm font-semibold text-white underline underline-offset-2 hover:text-white/80"
+                >
+                  Report first
+                </button>
+              </div>
+            )}
             {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
             <button
               type="button"

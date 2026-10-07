@@ -32,7 +32,8 @@ rm -rf "$E/web-fn" && mkdir -p "$E/web-fn"
 cp -R "$WEB/functions/lib" "$WEB/functions/package.json" "$E/web-fn/"
 ln -sfn "$WEB/functions/node_modules" "$E/web-fn/node_modules"
 perl -pi -e "s/admin\.firestore\.(FieldValue|Timestamp|GeoPoint|FieldPath)\b/require('firebase-admin\/firestore').\$1/g" "$E"/web-fn/lib/legacy/*.js
-printf 'TWILIO_AUTH_TOKEN=%s\n' "$TWILIO_AUTH_TOKEN" > "$E/web-fn/.secret.local"
+# Every test-only secret in .env.test reaches the functions emulator.
+grep -E '^[A-Z_][A-Z0-9_]*=' "$E/.env.test" > "$E/web-fn/.secret.local"
 
 # The repo's own rules (the emulator only reads files inside e2e/).
 cp "$WEB/firestore.rules" "$WEB/storage.rules" "$C/"

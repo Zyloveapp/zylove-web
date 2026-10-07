@@ -147,7 +147,7 @@ export async function takeDeck(uid: string, mode: Mode): Promise<DiscoverProfile
 
 interface RecordSwipeRequest {
   targetUid: string
-  action: 'like' | 'pass'
+  action: 'like' | 'pass' | 'maybe'
   mode: Mode
 }
 
@@ -283,6 +283,12 @@ export function prefetchCompatibility(targetUid: string): void {
 // Fire-and-forget: never blocks or fails the Discover load.
 export function ensureUserDefaults(): void {
   httpsCallable(functions, 'initUserDefaults')({}).catch(() => {})
+}
+
+// "Maybe" keeps the card in the deck; the server only counts it (safety
+// signals: how someone swipes). Fire-and-forget.
+export function maybeProfile(mode: Mode, targetUid: string): void {
+  httpsCallable<RecordSwipeRequest, { success: boolean }>(functions, 'recordSwipe')({ targetUid, action: 'maybe', mode }).catch(() => {})
 }
 
 export async function passProfile(uid: string, mode: Mode, targetUid: string): Promise<void> {

@@ -106,8 +106,12 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   // A live match between them stays as it is (never overwritten).
   const existingMatch = (await db.collection("matches").doc(pid).get()).data();
   const live = !!existingMatch && existingMatch.isBlocked !== true && !existingMatch.unmatchedAt;
-  const matched   = otherLiked;
-  const createMatch = otherLiked && !live;
+  // T&S Phase 1: a reported chat kept for its reporter (unmatchConnection)
+  // is never overwritten by a re-match while it's preserved.
+  const preserved = !!existingMatch && typeof existingMatch.preservedUntil?.toMillis === "function" &&
+    existingMatch.preservedUntil.toMillis() > Date.now();
+  const matched   = otherLiked && !preserved;
+  const createMatch = otherLiked && !live && !preserved;
 
   // Explore (Stage 3): acted on in this mode — out of the liker's deck.
   await markActed(likerId, mode as "spark" | "play", likedId);

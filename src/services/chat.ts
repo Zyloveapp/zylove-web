@@ -154,6 +154,8 @@ export async function sendMessage(
   text: string,
   recipientPublicKey: string,
   recipientUid: string,
+  // On-device hash of a first message (openerHash.ts); never the text.
+  openerHashHex: string | null = null,
 ): Promise<{ delivered: Promise<void> }> {
   const recipientHasKey = isRealPublicKey(recipientPublicKey)
   if (!recipientHasKey && !isBotUid(recipientUid)) throw new Error(RECIPIENT_NO_KEY)
@@ -170,6 +172,7 @@ export async function sendMessage(
     sentAt: serverTimestamp(),
     status: 'sent',
     messageType: 'text',
+    ...(openerHashHex && !isBotUid(recipientUid) ? { fh: openerHashHex } : {}),
   })
   // Same fields the mobile chat updates; lastSenderId drives unread state.
   // The preview is generic so message content never sits unencrypted on the match doc.

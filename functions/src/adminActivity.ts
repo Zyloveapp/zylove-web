@@ -16,6 +16,7 @@ import { claimFounderSpot, type FounderResult } from './founders'
 import { revokeFounderStatus } from './founderActivity'
 import { SMS_SECRETS } from './sms'
 import { liftSuspension, setAuthDisabled } from './reports'
+import { audit, requireAdminAudited } from './audit'
 import { ROOT_SCRUB, clearPrivateData, deletionView, internalRef, isAdminAuth, loadLocation, loadMatching, loadPrivateProfile } from './userData'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -126,8 +127,8 @@ function cityOf(u: DocumentData): string {
 export const adminGetActivity = onCall(
   { timeoutSeconds: 120, memory: '512MiB', invoker: 'public' },
   async (request): Promise<ActivityResponse> => {
-    requireAdmin(request.auth)
     const req = (request.data ?? {}) as ActivityRequest
+    await requireAdminAudited(request.auth, { action: 'activity.list', detail: { query: JSON.stringify(req).slice(0, 300) } })
     const db = getFirestore()
     const now = Date.now()
 
@@ -329,8 +330,9 @@ export const adminUserAction = onCall(
     if ((await getAuth().getUser(uid).catch(() => null))?.customClaims?.admin === true && action !== 'make_founder') {
       throw new HttpsError('failed-precondition', 'Not on an admin account.')
     }
-    const log = (details: Record<string, unknown> = {}) =>
-      db.collection('adminActions').add({ action, uid, adminUid, at: FieldValue.serverTimestamp(), ...details })
+    const reason = typeof (request.data as Record<string, unknown>)?.reason === 'string'
+      ? String((request.data as Record<string, unknown>).reason).slice(0, 300) : null
+    const log = (detail: Record<string, unknown> = {}) => audit({ actor: adminUid, action: `user.${action}`, target: uid, reason, detail })
 
     if (action === 'make_founder') {
       const loc = await loadLocation(uid, user)

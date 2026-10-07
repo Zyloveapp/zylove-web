@@ -1,5 +1,6 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { getFirestore } from 'firebase-admin/firestore'
+import { recordCapHit } from './trustSignals'
 import { tierNow, type Tier } from './entitlements'
 
 // Stage C: every paid or limited feature's allowance, per tier, enforced
@@ -73,6 +74,8 @@ export async function takeQuota(uid: string, feature: Feature, tier?: Tier): Pro
     const cur = ((await tx.get(usageRef(uid))).get(feature) ?? {}) as Record<string, number>
     const used = cur[key] ?? 0
     if (rule.max !== null && used >= rule.max) {
+      // T&S Phase 1: hitting the like cap is a behaviour signal.
+      if (feature === 'likes') void recordCapHit(uid)
       throw new HttpsError('resource-exhausted', `You've used all ${rule.max} ${LIMIT_TEXT[rule.period] === 'on your plan' ? 'included in your plan' : `for ${LIMIT_TEXT[rule.period]}`}.`, {
         upgrade: t === 'elite' ? null : t === 'free' ? 'spark_plus' : 'elite',
       })

@@ -160,7 +160,10 @@ service cloud.firestore {
         // (reports refuse bots), deletion, founder status and badge, Explore order
         'isBot', 'isDeleted', 'deleted', 'deletedAt', 'previousUid', 'sortKey',
         'founderBadge', 'founderStatus', 'founderCity', 'founderCityId', 'founderRevokedAt', 'founderConvertedAt',
-        'founderLastActiveAt', 'founderWarningSentAt', 'founderThreadMeta'
+        'founderLastActiveAt', 'founderWarningSentAt', 'founderThreadMeta',
+        // T&S Phase 1: account age comes from Firebase Auth, written by the
+        // server ("Member since"; createdAt is the client's and can't be trusted)
+        'memberSince', 'accountCreatedAt'
       ];
     }
 
@@ -505,11 +508,23 @@ service cloud.firestore {
       // ciphertext is in this match's chat-photos folder under the sender's
       // name (sweepChatPhotos deletes it with admin rights), or a photo-
       // consent notice. Server time only; nothing else.
-      function validTextMessage(d) {
-        return d.keys().hasOnly(['ciphertext', 'nonce', 'senderId', 'sentAt', 'status', 'messageType'])
+      // T&S Phase 1: plaintext ('stub' nonces) only to a curated profile —
+      // between two people every text is end-to-end encrypted. `fh` is the
+      // optional on-device hash of a first message (duplicate-opener check;
+      // the server drops it from the message once recorded).
+      function partnerIsBot(m) {
+        return m.get('isBot', false) == true
+            || (m.get('users', []).size() == 2
+                && ((m.users[0] != request.auth.uid && m.users[0].matches('^(zbot|seed)-.*'))
+                    || (m.users[1] != request.auth.uid && m.users[1].matches('^(zbot|seed)-.*'))));
+      }
+      function validTextMessage(d, m) {
+        return d.keys().hasOnly(['ciphertext', 'nonce', 'senderId', 'sentAt', 'status', 'messageType', 'fh'])
             && d.messageType == 'text'
             && d.ciphertext is string && d.ciphertext.size() <= 20000
-            && d.nonce is string && d.nonce != 'system' && d.nonce.size() <= 64;
+            && d.nonce is string && d.nonce != 'system' && d.nonce.size() <= 64
+            && (!(d.nonce in ['stub', 'stub-nonce']) || partnerIsBot(m))
+            && (!('fh' in d) || (d.fh is string && d.fh.matches('^[a-f0-9]{64}$')));
       }
       function validPhotoMessage(d) {
         return d.keys().hasOnly(['senderId', 'messageType', 'encrypted', 'storageRef', 'photoNonce',
@@ -519,6 +534,8 @@ service cloud.firestore {
             && d.messageType == 'photo'
             // Sending photos in chat is Spark+ (Stage C); receiving isn't.
             && viewerHasSparkPlus()
+            // T&S Phase 1: only once the other person accepted photo sharing.
+            && matchDoc(matchId).get('photoConsent', {}).get('status', '') == 'accepted'
             && d.storageRef is string
             && d.storageRef.matches('^chat-photos/' + matchId + '/' + request.auth.uid + '_[A-Za-z0-9._-]+$')
             && d.get('timerSeconds', 0) is int && d.get('timerSeconds', 0) >= 0 && d.get('timerSeconds', 0) <= 86400
@@ -546,7 +563,7 @@ service cloud.firestore {
                       && request.resource.data.senderId == request.auth.uid
                       && request.resource.data.sentAt == request.time
                       && request.resource.data.get('status', 'sent') == 'sent'
-                      && (validTextMessage(request.resource.data)
+                      && (validTextMessage(request.resource.data, matchDoc(matchId))
                           || validPhotoMessage(request.resource.data)
                           || validConsentMessage(request.resource.data));
         // Read receipts by the recipient; "delete for me" adds only yourself;

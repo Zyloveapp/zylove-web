@@ -25,6 +25,8 @@ import { REVIEW_TONE } from './shared/reviewCategories'
 import { SMS_SECRETS, textAccount } from './sms'
 import { phoneHash, wereMatched } from './trust'
 import { softDeleteAccount } from './adminActivity'
+import { audit, requireAdminAudited } from './audit'
+import { markBannedDevices } from './devices'
 import { accountRef, adminUids, internalRef, isAdminAuth, isAdminUid, isSuspendedUid, loadInternal } from './userData'
 
 const BOT_PREFIXES = ['zbot-', 'seed-']
@@ -288,8 +290,8 @@ export const adminGetReports = onCall(
   async (
     request,
   ): Promise<{ urgent: number; pending: number; reported?: ReportedUser[]; goodActors?: GoodActor[] }> => {
-    requireAdmin(request.auth)
     const summaryOnly = (request.data as Record<string, unknown> | null)?.summaryOnly === true
+    await requireAdminAudited(request.auth, { action: summaryOnly ? 'reports.summary' : 'reports.list' })
     const snap = await db().collection('reports').get()
 
     const byUser = new Map<string, DocumentData[]>()
@@ -408,6 +410,25 @@ async function resolveReports(uid: string, status: 'actioned' | 'cleared', actio
   return open.length
 }
 
+// A suspension: userInternal state, sign-in disabled and sessions ended.
+// `days` null = until an admin reviews it (T&S auto-suspension).
+export async function suspendAccount(uid: string, days: number | null, by: string, source: 'admin' | 'trust' | 'auto_scam'): Promise<void> {
+  await internalRef(uid).set(
+    {
+      isSuspended: true,
+      suspendedAt: FieldValue.serverTimestamp(),
+      suspendedUntil: days === null ? null : Timestamp.fromMillis(Date.now() + days * DAY_MS),
+      suspendedBy: by,
+      suspendSource: source,
+      suspendedPendingReview: days === null,
+      suspendedForDeletion: FieldValue.delete(),
+    },
+    { merge: true },
+  )
+  // Locked: no sign-in, and current sessions end when their token next refreshes.
+  await setAuthDisabled(uid, true)
+}
+
 export async function setAuthDisabled(uid: string, disabled: boolean): Promise<void> {
   try {
     await getAuth().updateUser(uid, { disabled })
@@ -425,6 +446,7 @@ export async function liftSuspension(uid: string): Promise<void> {
       suspendedUntil: FieldValue.delete(),
       suspendedBy: FieldValue.delete(),
       suspendSource: FieldValue.delete(),
+      suspendedPendingReview: FieldValue.delete(),
     },
     { merge: true },
   )
@@ -451,8 +473,10 @@ export const adminModerate = onCall(
     if ((await isAdminUid(uid)) && action !== 'thank' && action !== 'clear') {
       throw new HttpsError('failed-precondition', 'Not on an admin account.')
     }
-    const log = (details: Record<string, unknown> = {}) =>
-      db().collection('adminActions').add({ action: `report_${action}`, uid, adminUid, at: FieldValue.serverTimestamp(), ...details })
+    const reason = typeof data.reason === 'string' && data.reason.trim() ? data.reason.trim().slice(0, 300) : null
+    // The audit keeps the action and its outcome, never the warning text itself.
+    const log = (detail: Record<string, unknown> = {}) =>
+      audit({ actor: adminUid, action: `report.${action}`, target: uid, reason, detail: { ...detail, ...(message ? { messageChars: message.length } : {}) } })
 
     switch (action) {
       case 'warn': {
@@ -477,19 +501,7 @@ export const adminModerate = onCall(
         const days = data.days
         if (!SUSPEND_DAYS.includes(days as (typeof SUSPEND_DAYS)[number])) throw new HttpsError('invalid-argument', 'days must be 30, 60 or 90.')
         if (!user || user.isDeleted === true) throw new HttpsError('failed-precondition', 'That account no longer exists.')
-        await internalRef(uid).set(
-          {
-            isSuspended: true,
-            suspendedAt: FieldValue.serverTimestamp(),
-            suspendedUntil: Timestamp.fromMillis(Date.now() + (days as number) * DAY_MS),
-            suspendedBy: adminUid,
-            suspendSource: 'admin',
-            suspendedForDeletion: FieldValue.delete(),
-          },
-          { merge: true },
-        )
-        // Locked: no sign-in, and current sessions end when their token next refreshes.
-        await setAuthDisabled(uid, true)
+        await suspendAccount(uid, days as number, adminUid, 'admin')
         const resolved = await resolveReports(uid, 'actioned', action, adminUid)
         await log({ days })
         return { ok: true, resolved }
@@ -522,13 +534,16 @@ export const adminModerate = onCall(
               { merge: true },
             )
         }
+        // T&S Phase 1: its devices and addresses, before the soft delete
+        // clears them — a new account seen on them is flagged.
+        const bannedDevices = await markBannedDevices(uid)
         // Soft delete with the recovery record marked banned; an account
         // that's already gone just gets its recovery record marked.
         if (user && user.isDeleted !== true) await softDeleteAccount(uid, user, adminUid, { banned: true })
         else if (phone) await db().doc(`deletedAccounts/${phone}`).set({ banned: true }, { merge: true })
         if (user) await internalRef(uid).set({ bannedAt: FieldValue.serverTimestamp(), bannedBy: adminUid }, { merge: true })
         const resolved = await resolveReports(uid, 'actioned', action, adminUid)
-        await log({ phoneBanned: phone !== null })
+        await log({ phoneBanned: phone !== null, bannedDevices })
         logger.warn('adminModerate: banned', { phoneBanned: phone !== null })
         return { ok: true, resolved, phoneBanned: phone !== null }
       }

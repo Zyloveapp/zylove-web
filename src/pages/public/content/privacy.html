@@ -82,11 +82,23 @@
           <tbody>
             <tr>
               <td><strong>Location (approximate)</strong></td>
-              <td>Stored as coordinates snapped to a grid of roughly 3 miles, plus a city label, to enable distance-based discovery. We do not store your precise GPS coordinates.</td>
+              <td>Stored as coordinates snapped to a grid of roughly 1 mile, plus a city label, to enable distance-based discovery. We do not store your precise GPS coordinates.</td>
             </tr>
             <tr>
               <td><strong>Device information</strong></td>
               <td>OS version, device type — used for crash reporting and compatibility</td>
+            </tr>
+            <tr>
+              <td><strong>Device and network safety signals</strong></td>
+              <td>When you sign in or use Zylove, we record your IP address, the network it belongs to, a general device type (such as "iPhone Safari") and a random identifier stored in your browser. We keep these only as one-way keyed hashes — never the raw values — for 90 days, to spot fake and duplicate accounts and people returning after a ban. If an account is banned, its hashes are kept for as long as the ban stands.</td>
+            </tr>
+            <tr>
+              <td><strong>Terms acceptance record</strong></td>
+              <td>When you accept our Terms or acknowledge an update, we keep the date, the versions, your IP address and your browser's user agent, as a record of that acceptance.</td>
+            </tr>
+            <tr>
+              <td><strong>Account age</strong></td>
+              <td>The date your account was created, from our sign-in records. Your profile shows the month you joined ("Member since").</td>
             </tr>
             <tr>
               <td><strong>Usage data</strong></td>
@@ -95,6 +107,10 @@
             <tr>
               <td><strong>Behavioral signals</strong></td>
               <td>How you treat other users — feeds our reputation scoring system</td>
+            </tr>
+            <tr>
+              <td><strong>Behaviour-based safety checks</strong></td>
+              <td>Counts and timing of how you use Zylove — for example how often you like, pass or choose "maybe", how quickly you swipe, how many conversations you start and how often they get replies, unmatches, reports and blocks. <strong>Never the content of your messages.</strong> When you send the first message in a chat, your device also sends a one-way fingerprint (hash) of it, so we can spot the same opener pasted to many people; the message can't be recovered from it, and we keep it for 14 days. These signals produce a safety score compared with similar members. A high score is reviewed by a person — it never bans anyone automatically.</td>
             </tr>
           </tbody>
         </table>
@@ -138,6 +154,8 @@
           <li>Detect and remove fake profiles, spam, and abusive behavior</li>
           <li>Process reports and take action against violating accounts</li>
           <li>Run our behavioral reputation system — users who treat people well are rewarded</li>
+          <li>Review accounts flagged by our safety checks. A person reviews every flag, and any action is graduated — for example showing a profile less often in Explore while it's reviewed, or a suspension</li>
+          <li>Recognize accounts used from the same device, or from a device used by a banned account</li>
           <li>Verify age (18+) before granting access to the platform</li>
           <li>Verify identity via selfie verification (optional but encouraged)</li>
         </ul>
@@ -256,6 +274,7 @@
         <h3>Message encryption</h3>
         <p>
           Messages between people using the Zylove web app are end-to-end encrypted using NaCl (TweetNaCl). They are encrypted on your device before transmission and can only be decrypted by the intended recipient — Zylove cannot read them.
+          If you report someone and the chat later ends, that chat stays readable — only to you, and still end-to-end encrypted — for 30 days so you can use it in your report; then it is deleted.
         </p>
         <p>
           When someone in a conversation hasn't set up encryption (for example, some mobile accounts), messages in that conversation are stored protected by access controls — only the people in the conversation can access them — rather than end-to-end encrypted.
@@ -293,6 +312,11 @@
           <li>Your photos are deleted from Firebase Storage within 12 months</li>
           <li>Your messages are soft-deleted immediately and permanently purged within 12 months</li>
           <li>Safety and moderation records may be retained for up to 2 years to prevent ban evasion</li>
+          <li>Hashed device and network data: 90 days (for a banned account, as long as the ban stands)</li>
+          <li>Safety scores are recalculated daily and deleted with your account; closed safety reviews are kept for 2 years</li>
+          <li>First-message fingerprints: 14 days</li>
+          <li>A reported chat kept for the reporter: 30 days after the chat ends</li>
+          <li>Records of what our team views and does on accounts: 2 years. Every view, download and action by our team is logged</li>
           <li>Anonymized, aggregated data may be retained indefinitely for product improvement</li>
         </ul>
         <p>

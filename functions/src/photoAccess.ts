@@ -4,6 +4,7 @@ import { getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { defaultBucket, isPhotoRef } from './storagePath'
 import { isAdminAuth, requireActive } from './userData'
 import { takeRateLimit } from './rateLimits'
+import { audit } from './audit'
 import { playStatus } from './playAccess'
 
 // Profile photos (F-021). Firestore holds each photo's Storage path
@@ -50,6 +51,12 @@ export const getPhotoUrls = onCall(
     const refs = [...new Set(raw as string[])]
     const admin = isAdminAuth(request.auth)
     const db = getFirestore()
+    // T&S Phase 1: an admin viewing other people's photos is audited (by
+    // owner; never the paths themselves).
+    const others = [...new Set(refs.map((r) => ownerOf(r).uid))].filter((u) => u !== viewer)
+    if (admin && others.length) {
+      await Promise.all(others.map((u) => audit({ actor: viewer, action: 'photo.view', target: u, detail: { count: refs.filter((r) => ownerOf(r).uid === u).length } })))
+    }
 
     // Everything about each owner the checks need, read once.
     const owners = [...new Set(refs.map((r) => ownerOf(r).uid))].filter((u) => u !== viewer)
@@ -130,6 +137,7 @@ export const getReviewPdfUrl = onCall(
     const m = typeof path === 'string' ? PDF_RE.exec(path) : null
     if (!m || typeof path !== 'string') throw new HttpsError('invalid-argument', 'pdfPath must be a review PDF path')
     if (m[1] !== request.auth.uid && !isAdminAuth(request.auth)) throw new HttpsError('permission-denied', 'Not your review.')
+    if (m[1] !== request.auth.uid) await audit({ actor: request.auth.uid, action: 'review_pdf.download', target: m[1] })
     await takeRateLimit(request.auth.uid, 'reviewPdf', { max: 30, windowMs: 10 * 60 * 1000 })
     const file = getStorage().bucket(defaultBucket()).file(path)
     if (!(await file.exists())[0]) throw new HttpsError('not-found', 'That review PDF no longer exists.')
