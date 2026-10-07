@@ -3,7 +3,6 @@ import { BrowserRouter, Outlet, Routes, Route, useNavigate } from 'react-router-
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from './services/firebase'
 import { useAuthStore } from './store/authStore'
-import { refreshLocationSilently } from './services/location'
 import { founderHeartbeat } from './services/founders'
 import { loadPin } from './services/playPin'
 import { isAdmin } from './services/adminPhotos'
@@ -55,8 +54,8 @@ import { touchLastActive } from './services/adminActivity'
 import { loadPrivateProfile } from './services/privateProfile'
 
 // Protected pages share the nav. Leaves room for the mobile bottom bar.
-// Location (and the founder check) run once per user per page load.
-const locationChecked = new Set<string>()
+// The start-up calls (PIN cache, last active, founder check) run once per user per page load.
+const startupDone = new Set<string>()
 
 // Chose the Play path in onboarding but never finished Play setup (left it,
 // or the redirect didn't happen): send them back once per session.
@@ -121,16 +120,15 @@ function AppLayout() {
       cancelled = true
     }
   }, [uid, navigate])
-  // Signed in and onboarded: refresh the location in the background when
-  // it's already granted (no prompt), and let the server know an active
-  // founder is around (keeps their spot; see founderActivity.ts). Never
-  // blocks or errors.
+  // Signed in and onboarded: let the server know an active founder is around
+  // (keeps their spot; see founderActivity.ts). Never blocks or errors. The
+  // location isn't touched here — only Explore's first-time gate and
+  // Settings → Update location take it.
   useEffect(() => {
-    if (!uid || locationChecked.has(uid)) return
-    locationChecked.add(uid)
+    if (!uid || startupDone.has(uid)) return
+    startupDone.add(uid)
     // Pull the Play PIN into this browser's cache (Settings reads it sync).
     void loadPin(uid)
-    void refreshLocationSilently(uid)
     void touchLastActive(uid)
     void founderHeartbeat(uid)
   }, [uid])

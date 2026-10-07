@@ -3,6 +3,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import AgeRangeSlider from './AgeRangeSlider'
+import LocationSettings from './LocationSettings'
 import { cityConfigPath } from '../config/cities'
 import { marketOf, subscribeAccountView } from '../services/subscription'
 import { matchingDoc, subscribeMatching, type Matching } from '../services/privateMatching'
@@ -120,7 +121,8 @@ export default function DiscoverySettings() {
   return (
     <section className="rounded-2xl border border-white/10 bg-white/5">
       <h2 className="px-5 pt-4 text-xs font-semibold uppercase tracking-widest text-white/40">Discovery</h2>
-      <label className={`flex items-center justify-between gap-4 px-5 pt-4 ${founding ? 'pb-2' : 'pb-4'}`}>
+      <LocationSettings />
+      <label className={`flex items-center justify-between gap-4 border-t border-white/5 px-5 pt-4 ${founding ? 'pb-2' : 'pb-4'}`}>
         <span className={founding ? 'opacity-50' : undefined}>
           <span className="block font-medium">Maximum distance</span>
           <span className="block text-sm text-white/40">Profiles without a location are always shown.</span>

@@ -11,16 +11,11 @@ export interface LatLng {
 }
 
 // Locations are server-side (functions/src/location.ts): setLocation snaps the
-// browser's position to a ~3-mile grid and keeps it where no other user can
+// browser's position to a ~1-mile grid and keeps it where no other user can
 // read it; the owner gets a summary in private/account ({ lat, lng, label,
 // marketCityId }). Other people's distances come from getDistances.
-// The same grid as the server (~1 mile, Stage 3), so an unmoved position
-// isn't re-sent.
-const GRID_DEG = 0.015
-
-function snap(v: number): number {
-  return Math.round(Math.round(v / GRID_DEG) * GRID_DEG * 1000) / 1000
-}
+// The location is taken only when the user asks: Explore's first-time gate
+// or Settings → Update location. Never on app load.
 
 // Left behind by an earlier build; nothing reads it any more.
 try {
@@ -75,45 +70,17 @@ export async function savedLocation(uid: string): Promise<{ lat: number; lng: nu
 
 export class LocationLimitError extends Error {}
 
-// Saves the location server-side. Throws LocationLimitError (message: "You
-// can update your location again tomorrow") past the daily limit on moves.
-export async function saveUserLocation(location: LatLng): Promise<void> {
+// Saves the location server-side: whether it moved (a new ~1-mile cell) and
+// the city label. Throws LocationLimitError (message: "You can update your
+// location again tomorrow") past the daily limit on moves.
+export async function saveUserLocation(location: LatLng): Promise<{ changed: boolean; label: string | null }> {
   try {
-    await httpsCallable(functions, 'setLocation')({ lat: location.lat, lng: location.lng })
-    clearDistances()
+    const { data } = await httpsCallable<LatLng, { changed: boolean; label: string | null }>(functions, 'setLocation')({ lat: location.lat, lng: location.lng })
+    if (data.changed) clearDistances()
+    return { changed: data.changed === true, label: typeof data.label === 'string' ? data.label : null }
   } catch (err) {
     if (err instanceof FirebaseError && err.code === 'functions/resource-exhausted') throw new LocationLimitError(err.message)
     throw err
-  }
-}
-
-// Whether the browser has already granted geolocation, without asking.
-// Only an explicit 'granted' counts: calling getCurrentPosition from
-// 'prompt' without a click lets Safari record a denial the user never saw.
-async function locationGranted(): Promise<boolean> {
-  try {
-    if (!navigator.permissions?.query) return false
-    return (await navigator.permissions.query({ name: 'geolocation' })).state === 'granted'
-  } catch {
-    return false
-  }
-}
-
-// Every app load: if location is already granted, quietly take the current
-// position and save it — never a prompt (LocationGate does the asking).
-// When the snapped position hasn't moved nothing is sent. Fire and forget;
-// never throws (past the daily limit the move simply waits).
-export async function refreshLocationSilently(uid: string): Promise<void> {
-  try {
-    if (!(await locationGranted())) return
-    const location = await requestLocation()
-    if (!location) return
-    const saved = await savedLocation(uid)
-    if (saved && saved.lat === snap(location.lat) && saved.lng === snap(location.lng) && saved.label) return
-    await saveUserLocation(location)
-  } catch (err) {
-    // Location is a nice-to-have; never surface failures to the user.
-    console.warn('[location] silent refresh failed', err)
   }
 }
 

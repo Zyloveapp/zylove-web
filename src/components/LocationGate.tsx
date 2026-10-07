@@ -4,6 +4,7 @@ import { useModeStore } from '../store/modeStore'
 import { LocationLimitError, lastLocationDenied, requestLocation, saveUserLocation } from '../services/location'
 import { subscribeAccountView } from '../services/subscription'
 import { isAdmin as checkAdmin } from '../services/adminPhotos'
+import LocationHelp from './LocationHelp'
 
 type Permission = 'checking' | 'granted' | 'prompt' | 'denied'
 // What's shown: the feed, a spinner, or the ask.
@@ -50,13 +51,14 @@ function isPrivateBrowser(): boolean {
   }
 }
 
-// Explore needs a location to build the feed. Children render only when
-// BOTH the browser allows geolocation AND a location is saved (the summary in
-// private/account; older accounts: coordinates on users/{uid}); otherwise a full-page ask in
-// their place (only Explore uses this, so nav, chat and settings stay
-// reachable). Both are watched live: revoking the permission or losing the
-// saved location brings the gate back. Permission already granted but
-// nothing saved: the position is fetched and saved without a tap.
+// Explore needs a location to build the feed: the first-time ask. Once a
+// location is saved (the summary in private/account) children render, and
+// that saved location is what Explore uses — the browser's permission isn't
+// checked again and the position isn't re-read; it changes only through
+// Settings → Update location. With nothing saved, a full-page ask in their
+// place (only Explore uses this, so nav, chat and settings stay reachable).
+// Permission already granted but nothing saved: the position is fetched and
+// saved without a tap.
 export default function LocationGate({ children }: { children: ReactNode }) {
   const uid = useAuthStore((s) => s.user?.uid) ?? ''
   const [permission, setPermission] = useState<Permission>(() => (grantedThisSession() ? 'granted' : 'checking'))
@@ -159,8 +161,9 @@ export default function LocationGate({ children }: { children: ReactNode }) {
   let state: GateState
   if (preview === 'private') state = 'denied'
   else if (preview) state = preview
-  else if (hasSaved === null || permission === 'checking') state = 'checking'
-  else if (permission === 'granted' && hasSaved) state = 'granted'
+  else if (hasSaved === null) state = 'checking'
+  else if (hasSaved) state = 'granted'
+  else if (permission === 'checking') state = 'checking'
   else if (permission === 'denied') state = 'denied'
   // Granted but still saving (or the save failed): the ask, with its status.
   else state = 'prompt'
@@ -295,14 +298,7 @@ export default function LocationGate({ children }: { children: ReactNode }) {
               Still blocked — your browser didn't share your location. Follow the steps below, then try again.
             </p>
           )}
-          <p>
-            <span className="font-semibold text-white/70">iPhone/Safari:</span> Open your iPhone Settings → scroll to Safari →
-            tap Location → select Allow
-          </p>
-          <p>
-            <span className="font-semibold text-white/70">Android/Chrome:</span> Tap the lock icon in your address bar →
-            Permissions → Location → Allow
-          </p>
+          <LocationHelp />
           <button
             type="button"
             onClick={() => void allow()}
