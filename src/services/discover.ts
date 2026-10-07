@@ -177,7 +177,7 @@ export interface ArchetypeMatch {
 
 export interface Tier1Result {
   archetype: ArchetypeMatch | null
-  combinedScore: number | null // can exceed 100 from bonus stacking
+  combinedScore: number | null // engine v1 could exceed 100; v2 is 0–100
   asymmetryGap: number | null // |A→B − B→A| in score points
   dataConfidence: number | null
 }
@@ -185,8 +185,13 @@ export interface Tier1Result {
 export interface CompatibilityResult {
   pairId: string
   sparkScore?: number
+  // Engine v2: false → too little to go on ("Not enough info").
+  sparkEnoughInfo?: boolean
+  // The scoring engine behind sparkScore/tier1 (absent: engine v1).
+  engineVersion?: number
   playScore?: number
-  breakdown?: { spark?: Record<string, number>; play?: Record<string, number> }
+  // null: no data on one side (engine v2 leaves it out).
+  breakdown?: { spark?: Record<string, number | null>; play?: Record<string, number> }
   triggeredDealbreakers?: string[]
   tier1?: Tier1Result | null
   // The viewed person has physical preferences to score against (their
@@ -301,27 +306,50 @@ export function actionErrorMessage(err: unknown): string {
 
 // ─── Displayed score ─────────────────────────────────────────────────────────
 
-// Deep Fit (tier1) inflates thin profiles — empty data reads as a perfect
-// facet match — so it only becomes the headline score once both people have
-// filled in most of the seven tag lists it's built from (5 of 7 ≈ 0.71).
-// Above 100 is the uncapped physical bonus stacking, not a real fit, so
-// those fall back to the base score too.
+// The server's scoring engine (functions/src/legacy/scoring.ts
+// SCORE_ENGINE_VERSION). Engine v2 scores are calibrated, capped and come
+// with a "Not enough info" flag; older ones keep the old display rules
+// until they're re-scored.
+export const SCORE_ENGINE_VERSION = 2
+
+export type ScoreLabel = 'Strong fit' | 'Good fit' | 'Some differences' | 'Not enough info'
+
+// Spark bands (engine v2).
+export function scoreLabel(value: number): ScoreLabel {
+  if (value >= 75) return 'Strong fit'
+  if (value >= 60) return 'Good fit'
+  return 'Some differences'
+}
+
+// Engine v1 only: Deep Fit inflated thin profiles and could pass 100, so it
+// headlined only when under 100 with most tag lists filled in.
 const DEEP_FIT_MIN_CONFIDENCE = 0.6
 
 export interface DisplayScore {
-  value: number // 0–100, rounded
+  value: number | null // 0–100, rounded; null = "Not enough info"
   deep: boolean // true when this is the Deep Fit (tier1) score
+  label: ScoreLabel | null // Spark, engine v2; null for Play and engine v1
 }
 
-// The one compatibility number shown anywhere: Deep Fit when it's trustworthy
-// (Spark only), otherwise the base score. Always capped at 100.
+// The one compatibility number shown anywhere: Deep Fit when the pair has
+// it (Spark only), otherwise the base score. Always 0–100.
 export function displayScore(result: CompatibilityResult, mode: Mode): DisplayScore | null {
-  const t = mode === 'spark' ? result.tier1 : null
-  if (t && t.combinedScore !== null && t.combinedScore <= 100 && (t.dataConfidence ?? 0) >= DEEP_FIT_MIN_CONFIDENCE) {
-    return { value: clampScore(t.combinedScore), deep: true }
+  if (mode === 'play') {
+    return typeof result.playScore === 'number' ? { value: clampScore(result.playScore), deep: false, label: null } : null
   }
-  const base = mode === 'play' ? result.playScore : result.sparkScore
-  return typeof base === 'number' ? { value: clampScore(base), deep: false } : null
+  const t = result.tier1
+  if (result.engineVersion === SCORE_ENGINE_VERSION) {
+    if (result.sparkEnoughInfo === false) return { value: null, deep: false, label: 'Not enough info' }
+    const deep = t?.combinedScore != null
+    const raw = deep ? t.combinedScore : result.sparkScore
+    if (typeof raw !== 'number') return null
+    const value = clampScore(raw)
+    return { value, deep, label: scoreLabel(value) }
+  }
+  if (t && t.combinedScore !== null && t.combinedScore <= 100 && (t.dataConfidence ?? 0) >= DEEP_FIT_MIN_CONFIDENCE) {
+    return { value: clampScore(t.combinedScore), deep: true, label: null }
+  }
+  return typeof result.sparkScore === 'number' ? { value: clampScore(result.sparkScore), deep: false, label: null } : null
 }
 
 function clampScore(n: number): number {

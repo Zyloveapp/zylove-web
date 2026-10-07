@@ -75,6 +75,12 @@ export interface PairDoc {
   triggeredDealbreakers?: string[];
   scoreCalculatedAt: Timestamp;
   scoreVersion: number;
+  // Which scoring engine produced sparkScore (SCORE_ENGINE_VERSION in
+  // scoring.ts); absent = engine v1. onTap re-scores older versions.
+  engineVersion?: number;
+  // false: too little recognized data for the score to mean much — the app
+  // shows "Not enough info" instead of the number (engine v2+).
+  sparkEnoughInfo?: boolean;
   userALiked?: boolean;
   userBLiked?: boolean;
   matched?: boolean;
@@ -82,14 +88,15 @@ export interface PairDoc {
   tier1Spark?: { archetype: unknown; combinedScore: number; asymmetryGap: number; dataConfidence: number };
 }
 
+// Per category, 0–100; null = no data on one side (excluded, engine v2+).
 export interface SparkBreakdown {
   coreFit: number;
   dealbreakers: number;
-  valuesIntentions: number;
-  physicalPrefs: number;
-  loveLanguages: number;
-  lifestyle: number;
-  personality: number;
+  valuesIntentions: number | null;
+  physicalPrefs: number | null;
+  loveLanguages: number | null;
+  lifestyle: number | null;
+  personality: number | null;
 }
 
 export interface PlayBreakdown {

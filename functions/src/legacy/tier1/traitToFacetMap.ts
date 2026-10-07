@@ -89,12 +89,17 @@ export type Tier1PersonalityTrait =
   | 'creative'    | 'curious'   | 'driven'     | 'easygoing' | 'empathetic'
   | 'funny'       | 'introverted' | 'intuitive' | 'kind' | 'loyal'
   | 'optimistic'  | 'passionate' | 'thoughtful' | 'witty'
+  // Web onboarding's options (approved mapping, 2026-10-06)
+  | 'spontaneous' | 'intellectual' | 'laid_back' | 'independent' | 'playful'
+  | 'genuine'     | 'romantic'     | 'sarcastic' | 'wild_card'   | 'grounded'
 
 // Section 3.2 — 12 values per design doc
 export type Tier1RelationshipValue =
   | 'honesty'      | 'communication' | 'loyalty' | 'respect' | 'trust'
   | 'independence' | 'growth'        | 'adventure' | 'humor'
   | 'stability'    | 'passion'       | 'family'
+  // Web onboarding's options (approved mapping, 2026-10-06)
+  | 'spontaneity'  | 'ambition'      | 'spiritual_alignment' | 'physical_connection'
 
 // Section 3.3 — 10 lifestyle tags per design doc (matches current canonical)
 export type Tier1LifestyleTag =
@@ -107,6 +112,10 @@ export type Tier1WeekendVibe =
   | 'hiking' | 'brunch' | 'concert' | 'museum' | 'cooking_at_home'
   | 'road_trip' | 'movie_night' | 'farmers_market' | 'workout'
   | 'reading' | 'party' | 'travel' | 'volunteering'
+  // Web onboarding's options (approved mapping, 2026-10-06)
+  | 'slow_mornings' | 'cook_something_good' | 'out_in_the_city' | 'get_outside'
+  | 'live_something' | 'stay_in_with_someone' | 'go_somewhere' | 'no_plan'
+  | 'nightlife' | 'recharge_solo' | 'create_something' | 'host_people' | 'take_care_of_myself'
 
 // Section 3.6 — 20 habit tags from current canonical.
 // Design doc enumerates 10 representative habits (meditates, journals,
@@ -210,6 +219,65 @@ export const PERSONALITY_TRAIT_FACET_MAP: Record<Tier1PersonalityTrait, FacetWei
     { facet: 'intellectual_curiosity', weight: 0.6 },
     { facet: 'verbal_expressiveness',  weight: 0.7 },
   ],
+
+  // Web onboarding's options (approved mapping, 2026-10-06). One-line
+  // reasons; none carries a negative signal that depends on self-awareness.
+  // Direct trait; the opposite of liking routine.
+  spontaneous: [
+    { facet: 'spontaneity',        weight: 1.0 },
+    { facet: 'routine_preference', weight: -0.4 },
+  ],
+  // Driven by ideas; tends to talk them through.
+  intellectual: [
+    { facet: 'intellectual_curiosity', weight: 1.0 },
+    { facet: 'verbal_expressiveness',  weight: 0.3 },
+  ],
+  // Like easygoing, without its conflict-avoidance weight.
+  laid_back: [
+    { facet: 'emotional_stability',     weight: 0.7 },
+    { facet: 'high_arousal_preference', weight: -0.3 },
+    { facet: 'routine_preference',      weight: -0.2 },
+  ],
+  // Same anchor as the independence value.
+  independent: [
+    { facet: 'autonomy_valued', weight: 1.0 },
+    { facet: 'self_awareness',  weight: 0.2 },
+  ],
+  // Direct trait.
+  playful: [
+    { facet: 'playfulness', weight: 1.0 },
+    { facet: 'spontaneity', weight: 0.3 },
+  ],
+  // Authenticity: honesty plus knowing yourself.
+  genuine: [
+    { facet: 'integrity_valued', weight: 0.8 },
+    { facet: 'self_awareness',   weight: 0.4 },
+  ],
+  // Emotional, sensual and invested.
+  romantic: [
+    { facet: 'emotional_depth',         weight: 0.6 },
+    { facet: 'sensuality',              weight: 0.5 },
+    { facet: 'commitment_orientation',  weight: 0.4 },
+    { facet: 'physical_expressiveness', weight: 0.3 },
+  ],
+  // A humor style — deliberately not a negative signal.
+  sarcastic: [
+    { facet: 'playfulness',           weight: 0.6 },
+    { facet: 'verbal_expressiveness', weight: 0.5 },
+  ],
+  // Unpredictable and up for anything.
+  wild_card: [
+    { facet: 'spontaneity',         weight: 0.8 },
+    { facet: 'risk_tolerance',      weight: 0.7 },
+    { facet: 'openness_to_novelty', weight: 0.5 },
+    { facet: 'routine_preference',  weight: -0.4 },
+  ],
+  // Steady and self-aware.
+  grounded: [
+    { facet: 'emotional_stability', weight: 0.9 },
+    { facet: 'self_awareness',      weight: 0.5 },
+    { facet: 'routine_preference',  weight: 0.3 },
+  ],
 }
 
 // ─── Section 3.2 — Relationship values (12) ────────────────────────────────
@@ -263,6 +331,27 @@ export const RELATIONSHIP_VALUE_FACET_MAP: Record<Tier1RelationshipValue, FacetW
   family: [
     { facet: 'family_orientation', weight: 1.0 },
     { facet: 'tradition_valued',   weight: 0.4 },
+  ],
+
+  // Web onboarding's options (approved mapping, 2026-10-06).
+  // Like adventure, but about pace rather than novelty.
+  spontaneity: [
+    { facet: 'spontaneity',         weight: 0.9 },
+    { facet: 'openness_to_novelty', weight: 0.4 },
+  ],
+  // Wants a driven partnership.
+  ambition: [
+    { facet: 'ambition_drive',        weight: 1.0 },
+    { facet: 'personal_growth_focus', weight: 0.4 },
+  ],
+  // Shared belief matters — spiritual, not traditional.
+  spiritual_alignment: [
+    { facet: 'spiritual_openness', weight: 1.0 },
+  ],
+  // Direct.
+  physical_connection: [
+    { facet: 'sensuality',              weight: 0.8 },
+    { facet: 'physical_expressiveness', weight: 0.7 },
   ],
 }
 
@@ -408,6 +497,84 @@ export const WEEKEND_VIBE_FACET_MAP: Record<Tier1WeekendVibe, FacetWeight[]> = {
   volunteering: [
     { facet: 'social_consciousness', weight: 1.0 },
     { facet: 'nurturing_impulse',    weight: 0.6 },
+  ],
+
+  // Web onboarding's options (approved mapping, 2026-10-06). Most reuse the
+  // design-doc vibe they replaced.
+  // Unhurried, low stimulation.
+  slow_mornings: [
+    { facet: 'routine_preference',      weight: 0.4 },
+    { facet: 'high_arousal_preference', weight: -0.4 },
+    { facet: 'sensuality',              weight: 0.3 },
+  ],
+  // cooking_at_home with less routine (it includes trying new recipes).
+  cook_something_good: [
+    { facet: 'nurturing_impulse',     weight: 0.5 },
+    { facet: 'sensuality',            weight: 0.4 },
+    { facet: 'aesthetic_sensitivity', weight: 0.3 },
+    { facet: 'routine_preference',    weight: 0.2 },
+  ],
+  // "See what happens."
+  out_in_the_city: [
+    { facet: 'openness_to_novelty', weight: 0.6 },
+    { facet: 'social_breadth',      weight: 0.5 },
+    { facet: 'spontaneity',         weight: 0.4 },
+  ],
+  // Replaces hiking.
+  get_outside: [
+    { facet: 'openness_to_novelty',  weight: 0.5 },
+    { facet: 'lifestyle_discipline', weight: 0.4 },
+    { facet: 'routine_preference',   weight: -0.3 },
+  ],
+  // Replaces concert.
+  live_something: [
+    { facet: 'high_arousal_preference', weight: 0.7 },
+    { facet: 'social_breadth',          weight: 0.5 },
+    { facet: 'aesthetic_sensitivity',   weight: 0.4 },
+  ],
+  // movie_night, but about company.
+  stay_in_with_someone: [
+    { facet: 'routine_preference',     weight: 0.5 },
+    { facet: 'emotional_availability', weight: 0.5 },
+    { facet: 'extraversion_social',    weight: -0.2 },
+  ],
+  // travel plus road_trip.
+  go_somewhere: [
+    { facet: 'openness_to_novelty', weight: 0.9 },
+    { facet: 'spontaneity',         weight: 0.5 },
+  ],
+  // Direct.
+  no_plan: [
+    { facet: 'spontaneity',        weight: 1.0 },
+    { facet: 'routine_preference', weight: -0.6 },
+  ],
+  // Replaces party.
+  nightlife: [
+    { facet: 'extraversion_social',     weight: 0.8 },
+    { facet: 'high_arousal_preference', weight: 0.7 },
+  ],
+  // An explicit introvert reset.
+  recharge_solo: [
+    { facet: 'extraversion_social', weight: -0.8 },
+    { facet: 'autonomy_valued',     weight: 0.4 },
+    { facet: 'self_awareness',      weight: 0.3 },
+  ],
+  // Like the creative trait.
+  create_something: [
+    { facet: 'aesthetic_sensitivity',  weight: 0.8 },
+    { facet: 'openness_to_novelty',    weight: 0.5 },
+    { facet: 'intellectual_curiosity', weight: 0.3 },
+  ],
+  // Social and caring.
+  host_people: [
+    { facet: 'social_breadth',      weight: 0.7 },
+    { facet: 'nurturing_impulse',   weight: 0.6 },
+    { facet: 'extraversion_social', weight: 0.5 },
+  ],
+  // Replaces workout.
+  take_care_of_myself: [
+    { facet: 'lifestyle_discipline',  weight: 1.0 },
+    { facet: 'personal_growth_focus', weight: 0.4 },
   ],
 }
 

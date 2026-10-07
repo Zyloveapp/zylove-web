@@ -1,7 +1,7 @@
-// One-time dev seed: bot likes in the dev account's Sparks queue.
+// Dev seed: bot likes in an account's Sparks queue.
 //
-//   node scripts/seed-sparks.mjs                   write 5 entries
-//   node scripts/seed-sparks.mjs --dry-run         show what would be written
+//   node scripts/seed-sparks.mjs --target=<uid>             write 5 entries
+//   node scripts/seed-sparks.mjs --target=<uid> --dry-run   show what would be written
 //   node scripts/seed-sparks.mjs --range=11-20     pick from zbot-w-011…020 (default 1-10)
 //   node scripts/seed-sparks.mjs --pick=zbot-w-012,zbot-w-017
 //                                                  write exactly these bots (e.g. a dry run's picks)
@@ -21,7 +21,12 @@ const { initializeApp, cert, applicationDefault } = require('firebase-admin/app'
 const { getFirestore } = require('firebase-admin/firestore')
 
 const PROJECT_ID = 'zylove'
-const TARGET_UID = 'ipKWm5GSY6VrGLIErDBA6Zj61W62'
+// Whose queue to seed — required, so no account is hard-coded here.
+const TARGET_UID = arg('target')
+if (!TARGET_UID || TARGET_UID.includes('/')) {
+  console.error('Pass --target=<uid> (the account whose queue gets the likes).')
+  process.exit(1)
+}
 function arg(name) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
   return hit ? hit.slice(name.length + 3) : null
@@ -75,13 +80,13 @@ for (const { botUid, bot } of picked) {
   const photoURLs = Array.isArray(bot.photoURLs) ? bot.photoURLs : []
   const traits = Array.isArray(bot.personalityTraits) ? bot.personalityTraits : []
   const values = Array.isArray(bot.relationshipValues) ? bot.relationshipValues : []
-  const score = Math.floor(Math.random() * 31) + 65 // 65–95
+  // No score: the app scores bot likes with the real engine (onTap).
   const entry = {
     likerUid: botUid,
     likedAt: Date.now(),
-    compatibilityScore: score,
+    compatibilityScore: null,
     dealbreakersTriggered: [],
-    istopPicks: score >= 80,
+    istopPicks: false,
     breakdown: {},
     dismissed: false,
     isExpired: false,
@@ -110,7 +115,7 @@ for (const { botUid, bot } of picked) {
   if (!DRY_RUN) await db.doc(`users/${TARGET_UID}/likeQueue/${botUid}`).set(entry)
   const p = entry.likerProfile
   console.log(
-    `${DRY_RUN ? 'would write' : 'wrote'} ${botUid}: ${p.displayName}, ${p.age} · ${score}% · ` +
+    `${DRY_RUN ? 'would write' : 'wrote'} ${botUid}: ${p.displayName}, ${p.age} · ` +
       `${photoURLs.length} photo(s) · traits: ${traits.join(', ') || '—'}`,
   )
 }

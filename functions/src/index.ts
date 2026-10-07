@@ -1642,6 +1642,10 @@ interface SentSpark {
   age: number | null
   photoURL: string | null
   sparkScore: number | null
+  // Engine v2: false → "Not enough info"; with engineVersion, so the app
+  // can tell an engine v1 score (null) from a v2 one.
+  sparkEnoughInfo: boolean | null
+  engineVersion: number | null
   playScore: number | null
   tier1Spark: unknown
   likedAt: number
@@ -1713,6 +1717,8 @@ export const getSentSparks = onCall(
           ...modeIdentity(user, play),
           age: typeof user.age === 'number' && user.age > 0 ? user.age : null,
           sparkScore: mode === 'spark' && typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
+          sparkEnoughInfo: typeof pair.sparkEnoughInfo === 'boolean' ? pair.sparkEnoughInfo : null,
+          engineVersion: typeof pair.engineVersion === 'number' ? pair.engineVersion : null,
           playScore: typeof playScores?.playScore === 'number' ? playScores.playScore : null,
           // Deep Fit is Elite (Stage C); its home is pairs/{id}/modes/deep.
           tier1Spark: callerTier === 'elite' ? (await loadSparkDetails(pairSnap.id, pair)).tier1Spark : null,
@@ -1735,6 +1741,8 @@ interface CuriousVisitor {
   locationLabel: string | null
   intent: string | null
   sparkScore: number | null
+  sparkEnoughInfo: boolean | null // as SentSpark
+  engineVersion: number | null
   playScore: number | null
   tier1Spark: unknown
   at: number
@@ -1832,6 +1840,8 @@ export const getCuriousVisitors = onCall(
         locationLabel: typeof user.locationLabel === 'string' && user.locationLabel ? user.locationLabel : null,
         intent: mode,
         sparkScore: mode !== 'play' && typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
+        sparkEnoughInfo: typeof pair.sparkEnoughInfo === 'boolean' ? pair.sparkEnoughInfo : null,
+        engineVersion: typeof pair.engineVersion === 'number' ? pair.engineVersion : null,
         playScore: typeof playScores?.playScore === 'number' ? playScores.playScore : null,
         tier1Spark: (await loadSparkDetails(id, pair)).tier1Spark, // Curious is Elite: Deep Fit included
         at: revealedAt(pair, uid),
@@ -2134,7 +2144,7 @@ export { requestAccountDeletion, cancelAccountDeletion } from './legacy/trustSaf
 export { onNightlyPurge, processGraceExpiredDeletions } from './legacy/onNightlyPurge'
 // Batch (b): photo moderation, pair rescoring, women's Elite.
 export { onPhotoUpload } from './legacy/onPhotoUpload'
-export { onPlayProfileWrite, onProfileWrite } from './legacy/onProfileWrite'
+export { onMatchingPrefsWrite, onPlayProfileWrite, onPrivateProfileWrite, onProfileWrite } from './legacy/onProfileWrite'
 export { claimWomenElite } from './legacy/claimWomenElite'
 // Batch (c): Explore taps and likes, swipes, blocking.
 export { onTap } from './legacy/onTap'

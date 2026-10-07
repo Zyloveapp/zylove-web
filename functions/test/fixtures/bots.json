@@ -1,0 +1,2740 @@
+[
+ {
+  "uid": "zbot-m-001",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 29,
+  "ageMin": 26,
+  "ageMax": 35,
+  "intent": "open",
+  "bodyType": "athletic",
+  "heightCm": 183,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "curvy"
+  ],
+  "personalityTraits": [
+   "ambitious",
+   "genuine",
+   "grounded",
+   "loyal"
+  ],
+  "relationshipValues": [
+   "communication",
+   "growth",
+   "loyalty"
+  ],
+  "lifestyleTags": [
+   "wellness_focused",
+   "outdoorsy",
+   "adventurer"
+  ],
+  "weekendVibes": [
+   "get_outside",
+   "cook_something_good",
+   "take_care_of_myself"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "hiker",
+   "coffee_addict",
+   "cook",
+   "early_riser"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "physical_touch"
+  ],
+  "loveLangReceive": [
+   "quality_time",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "power_through",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "agnostic",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-m-002",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 33,
+  "ageMin": 27,
+  "ageMax": 36,
+  "intent": "open",
+  "bodyType": "muscular",
+  "heightCm": 188,
+  "seekingBodyTypes": [
+   "athletic",
+   "curvy",
+   "average"
+  ],
+  "personalityTraits": [
+   "loyal",
+   "caring",
+   "genuine",
+   "grounded"
+  ],
+  "relationshipValues": [
+   "loyalty",
+   "stability",
+   "trust"
+  ],
+  "lifestyleTags": [
+   "wellness_focused",
+   "adventurer",
+   "social_butterfly"
+  ],
+  "weekendVibes": [
+   "get_outside",
+   "cook_something_good",
+   "host_people"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "dog_person",
+   "early_riser",
+   "cook",
+   "hiker"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "physical_touch"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "quality_time"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "entwined",
+  "stressResponse": "power_through",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "christian",
+  "politicalView": "center_right",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-m-003",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 27,
+  "ageMin": 24,
+  "ageMax": 32,
+  "intent": "open",
+  "bodyType": "average",
+  "heightCm": 178,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "curvy"
+  ],
+  "personalityTraits": [
+   "passionate",
+   "playful",
+   "loyal",
+   "genuine"
+  ],
+  "relationshipValues": [
+   "passion",
+   "loyalty",
+   "communication"
+  ],
+  "lifestyleTags": [
+   "foodie",
+   "social_butterfly",
+   "nightlife"
+  ],
+  "weekendVibes": [
+   "cook_something_good",
+   "host_people",
+   "live_something"
+  ],
+  "habitTags": [
+   "cook",
+   "music_lover",
+   "night_owl",
+   "dog_person",
+   "coffee_addict"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "physical_touch"
+  ],
+  "loveLangReceive": [
+   "quality_time",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "entwined",
+  "stressResponse": "talk_it_out",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "catholic",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-m-004",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 25,
+  "ageMin": 23,
+  "ageMax": 32,
+  "intent": "open",
+  "bodyType": "slim",
+  "heightCm": 175,
+  "seekingBodyTypes": [
+   "average",
+   "slim",
+   "athletic"
+  ],
+  "personalityTraits": [
+   "intellectual",
+   "genuine",
+   "empathetic",
+   "laid_back"
+  ],
+  "relationshipValues": [
+   "communication",
+   "growth",
+   "trust"
+  ],
+  "lifestyleTags": [
+   "creative",
+   "homebody",
+   "foodie"
+  ],
+  "weekendVibes": [
+   "slow_mornings",
+   "cook_something_good",
+   "recharge_solo"
+  ],
+  "habitTags": [
+   "reader",
+   "cat_person",
+   "coffee_addict",
+   "cook",
+   "meditates"
+  ],
+  "loveLangGive": [
+   "words_of_affirmation",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "words_of_affirmation",
+   "acts_of_service"
+  ],
+  "conflictStyle": "process_first",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "get_quiet",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "undecided",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "agnostic",
+  "politicalView": "democrat",
+  "drinkingHabit": "never",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-m-005",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 35,
+  "ageMin": 30,
+  "ageMax": 42,
+  "intent": "open",
+  "bodyType": "athletic",
+  "heightCm": 180,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "muscular"
+  ],
+  "personalityTraits": [
+   "intellectual",
+   "genuine",
+   "grounded",
+   "loyal"
+  ],
+  "relationshipValues": [
+   "stability",
+   "growth",
+   "communication"
+  ],
+  "lifestyleTags": [
+   "creative",
+   "outdoorsy",
+   "foodie"
+  ],
+  "weekendVibes": [
+   "get_outside",
+   "cook_something_good",
+   "host_people"
+  ],
+  "habitTags": [
+   "hiker",
+   "dog_person",
+   "coffee_addict",
+   "cook",
+   "reader"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "talk_it_out",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "atheist",
+  "politicalView": "democrat",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-m-006",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 28,
+  "ageMin": 24,
+  "ageMax": 32,
+  "intent": "open",
+  "bodyType": "muscular",
+  "heightCm": 186,
+  "seekingBodyTypes": [
+   "athletic",
+   "curvy",
+   "slim"
+  ],
+  "personalityTraits": [
+   "ambitious",
+   "confident",
+   "passionate",
+   "loyal"
+  ],
+  "relationshipValues": [
+   "ambition",
+   "stability",
+   "loyalty"
+  ],
+  "lifestyleTags": [
+   "social_butterfly",
+   "workaholic",
+   "nightlife"
+  ],
+  "weekendVibes": [
+   "host_people",
+   "take_care_of_myself",
+   "nightlife"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "coffee_addict",
+   "dog_person",
+   "music_lover",
+   "night_owl"
+  ],
+  "loveLangGive": [
+   "physical_touch",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "entwined",
+  "stressResponse": "power_through",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "heavy_drinker"
+  ],
+  "religion": "christian",
+  "politicalView": "republican",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-m-007",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 26,
+  "ageMin": 24,
+  "ageMax": 32,
+  "intent": "open",
+  "bodyType": "athletic",
+  "heightCm": 181,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "curvy"
+  ],
+  "personalityTraits": [
+   "creative",
+   "passionate",
+   "spontaneous",
+   "genuine"
+  ],
+  "relationshipValues": [
+   "passion",
+   "spontaneity",
+   "loyalty"
+  ],
+  "lifestyleTags": [
+   "creative",
+   "nightlife",
+   "foodie"
+  ],
+  "weekendVibes": [
+   "live_something",
+   "nightlife",
+   "cook_something_good"
+  ],
+  "habitTags": [
+   "music_lover",
+   "420_friendly",
+   "night_owl",
+   "dog_person",
+   "cook"
+  ],
+  "loveLangGive": [
+   "physical_touch",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "words_of_affirmation",
+   "physical_touch"
+  ],
+  "conflictStyle": "avoid",
+  "togethernessStyle": "in_between",
+  "stressResponse": "get_quiet",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "undecided",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "spiritual",
+  "politicalView": "independent",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "casual",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-m-008",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 31,
+  "ageMin": 28,
+  "ageMax": 36,
+  "intent": "open",
+  "bodyType": "average",
+  "heightCm": 178,
+  "seekingBodyTypes": [
+   "athletic",
+   "average"
+  ],
+  "personalityTraits": [
+   "caring",
+   "loyal",
+   "grounded",
+   "empathetic"
+  ],
+  "relationshipValues": [
+   "trust",
+   "stability",
+   "communication"
+  ],
+  "lifestyleTags": [
+   "wellness_focused",
+   "homebody",
+   "foodie"
+  ],
+  "weekendVibes": [
+   "slow_mornings",
+   "cook_something_good",
+   "host_people"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "cook",
+   "reader",
+   "dog_person",
+   "meditates"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "words_of_affirmation"
+  ],
+  "loveLangReceive": [
+   "quality_time",
+   "physical_touch"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "entwined",
+  "stressResponse": "talk_it_out",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker",
+   "heavy_drinker"
+  ],
+  "religion": "jewish",
+  "politicalView": "democrat",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-m-009",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 32,
+  "ageMin": 28,
+  "ageMax": 36,
+  "intent": "open",
+  "bodyType": "average",
+  "heightCm": 182,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "curvy"
+  ],
+  "personalityTraits": [
+   "genuine",
+   "laid_back",
+   "empathetic",
+   "grounded"
+  ],
+  "relationshipValues": [
+   "communication",
+   "stability",
+   "humor"
+  ],
+  "lifestyleTags": [
+   "foodie",
+   "outdoorsy",
+   "wellness_focused"
+  ],
+  "weekendVibes": [
+   "get_outside",
+   "cook_something_good",
+   "host_people"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "dog_person",
+   "coffee_addict",
+   "hiker",
+   "cook"
+  ],
+  "loveLangGive": [
+   "quality_time",
+   "acts_of_service"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "process_first",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "step_back",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "agnostic",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-m-010",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 36,
+  "ageMin": 28,
+  "ageMax": 38,
+  "intent": "open",
+  "bodyType": "muscular",
+  "heightCm": 185,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "curvy"
+  ],
+  "personalityTraits": [
+   "loyal",
+   "grounded",
+   "caring",
+   "ambitious"
+  ],
+  "relationshipValues": [
+   "stability",
+   "loyalty",
+   "trust"
+  ],
+  "lifestyleTags": [
+   "outdoorsy",
+   "wellness_focused",
+   "workaholic"
+  ],
+  "weekendVibes": [
+   "get_outside",
+   "cook_something_good",
+   "take_care_of_myself"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "dog_person",
+   "early_riser",
+   "hiker",
+   "cook"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "physical_touch"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "entwined",
+  "stressResponse": "power_through",
+  "parentalCurrent": "has_kids",
+  "parentalIntent": "open_to_more",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "christian",
+  "politicalView": "center_right",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-m-011",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "everyone"
+  ],
+  "age": 24,
+  "ageMin": 22,
+  "ageMax": 30,
+  "intent": "open",
+  "bodyType": "slim",
+  "heightCm": 178,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "slim",
+   "curvy"
+  ],
+  "personalityTraits": [
+   "playful",
+   "spontaneous",
+   "wild_card",
+   "genuine"
+  ],
+  "relationshipValues": [
+   "passion",
+   "spontaneity",
+   "independence"
+  ],
+  "lifestyleTags": [
+   "creative",
+   "nightlife",
+   "social_butterfly"
+  ],
+  "weekendVibes": [
+   "live_something",
+   "nightlife",
+   "create_something"
+  ],
+  "habitTags": [
+   "music_lover",
+   "420_friendly",
+   "night_owl",
+   "reader",
+   "coffee_addict"
+  ],
+  "loveLangGive": [
+   "physical_touch",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "avoid",
+  "togethernessStyle": "independent",
+  "stressResponse": "get_quiet",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "undecided",
+  "dealbreakers": [
+   "heavy_drinker"
+  ],
+  "religion": "spiritual",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "casual",
+   "something_that_grows",
+   "open_relationship"
+  ]
+ },
+ {
+  "uid": "zbot-m-012",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 30,
+  "ageMin": 27,
+  "ageMax": 35,
+  "intent": "open",
+  "bodyType": "athletic",
+  "heightCm": 180,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "curvy"
+  ],
+  "personalityTraits": [
+   "ambitious",
+   "confident",
+   "loyal",
+   "grounded"
+  ],
+  "relationshipValues": [
+   "ambition",
+   "stability",
+   "communication"
+  ],
+  "lifestyleTags": [
+   "workaholic",
+   "foodie",
+   "social_butterfly"
+  ],
+  "weekendVibes": [
+   "take_care_of_myself",
+   "host_people",
+   "cook_something_good"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "coffee_addict",
+   "reader",
+   "dog_person",
+   "cook"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "words_of_affirmation"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "power_through",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "christian",
+  "politicalView": "democrat",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-m-013",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 38,
+  "ageMin": 32,
+  "ageMax": 44,
+  "intent": "open",
+  "bodyType": "average",
+  "heightCm": 175,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "curvy"
+  ],
+  "personalityTraits": [
+   "grounded",
+   "loyal",
+   "empathetic",
+   "genuine"
+  ],
+  "relationshipValues": [
+   "trust",
+   "stability",
+   "communication"
+  ],
+  "lifestyleTags": [
+   "homebody",
+   "foodie",
+   "wellness_focused"
+  ],
+  "weekendVibes": [
+   "slow_mornings",
+   "cook_something_good",
+   "host_people"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "cook",
+   "dog_person",
+   "reader",
+   "meditates"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "quality_time"
+  ],
+  "conflictStyle": "process_first",
+  "togethernessStyle": "in_between",
+  "stressResponse": "talk_it_out",
+  "parentalCurrent": "has_kids",
+  "parentalIntent": "doesnt_want_more",
+  "dealbreakers": [
+   "heavy_drinker"
+  ],
+  "religion": "jewish",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-m-014",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 26,
+  "ageMin": 24,
+  "ageMax": 32,
+  "intent": "open",
+  "bodyType": "muscular",
+  "heightCm": 184,
+  "seekingBodyTypes": [
+   "athletic",
+   "average"
+  ],
+  "personalityTraits": [
+   "ambitious",
+   "confident",
+   "grounded",
+   "playful"
+  ],
+  "relationshipValues": [
+   "growth",
+   "passion",
+   "loyalty"
+  ],
+  "lifestyleTags": [
+   "wellness_focused",
+   "adventurer",
+   "outdoorsy"
+  ],
+  "weekendVibes": [
+   "take_care_of_myself",
+   "get_outside",
+   "cook_something_good"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "early_riser",
+   "dog_person",
+   "doesnt_drink",
+   "hiker"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "physical_touch"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "power_through",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "agnostic",
+  "politicalView": "independent",
+  "drinkingHabit": "never",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-m-015",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 34,
+  "ageMin": 28,
+  "ageMax": 38,
+  "intent": "open",
+  "bodyType": "average",
+  "heightCm": 180,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "curvy"
+  ],
+  "personalityTraits": [
+   "creative",
+   "sarcastic",
+   "genuine",
+   "intellectual"
+  ],
+  "relationshipValues": [
+   "humor",
+   "passion",
+   "communication"
+  ],
+  "lifestyleTags": [
+   "creative",
+   "foodie",
+   "nightlife"
+  ],
+  "weekendVibes": [
+   "live_something",
+   "host_people",
+   "cook_something_good"
+  ],
+  "habitTags": [
+   "music_lover",
+   "coffee_addict",
+   "night_owl",
+   "cook",
+   "reader"
+  ],
+  "loveLangGive": [
+   "words_of_affirmation",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "words_of_affirmation",
+   "physical_touch"
+  ],
+  "conflictStyle": "situational",
+  "togethernessStyle": "in_between",
+  "stressResponse": "step_back",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "undecided",
+  "dealbreakers": [
+   "heavy_drinker"
+  ],
+  "religion": "atheist",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy",
+   "something_that_grows",
+   "ethically_non_mono"
+  ]
+ },
+ {
+  "uid": "zbot-m-016",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 29,
+  "ageMin": 26,
+  "ageMax": 34,
+  "intent": "open",
+  "bodyType": "athletic",
+  "heightCm": 188,
+  "seekingBodyTypes": [
+   "athletic",
+   "average"
+  ],
+  "personalityTraits": [
+   "intellectual",
+   "loyal",
+   "empathetic",
+   "grounded"
+  ],
+  "relationshipValues": [
+   "growth",
+   "communication",
+   "loyalty"
+  ],
+  "lifestyleTags": [
+   "homebody",
+   "foodie",
+   "wellness_focused"
+  ],
+  "weekendVibes": [
+   "slow_mornings",
+   "cook_something_good",
+   "recharge_solo"
+  ],
+  "habitTags": [
+   "reader",
+   "dog_person",
+   "coffee_addict",
+   "gym_regular",
+   "meditates"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "words_of_affirmation",
+   "physical_touch"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "talk_it_out",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "christian",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-m-017",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 33,
+  "ageMin": 27,
+  "ageMax": 36,
+  "intent": "open",
+  "bodyType": "muscular",
+  "heightCm": 185,
+  "seekingBodyTypes": [
+   "athletic",
+   "average"
+  ],
+  "personalityTraits": [
+   "ambitious",
+   "confident",
+   "driven",
+   "loyal"
+  ],
+  "relationshipValues": [
+   "ambition",
+   "stability",
+   "loyalty"
+  ],
+  "lifestyleTags": [
+   "wellness_focused",
+   "workaholic",
+   "social_butterfly"
+  ],
+  "weekendVibes": [
+   "take_care_of_myself",
+   "host_people",
+   "cook_something_good"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "early_riser",
+   "dog_person",
+   "coffee_addict",
+   "cook"
+  ],
+  "loveLangGive": [
+   "physical_touch",
+   "acts_of_service"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "power_through",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "agnostic",
+  "politicalView": "independent",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-m-018",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 31,
+  "ageMin": 28,
+  "ageMax": 36,
+  "intent": "open",
+  "bodyType": "average",
+  "heightCm": 178,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "slim"
+  ],
+  "personalityTraits": [
+   "intellectual",
+   "loyal",
+   "grounded",
+   "genuine"
+  ],
+  "relationshipValues": [
+   "communication",
+   "trust",
+   "stability"
+  ],
+  "lifestyleTags": [
+   "workaholic",
+   "homebody",
+   "foodie"
+  ],
+  "weekendVibes": [
+   "slow_mornings",
+   "recharge_solo",
+   "cook_something_good"
+  ],
+  "habitTags": [
+   "reader",
+   "cat_person",
+   "coffee_addict",
+   "gamer",
+   "cook"
+  ],
+  "loveLangGive": [
+   "words_of_affirmation",
+   "acts_of_service"
+  ],
+  "loveLangReceive": [
+   "quality_time",
+   "physical_touch"
+  ],
+  "conflictStyle": "process_first",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "get_quiet",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "atheist",
+  "politicalView": "democrat",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-m-019",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 37,
+  "ageMin": 30,
+  "ageMax": 42,
+  "intent": "open",
+  "bodyType": "full_figured",
+  "heightCm": 173,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "curvy",
+   "full_figured"
+  ],
+  "personalityTraits": [
+   "loyal",
+   "genuine",
+   "laid_back",
+   "empathetic"
+  ],
+  "relationshipValues": [
+   "humor",
+   "loyalty",
+   "stability"
+  ],
+  "lifestyleTags": [
+   "foodie",
+   "social_butterfly",
+   "homebody"
+  ],
+  "weekendVibes": [
+   "host_people",
+   "cook_something_good",
+   "live_something"
+  ],
+  "habitTags": [
+   "music_lover",
+   "cook",
+   "coffee_addict",
+   "reader",
+   "dog_person"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "process_first",
+  "togethernessStyle": "entwined",
+  "stressResponse": "talk_it_out",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "open_to_more",
+  "dealbreakers": [
+   "heavy_drinker"
+  ],
+  "religion": "agnostic",
+  "politicalView": "center_left",
+  "drinkingHabit": "regularly",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-m-020",
+  "genderIdentity": "man",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 28,
+  "ageMin": 25,
+  "ageMax": 33,
+  "intent": "open",
+  "bodyType": "athletic",
+  "heightCm": 188,
+  "seekingBodyTypes": [
+   "athletic",
+   "average"
+  ],
+  "personalityTraits": [
+   "creative",
+   "passionate",
+   "genuine",
+   "playful"
+  ],
+  "relationshipValues": [
+   "passion",
+   "communication",
+   "growth"
+  ],
+  "lifestyleTags": [
+   "creative",
+   "wellness_focused",
+   "social_butterfly"
+  ],
+  "weekendVibes": [
+   "live_something",
+   "take_care_of_myself",
+   "host_people"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "early_riser",
+   "coffee_addict",
+   "music_lover",
+   "dog_person"
+  ],
+  "loveLangGive": [
+   "physical_touch",
+   "acts_of_service"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "quality_time"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "in_between",
+  "stressResponse": "power_through",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "spiritual",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-w-001",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 28,
+  "ageMin": 26,
+  "ageMax": 38,
+  "intent": "open",
+  "bodyType": "athletic",
+  "heightCm": 165,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "slim"
+  ],
+  "personalityTraits": [
+   "caring",
+   "ambitious",
+   "empathetic",
+   "genuine"
+  ],
+  "relationshipValues": [
+   "communication",
+   "trust",
+   "growth"
+  ],
+  "lifestyleTags": [
+   "wellness_focused",
+   "adventurer",
+   "homebody"
+  ],
+  "weekendVibes": [
+   "get_outside",
+   "slow_mornings",
+   "cook_something_good"
+  ],
+  "habitTags": [
+   "meditates",
+   "early_riser",
+   "coffee_addict",
+   "reader",
+   "hiker"
+  ],
+  "loveLangGive": [
+   "words_of_affirmation",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "quality_time"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "entwined",
+  "stressResponse": "step_back",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "spiritual",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-w-002",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 26,
+  "ageMin": 26,
+  "ageMax": 34,
+  "intent": "open",
+  "bodyType": "slim",
+  "heightCm": 162,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "muscular"
+  ],
+  "personalityTraits": [
+   "creative",
+   "playful",
+   "sarcastic",
+   "loyal"
+  ],
+  "relationshipValues": [
+   "humor",
+   "spontaneity",
+   "communication"
+  ],
+  "lifestyleTags": [
+   "creative",
+   "foodie",
+   "social_butterfly"
+  ],
+  "weekendVibes": [
+   "cook_something_good",
+   "out_in_the_city",
+   "host_people"
+  ],
+  "habitTags": [
+   "music_lover",
+   "cook",
+   "coffee_addict",
+   "gamer",
+   "night_owl"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "words_of_affirmation",
+   "physical_touch"
+  ],
+  "conflictStyle": "process_first",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "talk_it_out",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "heavy_drinker"
+  ],
+  "religion": "agnostic",
+  "politicalView": "democrat",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-w-003",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 30,
+  "ageMin": 28,
+  "ageMax": 38,
+  "intent": "open",
+  "bodyType": "curvy",
+  "heightCm": 168,
+  "seekingBodyTypes": [
+   "athletic",
+   "average"
+  ],
+  "personalityTraits": [
+   "caring",
+   "grounded",
+   "passionate",
+   "empathetic"
+  ],
+  "relationshipValues": [
+   "trust",
+   "stability",
+   "communication"
+  ],
+  "lifestyleTags": [
+   "wellness_focused",
+   "foodie",
+   "homebody"
+  ],
+  "weekendVibes": [
+   "slow_mornings",
+   "cook_something_good",
+   "host_people"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "cook",
+   "dog_person",
+   "reader",
+   "meditates"
+  ],
+  "loveLangGive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "loveLangReceive": [
+   "acts_of_service",
+   "physical_touch"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "entwined",
+  "stressResponse": "talk_it_out",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "jewish",
+  "politicalView": "democrat",
+  "drinkingHabit": "never",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-w-004",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "everyone"
+  ],
+  "age": 24,
+  "ageMin": 24,
+  "ageMax": 32,
+  "intent": "open",
+  "bodyType": "athletic",
+  "heightCm": 170,
+  "seekingBodyTypes": [
+   "athletic",
+   "muscular"
+  ],
+  "personalityTraits": [
+   "playful",
+   "spontaneous",
+   "wild_card",
+   "passionate"
+  ],
+  "relationshipValues": [
+   "spontaneity",
+   "independence",
+   "passion"
+  ],
+  "lifestyleTags": [
+   "adventurer",
+   "wellness_focused",
+   "nightlife"
+  ],
+  "weekendVibes": [
+   "get_outside",
+   "nightlife",
+   "live_something"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "early_riser",
+   "420_friendly",
+   "music_lover",
+   "hiker"
+  ],
+  "loveLangGive": [
+   "physical_touch",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "situational",
+  "togethernessStyle": "independent",
+  "stressResponse": "get_quiet",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "undecided",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "spiritual",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "casual",
+   "something_that_grows",
+   "open_relationship"
+  ]
+ },
+ {
+  "uid": "zbot-w-005",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 32,
+  "ageMin": 30,
+  "ageMax": 40,
+  "intent": "open",
+  "bodyType": "average",
+  "heightCm": 158,
+  "seekingBodyTypes": [
+   "average",
+   "athletic",
+   "slim"
+  ],
+  "personalityTraits": [
+   "intellectual",
+   "empathetic",
+   "genuine",
+   "sarcastic"
+  ],
+  "relationshipValues": [
+   "communication",
+   "loyalty",
+   "humor"
+  ],
+  "lifestyleTags": [
+   "creative",
+   "homebody",
+   "foodie"
+  ],
+  "weekendVibes": [
+   "slow_mornings",
+   "cook_something_good",
+   "recharge_solo"
+  ],
+  "habitTags": [
+   "reader",
+   "cat_person",
+   "coffee_addict",
+   "cook",
+   "meditates"
+  ],
+  "loveLangGive": [
+   "words_of_affirmation",
+   "acts_of_service"
+  ],
+  "loveLangReceive": [
+   "quality_time",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "process_first",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "get_quiet",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "open_to_more",
+  "dealbreakers": [
+   "different_politics"
+  ],
+  "religion": "catholic",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-w-006",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 27,
+  "ageMin": 27,
+  "ageMax": 35,
+  "intent": "open",
+  "bodyType": "athletic",
+  "heightCm": 172,
+  "seekingBodyTypes": [
+   "athletic",
+   "muscular"
+  ],
+  "personalityTraits": [
+   "ambitious",
+   "confident",
+   "driven",
+   "genuine"
+  ],
+  "relationshipValues": [
+   "ambition",
+   "growth",
+   "communication"
+  ],
+  "lifestyleTags": [
+   "wellness_focused",
+   "outdoorsy",
+   "adventurer"
+  ],
+  "weekendVibes": [
+   "get_outside",
+   "take_care_of_myself",
+   "cook_something_good"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "dog_person",
+   "early_riser",
+   "hiker",
+   "coffee_addict"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "power_through",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "agnostic",
+  "politicalView": "democrat",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-w-007",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 29,
+  "ageMin": 28,
+  "ageMax": 36,
+  "intent": "open",
+  "bodyType": "average",
+  "heightCm": 163,
+  "seekingBodyTypes": [
+   "athletic",
+   "average"
+  ],
+  "personalityTraits": [
+   "ambitious",
+   "loyal",
+   "empathetic",
+   "genuine"
+  ],
+  "relationshipValues": [
+   "communication",
+   "loyalty",
+   "growth"
+  ],
+  "lifestyleTags": [
+   "social_butterfly",
+   "foodie",
+   "traveler"
+  ],
+  "weekendVibes": [
+   "out_in_the_city",
+   "host_people",
+   "cook_something_good"
+  ],
+  "habitTags": [
+   "music_lover",
+   "dog_person",
+   "coffee_addict",
+   "cook",
+   "reader"
+  ],
+  "loveLangGive": [
+   "quality_time",
+   "words_of_affirmation"
+  ],
+  "loveLangReceive": [
+   "acts_of_service",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "entwined",
+  "stressResponse": "talk_it_out",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "heavy_drinker"
+  ],
+  "religion": "hindu",
+  "politicalView": "democrat",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-w-008",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 31,
+  "ageMin": 28,
+  "ageMax": 40,
+  "intent": "open",
+  "bodyType": "full_figured",
+  "heightCm": 165,
+  "seekingBodyTypes": [
+   "athletic",
+   "curvy",
+   "full_figured"
+  ],
+  "personalityTraits": [
+   "passionate",
+   "genuine",
+   "confident",
+   "sarcastic"
+  ],
+  "relationshipValues": [
+   "passion",
+   "loyalty",
+   "independence"
+  ],
+  "lifestyleTags": [
+   "foodie",
+   "creative",
+   "nightlife"
+  ],
+  "weekendVibes": [
+   "host_people",
+   "cook_something_good",
+   "nightlife"
+  ],
+  "habitTags": [
+   "cook",
+   "music_lover",
+   "night_owl",
+   "cat_person",
+   "gamer"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "physical_touch"
+  ],
+  "loveLangReceive": [
+   "quality_time",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "power_through",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "doesnt_want_any",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "atheist",
+  "politicalView": "center_left",
+  "drinkingHabit": "regularly",
+  "openTo": [
+   "monogamy",
+   "ethically_non_mono"
+  ]
+ },
+ {
+  "uid": "zbot-w-009",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 33,
+  "ageMin": 32,
+  "ageMax": 42,
+  "intent": "open",
+  "bodyType": "curvy",
+  "heightCm": 160,
+  "seekingBodyTypes": [
+   "average",
+   "athletic"
+  ],
+  "personalityTraits": [
+   "caring",
+   "loyal",
+   "genuine",
+   "grounded"
+  ],
+  "relationshipValues": [
+   "trust",
+   "stability",
+   "loyalty"
+  ],
+  "lifestyleTags": [
+   "homebody",
+   "creative",
+   "wellness_focused"
+  ],
+  "weekendVibes": [
+   "slow_mornings",
+   "cook_something_good",
+   "host_people"
+  ],
+  "habitTags": [
+   "reader",
+   "cat_person",
+   "early_riser",
+   "cook",
+   "meditates"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "process_first",
+  "togethernessStyle": "entwined",
+  "stressResponse": "talk_it_out",
+  "parentalCurrent": "has_kids",
+  "parentalIntent": "open_to_more",
+  "dealbreakers": [
+   "cigarette_smoker",
+   "different_religion"
+  ],
+  "religion": "christian",
+  "politicalView": "center_right",
+  "drinkingHabit": "never",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-w-010",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 25,
+  "ageMin": 24,
+  "ageMax": 32,
+  "intent": "open",
+  "bodyType": "slim",
+  "heightCm": 168,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "slim"
+  ],
+  "personalityTraits": [
+   "creative",
+   "playful",
+   "sarcastic",
+   "spontaneous"
+  ],
+  "relationshipValues": [
+   "humor",
+   "passion",
+   "spontaneity"
+  ],
+  "lifestyleTags": [
+   "creative",
+   "social_butterfly",
+   "nightlife"
+  ],
+  "weekendVibes": [
+   "out_in_the_city",
+   "live_something",
+   "nightlife"
+  ],
+  "habitTags": [
+   "music_lover",
+   "coffee_addict",
+   "night_owl",
+   "420_friendly",
+   "reader"
+  ],
+  "loveLangGive": [
+   "quality_time",
+   "physical_touch"
+  ],
+  "loveLangReceive": [
+   "words_of_affirmation",
+   "quality_time"
+  ],
+  "conflictStyle": "avoid",
+  "togethernessStyle": "in_between",
+  "stressResponse": "step_back",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "undecided",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "agnostic",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "casual",
+   "something_that_grows",
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-w-011",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 36,
+  "ageMin": 32,
+  "ageMax": 44,
+  "intent": "open",
+  "bodyType": "average",
+  "heightCm": 167,
+  "seekingBodyTypes": [
+   "athletic",
+   "average"
+  ],
+  "personalityTraits": [
+   "grounded",
+   "loyal",
+   "empathetic",
+   "ambitious"
+  ],
+  "relationshipValues": [
+   "stability",
+   "communication",
+   "growth"
+  ],
+  "lifestyleTags": [
+   "homebody",
+   "wellness_focused",
+   "foodie"
+  ],
+  "weekendVibes": [
+   "slow_mornings",
+   "cook_something_good",
+   "take_care_of_myself"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "reader",
+   "dog_person",
+   "cook",
+   "meditates"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "words_of_affirmation"
+  ],
+  "loveLangReceive": [
+   "quality_time",
+   "physical_touch"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "talk_it_out",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "undecided",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "jewish",
+  "politicalView": "democrat",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-w-012",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 28,
+  "ageMin": 26,
+  "ageMax": 36,
+  "intent": "open",
+  "bodyType": "athletic",
+  "heightCm": 174,
+  "seekingBodyTypes": [
+   "athletic",
+   "muscular"
+  ],
+  "personalityTraits": [
+   "caring",
+   "genuine",
+   "grounded",
+   "empathetic"
+  ],
+  "relationshipValues": [
+   "growth",
+   "communication",
+   "trust"
+  ],
+  "lifestyleTags": [
+   "wellness_focused",
+   "outdoorsy",
+   "adventurer"
+  ],
+  "weekendVibes": [
+   "get_outside",
+   "take_care_of_myself",
+   "cook_something_good"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "hiker",
+   "early_riser",
+   "dog_person",
+   "meditates"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "physical_touch"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "quality_time"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "power_through",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "agnostic",
+  "politicalView": "independent",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-w-013",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 34,
+  "ageMin": 32,
+  "ageMax": 42,
+  "intent": "open",
+  "bodyType": "average",
+  "heightCm": 165,
+  "seekingBodyTypes": [
+   "athletic",
+   "average"
+  ],
+  "personalityTraits": [
+   "empathetic",
+   "loyal",
+   "genuine",
+   "grounded"
+  ],
+  "relationshipValues": [
+   "communication",
+   "loyalty",
+   "spiritual_alignment"
+  ],
+  "lifestyleTags": [
+   "social_butterfly",
+   "foodie",
+   "wellness_focused"
+  ],
+  "weekendVibes": [
+   "host_people",
+   "cook_something_good",
+   "take_care_of_myself"
+  ],
+  "habitTags": [
+   "reader",
+   "dog_person",
+   "meditates",
+   "cook",
+   "gym_regular"
+  ],
+  "loveLangGive": [
+   "quality_time",
+   "words_of_affirmation"
+  ],
+  "loveLangReceive": [
+   "acts_of_service",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "process_first",
+  "togethernessStyle": "entwined",
+  "stressResponse": "talk_it_out",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "heavy_drinker",
+   "different_politics"
+  ],
+  "religion": "spiritual",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-w-014",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 27,
+  "ageMin": 26,
+  "ageMax": 36,
+  "intent": "open",
+  "bodyType": "curvy",
+  "heightCm": 161,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "muscular"
+  ],
+  "personalityTraits": [
+   "creative",
+   "playful",
+   "genuine",
+   "passionate"
+  ],
+  "relationshipValues": [
+   "passion",
+   "spontaneity",
+   "humor"
+  ],
+  "lifestyleTags": [
+   "creative",
+   "foodie",
+   "traveler"
+  ],
+  "weekendVibes": [
+   "live_something",
+   "cook_something_good",
+   "go_somewhere"
+  ],
+  "habitTags": [
+   "music_lover",
+   "cook",
+   "dog_person",
+   "coffee_addict",
+   "reader"
+  ],
+  "loveLangGive": [
+   "physical_touch",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "words_of_affirmation",
+   "physical_touch"
+  ],
+  "conflictStyle": "situational",
+  "togethernessStyle": "in_between",
+  "stressResponse": "get_quiet",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "agnostic",
+  "politicalView": "democrat",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-w-015",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 30,
+  "ageMin": 30,
+  "ageMax": 40,
+  "intent": "open",
+  "bodyType": "athletic",
+  "heightCm": 170,
+  "seekingBodyTypes": [
+   "athletic",
+   "muscular"
+  ],
+  "personalityTraits": [
+   "ambitious",
+   "confident",
+   "grounded",
+   "driven"
+  ],
+  "relationshipValues": [
+   "ambition",
+   "stability",
+   "loyalty"
+  ],
+  "lifestyleTags": [
+   "workaholic",
+   "wellness_focused",
+   "foodie"
+  ],
+  "weekendVibes": [
+   "take_care_of_myself",
+   "cook_something_good",
+   "host_people"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "coffee_addict",
+   "reader",
+   "dog_person",
+   "early_riser"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "power_through",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "cigarette_smoker"
+  ],
+  "religion": "agnostic",
+  "politicalView": "center_right",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-w-016",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 38,
+  "ageMin": 35,
+  "ageMax": 48,
+  "intent": "open",
+  "bodyType": "average",
+  "heightCm": 160,
+  "seekingBodyTypes": [
+   "average",
+   "athletic",
+   "muscular"
+  ],
+  "personalityTraits": [
+   "caring",
+   "empathetic",
+   "loyal",
+   "grounded"
+  ],
+  "relationshipValues": [
+   "trust",
+   "stability",
+   "communication"
+  ],
+  "lifestyleTags": [
+   "wellness_focused",
+   "homebody",
+   "foodie"
+  ],
+  "weekendVibes": [
+   "slow_mornings",
+   "cook_something_good",
+   "recharge_solo"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "cook",
+   "reader",
+   "dog_person",
+   "meditates"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "physical_touch"
+  ],
+  "loveLangReceive": [
+   "quality_time",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "process_first",
+  "togethernessStyle": "in_between",
+  "stressResponse": "get_quiet",
+  "parentalCurrent": "has_kids",
+  "parentalIntent": "doesnt_want_more",
+  "dealbreakers": [
+   "cigarette_smoker",
+   "heavy_drinker"
+  ],
+  "religion": "christian",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy"
+  ]
+ },
+ {
+  "uid": "zbot-w-017",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 26,
+  "ageMin": 25,
+  "ageMax": 32,
+  "intent": "open",
+  "bodyType": "slim",
+  "heightCm": 165,
+  "seekingBodyTypes": [
+   "athletic",
+   "muscular",
+   "average"
+  ],
+  "personalityTraits": [
+   "playful",
+   "passionate",
+   "spontaneous",
+   "sarcastic"
+  ],
+  "relationshipValues": [
+   "passion",
+   "spontaneity",
+   "humor"
+  ],
+  "lifestyleTags": [
+   "social_butterfly",
+   "foodie",
+   "nightlife"
+  ],
+  "weekendVibes": [
+   "out_in_the_city",
+   "nightlife",
+   "live_something"
+  ],
+  "habitTags": [
+   "music_lover",
+   "coffee_addict",
+   "night_owl",
+   "cook",
+   "gym_regular"
+  ],
+  "loveLangGive": [
+   "quality_time",
+   "physical_touch"
+  ],
+  "loveLangReceive": [
+   "words_of_affirmation",
+   "quality_time"
+  ],
+  "conflictStyle": "avoid",
+  "togethernessStyle": "entwined",
+  "stressResponse": "talk_it_out",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "heavy_drinker"
+  ],
+  "religion": "catholic",
+  "politicalView": "center_left",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-w-018",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "women"
+  ],
+  "age": 29,
+  "ageMin": 27,
+  "ageMax": 36,
+  "intent": "open",
+  "bodyType": "athletic",
+  "heightCm": 168,
+  "seekingBodyTypes": [
+   "athletic",
+   "average"
+  ],
+  "personalityTraits": [
+   "ambitious",
+   "genuine",
+   "grounded",
+   "intellectual"
+  ],
+  "relationshipValues": [
+   "growth",
+   "communication",
+   "trust"
+  ],
+  "lifestyleTags": [
+   "creative",
+   "outdoorsy",
+   "wellness_focused"
+  ],
+  "weekendVibes": [
+   "get_outside",
+   "take_care_of_myself",
+   "cook_something_good"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "hiker",
+   "dog_person",
+   "cook",
+   "early_riser"
+  ],
+  "loveLangGive": [
+   "acts_of_service",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "quality_time"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "power_through",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "undecided",
+  "dealbreakers": [
+   "different_politics"
+  ],
+  "religion": "atheist",
+  "politicalView": "democrat",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "monogamy",
+   "something_that_grows"
+  ]
+ },
+ {
+  "uid": "zbot-w-019",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "everyone"
+  ],
+  "age": 24,
+  "ageMin": 22,
+  "ageMax": 32,
+  "intent": "open",
+  "bodyType": "average",
+  "heightCm": 163,
+  "seekingBodyTypes": [
+   "athletic",
+   "average",
+   "muscular"
+  ],
+  "personalityTraits": [
+   "creative",
+   "wild_card",
+   "playful",
+   "passionate"
+  ],
+  "relationshipValues": [
+   "passion",
+   "spontaneity",
+   "independence"
+  ],
+  "lifestyleTags": [
+   "creative",
+   "nightlife",
+   "social_butterfly"
+  ],
+  "weekendVibes": [
+   "live_something",
+   "create_something",
+   "out_in_the_city"
+  ],
+  "habitTags": [
+   "music_lover",
+   "420_friendly",
+   "night_owl",
+   "reader",
+   "coffee_addict"
+  ],
+  "loveLangGive": [
+   "physical_touch",
+   "quality_time"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "situational",
+  "togethernessStyle": "independent",
+  "stressResponse": "get_quiet",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "undecided",
+  "dealbreakers": [
+   "heavy_drinker"
+  ],
+  "religion": "spiritual",
+  "politicalView": "independent",
+  "drinkingHabit": "socially",
+  "openTo": [
+   "casual",
+   "something_that_grows",
+   "ethically_non_mono"
+  ]
+ },
+ {
+  "uid": "zbot-w-020",
+  "genderIdentity": "woman",
+  "attractedTo": [
+   "men"
+  ],
+  "age": 31,
+  "ageMin": 28,
+  "ageMax": 40,
+  "intent": "open",
+  "bodyType": "athletic",
+  "heightCm": 167,
+  "seekingBodyTypes": [
+   "athletic",
+   "muscular"
+  ],
+  "personalityTraits": [
+   "ambitious",
+   "confident",
+   "grounded",
+   "driven"
+  ],
+  "relationshipValues": [
+   "ambition",
+   "growth",
+   "independence"
+  ],
+  "lifestyleTags": [
+   "wellness_focused",
+   "workaholic",
+   "adventurer"
+  ],
+  "weekendVibes": [
+   "take_care_of_myself",
+   "get_outside",
+   "recharge_solo"
+  ],
+  "habitTags": [
+   "gym_regular",
+   "coffee_addict",
+   "early_riser",
+   "meditates",
+   "doesnt_drink"
+  ],
+  "loveLangGive": [
+   "words_of_affirmation",
+   "acts_of_service"
+  ],
+  "loveLangReceive": [
+   "physical_touch",
+   "words_of_affirmation"
+  ],
+  "conflictStyle": "direct",
+  "togethernessStyle": "separate_plus_deep",
+  "stressResponse": "step_back",
+  "parentalCurrent": "no_kids",
+  "parentalIntent": "wants_first",
+  "dealbreakers": [
+   "heavy_drinker",
+   "cigarette_smoker"
+  ],
+  "religion": "agnostic",
+  "politicalView": "independent",
+  "drinkingHabit": "never",
+  "openTo": [
+   "monogamy"
+  ]
+ }
+]

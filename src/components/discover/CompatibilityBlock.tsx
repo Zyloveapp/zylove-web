@@ -276,10 +276,21 @@ function RevealedScore({
   if (!score) {
     return <p className="mt-4 text-sm text-white/40">No compatibility score available yet.</p>
   }
+  // Too little recognized data for a number to mean anything (engine v2).
+  if (score.value === null) {
+    return (
+      <div className="mt-4">
+        <p className="text-2xl font-semibold text-white/70">Not enough info</p>
+        <p className="mt-1 max-w-xs text-xs text-white/40">
+          One of you hasn't answered enough of the profile questions yet for a score that means something.
+        </p>
+      </div>
+    )
+  }
 
   const breakdown = mode === 'play' ? result.breakdown?.play : result.breakdown?.spark
   const withValue = (c: { key: string; label: string }) => ({ ...c, value: hidden.has(c.key) ? undefined : breakdown?.[c.key] })
-  const hasValue = (c: { key: string; label: string; value?: number }): c is { key: string; label: string; value: number } =>
+  const hasValue = (c: { key: string; label: string; value?: number | null }): c is { key: string; label: string; value: number } =>
     typeof c.value === 'number'
   const bars = CATEGORIES[mode].map(withValue).filter(hasValue)
   const insights = fullReport
@@ -302,7 +313,9 @@ function RevealedScore({
   const playLines = isPlay && fullReport && playFacts ? playWhyLines(playFacts) : null
   // Deep Fit replaces the base score as the headline when it's trustworthy.
   const rounded = score.value
-  const qualifier = scoreQualifier(rounded, mode)
+  // Engine v2 Spark scores carry their band label; Play and older scores
+  // keep the old qualifiers.
+  const qualifier = score.label ?? scoreQualifier(rounded, mode)
 
   return (
     <div

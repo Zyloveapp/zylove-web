@@ -4,15 +4,24 @@
 // Field names corrected to match actual Firestore data from onboarding.
 
 import { UserDoc, SparkBreakdown, PlayBreakdown } from "./types";
-import { computeFacetProfile } from "./tier1/facetProfile";
-import { computePairScore } from "./tier1/scorePair";
+import { analyzeFacets, computeFacetProfile } from "./tier1/facetProfile";
+import { computePairScore, DEALBREAKER_CAP, hasEnoughInfo, shrinkToPrior } from "./tier1/scorePair";
+import { calibrateTier0 } from "./tier1/calibration";
 import { matchPlayArchetype } from "./tier1/archetypeMatcher";
 import type { DatingProfile } from "./types";
 
-// Dealbreakers no longer contribute to the weighted Tier 0 score — they
-// drive UI banners (Discover dealbreaker warning, MatchScorecard mirror)
-// and the tier1Spark.combinedScore cap, but are not weighted in.
-// breakdown.dealbreakers is still computed for those display surfaces.
+// The scoring engine's version, stored on every pair score (engineVersion).
+// Bump it with any change to the Spark math, mappings or calibration: onTap
+// re-scores pairs from older versions, and scripts/rescore-pairs.mjs
+// backfills them.
+//   1 — original Tier 0 / Tier 1 (missing data = neutral match, 3× physical)
+//   2 — 2026-10 overhaul: missing data excluded, caps, dealbreakers lower
+//       the score, 27 web answers mapped, calibrated, "Not enough info"
+export const SCORE_ENGINE_VERSION = 2;
+
+// Tier 0 category weights. Categories with no data on one side are left out
+// and the rest renormalized. A triggered dealbreaker halves the score per
+// trigger and caps it (DEALBREAKER_CAP).
 const SPARK_WEIGHTS = {
   coreFit:          0.18,
   valuesIntentions: 0.29,
@@ -36,11 +45,6 @@ function arrayOverlap(a: string[], b: string[]): number {
   const setA    = new Set(a);
   const matches = b.filter(x => setA.has(x)).length;
   return matches / Math.max(a.length, b.length);
-}
-
-function exactMatch(a: unknown, b: unknown): number {
-  if (a == null || b == null) return 0.5;
-  return a === b ? 1 : 0;
 }
 
 // ─── Field accessors ──────────────────────────────────────────────────────────
@@ -187,44 +191,64 @@ function dealbreakersCheck(a: any, b: any): { clean: number; triggered: string[]
   for (const d of bBreakers) {
     if (isDealbreakerTriggered(d, a, b)) triggered.push(d);
   }
-  return { clean: triggered.length === 0 ? 1 : 0, triggered };
+  // Both people can rule out the same thing (e.g. different_politics): list it once.
+  const unique = [...new Set(triggered)];
+  return { clean: unique.length === 0 ? 1 : 0, triggered: unique };
 }
 
 // ─── Spark scoring ────────────────────────────────────────────────────────────
 
-function sparkCoreFitScore(a: any, b: any): number {
-  const scores = [
-    exactMatch((a as any).intent, (b as any).intent),
-    ageCompatibility(a, b),
-    attractionCompatibility(a, b),
-  ];
-  return scores.reduce((x, y) => x + y, 0) / scores.length;
+// Engine v2 helpers: null = no data on one side (excluded, never a match).
+function overlapOrNull(a: unknown, b: unknown): number | null {
+  if (!Array.isArray(a) || !Array.isArray(b) || !a.length || !b.length) return null;
+  return arrayOverlap(a, b);
 }
 
+function exactOrNull(a: unknown, b: unknown): number | null {
+  if (a == null || b == null || a === "" || b === "") return null;
+  return a === b ? 1 : 0;
+}
+
+function mean(xs: (number | null)[]): number | null {
+  const known = xs.filter((x): x is number => x !== null);
+  return known.length ? known.reduce((x, y) => x + y, 0) / known.length : null;
+}
+
+// Viewer's physical criteria vs the target, 0–1; null when none stated.
+function physicalOrNull(viewer: any, target: any): number | null {
+  const scores: number[] = [];
+  if (viewer?.seekingHeightMinCm && viewer?.seekingHeightMaxCm && target?.heightCm) {
+    scores.push(target.heightCm >= viewer.seekingHeightMinCm && target.heightCm <= viewer.seekingHeightMaxCm ? 1 : 0.2);
+  }
+  if (Array.isArray(viewer?.seekingBodyTypes) && viewer.seekingBodyTypes.length && target?.bodyType) {
+    scores.push(viewer.seekingBodyTypes.includes(target.bodyType) ? 1 : 0.3);
+  }
+  return scores.length ? scores.reduce((x, y) => x + y, 0) / scores.length : null;
+}
+
+const pct = (v: number | null): number | null => (v === null ? null : Math.round(v * 100));
+
+const NON_CORE: (keyof typeof SPARK_WEIGHTS)[] = ["valuesIntentions", "physicalPrefs", "loveLanguages", "lifestyle", "personality"];
+
 /**
- * PRE-TIER-1 SCORING — scheduled for replacement in Phase 6.
+ * Spark compatibility for a pair: the Tier 0 score (the headline for most
+ * plans), its category breakdown, triggered dealbreakers, and the Tier 1
+ * "Deep Fit" result (facet-based; Elite and bot pairs see it).
  *
- * This function uses the Tier 0 array-overlap algorithm against raw user
- * fields (relationshipValues, loveLangGive, etc.) and does NOT compute
- * facet vectors or emit archetype classification.
- *
- * The Tier 1 successor is src/services/scorePair.ts, which currently has
- * zero production consumers (archetype-ready infrastructure awaiting
- * cutover).
- *
- * Phase 6 tasks:
- *   - Replace this function's algorithm with Tier 1 facet scoring
- *   - Wire matchSparkArchetype + matchUnlikelyFit
- *   - Backfill archetype field on existing pair docs via migration
- *     Cloud Function (doc Section 11.2)
- *
- * See docs/phase6-checklist.md for full scope.
+ * Both engines: missing data is excluded, not a match; thin evidence pulls
+ * toward EVIDENCE_PRIOR; a dealbreaker caps the score at DEALBREAKER_CAP;
+ * calibration.ts maps the result onto the display scale. `enoughInfo`
+ * (shared by both) says whether the number means anything.
  */
 export function calculateSparkScore(
   userA: UserDoc,
   userB: UserDoc
 ): {
   score: number;
+  enoughInfo: boolean;
+  // Engine output before calibration, shrinkage and caps (for calibration
+  // and audits; never stored or shown).
+  raw: { tier0: number; tier1: number | null };
   breakdown: SparkBreakdown;
   triggeredDealbreakers: string[];
   tier1: {
@@ -232,85 +256,92 @@ export function calculateSparkScore(
     combinedScore:  number;
     asymmetryGap:   number;
     dataConfidence: number;
+    coverage:       number;
+    enoughInfo:     boolean;
   } | null;
 } {
   const a = userA as any;
   const b = userB as any;
 
   const dealbreakerResult = dealbreakersCheck(a, b);
+  const attraction = attractionCompatibility(a, b);
 
   const breakdown: SparkBreakdown = {
-    coreFit:      Math.round(sparkCoreFitScore(a, b) * 100),
+    coreFit: Math.round((mean([exactOrNull(a.intent, b.intent), ageCompatibility(a, b), attraction]) ?? 0) * 100),
     dealbreakers: dealbreakerResult.clean * 100,
-
-    valuesIntentions: Math.round(arrayOverlap(
-      [...(a.relationshipValues ?? []), a.intent ?? ''],
-      [...(b.relationshipValues ?? []), b.intent ?? '']
-    ) * 100),
-
-    physicalPrefs: Math.round(
-      ((physicalPrefScore(a, b) + physicalPrefScore(b, a)) / 2) * 100
-    ),
-
+    valuesIntentions: pct(overlapOrNull(a.relationshipValues, b.relationshipValues)),
+    physicalPrefs: pct(mean([physicalOrNull(a, b), physicalOrNull(b, a)])),
     // Cross-match love languages: a gives what b receives and vice versa
-    loveLanguages: Math.round(
-      ((arrayOverlap(a.loveLangGive ?? [], b.loveLangReceive ?? []) +
-        arrayOverlap(b.loveLangGive ?? [], a.loveLangReceive ?? [])) / 2) * 100
-    ),
-
-    lifestyle: Math.round(arrayOverlap(
-      a.weekendVibes ?? [],
-      b.weekendVibes ?? []
-    ) * 100),
-
-    personality: Math.round(arrayOverlap(
-      a.personalityTraits ?? [],
-      b.personalityTraits ?? []
-    ) * 100),
+    loveLanguages: pct(mean([overlapOrNull(a.loveLangGive, b.loveLangReceive), overlapOrNull(b.loveLangGive, a.loveLangReceive)])),
+    lifestyle: pct(overlapOrNull(a.weekendVibes, b.weekendVibes)),
+    personality: pct(overlapOrNull(a.personalityTraits, b.personalityTraits)),
   };
 
-  const score = Math.round(
-    breakdown.coreFit          * SPARK_WEIGHTS.coreFit +
-    breakdown.valuesIntentions * SPARK_WEIGHTS.valuesIntentions +
-    breakdown.physicalPrefs    * SPARK_WEIGHTS.physicalPrefs +
-    breakdown.loveLanguages    * SPARK_WEIGHTS.loveLanguages +
-    breakdown.lifestyle        * SPARK_WEIGHTS.lifestyle +
-    breakdown.personality      * SPARK_WEIGHTS.personality
-  );
+  // Shared facet evidence decides "Not enough info" for both engines.
+  const facetsA = analyzeFacets(a as unknown as DatingProfile);
+  const facetsB = analyzeFacets(b as unknown as DatingProfile);
 
-  // ── Tier 1 metadata (additive, fail-open) ──────────────────────────────
+  // Tier 0 raw: weighted average of the categories with data on both sides.
+  const parts: [number, number][] = [[SPARK_WEIGHTS.coreFit, breakdown.coreFit]];
+  for (const k of NON_CORE) {
+    const v = breakdown[k];
+    if (v !== null) parts.push([SPARK_WEIGHTS[k], v]);
+  }
+  const raw0 = attraction === 0 ? 0 : parts.reduce((n, [w, v]) => n + w * v, 0) / parts.reduce((n, [w]) => n + w, 0);
+
+  // ── Tier 1 (fail-open) ──────────────────────────────────────────────────
   let tier1: {
     archetype:      unknown;
     combinedScore:  number;
     asymmetryGap:   number;
     dataConfidence: number;
+    coverage:       number;
+    enoughInfo:     boolean;
   } | null = null;
+  // Shared facet evidence (0–1) — the one measure of how much we know, for
+  // both engines. 0 if Tier 1 fails, so Tier 0 falls to the prior.
+  let coverage = 0;
+  let raw1: number | null = null;
   try {
-    const aVec = computeFacetProfile(a as unknown as DatingProfile);
-    const bVec = computeFacetProfile(b as unknown as DatingProfile);
-    const pair = computePairScore(a as unknown as DatingProfile, b as unknown as DatingProfile, aVec, bVec);
+    const pair = computePairScore(a as unknown as DatingProfile, b as unknown as DatingProfile, facetsA, facetsB);
+    coverage = pair.coverage;
+    raw1 = pair.combinedRaw;
+    // Tier 0's dealbreakers (habits, drinking, kids…) cap Deep Fit too; Tier 1
+    // only sees the facet-shaped ones.
+    const combined = dealbreakerResult.triggered.length > 0 ? Math.min(DEALBREAKER_CAP, pair.combinedScore) : pair.combinedScore;
     tier1 = {
       archetype:      pair.archetype,
-      // Cap at 100 when a dealbreaker fired — Tier 1 facet scoring can
-      // exceed 100 from bonus stacking, but a triggered dealbreaker should
-      // never display as a >100% match. dealbreakerResult is in scope from
-      // earlier in calculateSparkScore.
-      combinedScore:  dealbreakerResult.triggered.length > 0
-        ? Math.min(100, pair.combinedScore)
-        : pair.combinedScore,
+      combinedScore:  combined,
       asymmetryGap:   pair.asymmetryData.gap,
       dataConfidence: pair.dataConfidence,
+      coverage:       pair.coverage,
+      enoughInfo:     pair.enoughInfo,
     };
   } catch (err) {
-    console.warn("[scoring] Tier 1 metadata computation failed", err);
+    console.warn("[scoring] Tier 1 computation failed", err);
   }
 
+  let score = attraction === 0 ? 0 : shrinkToPrior(calibrateTier0(raw0), coverage);
+  const n = dealbreakerResult.triggered.length;
+  if (n > 0) score = Math.min(DEALBREAKER_CAP, score * Math.pow(0.5, n));
+
   return {
-    score: Math.min(100, Math.max(0, score)),
+    score: Math.round(Math.min(100, Math.max(0, score))),
+    enoughInfo: attraction !== 0 && hasEnoughInfo(coverage, facetsA.recognized, facetsB.recognized),
+    raw: { tier0: raw0, tier1: raw1 },
     breakdown,
     triggeredDealbreakers: dealbreakerResult.triggered,
     tier1,
   };
+}
+
+// The pair-doc fields for a Spark result (the headline the free plan sees).
+export function sparkPairFields(result: ReturnType<typeof calculateSparkScore>): {
+  sparkScore: number;
+  sparkEnoughInfo: boolean;
+  engineVersion: number;
+} {
+  return { sparkScore: result.score, sparkEnoughInfo: result.enoughInfo, engineVersion: SCORE_ENGINE_VERSION };
 }
 
 // ─── Play scoring ─────────────────────────────────────────────────────────────

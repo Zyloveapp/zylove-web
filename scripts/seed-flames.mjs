@@ -1,7 +1,7 @@
-// One-time dev seed: bot likes in the dev account's Flames (Play) queue.
+// Dev seed: bot likes in an account's Flames (Play) queue.
 //
-//   node scripts/seed-flames.mjs                   write 5 entries
-//   node scripts/seed-flames.mjs --dry-run         show what would be written
+//   node scripts/seed-flames.mjs --target=<uid>             write 5 entries
+//   node scripts/seed-flames.mjs --target=<uid> --dry-run   show what would be written
 //   node scripts/seed-flames.mjs --range=1-20      pick from zbot-w-001…020 (the default)
 //   node scripts/seed-flames.mjs --pick=zbot-w-003,zbot-w-018
 //                                                  write exactly these bots (e.g. a dry run's picks)
@@ -23,7 +23,12 @@ const { initializeApp, cert, applicationDefault } = require('firebase-admin/app'
 const { getFirestore } = require('firebase-admin/firestore')
 
 const PROJECT_ID = 'zylove'
-const TARGET_UID = 'ipKWm5GSY6VrGLIErDBA6Zj61W62'
+// Whose queue to seed — required, so no account is hard-coded here.
+const TARGET_UID = arg('target')
+if (!TARGET_UID || TARGET_UID.includes('/')) {
+  console.error('Pass --target=<uid> (the account whose queue gets the likes).')
+  process.exit(1)
+}
 function arg(name) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
   return hit ? hit.slice(name.length + 3) : null
@@ -83,16 +88,20 @@ const picked = PICKS ? candidates : shuffle(candidates).slice(0, COUNT)
 if (picked.length < COUNT && !PICKS) console.log(`Only ${picked.length} eligible bots (wanted ${COUNT})`)
 
 for (const { botUid, bot, play } of picked) {
-  const playPhotos = strings(play.photoURLs)
-  const photoURLs = playPhotos.length > 0 ? playPhotos : strings(bot.photoURLs)
-  const score = Math.floor(Math.random() * 31) + 65 // 65–95
+  // Play photos only — never the Spark ones (mode sealing).
+  const photoURLs = strings(play.photoURLs)
+  if (photoURLs.length === 0) {
+    console.log(`skip ${botUid}: no Play photos`)
+    continue
+  }
   const entry = {
     likerUid: botUid,
     likedAt: Date.now(),
     mode: 'play',
     dismissed: false,
     isExpired: false,
-    compatibilityScore: score,
+    // No score: the app scores bot likes with the real engine (onTap).
+    compatibilityScore: null,
     likerProfile: {
       displayName: bot.displayName || 'Unknown',
       photoURLs,
@@ -108,7 +117,7 @@ for (const { botUid, bot, play } of picked) {
   if (!DRY_RUN) await db.doc(`users/${TARGET_UID}/likeQueue/${botUid}`).set(entry)
   const p = entry.likerProfile
   console.log(
-    `${DRY_RUN ? 'would write' : 'wrote'} ${botUid}: ${p.displayName}, ${p.age} · ${score}% · ` +
+    `${DRY_RUN ? 'would write' : 'wrote'} ${botUid}: ${p.displayName}, ${p.age} · ` +
       `${photoURLs.length} photo(s) · spice: ${p.spiceLevel ?? '—'} · ${p.playInterestTags.length} tags · "${p.playBio}"`,
   )
 }

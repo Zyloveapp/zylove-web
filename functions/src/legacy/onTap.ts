@@ -3,7 +3,7 @@
 // settings (legacyOptions.ts) are new.
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { calculateSparkScore, calculatePlayScore } from "./scoring";
+import { calculateSparkScore, calculatePlayScore, SCORE_ENGINE_VERSION, sparkPairFields } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
@@ -43,15 +43,18 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   const full = bot || atLeast(tier, "spark_plus");
   const deep = bot || tier === "elite";
 
-  // Return cached score if pair already exists
+  // Return the cached score if the pair exists and was scored by the current
+  // engine; older engine versions are re-scored below (merged into the doc).
   const existing = await pairRef.get();
-  if (existing.exists) {
+  if (existing.exists && (existing.data() as PairDoc).engineVersion === SCORE_ENGINE_VERSION) {
     const data = existing.data() as PairDoc;
     const playScores = play ? await loadPlayScores(pid, data) : undefined;
     const details = full ? await loadSparkDetails(pid, data) : null;
     return {
       pairId:     pid,
       sparkScore: data.sparkScore,
+      sparkEnoughInfo: data.sparkEnoughInfo !== false,
+      engineVersion: data.engineVersion,
       ...(playScores && { playScore: playScores.playScore }),
       breakdown:  { ...(details && { spark: details.sparkBreakdown }), ...(playScores && { play: playScores.playBreakdown }) },
       triggeredDealbreakers: details?.triggeredDealbreakers ?? [],
@@ -85,22 +88,32 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   const tapperFull = { ...tapperDoc, ...tapperPlay, playProfile: tapperPlay } as UserDoc;
   const tappedFull = { ...tappedDoc, ...tappedPlay, playProfile: tappedPlay } as UserDoc;
 
-  const { score: sparkScore, breakdown: sparkBreakdown, triggeredDealbreakers, tier1: sparkTier1 } = calculateSparkScore(tapperDoc,  tappedDoc);
+  const spark = calculateSparkScore(tapperDoc, tappedDoc);
+  const { score: sparkScore, breakdown: sparkBreakdown, triggeredDealbreakers, tier1: sparkTier1 } = spark;
   const playResult = play ? calculatePlayScore(tapperFull, tappedFull) : null;
 
   const [userA, userB] = [tapperId, tappedId].sort();
 
-  const pairData: PairDoc = {
-    userA,
-    userB,
-    createdAt:         admin.firestore.Timestamp.now(),
-    sparkScore,
-    scoreCalculatedAt: admin.firestore.Timestamp.now(),
-    scoreVersion:      1,
-  };
-
   const batch = db.batch();
-  batch.set(pairRef, pairData);
+  if (existing.exists) {
+    // Re-score from an older engine: keep everything else on the pair
+    // (likes, reveals, match state).
+    batch.update(pairRef, {
+      ...sparkPairFields(spark),
+      scoreCalculatedAt: admin.firestore.Timestamp.now(),
+      scoreVersion:      admin.firestore.FieldValue.increment(1),
+    });
+  } else {
+    const pairData: PairDoc = {
+      userA,
+      userB,
+      createdAt:         admin.firestore.Timestamp.now(),
+      ...sparkPairFields(spark),
+      scoreCalculatedAt: admin.firestore.Timestamp.now(),
+      scoreVersion:      1,
+    };
+    batch.set(pairRef, pairData);
+  }
   writeSparkDetails(batch, pid, { breakdown: sparkBreakdown, dealbreakers: triggeredDealbreakers, tier1: sparkTier1 }, false);
   await batch.commit();
   if (playResult) await setPlayScores(pid, playFields(playResult.score, playResult.breakdown, playResult.tier1));
@@ -108,6 +121,8 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   return {
     pairId: pid,
     sparkScore,
+    sparkEnoughInfo: spark.enoughInfo,
+    engineVersion: SCORE_ENGINE_VERSION,
     ...(playResult && { playScore: playResult.score }),
     breakdown: { ...(full && { spark: sparkBreakdown }), ...(playResult && { play: playResult.breakdown }) },
     triggeredDealbreakers: full ? triggeredDealbreakers : [],

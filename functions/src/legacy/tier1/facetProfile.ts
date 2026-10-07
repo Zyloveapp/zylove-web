@@ -83,10 +83,26 @@ function normalize(raw: number, scale: number): number {
  * __DEV__ surfaces them as warnings so trait-enum drift is visible during
  * development without breaking user-facing flows.
  */
+// Running totals for one user: the signed raw weight per facet, the
+// evidence per facet (sum of |weight| — how much the user told us about it,
+// whatever the direction), and how many answers mapped to anything.
+interface Accumulator {
+  raw:        Record<string, number>
+  evidence:   Record<string, number>
+  recognized: number
+}
+
+function add(acc: Accumulator, contributions: readonly FacetWeight[]): void {
+  for (const { facet, weight } of contributions) {
+    acc.raw[facet] = (acc.raw[facet] ?? 0) + weight
+    acc.evidence[facet] = (acc.evidence[facet] ?? 0) + Math.abs(weight)
+  }
+}
+
 function accumulate(
   values: readonly string[] | undefined,
   map:    Readonly<Record<string, FacetWeight[]>>,
-  raw:    Record<string, number>,
+  acc:    Accumulator,
   categoryLabel: string,
 ): void {
   if (!Array.isArray(values) || values.length === 0) return
@@ -98,9 +114,8 @@ function accumulate(
       }
       continue
     }
-    for (const { facet, weight } of contributions) {
-      raw[facet] = (raw[facet] ?? 0) + weight
-    }
+    acc.recognized++
+    add(acc, contributions)
   }
 }
 
@@ -113,7 +128,7 @@ function accumulate(
 function accumulateSingle<T extends string>(
   value: T | null | undefined,
   map:   Readonly<Record<T, FacetWeight[]>>,
-  raw:   Record<string, number>,
+  acc:   Accumulator,
   categoryLabel: string,
 ): void {
   if (!value) return
@@ -124,9 +139,8 @@ function accumulateSingle<T extends string>(
     }
     return
   }
-  for (const { facet, weight } of contributions) {
-    raw[facet] = (raw[facet] ?? 0) + weight
-  }
+  acc.recognized++
+  add(acc, contributions)
 }
 
 /** Builds the ShadowContext consumed by conditional shadow facet evaluators. */
@@ -144,6 +158,16 @@ function buildShadowContext(user: DatingProfile): ShadowContext {
 
 // ─── Public API ───────────────────────────────────────────────────────────
 
+export interface FacetAnalysis {
+  vector:     FacetVector
+  // Per facet: how much mapped input the user gave (0 = nothing — the 0.5 in
+  // `vector` is then "no information", not a measured midpoint).
+  evidence:   Record<FacetId, number>
+  // Answers that mapped to at least one facet (list items and single-choice
+  // questions; dealbreaker shadows don't count).
+  recognized: number
+}
+
 /**
  * Computes a user's 32-dimensional psychological facet vector from their
  * declared onboarding data.
@@ -156,26 +180,31 @@ function buildShadowContext(user: DatingProfile): ShadowContext {
  * "no information" rather than "low expression everywhere."
  */
 export function computeFacetProfile(user: DatingProfile): FacetVector {
-  // Initialize raw accumulator at zero for every canonical facet.
-  const raw: Record<string, number> = {}
+  return analyzeFacets(user).vector
+}
+
+/** The facet vector plus the evidence behind it (see FacetAnalysis). */
+export function analyzeFacets(user: DatingProfile): FacetAnalysis {
+  const acc: Accumulator = { raw: {}, evidence: {}, recognized: 0 }
   for (const facetId of ALL_FACET_IDS) {
-    raw[facetId] = 0
+    acc.raw[facetId] = 0
+    acc.evidence[facetId] = 0
   }
 
   // Per-category trait contributions. Each helper is defensive against
   // missing arrays / unknown values — no single bad field breaks the vector.
-  accumulate((user as any).personalityTraits,  PERSONALITY_TRAIT_FACET_MAP,  raw, 'personalityTrait')
-  accumulate((user as any).relationshipValues, RELATIONSHIP_VALUE_FACET_MAP, raw, 'relationshipValue')
-  accumulate((user as any).lifestyleTags,      LIFESTYLE_TAG_FACET_MAP,      raw, 'lifestyleTag')
-  accumulate((user as any).loveLangGive,       LOVE_LANG_GIVE_FACET_MAP,     raw, 'loveLangGive')
-  accumulate((user as any).loveLangReceive,    LOVE_LANG_RECEIVE_FACET_MAP,  raw, 'loveLangReceive')
-  accumulate((user as any).weekendVibes,       WEEKEND_VIBE_FACET_MAP,       raw, 'weekendVibe')
-  accumulate((user as any).habitTags,          HABIT_TAG_FACET_MAP,          raw, 'habitTag')
-  accumulateSingle(user.conflictStyle,     CONFLICT_STYLE_FACET_MAP,     raw, 'conflictStyle')
-  accumulateSingle(user.togethernessStyle, TOGETHERNESS_STYLE_FACET_MAP, raw, 'togethernessStyle')
-  accumulateSingle(user.stressResponse,    STRESS_RESPONSE_FACET_MAP,    raw, 'stressResponse')
-  accumulateSingle(user.parentalCurrent,   PARENTAL_CURRENT_FACET_MAP,   raw, 'parentalCurrent')
-  accumulateSingle(user.parentalIntent,    PARENTAL_INTENT_FACET_MAP,    raw, 'parentalIntent')
+  accumulate((user as any).personalityTraits,  PERSONALITY_TRAIT_FACET_MAP,  acc, 'personalityTrait')
+  accumulate((user as any).relationshipValues, RELATIONSHIP_VALUE_FACET_MAP, acc, 'relationshipValue')
+  accumulate((user as any).lifestyleTags,      LIFESTYLE_TAG_FACET_MAP,      acc, 'lifestyleTag')
+  accumulate((user as any).loveLangGive,       LOVE_LANG_GIVE_FACET_MAP,     acc, 'loveLangGive')
+  accumulate((user as any).loveLangReceive,    LOVE_LANG_RECEIVE_FACET_MAP,  acc, 'loveLangReceive')
+  accumulate((user as any).weekendVibes,       WEEKEND_VIBE_FACET_MAP,       acc, 'weekendVibe')
+  accumulate((user as any).habitTags,          HABIT_TAG_FACET_MAP,          acc, 'habitTag')
+  accumulateSingle(user.conflictStyle,     CONFLICT_STYLE_FACET_MAP,     acc, 'conflictStyle')
+  accumulateSingle(user.togethernessStyle, TOGETHERNESS_STYLE_FACET_MAP, acc, 'togethernessStyle')
+  accumulateSingle(user.stressResponse,    STRESS_RESPONSE_FACET_MAP,    acc, 'stressResponse')
+  accumulateSingle(user.parentalCurrent,   PARENTAL_CURRENT_FACET_MAP,   acc, 'parentalCurrent')
+  accumulateSingle(user.parentalIntent,    PARENTAL_INTENT_FACET_MAP,    acc, 'parentalIntent')
 
   // Shadow facet adjustments — "what you reject informs who you are".
   // Conditional shadows (wants_kids, different_religion) are resolved against
@@ -191,18 +220,19 @@ export function computeFacetProfile(user: DatingProfile): FacetVector {
         }
         continue
       }
-      const contributions = resolveShadowFacets(shadow, ctx)
-      for (const { facet, weight } of contributions) {
-        raw[facet] = (raw[facet] ?? 0) + weight
-      }
+      add(acc, resolveShadowFacets(shadow, ctx))
     }
   }
 
   // Normalize each raw accumulation into [0, 1] facet space.
   const vector: Record<string, number> = {}
   for (const facetId of ALL_FACET_IDS) {
-    vector[facetId] = normalize(raw[facetId] ?? 0, SCALE)
+    vector[facetId] = normalize(acc.raw[facetId] ?? 0, SCALE)
   }
 
-  return vector as FacetVector
+  return {
+    vector:     vector as FacetVector,
+    evidence:   acc.evidence as Record<FacetId, number>,
+    recognized: acc.recognized,
+  }
 }

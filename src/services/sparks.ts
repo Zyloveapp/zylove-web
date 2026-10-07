@@ -163,6 +163,8 @@ interface SentSparkRaw {
   age: number | null
   photoURL: string | null
   sparkScore: number | null
+  sparkEnoughInfo: boolean | null
+  engineVersion: number | null
   playScore: number | null
   tier1Spark: unknown
   likedAt: number
@@ -181,6 +183,8 @@ export async function fetchSentSparks(mode: Mode): Promise<SentSpark[]> {
       {
         pairId: '',
         sparkScore: s.sparkScore ?? undefined,
+        sparkEnoughInfo: s.sparkEnoughInfo ?? undefined,
+        engineVersion: s.engineVersion ?? undefined,
         playScore: s.playScore ?? undefined,
         tier1: parseTier1(s.tier1Spark),
       },
@@ -245,6 +249,8 @@ interface CuriousRaw {
   locationLabel: string | null
   intent: string | null
   sparkScore: number | null
+  sparkEnoughInfo: boolean | null
+  engineVersion: number | null
   playScore: number | null
   tier1Spark: unknown
 }
@@ -270,7 +276,14 @@ export async function fetchCurious(mode: Mode): Promise<CuriousResult> {
         intent: (v.intent ?? undefined) as DiscoverProfile['intent'],
       },
       score: displayScore(
-        { pairId: '', sparkScore: v.sparkScore ?? undefined, playScore: v.playScore ?? undefined, tier1: parseTier1(v.tier1Spark) },
+        {
+          pairId: '',
+          sparkScore: v.sparkScore ?? undefined,
+          sparkEnoughInfo: v.sparkEnoughInfo ?? undefined,
+          engineVersion: v.engineVersion ?? undefined,
+          playScore: v.playScore ?? undefined,
+          tier1: parseTier1(v.tier1Spark),
+        },
         mode,
       ),
     })),

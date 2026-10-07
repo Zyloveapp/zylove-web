@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore } from '../store/modeStore'
-import SparksList, { CuriousList, SentList } from '../components/matches/SparksList'
+import SparksList, { CuriousList, SentList, type CardScore } from '../components/matches/SparksList'
 import SparkProfileView from '../components/matches/SparkProfileView'
 import MatchOverlay, { type NewMatch } from '../components/discover/MatchOverlay'
 import { subscribeMatches, type MatchEntry } from '../services/matches'
@@ -41,7 +41,7 @@ export default function Sparks() {
   const [sent, setSent] = useState<{ key: string; list: SentSpark[] | null; error: boolean } | null>(null)
   const [selected, setSelected] = useState<SparkEntry | null>(null)
   // Calculated scores for sparks opened this session, keyed by likerUid.
-  const [scores, setScores] = useState<{ key: string; map: Map<string, number> }>({ key, map: new Map() })
+  const [scores, setScores] = useState<{ key: string; map: Map<string, CardScore> }>({ key, map: new Map() })
   const [newMatch, setNewMatch] = useState<NewMatch | null>(null)
   const sparksAllowed = useCanAccess('sparks')
   // Bumped by "Try again" to re-run a failed load.
@@ -140,9 +140,10 @@ export default function Sparks() {
           const score = displayScore(result, mode)
           if (cancelled || !score) return
           setScores((prev) => {
-            if (prev.key === key && prev.map.get(likerUid) === score.value) return prev
+            const value = score.value ?? 'nei'
+            if (prev.key === key && prev.map.get(likerUid) === value) return prev
             const map = new Map(prev.key === key ? prev.map : [])
-            map.set(likerUid, score.value)
+            map.set(likerUid, value)
             return { key, map }
           })
         })
@@ -161,7 +162,7 @@ export default function Sparks() {
     if (live.length < TOP_PICKS_MIN_SPARKS) return null
     return live
       .map((s) => ({ s, score: syncedScores?.get(s.likerUid) ?? s.compatibilityScore }))
-      .filter((x): x is { s: SparkEntry; score: number } => x.score !== null)
+      .filter((x): x is { s: SparkEntry; score: number } => typeof x.score === 'number')
       .sort((a, b) => b.score - a.score)
       .slice(0, TOP_PICKS_COUNT)
       .map((x) => x.s)
@@ -195,7 +196,7 @@ export default function Sparks() {
         if (!score) return
         setScores((prev) => {
           const map = new Map(prev.key === key ? prev.map : [])
-          map.set(spark.likerUid, score.value)
+          map.set(spark.likerUid, score.value ?? 'nei')
           return { key, map }
         })
       })

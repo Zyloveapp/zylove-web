@@ -18,9 +18,15 @@ function expiresIn(expiresAt: number): string {
   return hours >= 1 ? `Expires in ${hours}h` : `Expires in ${Math.max(1, Math.floor(ms / 60_000))}m`
 }
 
+// A card's score: a percentage, or 'nei' — "Not enough info" (engine v2).
+export type CardScore = number | 'nei'
+
 // null score: still being calculated (a neutral placeholder).
-function ScorePill({ score, mode }: { score: number | null; mode: Mode }) {
+function ScorePill({ score, mode }: { score: CardScore | null; mode: Mode }) {
   const tone = mode === 'play' ? 'border-[#E03131]/40 bg-[#E03131]/15 text-red-300' : 'border-[#1B4FD8]/40 bg-[#1B4FD8]/15 text-[#9DB4FF]'
+  if (score === 'nei') {
+    return <span className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold ${tone}`}>Not enough info</span>
+  }
   if (score === null) {
     return (
       <span className={`shrink-0 animate-pulse rounded-full border px-2.5 py-1 text-sm font-bold ${tone}`} aria-label="Score loading">
@@ -95,7 +101,7 @@ interface SparksListProps {
   onSelect: (spark: SparkEntry) => void
   // Real scores (likerUid → %) from onTap: cards whose profile has been
   // opened, and every bot (whose like carries no trustworthy score).
-  scores?: Map<string, number>
+  scores?: Map<string, CardScore>
   // Top Picks tab: adds the gold "✦ Top Pick" label to every card.
   topPicks?: boolean
 }
@@ -138,7 +144,7 @@ function SparkCard({
   spark: SparkEntry
   mode: Mode
   matched: boolean
-  score: number | null
+  score: CardScore | null
   onSelect: () => void
   topPick: boolean
 }) {
@@ -209,7 +215,7 @@ export function SentList({ sent, mode }: { sent: SentSpark[]; mode: Mode }) {
             </span>
             {s.likedAt > 0 && <span className="text-xs text-white/30">Sent {relativeTime(s.likedAt)}</span>}
           </span>
-          {s.score && <ScorePill score={s.score.value} mode={mode} />}
+          {s.score && <ScorePill score={s.score.value ?? 'nei'} mode={mode} />}
         </li>
       ))}
     </ul>
@@ -271,7 +277,7 @@ export function CuriousList({
           photo={v.profile.photoURLs?.[0]}
           mode={mode}
           onSelect={() => onSelect(v.uid)}
-          score={v.score ? <ScorePill score={v.score.value} mode={mode} /> : null}
+          score={v.score ? <ScorePill score={v.score.value ?? 'nei'} mode={mode} /> : null}
         >
           <span className={`block text-xs font-semibold ${play ? 'text-red-300' : 'text-[#9DB4FF]'}`}>
             Revealed your compatibility {symbol}

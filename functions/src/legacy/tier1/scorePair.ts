@@ -12,23 +12,23 @@
 // combined score, reflecting relationship reality: the less-invested side limits
 // mutual growth, but strong pull on one side still contributes.
 //
-// Over-100% scores are POSSIBLE and NOT CLAMPED. Option-C physical amplification
-// (3× / 2× / 1.5× multiplier on physical component when viewer's stated criteria
-// are fully/mostly/partly satisfied) stacks with exceptional facet alignment
-// and zero dealbreakers to push scoreAB above 100. UI must handle three-digit
-// rendering — flagged for later UI work, not File 4's concern.
+// Engine v2 (2026-10, the scoring overhaul):
+//   - Missing data is excluded, never a match: a facet counts only when both
+//     people gave evidence for it, and a component (physical, intent) only
+//     when it can be computed. Weights renormalize over what's left.
+//   - No physical amplification: physical fit is 0–1 like everything else.
+//   - Each direction is capped at 100 before combining.
+//   - The result is mapped onto the display scale by calibration.ts; then
+//     thin evidence pulls it toward a low prior (EVIDENCE_PRIOR), and
+//     `enoughInfo` tells the UI to show "Not enough info" instead.
+//   - Any triggered dealbreaker caps the pair at DEALBREAKER_CAP.
 //
 // Hard-zero behavior: ONLY orientation/attraction mismatch zeros the score.
-// Physical preference mismatch applies a minor deduction (max 0.1), never
-// craters. Dealbreaker triggers are soft repulsions — 0.2 multiplier per
-// trigger on the psychological component, preserving physical + intent
-// contributions (so a single dealbreaker-triggered pair shows ~45% ceiling,
-// not zero).
 //
 // Combined score math
 // ───────────────────
-// combinedScore = 0.4 * max(scoreAB, scoreBA) + 0.6 * min(scoreAB, scoreBA)
-// Example: A→B 95, B→A 73 → 0.4×95 + 0.6×73 = 38 + 43.8 = 81.8 ≈ 82
+// combinedRaw = 0.4 * max(scoreAB, scoreBA) + 0.6 * min(scoreAB, scoreBA),
+// then evidence shrinkage, the dealbreaker cap and calibration → combinedScore.
 //
 // Dependencies
 // ────────────
@@ -47,7 +47,8 @@ import {
   DEALBREAKER_REPULSION_MAP,
   type DealbreakerRepulsion,
 } from './traitToFacetMap'
-import type { FacetVector } from './facetProfile'
+import type { FacetAnalysis, FacetVector } from './facetProfile'
+import { calibrateTier1 } from './calibration'
 import type { DatingProfile, Dealbreaker } from '../types'
 import { matchSparkArchetype, matchUnlikelyFit } from './archetypeMatcher'
 import type { ArchetypeMatch } from './archetypes'
@@ -57,8 +58,8 @@ import type { ArchetypeMatch } from './archetypes'
 export interface PairScoreResult {
   // A→B asymmetric score — how well B fits A's preferences + values
   scoreAB:                 number
-  baseScoreAB:             number
-  physicalScoreAB:         number
+  baseScoreAB:             number | null // null: no shared facets
+  physicalScoreAB:         number | null // null: no criteria stated
   intentScoreAB:           number
   dealbreakerMultiplierAB: number
   triggeredDealbreakersAB: string[]
@@ -66,15 +67,23 @@ export interface PairScoreResult {
 
   // B→A asymmetric score — how well A fits B's preferences + values
   scoreBA:                 number
-  baseScoreBA:             number
-  physicalScoreBA:         number
+  baseScoreBA:             number | null // null: no shared facets
+  physicalScoreBA:         number | null // null: no criteria stated
   intentScoreBA:           number
   dealbreakerMultiplierBA: number
   triggeredDealbreakersBA: string[]
   facetScoresBA:           Record<FacetId, number>
 
-  // Combined metric for post-match reveal
+  // Combined metric for post-match reveal: calibrated display score (0–100).
   combinedScore:           number
+  // Before calibration, shrinkage and the dealbreaker cap (0–100) — what
+  // scripts/calibrate-scores.mjs fits the curve to.
+  combinedRaw:             number
+  // Share of facet weight both people gave evidence for (0–1).
+  coverage:                number
+  // Both people answered enough recognized questions, and the shared
+  // evidence covers enough of the facet weight, for a number to mean much.
+  enoughInfo:              boolean
 
   // For archetype classifier (File 5) — direct asymmetry inspection
   asymmetryData: {
@@ -84,7 +93,7 @@ export interface PairScoreResult {
     weightedMin:      number
   }
 
-  // Forward-looking hook — min data completeness across both users
+  // Kept for older readers: equals `coverage` in engine v2.
   dataConfidence:          number
 
   // Phase 4 — best-matching archetype for this pair, or null if no
@@ -149,6 +158,29 @@ const W_INTENT        = 0.30
 // 1 triggered = 0.2, 2 triggered = 0.04, none = 1.0 (no repulsion).
 const DEALBREAKER_PENALTY_PER_TRIGGER = 0.2
 
+// A pair with a triggered dealbreaker (either direction) never shows above
+// this, whatever else lines up.
+export const DEALBREAKER_CAP = 35
+
+// Evidence: below FULL_COVERAGE of shared facet weight the calibrated score
+// is pulled toward EVIDENCE_PRIOR (display scale) in proportion — none at
+// all → the prior. "Not enough info" below MIN_COVERAGE, or when either
+// person has fewer than MIN_RECOGNIZED recognized answers. Both engines use
+// this one measure of evidence.
+export const EVIDENCE_PRIOR = 30
+export const FULL_COVERAGE = 0.6
+export const MIN_COVERAGE = 0.5
+export const MIN_RECOGNIZED = 8
+
+export function shrinkToPrior(score: number, coverage: number): number {
+  const k = Math.max(0, Math.min(1, coverage / FULL_COVERAGE))
+  return EVIDENCE_PRIOR + (score - EVIDENCE_PRIOR) * k
+}
+
+export function hasEnoughInfo(coverage: number, recognizedA: number, recognizedB: number): boolean {
+  return coverage >= MIN_COVERAGE && recognizedA >= MIN_RECOGNIZED && recognizedB >= MIN_RECOGNIZED
+}
+
 // Combined score blend: 40% to the higher side, 60% to the lower side.
 // Reflects that the less-invested partner limits mutual growth while still
 // honoring that strong pull on one side contributes something.
@@ -171,8 +203,9 @@ function validateFacetVector(vector: FacetVector, name: string): void {
 
 // ─── Intent / attraction helpers (copied from legacy compatibility.ts) ────
 
-function exactMatch(a: unknown, b: unknown): number {
-  if (a == null || b == null) return 0.5
+// null when either side is unknown — excluded, not a half match.
+function exactMatch(a: unknown, b: unknown): number | null {
+  if (a == null || b == null || a === '' || b === '') return null
   return a === b ? 1 : 0
 }
 
@@ -257,68 +290,31 @@ function attractionCompatibility(a: any, b: any): number {
 // agreement, mutual age range fit, and mutual attraction. Symmetric by
 // construction — arguments commute.
 function intentScore(a: DatingProfile, b: DatingProfile, attractionValue: number): number {
-  const intent = exactMatch((a as any).intent, (b as any).intent)
-  const age    = ageCompatibility(a, b)
-  return (intent + age + attractionValue) / 3
+  const parts = [exactMatch((a as any).intent, (b as any).intent), ageCompatibility(a, b), attractionValue]
+    .filter((x): x is number => x !== null)
+  return parts.reduce((x, y) => x + y, 0) / parts.length
 }
 
 // ─── Physical scoring with Option C amplification ─────────────────────────
 
 /**
- * Computes viewer's physical score for target. Two components:
- *  - basePhysical: [0, 1] average fit across stated criteria (existing logic)
- *  - amplification: multiplier based on how many criteria were satisfied
- *
- * Criteria: height range (seekingHeightMinCm/MaxCm vs target.heightCm) and
- * body type (seekingBodyTypes vs target.bodyType). Max 2 criteria.
- *
- * Amplification tiers (per Matthew's product spec, 2-criterion world):
- *   matchRatio 1.0    → 3.0× base   (both criteria fit, can push > 1.0)
- *   matchRatio ≥ 0.5  → 2.0× base   (one of two fits)
- *   matchRatio 0      → max(0, base - 0.1)   (minor deduction, no crater)
- *   No criteria stated → 0.5 (neutral — no bonus / no penalty)
+ * Viewer's physical fit for target, 0–1, from the viewer's stated criteria:
+ * height range (seekingHeightMinCm/MaxCm vs heightCm) and body type
+ * (seekingBodyTypes vs bodyType). In range / listed → 1; out of range → 0.2;
+ * unlisted body type → 0.3; averaged. No criteria stated (or nothing on the
+ * target to check them against) → null: excluded, not neutral.
  */
-function physicalScoreWithAmplification(viewer: any, target: any): number {
+function physicalScore(viewer: any, target: any): number | null {
   const subScores: number[] = []
-  let matched = 0
-  let total   = 0
-
-  // Height range
-  if (
-    viewer?.seekingHeightMinCm &&
-    viewer?.seekingHeightMaxCm &&
-    target?.heightCm
-  ) {
-    total++
-    const inRange =
-      target.heightCm >= viewer.seekingHeightMinCm &&
-      target.heightCm <= viewer.seekingHeightMaxCm
-    if (inRange) matched++
+  if (viewer?.seekingHeightMinCm && viewer?.seekingHeightMaxCm && target?.heightCm) {
+    const inRange = target.heightCm >= viewer.seekingHeightMinCm && target.heightCm <= viewer.seekingHeightMaxCm
     subScores.push(inRange ? 1 : 0.2)
   }
-
-  // Body type
-  if (
-    Array.isArray(viewer?.seekingBodyTypes) &&
-    viewer.seekingBodyTypes.length > 0 &&
-    target?.bodyType
-  ) {
-    total++
-    const fits = viewer.seekingBodyTypes.includes(target.bodyType)
-    if (fits) matched++
-    subScores.push(fits ? 1 : 0.3)
+  if (Array.isArray(viewer?.seekingBodyTypes) && viewer.seekingBodyTypes.length > 0 && target?.bodyType) {
+    subScores.push(viewer.seekingBodyTypes.includes(target.bodyType) ? 1 : 0.3)
   }
-
-  // No criteria stated → neutral
-  if (total === 0) return 0.5
-
-  const basePhysical =
-    subScores.reduce((acc, x) => acc + x, 0) / subScores.length
-  const matchRatio = matched / total
-
-  if (matchRatio === 1.0)  return basePhysical * 3.0
-  if (matchRatio >= 0.5)   return basePhysical * 2.0
-  return Math.max(0, basePhysical - 0.1)
+  if (!subScores.length) return null
+  return subScores.reduce((acc, x) => acc + x, 0) / subScores.length
 }
 
 // ─── Facet similarity / complementarity ───────────────────────────────────
@@ -340,21 +336,44 @@ function facetScoreValue(a: number, b: number, isSimilarity: boolean): number {
   return Math.max(0, Math.min(1, raw))
 }
 
+const TOTAL_FACET_WEIGHT = ALL_FACET_IDS.reduce((sum, id) => sum + facetWeight(id), 0)
+
+// Only facets both people gave evidence for count; the rest are excluded
+// (scored NaN in facetScores) rather than read as a match of two neutrals.
+// baseScore is null when nothing is shared.
 function computeBaseAndFacetScores(
-  vectorA: FacetVector,
-  vectorB: FacetVector,
-): { baseScore: number; facetScores: Record<FacetId, number> } {
+  a: FacetAnalysis,
+  b: FacetAnalysis,
+): { baseScore: number | null; coverage: number; facetScores: Record<FacetId, number> } {
   const facetScores: Record<string, number> = {}
-  let base = 0
+  let weighted = 0
+  let weight = 0
   for (const id of ALL_FACET_IDS) {
-    const score = facetScoreValue(vectorA[id], vectorB[id], SIMILARITY_FACETS.has(id))
+    if (!(a.evidence[id] > 0 && b.evidence[id] > 0)) {
+      facetScores[id] = NaN
+      continue
+    }
+    const score = facetScoreValue(a.vector[id], b.vector[id], SIMILARITY_FACETS.has(id))
     facetScores[id] = score
-    base += facetWeight(id) * score
+    weighted += facetWeight(id) * score
+    weight += facetWeight(id)
   }
   return {
-    baseScore:   base,
+    baseScore:   weight > 0 ? weighted / weight : null,
+    coverage:    weight / TOTAL_FACET_WEIGHT,
     facetScores: facetScores as Record<FacetId, number>,
   }
+}
+
+// One direction's score, 0–100: the weighted average of the components that
+// could be computed (psychological, physical, intent).
+function directionScore(psychological: number | null, physical: number | null, intent: number): number {
+  const parts: [number, number][] = [[W_INTENT, intent]]
+  if (psychological !== null) parts.push([W_PSYCHOLOGICAL, psychological])
+  if (physical !== null) parts.push([W_PHYSICAL, physical])
+  const total = parts.reduce((n, [w]) => n + w, 0)
+  const value = parts.reduce((n, [w, v]) => n + w * v, 0) / total
+  return Math.max(0, Math.min(100, value * 100))
 }
 
 // ─── Dealbreaker evaluation ───────────────────────────────────────────────
@@ -461,22 +480,6 @@ function computeDealbreakerMultiplier(
   return { multiplier, triggered }
 }
 
-// ─── Data confidence ──────────────────────────────────────────────────────
-
-function singleUserConfidence(user: any): number {
-  const arrays = [
-    user?.personalityTraits,
-    user?.relationshipValues,
-    user?.lifestyleTags,
-    user?.loveLangGive,
-    user?.loveLangReceive,
-    user?.weekendVibes,
-    user?.habitTags,
-  ]
-  const filled = arrays.filter(a => Array.isArray(a) && a.length > 0).length
-  return filled / arrays.length
-}
-
 // ─── Combined score ───────────────────────────────────────────────────────
 
 function combineScores(scoreAB: number, scoreBA: number): number {
@@ -510,6 +513,9 @@ function buildZeroResult(): PairScoreResult {
     facetScoresBA:           zeroFacets as Record<FacetId, number>,
 
     combinedScore:           0,
+    combinedRaw:             0,
+    coverage:                0,
+    enoughInfo:              true,
 
     asymmetryData: {
       userAScoresUserB: 0,
@@ -540,11 +546,13 @@ function buildZeroResult(): PairScoreResult {
  * malformed input is a programming error, not a data edge case.
  */
 export function computePairScore(
-  userA:   DatingProfile,
-  userB:   DatingProfile,
-  vectorA: FacetVector,
-  vectorB: FacetVector,
+  userA:     DatingProfile,
+  userB:     DatingProfile,
+  analysisA: FacetAnalysis,
+  analysisB: FacetAnalysis,
 ): PairScoreResult {
+  const vectorA = analysisA.vector
+  const vectorB = analysisB.vector
   validateFacetVector(vectorA, 'vectorA')
   validateFacetVector(vectorB, 'vectorB')
 
@@ -559,40 +567,35 @@ export function computePairScore(
   // Symmetric components — computed once, used in both directions.
   // Facet similarity/complementarity is commutative: facetScore(a, b) == facetScore(b, a).
   // Same for exactMatch(intent), ageCompatibility, attractionCompatibility.
-  const { baseScore, facetScores } = computeBaseAndFacetScores(vectorA, vectorB)
-  const intent                     = intentScore(userA, userB, attraction)
+  const { baseScore, coverage, facetScores } = computeBaseAndFacetScores(analysisA, analysisB)
+  const intent                               = intentScore(userA, userB, attraction)
 
   // Asymmetric components — each direction's viewer evaluates target.
-  const physicalAB = physicalScoreWithAmplification(userA, userB)
-  const physicalBA = physicalScoreWithAmplification(userB, userA)
+  const physicalAB = physicalScore(userA, userB)
+  const physicalBA = physicalScore(userB, userA)
   const dbAB       = computeDealbreakerMultiplier(userA, userB, vectorB)
   const dbBA       = computeDealbreakerMultiplier(userB, userA, vectorA)
 
-  // Composed scores per direction (×100 for UI-facing integer-ish display).
-  // NOT clamped at 100 — physical amplification can legitimately push above.
-  const scoreAB =
-    (W_PSYCHOLOGICAL * baseScore * dbAB.multiplier +
-     W_PHYSICAL      * physicalAB +
-     W_INTENT        * intent) * 100
+  // Per direction, 0–100 (capped before combining).
+  const scoreAB = directionScore(baseScore === null ? null : baseScore * dbAB.multiplier, physicalAB, intent)
+  const scoreBA = directionScore(baseScore === null ? null : baseScore * dbBA.multiplier, physicalBA, intent)
 
-  const scoreBA =
-    (W_PSYCHOLOGICAL * baseScore * dbBA.multiplier +
-     W_PHYSICAL      * physicalBA +
-     W_INTENT        * intent) * 100
-
-  const combined = combineScores(scoreAB, scoreBA)
+  const combinedRaw = combineScores(scoreAB, scoreBA)
+  const hasDealbreakerPenalty = dbAB.multiplier < 1 || dbBA.multiplier < 1
+  const calibrated = shrinkToPrior(calibrateTier1(combinedRaw), coverage)
+  const combined = hasDealbreakerPenalty ? Math.min(DEALBREAKER_CAP, calibrated) : calibrated
+  const enoughInfo = hasEnoughInfo(coverage, analysisA.recognized, analysisB.recognized)
 
   // Archetype classification — facet-based matchers run first, Unlikely
   // Fit runs post-score as fallback. Unlikely Fit is stubbed (always
   // null) until Phase 6 calibrates its band against production score
   // distribution. The chain is wired so Phase 6 only needs to tune the
   // predicate.
-  const facetArchetype = matchSparkArchetype(vectorA, vectorB)
-  const hasDealbreakerPenalty =
-    dbAB.multiplier < 1 || dbBA.multiplier < 1
-  const archetype: ArchetypeMatch | null =
-    facetArchetype ??
-    matchUnlikelyFit(vectorA, vectorB, combined, hasDealbreakerPenalty)
+  // No archetype without enough to go on — it would describe the gaps.
+  const archetype: ArchetypeMatch | null = !enoughInfo
+    ? null
+    : matchSparkArchetype(vectorA, vectorB) ??
+      matchUnlikelyFit(vectorA, vectorB, combined, hasDealbreakerPenalty)
 
   return {
     scoreAB,
@@ -612,6 +615,9 @@ export function computePairScore(
     facetScoresBA:           facetScores,
 
     combinedScore:           combined,
+    combinedRaw,
+    coverage,
+    enoughInfo,
 
     asymmetryData: {
       userAScoresUserB: scoreAB,
@@ -620,7 +626,7 @@ export function computePairScore(
       weightedMin:      combined,
     },
 
-    dataConfidence: Math.min(singleUserConfidence(userA), singleUserConfidence(userB)),
+    dataConfidence: coverage,
 
     archetype,
   }

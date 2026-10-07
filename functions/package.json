@@ -8,7 +8,8 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "check:memory": "node scripts/check-memory.js"
+    "check:memory": "node scripts/check-memory.js",
+    "test": "rm -rf .test-build && tsc -p tsconfig.test.json && node --test .test-build/test/"
   },
   "dependencies": {
     "dejavu-fonts-ttf": "^2.37.3",
