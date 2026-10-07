@@ -4,7 +4,8 @@ Everything deploys from this repo only — functions (codebase `web`), Firestore
 rules and indexes, Storage rules. Never from the mobile repo.
 
 ## Before
-- [ ] Full regression suite passes on the code being deployed.
+- [ ] Full regression suite passes on the code being deployed: `cd e2e && ./run.sh`
+      (setup in `e2e/README.md`). Unit tests too: `npm --prefix functions test`.
 - [ ] Functions: run the deploy planner (dry run). Only creates and in-place
       updates — stop on any delete or delete-and-recreate.
 - [ ] Rules: review the diff against what's live.

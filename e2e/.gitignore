@@ -1,0 +1,10 @@
+# Test-only secrets (see .env.test.example)
+.env.test
+# Built or downloaded per run
+node_modules/
+web-fn/
+.cache/
+test-results/
+results.json
+shots/
+*.log

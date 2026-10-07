@@ -1,0 +1,13 @@
+{
+  "name": "zylove-e2e",
+  "private": true,
+  "description": "Zylove web regression suite (Playwright + Firebase emulators). See README.md.",
+  "scripts": {
+    "test": "./run.sh"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.57",
+    "firebase-admin": "^12.7.0",
+    "playwright": "1.57"
+  }
+}
