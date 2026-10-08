@@ -64,10 +64,32 @@ async function sends(days = 7) {
   console.log(`\n${days} days: SendVerificationCode 200 = ${send200}, 400 = ${send400}; v2 fallbacks (GetRecaptchaParam) = ${fallback}`)
 }
 
+// Why sends were refused, from Identity Platform's request logs (logging-on;
+// counts by error message only — no numbers or tokens).
+async function refusals(days = 7) {
+  const since = new Date(Date.now() - days * 864e5).toISOString()
+  const r = await client.request({
+    url: 'https://logging.googleapis.com/v2/entries:list',
+    method: 'POST',
+    data: {
+      resourceNames: ['projects/zylove'],
+      filter: `logName="projects/zylove/logs/identitytoolkit.googleapis.com%2Frequests" AND jsonPayload.methodName:"SendVerificationCode" AND jsonPayload.status.code>0 AND timestamp>="${since}"`,
+      pageSize: 1000,
+    },
+  })
+  const counts = {}
+  for (const e of r.data.entries ?? []) {
+    const k = String(e.jsonPayload?.status?.message ?? e.jsonPayload?.status?.code ?? 'unknown')
+    counts[k] = (counts[k] ?? 0) + 1
+  }
+  console.log('refused sends by reason (request logs):', JSON.stringify(counts))
+}
+
 const cmd = process.argv[2] ?? 'status'
 if (cmd === 'status') {
   console.log('config:', JSON.stringify(await config()))
   await sends()
+  await refusals()
 } else if (cmd === 'logging-on') await patch('monitoring.requestLogging.enabled', { monitoring: { requestLogging: { enabled: true } } })
 else if (cmd === 'logging-off') await patch('monitoring.requestLogging.enabled', { monitoring: { requestLogging: { enabled: false } } })
 else if (cmd === 'enforce') await patch('recaptchaConfig.phoneEnforcementState', { recaptchaConfig: { phoneEnforcementState: 'ENFORCE' } })
