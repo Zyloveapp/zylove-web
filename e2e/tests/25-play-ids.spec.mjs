@@ -446,4 +446,7 @@ test('chat photos in Play: named for your Play ID (never the uid), readable only
   expect(await upload(a.uid, `${aPlay}_1.bin`)).toBe(200)
   expect(await read(b.uid, `${aPlay}_1.bin`)).toBe(200)
   expect(await read(stranger.uid, `${aPlay}_1.bin`)).toBe(403)
+  // Without Play access (lapsed), not even a player can read it.
+  await db.doc(`userInternal/${b.uid}`).set({ playAccess: true, playAccessUntil: (await import('./helpers.mjs')).Timestamp.fromMillis(Date.now() - 1000) }, { merge: true })
+  expect(await read(b.uid, `${aPlay}_1.bin`)).toBe(403)
 })

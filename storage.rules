@@ -140,9 +140,13 @@ service firebase.storage {
     function myPlayId() {
       return firestore.get(/databases/(default)/documents/playIds/$(request.auth.uid)).data.playId;
     }
+    // …with Play access, as the Firestore rules require for Play chats.
     function inPlayMatch(matchId) {
+      let n = firestore.get(/databases/(default)/documents/userInternal/$(request.auth.uid)).data;
       return matchId.matches('^pm_[A-Za-z0-9]{20}$')
-        && myPlayId() in firestore.get(/databases/(default)/documents/playMatches/$(matchId)).data.get('players', []);
+        && myPlayId() in firestore.get(/databases/(default)/documents/playMatches/$(matchId)).data.get('players', [])
+        && n.get('playAccess', false) == true
+        && (n.get('playAccessUntil', null) == null || request.time < n.playAccessUntil);
     }
     match /chat-photos/{matchId}/{filename} {
       allow read: if isSignedIn() && (inPlayMatch(matchId) || (
