@@ -433,6 +433,9 @@ export interface DatingProfile {
   genderIdentity: GenderIdentity
   genderSelfDescribe?: string
   pronouns?: string
+  // F-018: "Don't show on my profile". Gender is still used for matching and
+  // stays identity-locked; only the profile display hides it.
+  genderHidden?: boolean
   attractedTo: AttractedTo[]
   // Off-map identities (genderfluid / agender / self_describe) declare which
   // attraction categories they want to be surfaced to. Consulted by

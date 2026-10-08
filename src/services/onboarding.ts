@@ -98,6 +98,8 @@ type RootProfileDoc = Omit<DatingProfile, ServerOnlyField> & GoDeeperFields & On
 type OptionalRootField =
   | 'genderSelfDescribe'
   | 'pronouns'
+  | 'genderHidden'
+  | 'heightCm'
   | 'bodyType'
   | 'religion'
   | 'politicalView'
@@ -111,6 +113,8 @@ type OptionalRootFields = Pick<RootProfileDoc, OptionalRootField>
 const OPTIONAL_ROOT_FIELDS: OptionalRootField[] = [
   'genderSelfDescribe',
   'pronouns',
+  'genderHidden',
+  'heightCm',
   'bodyType',
   'religion',
   'politicalView',
@@ -188,7 +192,8 @@ export async function saveSparkOnboarding(
     ...extraPrompts.filter((p) => !d.selectedPromptIds.includes(p.promptId)),
   ].filter((p) => p.answer)
   const sparkPromptAnswers = Object.fromEntries(promptAnswers.map((p) => [p.promptId, p.answer]))
-  const heightCm = feetInchesToCm(d.height.feet, d.height.inches)
+  // F-018: height is optional; none given = no height on the profile.
+  const heightCm = d.height ? feetInchesToCm(d.height.feet, d.height.inches) : null
   const bio = d.bio.trim()
 
   // Only already-published photos (profile refresh) are written here; new
@@ -218,7 +223,6 @@ export async function saveSparkOnboarding(
     ...(!identityLocked && { genderIdentity }),
     relationshipStatus,
     openTo: d.openTo,
-    heightCm,
     lifestyleTags: d.lifestyleTags,
     habitTags: d.habitTags,
     personalityTraits: d.personalityTraits,
@@ -243,6 +247,8 @@ export async function saveSparkOnboarding(
       genderSelfDescribe: d.genderSelfDescribe.trim(),
     }),
     ...(d.pronouns.trim() && { pronouns: d.pronouns.trim() }),
+    ...(d.genderHidden && { genderHidden: true }),
+    ...(heightCm !== null && { heightCm }),
     ...(d.bodyType && { bodyType: d.bodyType }),
     ...(d.religion && { religion: d.religion }),
     ...(d.politicalView && { politicalView: d.politicalView }),
@@ -338,7 +344,7 @@ export async function saveSparkOnboarding(
     personalityTags: d.personalityTraits,
     topValues: d.relationshipValues,
     intent: 'spark',
-    height: heightCm,
+    ...(heightCm !== null && { height: heightCm }),
     ...(d.bodyType && { bodyType: d.bodyType }),
     isActive: hasPhotos,
     completeness: computeSparkCompleteness({ ...coreFields, ...optional, bio }),
@@ -346,6 +352,8 @@ export async function saveSparkOnboarding(
   }
   const sparkRef = doc(db, `users/${uid}/sparkProfile/data`)
   batch.set(sparkRef, spark, { merge: true })
+  // A height removed on this save goes from the Spark doc too.
+  if (heightCm === null) batch.set(sparkRef, { height: deleteField() }, { merge: true })
   // set+merge merges map keys, so a prompt swapped out would linger in
   // sparkPromptAnswers (which loadOwnProfile prefers). Replace the map whole.
   batch.update(sparkRef, { sparkPromptAnswers, ...goDeeper })
@@ -409,7 +417,7 @@ function num(v: unknown, fallback: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback
 }
 
-function cmToHeight(cm: unknown, fallback: HeightFtIn): HeightFtIn {
+function cmToHeight<T extends HeightFtIn | null>(cm: unknown, fallback: T): HeightFtIn | T {
   if (typeof cm !== 'number' || cm <= 0) return fallback
   const total = Math.round(cm / 2.54)
   return { feet: Math.floor(total / 12), inches: total % 12 }
@@ -457,11 +465,12 @@ export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null
     genderSelfDescribe: str(p.genderSelfDescribe) ?? '',
     matchableAs: arr(p.matchableAs),
     pronouns: str(p.pronouns) ?? '',
+    genderHidden: p.genderHidden === true,
     attractedTo: arr(p.attractedTo),
     relationshipStatus: str(p.relationshipStatus),
     openTo: arr(p.openTo),
     bodyType: str(p.bodyType),
-    height: cmToHeight(p.heightCm, INITIAL_DRAFT.height),
+    height: cmToHeight(p.heightCm, null),
     lifestyleTags: arr(p.lifestyleTags),
     habitTags: arr(p.habitTags),
     drinkingHabit: str(p.drinkingHabit),

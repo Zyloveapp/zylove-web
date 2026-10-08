@@ -1,7 +1,7 @@
 <div class="hero">
     <div class="hero-tag">✦ Legal</div>
     <h1>Privacy Policy</h1>
-    <p class="hero-meta">Effective date: April 12, 2026 · Last updated: October 7, 2026</p>
+    <p class="hero-meta">Effective date: April 12, 2026 · Last updated: October 8, 2026</p>
     <p class="hero-sub">
       Zylove is built on the belief that you deserve to know what happens to your data. This policy explains exactly what we collect, why we collect it, and how you can control it.
     </p>
@@ -41,7 +41,7 @@
             </tr>
             <tr>
               <td><strong>Profile information</strong></td>
-              <td>First name, age, gender identity, photos, bio, dating intent</td>
+              <td>First name, age, gender identity, photos, bio, dating intent. Height is optional. You can choose not to show your gender identity on your profile; we still use it for matching</td>
               <td><span class="badge badge-blue">Required</span></td>
             </tr>
             <tr>
@@ -56,7 +56,12 @@
             </tr>
             <tr>
               <td><strong>Sensitive attributes</strong></td>
-              <td>Religion, political views, parental status</td>
+              <td>Religion and political views (used only for matching — never shown to other members), parental status, sexual orientation (who you're attracted to — never shown to other members) and gender identity</td>
+              <td>Orientation and gender identity are required; the rest are optional</td>
+            </tr>
+            <tr>
+              <td><strong>Play profile</strong></td>
+              <td>Optional, for adults 18+. Your Play name, photos, bio, spice level, arrangements, interests, non-negotiables and answers. It describes your sex life and is sensitive data. It is shown only to other Play members, under a separate Play ID — never with your Spark name, photos or account</td>
               <td><span class="badge badge-green">Optional</span></td>
             </tr>
             <tr>
@@ -82,19 +87,19 @@
           <tbody>
             <tr>
               <td><strong>Location (approximate)</strong></td>
-              <td>Stored as coordinates snapped to a grid of roughly 1 mile, plus a city label, to enable distance-based discovery. We do not store your precise GPS coordinates.</td>
+              <td>When you share your location, your device sends it to our servers, which round it to a grid about 1 mile across and store only that rounded point, never your precise GPS position. (Accounts that haven't updated their location since before October 2026 use an older grid of about 3 miles until their next update.) We send the rounded point to OpenStreetMap to look up your city. Other members never see coordinates: they see your city (for example "Austin, TX") and an approximate distance ("less than a mile", whole miles up to 10, then 15, 20 … 50, "50+").</td>
             </tr>
             <tr>
               <td><strong>Device information</strong></td>
-              <td>OS version, device type — used for crash reporting and compatibility</td>
+              <td>Browser and device type — used for compatibility and for the safety signals below</td>
             </tr>
             <tr>
               <td><strong>Device and network safety signals</strong></td>
-              <td>When you sign in or use Zylove, we record your IP address, the network it belongs to, a general device type (such as "iPhone Safari") and a random identifier stored in your browser. We keep these only as one-way keyed hashes — never the raw values — for 90 days, to spot fake and duplicate accounts and people returning after a ban. If an account is banned, its hashes are kept for as long as the ban stands.</td>
+              <td>When you sign in or use Zylove, we record your IP address, the network it belongs to, a general device type (such as "iPhone Safari") and a random identifier stored in your browser. We keep these only as one-way keyed hashes — never the raw values (except the Terms acceptance record below) — for 90 days, to spot fake and duplicate accounts and people returning after a ban. If an account is banned, its hashes are kept for as long as the ban stands.</td>
             </tr>
             <tr>
               <td><strong>Terms acceptance record</strong></td>
-              <td>When you accept our Terms or acknowledge an update, we keep the date, the versions, your IP address and your browser's user agent, as a record of that acceptance.</td>
+              <td>When you accept our Terms or acknowledge an update, we keep the date, the document versions, and the IP address and browser user agent your request came from (as sent, not hashed), as a record of each acceptance. We keep these while your account exists and for 12 months after you delete it.</td>
             </tr>
             <tr>
               <td><strong>Account age</strong></td>
@@ -126,7 +131,7 @@
             </tr>
             <tr>
               <td><strong>Duplicate-photo checks</strong></td>
-              <td>When you upload a profile photo, our servers make a short fingerprint of it (a "perceptual hash" — a number, not an image) to spot the same or a near-identical photo on another account, and photos from accounts banned for scams. A match on another account sends both accounts to a person for review; it never removes a photo by itself. A match with a banned scam account's photo holds the photo back until a person reviews it.</td>
+              <td>When you upload a profile photo, our servers make a short fingerprint of it (a "perceptual hash" — a number, not an image) to spot the same or a near-identical photo on another account, and photos from accounts banned for scams. A match on another account sends both accounts to a person for review; it never removes a photo by itself. A match with a banned scam account's photo holds the photo back until a person reviews it. For an account banned for scams or fraud, we keep its photo fingerprints together with the account's ID and display name, whether it was banned for a scam, and how many reports of each kind it received, so our team can recognize the photos if they're uploaded again and see why. We keep these for as long as the ban stands and delete them if the ban is overturned.</td>
             </tr>
             <tr>
               <td><strong>Reports and evidence</strong></td>
@@ -138,7 +143,7 @@
             </tr>
             <tr>
               <td><strong>Messages to Zylove curated profiles</strong></td>
-              <td>During a city's launch, some profiles are Zylove curated profiles (see our Terms, section 2.4). Messages you send them are not end-to-end encrypted, and they are checked for the same scam patterns. If one matches, we keep only the matching excerpt (at most 200 characters) for 90 days, for a person to review.</td>
+              <td>During a city's launch, some profiles are Zylove curated profiles (see our Terms, section 2.4). Messages you send them are not end-to-end encrypted, and they are checked for the same scam patterns. The most recent ones (up to 8) are sent to Anthropic to write the curated profile's reply, and your profile name and bio are used to write its first message. If one matches, we keep only the matching excerpt (at most 200 characters) for 90 days, for a person to review.</td>
             </tr>
             <tr>
               <td><strong>Photo checks</strong></td>
@@ -185,7 +190,7 @@
           <li>Generate personalized onboarding questions based on your profile</li>
         </ul>
         <div class="callout callout-blue">
-          <strong>AI data use:</strong> Profile data sent to Anthropic for bio generation and coaching is processed per Anthropic's API data policy. We do not send your phone number or messages to Anthropic. Profile text data (bio, prompts, preferences) is always transmitted for bio generation and coaching. Profile photos are transmitted to Anthropic only when you explicitly opt in to photo analysis in Settings → Privacy. You can withdraw this consent at any time.
+          <strong>AI data use:</strong> Profile data sent to Anthropic for bio generation and coaching is processed per Anthropic's API data policy. We do not send your phone number to Anthropic, and we never send messages between members. Messages you send to a Zylove curated profile are the exception: the most recent ones (up to 8) are sent to Anthropic to write the curated profile's reply, and your profile name and bio are used to write its first message. Your religion and political views are never used in the bio we write for you. Profile text data (bio, prompts, preferences) is always transmitted for bio generation and coaching. Profile photos are transmitted to Anthropic only when you explicitly opt in to photo analysis in Settings → Privacy. You can withdraw this consent at any time.
         </div>
         <h3>To process payments</h3>
         <p>
@@ -195,7 +200,6 @@
         <ul>
           <li>Send push notifications (match alerts, message notifications) — you control these</li>
           <li>Send text messages (SMS) — only the kinds described under <a href="#text-messages">Text messages</a> below</li>
-          <li>Send transactional emails via Brevo (waitlist confirmation, account notices)</li>
           <li>Respond to support and safety inquiries</li>
         </ul>
         <h3 id="text-messages">Text messages (SMS)</h3>
@@ -268,9 +272,19 @@
               <td>Payment details and billing information for web subscriptions (Spark+, Elite); Zylove does not store card numbers</td>
             </tr>
             <tr>
-              <td><strong>Brevo</strong></td>
-              <td>Brevo SAS</td>
-              <td>Email address for transactional emails</td>
+              <td><strong>Google reCAPTCHA</strong></td>
+              <td>Google LLC</td>
+              <td>Your IP address and browser and device signals when you request a sign-in code, to block automated sign-ups</td>
+            </tr>
+            <tr>
+              <td><strong>Vercel</strong></td>
+              <td>Vercel Inc.</td>
+              <td>Hosts the Zylove website; receives your IP address and the pages you request, as standard server logs</td>
+            </tr>
+            <tr>
+              <td><strong>OpenStreetMap (Nominatim)</strong></td>
+              <td>OpenStreetMap Foundation</td>
+              <td>Your rounded location point (about 1 mile), to look up your city name</td>
             </tr>
           </tbody>
         </table>
@@ -289,7 +303,10 @@
           Your profile also shows the month you joined ("Member since") and, once at least 5 people have messaged you first, "Usually replies" if you answer most of them. We never show a reply percentage.
         </p>
         <p>
-          Your phone number, exact location, email address, and sensitive attributes (religion, politics) are <strong>never shown</strong> to other users unless you voluntarily include them in your bio.
+          Your phone number, exact location, email address, who you're attracted to, and your religion and political views are <strong>never shown</strong> to other users unless you voluntarily include them in your bio. They are used only for matching. If you choose "Don't show on my profile" for your gender identity, it isn't shown either. Someone who likes you without a match stays anonymous: you see their photo and what they wrote, but not their name, age, location, gender, relationship status or kids until you link.
+        </p>
+        <p>
+          <strong>Blocking applies to your whole account.</strong> When you block someone, in Spark or in Play, neither of you can see or contact the other in either mode.
         </p>
         <h3>With law enforcement</h3>
         <p>
@@ -305,14 +322,14 @@
         <h2><span class="section-num">06</span> Security</h2>
         <h3>Message encryption</h3>
         <p>
-          Messages between people using the Zylove web app are end-to-end encrypted using NaCl (TweetNaCl). They are encrypted on your device before transmission and can only be decrypted by the intended recipient — Zylove cannot read them.
+          Messages between people using the Zylove web app are end-to-end encrypted using NaCl (TweetNaCl). They are encrypted on your device before transmission and can only be decrypted by the intended recipient — Zylove cannot read them (see the chat PIN backup below for the one exception).
           If you report someone and the chat later ends, that chat stays readable — only to you, and still end-to-end encrypted — for 30 days so you can use it in your report; then it is deleted.
         </p>
         <p>
           When someone in a conversation hasn't set up encryption (for example, some mobile accounts), messages in that conversation are stored protected by access controls — only the people in the conversation can access them — rather than end-to-end encrypted.
         </p>
         <p>
-          If you set a chat PIN, an encrypted copy of your chat key is stored with us so you can read your messages on a new device. It is encrypted on your device with a key derived from your PIN; we never receive your PIN or your unencrypted key, and we only release the encrypted copy after a correct PIN check, with lockouts after repeated wrong attempts. Because a 4-digit PIN has only 10,000 combinations, this backup protects against someone who gets into your account, but is not as strong as end-to-end encryption on its own. You can choose not to set a chat PIN.
+          If you set a chat PIN, an encrypted copy of your chat key is stored with us so you can read your messages on a new device. It is encrypted on your device with a key derived from your PIN; we never receive your PIN or your unencrypted key, and we only release the encrypted copy after a correct PIN check, with lockouts after repeated wrong attempts. Because a 4-digit PIN has only 10,000 combinations, this backup protects against someone who gets into your account, but is not as strong as end-to-end encryption on its own: someone with access to our database could in principle recover your key from it, and with it your messages. You can choose not to set a chat PIN.
         </p>
         <p>
           If you report a conversation or choose to share content with us, we may review what you share for safety purposes.
@@ -342,8 +359,10 @@
         <ul>
           <li>Your profile is removed from discovery immediately</li>
           <li>Your photos are deleted from Firebase Storage within 12 months</li>
-          <li>Your messages are soft-deleted immediately and permanently purged within 12 months</li>
-          <li>Safety and moderation records may be retained for up to 2 years to prevent ban evasion</li>
+          <li>Your chats end immediately. The people you were talking to keep a read-only copy of the conversation, shown as "Deleted User", until it's permanently deleted within 12 months</li>
+          <li>A recovery record (your phone number, name, birthday, gender identity, pronouns, bio, photo links and moderation status), so you can restore your account within 90 days and so a locked age or gender can't be changed by signing up again. It's deleted 18 months after deletion; for a banned account it's kept for as long as the ban stands</li>
+          <li>Safety and moderation records — reports, reviews, unmatch reasons, Zylove Score events, safety review queue entries, vibe checks and blocks: up to 2 years, to prevent ban evasion</li>
+          <li>Terms acceptance records (date, document versions, IP address and browser user agent): while your account exists and for 12 months after you delete it</li>
           <li>Hashed device and network data: 90 days (for a banned account, as long as the ban stands)</li>
           <li>Safety scores are recalculated daily and deleted with your account; closed safety reviews are kept for 2 years</li>
           <li>First-message fingerprints: 14 days</li>
@@ -355,7 +374,12 @@
           <li>Report evidence: 30 days after our decision, or after the outcome of an appeal. Child-safety cases are kept for 1 year, and anything under a legal hold or a law-enforcement preservation request is kept until the hold ends. Evidence we never decide on is deleted after 180 days</li>
           <li>Decision records (the decision, category, date and account IDs — no message content), and appeals: 2 years</li>
           <li>Message fingerprints (no content): while the chat exists, and 30 days after it is deleted</li>
-          <li>Photo fingerprints (perceptual hashes — not images): while the photo exists. For an account banned for scams or fraud, as long as the ban stands, so the same photos can be recognized if they're uploaded again</li>
+          <li>Photo fingerprints (perceptual hashes — not images): while the photo exists. For an account banned for scams or fraud, its fingerprints, ID, display name, whether it was banned for a scam and its report counts are kept as long as the ban stands, so the same photos can be recognized if they're uploaded again, and deleted if the ban is overturned</li>
+          <li>Ended connections (names, dates and message counts — never messages), so you can still report or review someone: 90 days after the match ends</li>
+          <li>Your opt-out from texts (your phone number and when you replied STOP): for as long as we need it to honor your opt-out</li>
+          <li>Free-trial history (a one-way hash of your phone number and your trial dates), so each number gets one free trial: kept after you delete your account</li>
+          <li>Feature-use counters (how many times you used limited features in each period), daily notification counters, and a log that an account was deleted (account ID, date and reason): kept after you delete your account</li>
+          <li>What you send us through the website's contact, waitlist and founding-member forms (name, email and message): until we've dealt with it, and no longer than needed for that</li>
           <li>Anonymized, aggregated data may be retained indefinitely for product improvement</li>
         </ul>
         <p>

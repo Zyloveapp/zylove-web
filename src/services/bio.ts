@@ -59,14 +59,16 @@ function toRequest(d: OnboardingDraft): SparkBioRequest {
 
   return {
     displayName: d.displayName.trim(),
-    genderIdentity: d.genderIdentity,
+    genderIdentity: d.genderHidden ? null : d.genderIdentity,
     pronouns: d.pronouns.trim() || null,
     age: parseBirthday(d.birthdayRaw)?.age ?? null,
-    heightCm: feetInchesToCm(d.height.feet, d.height.inches),
+    heightCm: d.height ? feetInchesToCm(d.height.feet, d.height.inches) : null,
     bodyType: d.bodyType,
     drinkingHabit: d.drinkingHabit,
-    religion: d.religion,
-    politicalView: d.politicalView,
+    // F-018: religion and politics are never shown, so they never go into the
+    // (public) bio; nor does a gender the person hides.
+    religion: null,
+    politicalView: null,
     relationshipStatus: d.relationshipStatus,
     openTo: d.openTo,
     lifestyleTags: d.lifestyleTags,

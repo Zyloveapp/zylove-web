@@ -93,6 +93,14 @@ function FounderWarningModal({
   )
 }
 
+// Matches Privacy §7 (recovery record, messages on deletion) and the
+// billing note (F-068, F-076).
+const ACCOUNT_DELETE_BODY = [
+  'Your Spark and Play profiles and your matches come down right away, and your chats end. The people you were talking to keep a read-only copy of each chat, shown as "Deleted User", until it is permanently deleted within 12 months.',
+  `Changed your mind? Email ${SUPPORT_EMAIL} within 90 days and we can restore your account. We keep a recovery record (your phone number, name, birthday, gender, pronouns, bio, photo links and moderation status) for 18 months — for a banned account, as long as the ban stands.`,
+  'Paying for Spark+ or Elite? Deleting your account doesn\'t cancel it — cancel first under Upgrade → Manage subscription.',
+].join('\n\n')
+
 const COPY = {
   spark: {
     row: 'Delete Spark profile',
@@ -150,7 +158,7 @@ export function ConfirmModal({
         <h2 id="delete-title" className="text-xl font-bold">
           {title}
         </h2>
-        <p className="mt-2 text-sm text-white/60">{body}</p>
+        <p className="mt-2 whitespace-pre-line text-sm text-white/60">{body}</p>
         {typeToConfirm && (
           <label className="mt-4 block">
             <span className="mb-1 block text-xs text-white/50">Type {typeToConfirm} to confirm</span>
@@ -292,7 +300,7 @@ export default function DeleteProfileControls({ uid }: { uid: string }) {
       <button type="button" onClick={() => ask('account')} className={row}>
         <span>
           <span className="block font-medium text-red-400">Delete account</span>
-          <span className="block text-sm text-white/50">Permanently delete everything — both profiles and your account.</span>
+          <span className="block text-sm text-white/50">Delete both profiles and your account.</span>
         </span>
         <span className="text-white/30" aria-hidden>
           ›
@@ -337,7 +345,7 @@ export default function DeleteProfileControls({ uid }: { uid: string }) {
       {pending === 'account' && (
         <ConfirmModal
           title="Delete your account?"
-          body={`Your Spark profile, Play profile, matches and messages come down right away. Changed your mind? Email ${SUPPORT_EMAIL} within 90 days and we can restore your account — after that it's permanently deleted.`}
+          body={ACCOUNT_DELETE_BODY}
           confirm="Delete my account"
           typeToConfirm="DELETE"
           busy={busy}
