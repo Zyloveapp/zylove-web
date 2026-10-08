@@ -6,7 +6,7 @@
 import { test, expect } from '@playwright/test'
 import {
   resetEmulators, seedUser, callAs, likeAs, idTokenFor, db, adminAuth, fnLib, sortedPair, signIn, offline, quietFirstRun,
-  CONTEXT, internalDoc, userDoc, accountDoc, Timestamp, APP,
+  CONTEXT, internalDoc, userDoc, accountDoc, Timestamp, APP, setPlan,
 } from './helpers.mjs'
 
 test.beforeEach(resetEmulators)
@@ -152,16 +152,22 @@ test('probation: off by default; on for a city, new accounts there get 5 likes a
   const admin = await seedUser('Kim', { isAdmin: true })
   const u = await seedUser('Una')
   const v = await woman('Val')
-  for (const p of [u, v]) await db.doc(`userLocations/${p.uid}`).set({ lat: 30.25, lng: -97.75, marketCityId: 'austin' }, { merge: true })
+  const o = await seedUser('Oli') // an older man on the free plan
+  for (const p of [u, v, o]) await db.doc(`userLocations/${p.uid}`).set({ lat: 30.25, lng: -97.75, marketCityId: 'austin' }, { merge: true })
+  // The free plan, set the way the server decides it: otherwise the location
+  // trigger may land a pre-launch Elite plan (unlimited) first. (Val, a woman,
+  // is Elite by identity once the triggers settle.)
+  for (const p of [u, o]) await setPlan(p.uid, 'free')
   await setCreated(u.uid, Date.now() - DAY) // a day old
   await setCreated(v.uid, Date.now() - 30 * DAY)
+  await setCreated(o.uid, Date.now() - 30 * DAY)
   expect((await callAs(u.uid, 'getUsage')).usage.likes.limit).toBe(10)
   await expect(callAs(u.uid, 'adminSetProbation', { cityId: 'austin', enabled: true, reason: 'spam wave' })).rejects.toThrow(/Admins only/)
   await expect(callAs(admin.uid, 'adminSetProbation', { cityId: 'austin', enabled: true })).rejects.toThrow(/reason/)
   await callAs(admin.uid, 'adminSetProbation', { cityId: 'austin', enabled: true, reason: 'spam wave in Austin' })
   expect((await callAs(admin.uid, 'adminGetProbation')).cities.find((c) => c.cityId === 'austin')).toMatchObject({ enabled: true, days: 7, likesPerDay: 5 })
   expect((await callAs(u.uid, 'getUsage')).usage.likes.limit).toBe(5)
-  expect((await callAs(v.uid, 'getUsage')).usage.likes.limit).toBe(10) // older account: unaffected
+  expect((await callAs(o.uid, 'getUsage')).usage.likes.limit).toBe(10) // older account: unaffected
 
   // Chat photos: Val asks, Una can't accept while on probation.
   const id = await matchOf(u, v)
@@ -220,7 +226,9 @@ test('photo checks: AI-generated and stolen photos flag for review; the photos s
   await expect.poll(async () => (await flag(b.uid))?.reasons?.[0]?.key, { timeout: 20000 }).toBe('stolen_photo')
   await expect.poll(async () => (await db.doc(`photoSignals/${c.uid}`).get()).exists, { timeout: 20000 }).toBe(true)
   expect((await signals(c.uid)).photoFlags).toBeUndefined()
-  expect(await flag(c.uid)).toBeUndefined()
+  // The three share the fixture's bytes, so Phase 5's duplicate check may flag
+  // them as duplicates of each other; the clean photo has no other reason.
+  expect(((await flag(c.uid))?.reasons ?? []).filter((r) => r.key !== 'duplicate_photo')).toEqual([])
   expect((await accountDoc(a.uid))?.pendingPhotoURLs ?? []).toEqual([])
   // The dashboard shows the checks; the Vision budget is counted.
   const detail = await callAs(admin.uid, 'adminTrustDetail', { uid: b.uid })

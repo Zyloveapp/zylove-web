@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto'
 import { logger } from 'firebase-functions'
 import { FieldValue, getFirestore, type DocumentData, type QueryDocumentSnapshot } from 'firebase-admin/firestore'
 import { MAX_DISTANCE, bandKeys, dHash, hamming, probeKeys } from './photoHashCore'
+import type { BanContext, StoredMatch } from './blocklistContext'
 
 // T&S Phase 5 — duplicate photos. Server-only; hashes are not images.
 //   photoHashes/{id}     { uid, path, mode, hash, bands, at }   while the photo exists
-//   photoBlocklist/{id}  { uid, path, hash, bands, bannedAt, by } photos of accounts
-//                        banned for scams/fraud — kept while the ban stands
+//   photoBlocklist/{id}  { uid, path, hash, bands, bannedAt, by, name, adminMarkedScam,
+//                        reports } photos of accounts banned for scams/fraud, with
+//                        the ban's context — kept while the ban stands
 //   photoDuplicates/{a__b} { uids: [a, b], photos: { [a]: path, [b]: path }[], distance,
 //                        status, at } — the same or near-same photo on two accounts,
 //                        for side-by-side review
@@ -24,6 +26,7 @@ export interface NearMatch {
   uid: string
   path: string
   distance: number
+  data: DocumentData
 }
 
 // Every doc in `col` within MAX_DISTANCE of `hash` (multi-probe band search).
@@ -35,12 +38,33 @@ export async function nearMatches(col: 'photoHashes' | 'photoBlocklist', hash: s
     for (const d of snap.docs) docs.set(d.id, d)
   }
   return [...docs.values()]
-    .map((d) => ({ id: d.id, uid: String(d.get('uid')), path: String(d.get('path')), distance: hamming(hash, String(d.get('hash'))) }))
+    .map((d) => ({ id: d.id, uid: String(d.get('uid')), path: String(d.get('path')), distance: hamming(hash, String(d.get('hash'))), data: d.data() }))
     .filter((m) => m.distance <= MAX_DISTANCE)
+    .sort((a, b) => a.distance - b.distance)
+}
+
+// The closest blocklist match, with the ban's context as recorded at ban time.
+function storedMatch(m: NearMatch): StoredMatch {
+  const reports = m.data.reports
+  return {
+    uid: m.uid,
+    name: typeof m.data.name === 'string' ? m.data.name : '',
+    bannedAt: typeof m.data.bannedAt === 'number' ? m.data.bannedAt : null,
+    adminMarkedScam: m.data.adminMarkedScam === true,
+    reports: typeof reports === 'object' && reports !== null ? (reports as Record<string, number>) : {},
+    distance: m.distance,
+  }
 }
 
 // After a photo is hashed: record it, check the blocklist, flag duplicates.
-export async function checkPhoto(uid: string, path: string, mode: 'spark' | 'play', bytes: Buffer): Promise<{ hash: string; blocklisted: NearMatch | null; duplicates: NearMatch[] }> {
+// `blocklisted` is the closest blocklist match (with its ban context) and
+// `blocklistMore` how many other blocklist entries matched too.
+export async function checkPhoto(
+  uid: string,
+  path: string,
+  mode: 'spark' | 'play',
+  bytes: Buffer,
+): Promise<{ hash: string; blocklisted: StoredMatch | null; blocklistMore: number; duplicates: NearMatch[] }> {
   const hash = await dHash(bytes)
   const blocked = (await nearMatches('photoBlocklist', hash)).filter((m) => m.uid !== uid)
   await db().doc(`photoHashes/${idOf(path)}`).set({ uid, path, mode, hash, bands: bandKeys(hash), at: Date.now() })
@@ -58,7 +82,7 @@ export async function checkPhoto(uid: string, path: string, mode: 'spark' | 'pla
   if (blocked.length) {
     await db().doc(`behaviorSignals/${uid}`).set({ blocklistPhoto: { at: Date.now(), distance: blocked[0].distance }, updatedAt: FieldValue.serverTimestamp() }, { merge: true })
   }
-  return { hash, blocklisted: blocked[0] ?? null, duplicates }
+  return { hash, blocklisted: blocked.length ? storedMatch(blocked[0]) : null, blocklistMore: Math.max(0, blocked.length - 1), duplicates }
 }
 
 // behaviorSignals/{uid}.duplicatePhotos { accounts, at } — other accounts that
@@ -90,13 +114,14 @@ export async function forgetPhoto(path: string): Promise<void> {
 }
 
 // On a ban for scams/fraud: the account's photo hashes join the blocklist
-// (before its photos are deleted), kept while the ban stands.
-export async function blocklistPhotosOf(uid: string, by: string): Promise<number> {
+// (before its photos are deleted), kept while the ban stands, with the ban's
+// context (name, why) — a later hold shows it even once the account is gone.
+export async function blocklistPhotosOf(uid: string, by: string, ctx: BanContext): Promise<number> {
   const hashes = await db().collection('photoHashes').where('uid', '==', uid).get()
   const batch = db().batch()
   for (const d of hashes.docs) {
     const h = d.data() as DocumentData
-    batch.set(db().doc(`photoBlocklist/${d.id}`), { uid, path: h.path, hash: h.hash, bands: h.bands, bannedAt: Date.now(), by })
+    batch.set(db().doc(`photoBlocklist/${d.id}`), { uid, path: h.path, hash: h.hash, bands: h.bands, bannedAt: Date.now(), by, name: ctx.name, adminMarkedScam: ctx.adminMarkedScam, reports: ctx.reports })
   }
   if (hashes.size) await batch.commit()
   logger.info('blocklistPhotosOf', { photos: hashes.size })

@@ -182,7 +182,9 @@ export const onPhotoUpload = onObjectFinalized(
           url: photoRef,
           mode: isPlayPhoto ? 'play' : 'spark',
           flaggedAt: admin.firestore.Timestamp.now(),
-          reason: { blocklist: true, distance: hashed.blocklisted.distance },
+          // The match's ban context is stored now: the banned account's
+          // records may be gone by the time someone reviews it.
+          reason: { blocklist: true, distance: hashed.blocklisted.distance, match: hashed.blocklisted, more: hashed.blocklistMore },
           approved: false,
         })
         await notifyAdmins(String((await userRef.get()).data()?.displayName ?? ''), photoRef)

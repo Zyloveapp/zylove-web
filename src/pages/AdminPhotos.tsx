@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { flagReason, listPendingPhotos, reviewPendingPhoto, type PendingPhoto } from '../services/adminPhotos'
 import StoredImg from '../components/StoredImg'
 import { usePhotoUrl } from '../hooks/usePhotoUrl'
@@ -10,6 +11,35 @@ function FullSizeLink({ photo }: { photo: string }) {
     <a href={url ?? undefined} target="_blank" rel="noreferrer">
       <StoredImg src={photo} alt="" className="h-24 w-20 rounded object-cover" />
     </a>
+  )
+}
+
+// A scam-blocklist hold: the banned account it matched, when and why it was
+// banned, and how close the match is.
+function BlocklistMatch({ m }: { m: NonNullable<PendingPhoto['blocklistMatch']> }) {
+  const who = m.name || m.uid
+  return (
+    <div data-testid="blocklist-match" className="mt-1.5 space-y-0.5 rounded-lg border border-amber-400/20 bg-amber-400/5 px-2 py-1.5 text-xs">
+      <p className="text-amber-200">
+        {m.closeness}
+        {m.more > 0 && <span className="text-white/50"> · and {m.more} more</span>}
+      </p>
+      <p className="text-white/70">
+        Matched{' '}
+        {m.onRecord ? (
+          <Link to={`/admin/trust?uid=${encodeURIComponent(m.uid)}`} className="text-[#7C9BFF] underline-offset-2 hover:underline">
+            {who}
+          </Link>
+        ) : (
+          <span>{who}</span>
+        )}
+        {m.name && <span className="block break-all font-mono text-[11px] text-white/40">{m.uid}</span>}
+      </p>
+      <p className="text-white/50">
+        {m.bannedAt !== null ? `Banned ${new Date(m.bannedAt).toLocaleDateString()} · ` : ''}
+        {m.why}
+      </p>
+    </div>
   )
 }
 
@@ -101,7 +131,10 @@ export default function AdminPhotos() {
                   <span className={p.mode === 'play' ? 'text-red-400' : 'text-[#6B8FFF]'}>{p.mode}</span>
                   <span className="block whitespace-nowrap text-xs">{submitted(p.flaggedAt)}</span>
                 </p>
-                <p className="min-w-0 break-words text-white/60">{flagReason(p.reason)}</p>
+                <div className="min-w-0 break-words text-white/60">
+                  <p>{flagReason(p.reason)}</p>
+                  {p.blocklistMatch && <BlocklistMatch m={p.blocklistMatch} />}
+                </div>
                 <div className="col-span-2 flex gap-2 md:col-span-1 md:flex-col">
                   <button
                     type="button"

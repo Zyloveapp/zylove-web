@@ -31,6 +31,7 @@ import { softDeleteAccount } from './adminActivity'
 import { audit, requireAdminAudited } from './audit'
 import { markBannedDevices } from './devices'
 import { blocklistPhotosOf, unblockPhotosOf } from './photoHashes'
+import { reportCounts } from './blocklistContext'
 import { decideEvidenceFor } from './evidence'
 import { accountRef, adminUids, internalRef, isAdminAuth, isAdminUid, isSuspendedUid, loadInternal } from './userData'
 
@@ -265,6 +266,15 @@ function statusOf(r: DocumentData): ReportStatus {
 function categoriesOf(r: DocumentData): string[] {
   if (Array.isArray(r.categories)) return r.categories.filter((c: unknown): c is string => typeof c === 'string')
   return typeof r.category === 'string' ? [r.category] : []
+}
+
+// The display name as it was before any deletion (a soft-deleted user doc
+// says "Deleted User"; the recovery record keeps the original).
+async function nameBeforeBan(uid: string, user: DocumentData | undefined): Promise<string> {
+  if (user && user.isDeleted !== true) return typeof user.displayName === 'string' ? user.displayName : ''
+  const rec = await db().collection('deletedAccounts').where('previousUid', '==', uid).limit(1).get()
+  const name: unknown = rec.docs[0]?.get('displayName')
+  return typeof name === 'string' ? name : ''
 }
 
 function accountStatus(user: DocumentData | undefined): AccountStatus {
@@ -574,9 +584,16 @@ export const adminModerate = onCall(
         // T&S Phase 5: a ban for scams/fraud (the admin says so, or it was
         // reported as a scam) puts its photos on the blocklist — before the
         // soft delete removes them; kept while the ban stands.
-        const scamReports = (await db().collection('reports').where('reportedUid', '==', uid).get()).docs.some((d) => categoriesOf(d.data()).includes('scam'))
-        const scamBan = data.scam === true || scamReports
-        const blocklistedPhotos = scamBan ? await blocklistPhotosOf(uid, adminUid) : 0
+        const reportCats = (await db().collection('reports').where('reportedUid', '==', uid).get()).docs.map((d) => categoriesOf(d.data()))
+        const scamBan = data.scam === true || reportCats.some((c) => c.includes('scam'))
+        // With the ban's context, recorded now — the name goes with the soft delete.
+        const blocklistedPhotos = scamBan
+          ? await blocklistPhotosOf(uid, adminUid, {
+              name: await nameBeforeBan(uid, user),
+              adminMarkedScam: data.scam === true,
+              reports: reportCounts(reportCats),
+            })
+          : 0
         // Soft delete with the recovery record marked banned; an account
         // that's already gone just gets its recovery record marked.
         if (user && user.isDeleted !== true) await softDeleteAccount(uid, user, adminUid, { banned: true })

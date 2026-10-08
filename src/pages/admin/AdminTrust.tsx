@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import StoredImg from '../../components/StoredImg'
 import {
   getTrustDetail,
@@ -376,7 +376,9 @@ export default function AdminTrust() {
   const [tab, setTab] = useState<FlagStatus | 'directory'>('open')
   const [list, setList] = useState<TrustSummary[] | null>(null)
   const [error, setError] = useState(false)
-  const [open, setOpen] = useState<string | null>(null)
+  // ?uid= opens that account (Photo review links a blocklist match here).
+  const [params] = useSearchParams()
+  const [open, setOpen] = useState<string | null>(params.get('uid'))
   const [q, setQ] = useState('')
   const [searching, setSearching] = useState(false)
 

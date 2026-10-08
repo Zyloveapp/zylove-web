@@ -12,6 +12,18 @@ export interface PendingPhoto {
   url: string
   flaggedAt: number | null
   reason: unknown
+  // T&S Phase 5: a scam-blocklist hold — which banned account, why, how
+  // close (recorded when the photo was held; no images of theirs are kept).
+  blocklistMatch?: {
+    uid: string
+    name: string
+    bannedAt: number | null
+    why: string
+    closeness: string
+    distance: number
+    more: number
+    onRecord: boolean
+  }
 }
 
 // Admins carry the `admin` auth claim. The first check in a session refreshes

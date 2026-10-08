@@ -6,6 +6,7 @@ import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
 import { storagePath } from './storagePath'
 import { requireAdminAudited, audit } from './audit'
 import { accountRef, internalRef, isAdminAuth, userRef } from './userData'
+import { matchView, type BlocklistMatchView } from './blocklistContext'
 
 // Admin photo review (/admin/photos). onPhotoUpload parks flagged photos of
 // both modes in users/{uid}/private/account pendingPhotoURLs (owner-only; each
@@ -32,6 +33,8 @@ export interface PendingPhoto {
   url: string
   flaggedAt: number | null
   reason: unknown
+  // T&S Phase 5: a scam-blocklist hold — which banned account, why, how close.
+  blocklistMatch?: BlocklistMatchView
 }
 
 const MAX_USERS = 200
@@ -97,6 +100,14 @@ export const listPendingPhotos = onCall(
     )
     // Oldest first: the queue is worked in order.
     const photos = perUser.flat().sort((a, b) => (a.flaggedAt ?? 0) - (b.flaggedAt ?? 0))
+    // Blocklist holds: the context stored at hold time, and whether the
+    // banned account still has a user doc to open in admin.
+    const matched = [...new Set(photos.map((p) => matchView(p.reason, () => false)?.uid).filter((u): u is string => !!u))]
+    const onRecord = new Set((await Promise.all(matched.map(async (u) => ((await userRef(u).get()).exists ? u : null)))).filter((u): u is string => !!u))
+    for (const p of photos) {
+      const view = matchView(p.reason, (u) => onRecord.has(u))
+      if (view) p.blocklistMatch = view
+    }
     return { photos }
   },
 )
