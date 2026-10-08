@@ -450,3 +450,54 @@ test('chat photos in Play: named for your Play ID (never the uid), readable only
   await db.doc(`userInternal/${b.uid}`).set({ playAccess: true, playAccessUntil: (await import('./helpers.mjs')).Timestamp.fromMillis(Date.now() - 1000) }, { merge: true })
   expect(await read(b.uid, `${aPlay}_1.bin`)).toBe(403)
 })
+
+// ─── Admin: the trust dashboard lists Spark and Play matches ─────────────────
+
+test('trust dashboard: an admin sees an account\'s Spark and Play matches (Play labelled, partner\'s real account + Play name); non-admins are refused', async ({ browser }) => {
+  const { a, b } = await seedPlayers()
+  const c = await seedUser('Cleo', { genderIdentity: 'woman', attractedTo: ['men'] })
+  const admin = await seedUser('Kim', { isAdmin: true })
+  await likeAs(a.uid, c.uid)
+  expect((await likeAs(c.uid, a.uid)).matched).toBe(true) // Spark
+  await likeAs(a.uid, b.uid, 'play')
+  const { matchId } = await likeAs(b.uid, a.uid, 'play') // Play
+  await callAs(a.uid, 'blockUser', { targetUid: await playIdOf(b.uid), matchId })
+
+  const d = await callAs(admin.uid, 'adminTrustDetail', { uid: a.uid })
+  expect(d.matches).toHaveLength(2)
+  expect(d.matches.find((m) => m.mode === 'spark')).toMatchObject({ otherUid: c.uid, otherName: 'Cleo', otherPlayName: null, status: 'active' })
+  expect(d.matches.find((m) => m.mode === 'play')).toMatchObject({ matchId, otherUid: b.uid, otherName: 'Bella', otherPlayName: 'Velvet', status: 'blocked' })
+  // Logged as the trust-detail view it's part of.
+  const audit = (await db.collection('adminAudit').where('action', '==', 'trust.detail').get()).docs.map((x) => x.data())
+  expect(audit.some((x) => x.actor === admin.uid && x.target === a.uid)).toBe(true)
+  // Admin-only.
+  await expect(callAs(a.uid, 'adminTrustDetail', { uid: a.uid })).rejects.toThrow(/permission-denied|PERMISSION_DENIED|Admins only/)
+
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+    const ctx = await browser.newContext({ ...CONTEXT, viewport })
+    const page = await ctx.newPage()
+    await offline(page)
+    await quietFirstRun(page, admin.uid)
+    await signIn(page, admin.phone, { expectPath: /\/discover/ })
+    const gotIt = page.getByRole('button', { name: 'Got it' })
+    await page.goto(`/admin/trust?uid=${a.uid}`)
+    if (await gotIt.isVisible({ timeout: 3000 }).catch(() => false)) await gotIt.click()
+    const list = page.getByTestId('trust-matches')
+    await expect(list).toBeVisible({ timeout: 20000 })
+    await expect(list.getByText('Play', { exact: true })).toBeVisible()
+    await expect(list.getByText('Spark', { exact: true })).toBeVisible()
+    await expect(list.getByText('Play name: Velvet')).toBeVisible()
+    await expect(list.getByText('blocked')).toBeVisible()
+    // A second browser for the admin: the chat-key notice can cover the page.
+    if (await gotIt.isVisible().catch(() => false)) await gotIt.click()
+    await expect(gotIt).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await page.screenshot({ path: `test-results/trust-matches-${viewport.width}.png`, fullPage: true })
+    if (viewport.width === 1280) {
+      // The partner's name opens their own trust detail.
+      await list.getByRole('button', { name: 'Bella' }).click()
+      await expect(page.getByTestId('trust-matches').getByRole('button', { name: 'Adam' })).toBeVisible({ timeout: 20000 })
+    }
+    await ctx.close()
+  }
+})

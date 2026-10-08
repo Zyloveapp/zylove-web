@@ -102,7 +102,7 @@ const ACTIONS: { id: TrustAction; label: string; tone: string }[] = [
   { id: 'lift_suspension', label: 'Lift suspension', tone: 'bg-emerald-700' },
 ]
 
-function Detail({ uid, onClose, onChanged }: { uid: string; onClose: () => void; onChanged: () => void }) {
+function Detail({ uid, onClose, onChanged, onOpenAccount }: { uid: string; onClose: () => void; onChanged: () => void; onOpenAccount: (uid: string) => void }) {
   const [d, setD] = useState<TrustDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [profile, setProfile] = useState<Awaited<ReturnType<typeof viewProfile>> | null>(null)
@@ -242,6 +242,34 @@ function Detail({ uid, onClose, onChanged }: { uid: string; onClose: () => void;
           </ul>
         ) : (
           <p className="text-sm text-white/50">None in the last 90 days.</p>
+        )}
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/40">Matches</h3>
+        {d.matches.length ? (
+          <ul className="divide-y divide-white/5 text-sm" data-testid="trust-matches">
+            {d.matches.map((m) => (
+              <li key={m.matchId} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1.5">
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${m.mode === 'play' ? 'bg-[#E03131]/20 text-[#FF8A80]' : 'bg-[#1B4FD8]/25 text-[#9DB4FF]'}`}
+                >
+                  {m.mode === 'play' ? 'Play' : 'Spark'}
+                </span>
+                <button type="button" onClick={() => onOpenAccount(m.otherUid)} className="min-w-0 break-all text-left font-medium text-[#7C9BFF] hover:text-white">
+                  {m.otherName}
+                </button>
+                {m.otherPlayName && <span className="text-white/60">· Play name: {m.otherPlayName}</span>}
+                <span className="basis-full break-all font-mono text-[11px] text-white/35 sm:basis-auto">{m.otherUid}</span>
+                <span className="ml-auto shrink-0 text-xs text-white/50">
+                  {m.matchedAt ? new Date(m.matchedAt).toLocaleDateString() : '—'} ·{' '}
+                  <span className={m.status === 'active' ? 'text-emerald-300' : m.status === 'blocked' ? 'text-red-300' : 'text-white/50'}>{m.status}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-white/50">No matches.</p>
         )}
       </section>
 
@@ -416,7 +444,7 @@ export default function AdminTrust() {
       <p className="mt-1 text-xs text-white/40">Every view and action here is logged.</p>
       {open ? (
         <div className="mt-5">
-          <Detail uid={open} onClose={() => setOpen(null)} onChanged={load} />
+          <Detail key={open} uid={open} onClose={() => setOpen(null)} onChanged={load} onOpenAccount={setOpen} />
         </div>
       ) : (
         <>

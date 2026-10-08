@@ -7,6 +7,8 @@ import { refreshEntry } from './explore'
 import { FLAG_RETENTION_MS, type Features, type Reason } from './trustScore'
 import { liftSuspension, suspendAccount } from './reports'
 import { isAdminUid } from './userData'
+import { loadMatch } from './playMatch'
+import { loadPlayName } from './playName'
 import { signPhotoRefs } from './photoAccess'
 
 // T&S Phase 1 — the admin trust dashboard (/admin/trust) and user directory.
@@ -71,12 +73,45 @@ export const adminTrustQueue = onCall({ timeoutSeconds: 60, memory: '256MiB', in
   return { flags: await summaries(snap.docs.map((d) => d.data())) }
 })
 
+// Every match the account is in, Spark and Play, newest first (up to 50 of
+// each). F-062: a Play match's people are in its server-only record; admins
+// see the partner's real account and Spark name, and the Play name labelled
+// as such. Nothing here reaches a non-admin.
+async function matchesOf(uid: string) {
+  const status = (m: DocumentData) => (m.isBlocked === true ? 'blocked' : m.unmatchedAt ? 'ended' : 'active')
+  const [spark, playMembers] = await Promise.all([
+    db().collection('matches').where('users', 'array-contains', uid).get(),
+    db().collection('playMatchMembers').where('users', 'array-contains', uid).get(),
+  ])
+  const rows: { matchId: string; mode: 'spark' | 'play'; otherUid: string; matchedAt: number | null; status: string }[] = []
+  for (const d of spark.docs) {
+    const m = d.data()
+    // A chat kept for its reporter lists only them in users; both are in pairUsers.
+    const other = ((m.pairUsers ?? m.users ?? []) as string[]).find((u) => u !== uid)
+    if (other) rows.push({ matchId: d.id, mode: m.mode === 'play' || m.mode === 'entanglement' ? 'play' : 'spark', otherUid: other, matchedAt: ms(m.matchedAt) ?? ms(m.createdAt), status: status(m) })
+  }
+  for (const mem of playMembers.docs) {
+    const ctx = await loadMatch(mem.id)
+    const other = ctx?.otherOf(uid)
+    if (ctx && other) rows.push({ matchId: mem.id, mode: 'play', otherUid: other, matchedAt: ms(ctx.data.matchedAt) ?? ms(ctx.data.createdAt), status: status(ctx.data) })
+  }
+  const latest = (mode: 'spark' | 'play') => rows.filter((r) => r.mode === mode).sort((a, b) => (b.matchedAt ?? 0) - (a.matchedAt ?? 0)).slice(0, 50)
+  const kept = [...latest('spark'), ...latest('play')]
+  const others = [...new Set(kept.map((r) => r.otherUid))]
+  const docs = others.length ? await db().getAll(...others.map((u) => db().doc(`users/${u}`))) : []
+  const sparkName = new Map(others.map((u, i) => [u, str(docs[i]?.data()?.displayName) || 'Unknown']))
+  const playNames = new Map(await Promise.all(others.filter((u) => kept.some((r) => r.otherUid === u && r.mode === 'play')).map(async (u) => [u, await loadPlayName(u)] as const)))
+  return kept
+    .map((r) => ({ ...r, otherName: sparkName.get(r.otherUid) ?? 'Unknown', otherPlayName: r.mode === 'play' ? (playNames.get(r.otherUid) ?? null) : null }))
+    .sort((a, b) => (b.matchedAt ?? 0) - (a.matchedAt ?? 0))
+}
+
 // One account: why it scored, the signals against its group, who it's
 // linked to, reports and blocks, and what admins have done about it.
 export const adminTrustDetail = onCall({ timeoutSeconds: 60, memory: '256MiB', invoker: 'public' }, async (request) => {
   const uid = uidArg(request.data)
   await requireAdminAudited(request.auth, { action: 'trust.detail', target: uid })
-  const [profile, flag, root, internal, signals, reports, history, linked, traps, photoSignals, dupes] = await Promise.all([
+  const [profile, flag, root, internal, signals, reports, history, linked, traps, photoSignals, dupes, matches] = await Promise.all([
     db().doc(`trustProfiles/${uid}`).get(),
     db().doc(`trustFlags/${uid}`).get(),
     db().doc(`users/${uid}`).get(),
@@ -88,6 +123,7 @@ export const adminTrustDetail = onCall({ timeoutSeconds: 60, memory: '256MiB', i
     db().collection('scamTrapHits').where('uid', '==', uid).get(),
     db().doc(`photoSignals/${uid}`).get(),
     db().collection('photoDuplicates').where('uids', 'array-contains', uid).get(),
+    matchesOf(uid),
   ])
   // T&S Phase 5: the same photo on other accounts, side by side (short-lived URLs).
   const pairs = dupes.docs.map((d) => {
@@ -167,6 +203,7 @@ export const adminTrustDetail = onCall({ timeoutSeconds: 60, memory: '256MiB', i
       flagged: linkedDocs[1][i]?.data()?.status === 'open',
       score: linkedDocs[1][i]?.data()?.score ?? null,
     })),
+    matches,
     reports: { total: reports.size, reporters: reporters.size, urgent, byCategory, pending: reports.docs.filter((d) => d.data().status === 'pending').length },
     blocksReceived: Number(signals.data()?.receivedBlockCount ?? 0),
     history: history.docs.map((d) => {

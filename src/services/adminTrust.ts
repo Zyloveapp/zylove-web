@@ -44,6 +44,9 @@ export interface TrustDetail {
   cohortSize: number | null
   flag: { status: FlagStatus; openedAt: number | null; closedAt: number | null; closeReason: string | null } | null
   linked: { uid: string; via: string[]; name: string; deleted: boolean; flagged: boolean; score: number | null }[]
+  // Spark and Play matches (F-062 follow-up). otherPlayName: the partner's
+  // Play name, for Play matches only.
+  matches: { matchId: string; mode: 'spark' | 'play'; otherUid: string; otherName: string; otherPlayName: string | null; matchedAt: number | null; status: 'active' | 'ended' | 'blocked' }[]
   reports: { total: number; reporters: number; urgent: number; pending: number; byCategory: Record<string, number> }
   blocksReceived: number
   history: { action: string; actor: string; reason: string | null; at: number | null }[]
