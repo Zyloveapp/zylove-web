@@ -3,6 +3,7 @@ import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { getStorage } from 'firebase-admin/storage'
 import { removeDeviceData } from './devices'
+import { removePhotoHashes } from './photoHashes'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 
 // Where a user's non-public data lives (Stage 1a). users/{uid} is readable by
@@ -283,6 +284,9 @@ export async function clearPrivateData(uid: string): Promise<void> {
     db().doc(`trustProfiles/${uid}`).delete(),
     // T&S Phase 2: AI / web-match results for its photos.
     db().doc(`photoSignals/${uid}`).delete(),
+    // T&S Phase 5: its photo hashes and duplicate pairs (a scam ban copies
+    // them to the blocklist first).
+    removePhotoHashes(uid),
   ])
 }
 

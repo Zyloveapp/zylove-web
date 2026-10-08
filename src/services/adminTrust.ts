@@ -52,6 +52,7 @@ export interface TrustDetail {
   suspendSource: string | null
   countryCheck: { ip: string | null; phone: string | null; city: string | null } | null
   scamTraps: { hits: string[]; excerpt: string; at: number | null }[]
+  duplicatePhotos: { otherUid: string; otherName: string; distance: number; status: string; photos: { mine: string | null; theirs: string | null }[] }[]
   photoChecks: { path: string; ai: number | null; deepfake: number | null; web: { full: number; pages: number; sample: string[] } | null }[]
 }
 

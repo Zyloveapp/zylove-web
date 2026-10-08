@@ -28,7 +28,7 @@ const STATUS_STYLE: Record<AccountStatus, string> = {
   deleted: 'bg-white/10 text-white/50',
 }
 
-type Pending = { user: { uid: string; name: string }; action: ModerateAction } | null
+type Pending = { user: { uid: string; name: string; categories?: { category: string }[] }; action: ModerateAction } | null
 
 export default function AdminReports() {
   const navigate = useNavigate()
@@ -242,9 +242,15 @@ function ReportedCard({
                 Suspend…
               </button>
             )}
-            <button type="button" disabled={u.status === 'banned' || u.isAdmin} onClick={() => onAction('ban')} className={`${btn} bg-red-700 text-white`}>
-              Delete &amp; ban
-            </button>
+            {u.status === 'banned' ? (
+              <button type="button" onClick={() => onAction('unban')} className={`${btn} border border-white/20 text-white`}>
+                Lift ban
+              </button>
+            ) : (
+              <button type="button" disabled={u.isAdmin} onClick={() => onAction('ban')} className={`${btn} bg-red-700 text-white`}>
+                Delete &amp; ban
+              </button>
+            )}
             <button type="button" disabled={u.pendingCount === 0} onClick={() => onAction('clear')} className={`${btn} border border-white/20 text-white/80`}>
               Clear reports
             </button>
@@ -280,6 +286,12 @@ const COPY: Record<ModerateAction, { title: (n: string) => string; body: string;
     confirm: 'Delete & ban',
     tone: 'bg-red-700',
   },
+  unban: {
+    title: (n) => `Lift ${n}'s ban`,
+    body: 'The ban is overturned: their phone number and devices come off the ban lists, and their photos come off the scam blocklist. The deleted account itself isn’t restored automatically.',
+    confirm: 'Lift ban',
+    tone: 'bg-[#1B4FD8]',
+  },
   clear: {
     title: (n) => `Clear reports on ${n}`,
     body: 'Dismisses their open reports as unfounded. Nothing else changes — reports never affect an account on their own.',
@@ -308,6 +320,8 @@ function ActionModal({
   const [message, setMessage] = useState('')
   const [days, setDays] = useState<30 | 60 | 90>(30)
   const [typed, setTyped] = useState('')
+  // T&S Phase 5: a scam/fraud ban adds their photos to the blocklist.
+  const [scam, setScam] = useState(() => (user.categories ?? []).some((c) => c.category === 'scam'))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const withMessage = action === 'warn' || action === 'thank'
@@ -328,6 +342,7 @@ function ActionModal({
       const res = await moderate(user.uid, action, {
         ...(action === 'suspend' ? { days } : {}),
         ...(withMessage && message.trim() ? { message: message.trim() } : {}),
+        ...(action === 'ban' ? { scam } : {}),
       })
       const parts = [`${copy.confirm.replace(' ✦', '')} — done for ${user.name}.`]
       if (res.texted) parts.push('Texted.')
@@ -377,6 +392,13 @@ function ActionModal({
             placeholder="Optional — leave blank for the standard message."
             className="mt-4 w-full resize-none rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none"
           />
+        )}
+
+        {action === 'ban' && (
+          <label className="mt-4 flex items-start gap-2 text-sm text-white/80">
+            <input type="checkbox" checked={scam} onChange={(e) => setScam(e.target.checked)} className="mt-0.5" />
+            <span>Banned for a scam or fraud — add their photos to the blocklist (new uploads of the same photos are held for review)</span>
+          </label>
         )}
 
         {action === 'ban' && (

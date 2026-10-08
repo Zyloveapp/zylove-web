@@ -72,6 +72,9 @@ export interface Features {
   // T&S Phase 3 (counts only)
   contactRequests24h: number // "Share contact" requests in the last day
   contactFastAfterUnlock7d: number // requests within 5 minutes of the chat unlocking, last 7 days
+  // T&S Phase 5
+  duplicatePhotoAccounts: number // other accounts sharing the same or a near-same photo
+  blocklistPhoto: boolean // a photo matched one from an account banned for scams
 }
 
 export interface Reason {
@@ -179,6 +182,11 @@ export function scoreFeatures(f: Features, baseline: Baseline | null): { score: 
 
   // T&S Phase 3 — contact requests (weak on their own).
   if (f.contactRequests24h >= 5) add('contact_rush', 20, `Asked ${f.contactRequests24h} matches for contact details within a day`)
+  // T&S Phase 5 — duplicate photos.
+  if (f.blocklistPhoto) add('blocklist_photo', 60, 'A photo matches one from an account banned for scams')
+  if (f.duplicatePhotoAccounts > 0) {
+    add('duplicate_photo', 40, `Same or near-same photo as ${plural(f.duplicatePhotoAccounts, 'other account')}`)
+  }
   if (f.contactFastAfterUnlock7d >= 3) add('contact_fast', 15, `Asked for contact details the moment a chat unlocked, ${f.contactFastAfterUnlock7d} times this week`)
 
   // Compared with their own group (only big enough groups).
@@ -294,6 +302,8 @@ export function featuresOf(input: {
     stolenPhotos: num((s.photoFlags as DocumentData | undefined)?.stolen),
     countryMismatch: typeof (s.countryMismatch as DocumentData | undefined)?.text === 'string' ? (s.countryMismatch as DocumentData).text : null,
     ...contactFeatures(s.contactRequests as DocumentData | undefined, now),
+    duplicatePhotoAccounts: num((s.duplicatePhotos as DocumentData | undefined)?.accounts),
+    blocklistPhoto: Boolean(s.blocklistPhoto),
   }
 }
 
@@ -500,7 +510,7 @@ export const computeTrustScores = onSchedule(
 )
 
 // Strong signals rescore at once rather than waiting for the night.
-const IMMEDIATE = ['bannedDeviceMatch', 'bannedIpMatch', 'duplicateOpener', 'receivedBlockCount', 'scamTrap', 'photoFlags', 'countryMismatch', 'contactRequests'] as const
+const IMMEDIATE = ['bannedDeviceMatch', 'bannedIpMatch', 'duplicateOpener', 'receivedBlockCount', 'scamTrap', 'photoFlags', 'countryMismatch', 'contactRequests', 'duplicatePhotos', 'blocklistPhoto'] as const
 export const trustOnSignals = onDocumentWritten({ document: 'behaviorSignals/{uid}', memory: '256MiB', timeoutSeconds: 60 }, async (event) => {
   const before = event.data?.before.data() ?? {}
   const after = event.data?.after.data()

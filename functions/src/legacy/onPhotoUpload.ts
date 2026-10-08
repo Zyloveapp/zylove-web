@@ -26,6 +26,7 @@ import { stripPhotoMetadata } from '../photoMetadata'
 import { takeRateLimit } from '../rateLimits'
 import { accountRef, internalRef } from '../userData'
 import { recordPhotoSignal, webMatches } from '../photoChecks'
+import { checkPhoto } from '../photoHashes'
 
 // Sightengine score limits per mode (flag when a score is above its limit).
 // nudity-2.1 categories + gore-2.0 / offensive probabilities.
@@ -169,6 +170,24 @@ export const onPhotoUpload = onObjectFinalized(
       }
       if (clean.bytes.length !== raw.length) {
         await file.save(clean.bytes, { contentType: clean.contentType, resumable: false, metadata: { metadata: { zyloveCopy: '1' } } })
+      }
+      // T&S Phase 5: its perceptual hash — duplicates on other accounts flag
+      // both for review; a match with a banned scammer's photo holds it back.
+      const hashed = await checkPhoto(uid, filePath, isPlayPhoto ? 'play' : 'spark', Buffer.from(clean.bytes)).catch((err: unknown) => {
+        console.warn(`[photoHash] failed for uid ${uid}: ${err instanceof Error ? err.message : err}`)
+        return null
+      })
+      if (hashed?.blocklisted) {
+        await flagPending({
+          url: photoRef,
+          mode: isPlayPhoto ? 'play' : 'spark',
+          flaggedAt: admin.firestore.Timestamp.now(),
+          reason: { blocklist: true, distance: hashed.blocklisted.distance },
+          approved: false,
+        })
+        await notifyAdmins(String((await userRef.get()).data()?.displayName ?? ''), photoRef)
+        console.warn(`[moderation] Photo matches the banned-scammer blocklist for uid ${uid}; held for review`)
+        return
       }
     }
 

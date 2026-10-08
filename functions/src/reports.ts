@@ -30,6 +30,7 @@ import { phoneHash, wereMatched } from './trust'
 import { softDeleteAccount } from './adminActivity'
 import { audit, requireAdminAudited } from './audit'
 import { markBannedDevices } from './devices'
+import { blocklistPhotosOf, unblockPhotosOf } from './photoHashes'
 import { decideEvidenceFor } from './evidence'
 import { accountRef, adminUids, internalRef, isAdminAuth, isAdminUid, isSuspendedUid, loadInternal } from './userData'
 
@@ -393,8 +394,8 @@ export const adminGetReports = onCall(
   },
 )
 
-type ModerateAction = 'warn' | 'suspend' | 'unsuspend' | 'ban' | 'clear' | 'thank'
-const ACTIONS: readonly ModerateAction[] = ['warn', 'suspend', 'unsuspend', 'ban', 'clear', 'thank']
+type ModerateAction = 'warn' | 'suspend' | 'unsuspend' | 'ban' | 'unban' | 'clear' | 'thank'
+const ACTIONS: readonly ModerateAction[] = ['warn', 'suspend', 'unsuspend', 'ban', 'unban', 'clear', 'thank']
 
 
 // The in-app notice AdminNotice shows on their next visit until dismissed.
@@ -526,6 +527,25 @@ export const adminModerate = onCall(
         await log()
         return { ok: true }
       }
+      // T&S Phase 5: a ban overturned — the phone, devices and photos come off
+      // their lists. (The account itself was soft-deleted; it can be restored
+      // through the normal recovery path once it's no longer marked banned.)
+      case 'unban': {
+        const phones = await db().collection('bannedPhones').where('uid', '==', uid).get()
+        await Promise.all(phones.docs.map((d) => d.ref.delete()))
+        const devices = await db().collection('bannedDevices').where('uids', 'array-contains', uid).get()
+        for (const d of devices.docs) {
+          const left = ((d.get('uids') ?? []) as string[]).filter((u) => u !== uid)
+          if (left.length) await d.ref.update({ uids: left })
+          else await d.ref.delete()
+        }
+        const unblocked = await unblockPhotosOf(uid)
+        const rec = await db().collection('deletedAccounts').where('previousUid', '==', uid).get()
+        await Promise.all(rec.docs.map((d) => d.ref.set({ banned: false }, { merge: true })))
+        await internalRef(uid).set({ bannedAt: FieldValue.delete(), bannedBy: FieldValue.delete(), banScam: FieldValue.delete() }, { merge: true })
+        await log({ phones: phones.size, devices: devices.size, unblockedPhotos: unblocked })
+        return { ok: true }
+      }
       case 'ban': {
         // The phone: from Auth, or (already deleted) the recovery record.
         let phone = await phoneOf(uid)
@@ -551,13 +571,20 @@ export const adminModerate = onCall(
         // T&S Phase 1: its devices and addresses, before the soft delete
         // clears them — a new account seen on them is flagged.
         const bannedDevices = await markBannedDevices(uid)
+        // T&S Phase 5: a ban for scams/fraud (the admin says so, or it was
+        // reported as a scam) puts its photos on the blocklist — before the
+        // soft delete removes them; kept while the ban stands.
+        const scamReports = (await db().collection('reports').where('reportedUid', '==', uid).get()).docs.some((d) => categoriesOf(d.data()).includes('scam'))
+        const scamBan = data.scam === true || scamReports
+        const blocklistedPhotos = scamBan ? await blocklistPhotosOf(uid, adminUid) : 0
         // Soft delete with the recovery record marked banned; an account
         // that's already gone just gets its recovery record marked.
         if (user && user.isDeleted !== true) await softDeleteAccount(uid, user, adminUid, { banned: true })
         else if (phone) await db().doc(`deletedAccounts/${phone}`).set({ banned: true }, { merge: true })
         if (user) await internalRef(uid).set({ bannedAt: FieldValue.serverTimestamp(), bannedBy: adminUid }, { merge: true })
         const resolved = await resolveReports(uid, 'actioned', action, adminUid)
-        await log({ phoneBanned: phone !== null, bannedDevices })
+        if (user) await internalRef(uid).set({ banScam: scamBan }, { merge: true })
+        await log({ phoneBanned: phone !== null, bannedDevices, scamBan, blocklistedPhotos })
         logger.warn('adminModerate: banned', { phoneBanned: phone !== null })
         return { ok: true, resolved, phoneBanned: phone !== null }
       }

@@ -7,6 +7,7 @@ import { refreshEntry } from './explore'
 import { FLAG_RETENTION_MS, type Features, type Reason } from './trustScore'
 import { liftSuspension, suspendAccount } from './reports'
 import { isAdminUid } from './userData'
+import { signPhotoRefs } from './photoAccess'
 
 // T&S Phase 1 — the admin trust dashboard (/admin/trust) and user directory.
 // Every call is admin-only and audit-logged (audit.ts) before it returns.
@@ -75,7 +76,7 @@ export const adminTrustQueue = onCall({ timeoutSeconds: 60, memory: '256MiB', in
 export const adminTrustDetail = onCall({ timeoutSeconds: 60, memory: '256MiB', invoker: 'public' }, async (request) => {
   const uid = uidArg(request.data)
   await requireAdminAudited(request.auth, { action: 'trust.detail', target: uid })
-  const [profile, flag, root, internal, signals, reports, history, linked, traps, photoSignals] = await Promise.all([
+  const [profile, flag, root, internal, signals, reports, history, linked, traps, photoSignals, dupes] = await Promise.all([
     db().doc(`trustProfiles/${uid}`).get(),
     db().doc(`trustFlags/${uid}`).get(),
     db().doc(`users/${uid}`).get(),
@@ -86,7 +87,16 @@ export const adminTrustDetail = onCall({ timeoutSeconds: 60, memory: '256MiB', i
     linkedAccounts(uid),
     db().collection('scamTrapHits').where('uid', '==', uid).get(),
     db().doc(`photoSignals/${uid}`).get(),
+    db().collection('photoDuplicates').where('uids', 'array-contains', uid).get(),
   ])
+  // T&S Phase 5: the same photo on other accounts, side by side (short-lived URLs).
+  const pairs = dupes.docs.map((d) => {
+    const other = ((d.get('uids') ?? []) as string[]).find((u) => u !== uid) ?? ''
+    const photos = ((d.get('photos') ?? []) as Record<string, string>[]).map((p) => ({ mine: p[uid] ?? '', theirs: p[other] ?? '' }))
+    return { other, photos, distance: Number(d.get('distance') ?? 0), status: str(d.get('status')) }
+  })
+  const signed = pairs.length ? (await signPhotoRefs(pairs.flatMap((p) => p.photos.flatMap((x) => [x.mine, x.theirs])).filter(Boolean))).urls : {}
+  const otherNames = pairs.length ? await db().getAll(...pairs.map((p) => db().doc(`users/${p.other}`))) : []
   if (!root.exists) throw new HttpsError('not-found', 'No such account.')
   const p = profile.data()
   const cohort = str(p?.cohort)
@@ -126,6 +136,13 @@ export const adminTrustDetail = onCall({ timeoutSeconds: 60, memory: '256MiB', i
       .map((d) => ({ hits: (d.get('hits') ?? []) as string[], excerpt: str(d.get('excerpt')), at: ms(d.get('at')) }))
       .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
       .slice(0, 20),
+    duplicatePhotos: pairs.map((p, i) => ({
+      otherUid: p.other,
+      otherName: str(otherNames[i]?.data()?.displayName) || 'Unknown',
+      distance: p.distance,
+      status: p.status,
+      photos: p.photos.map((x) => ({ mine: signed[x.mine] ?? null, theirs: signed[x.theirs] ?? null })),
+    })),
     photoChecks: Object.values((photoSignals.data()?.photos ?? {}) as Record<string, DocumentData>).map((ph) => ({
       path: str(ph.path),
       ai: typeof ph.ai === 'number' ? ph.ai : null,

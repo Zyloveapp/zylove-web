@@ -268,6 +268,28 @@ function Detail({ uid, onClose, onChanged }: { uid: string; onClose: () => void;
         </section>
       )}
 
+      {d.duplicatePhotos.length > 0 && (
+        <section>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/40">Same photo on other accounts</h3>
+          <ul className="space-y-3">
+            {d.duplicatePhotos.map((p) => (
+              <li key={p.otherUid} className="rounded-xl border border-white/10 p-3">
+                <p className="mb-2 text-sm">
+                  {d.name} ↔ {p.otherName} <span className="text-white/40">({p.otherUid}) · {p.distance === 0 ? 'identical' : `${p.distance} bits apart`}</span>
+                </p>
+                {p.photos.map((x, i) => (
+                  <div key={i} className="mb-2 grid grid-cols-2 gap-2">
+                    {[x.mine, x.theirs].map((src, j) =>
+                      src ? <img key={j} src={src} alt={j === 0 ? d.name : p.otherName} className="aspect-square w-full rounded-lg object-cover" /> : <div key={j} className="aspect-square rounded-lg bg-white/5" />,
+                    )}
+                  </div>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {d.photoChecks.length > 0 && (
         <section>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/40">Photo checks (AI-generated · found on the web)</h3>

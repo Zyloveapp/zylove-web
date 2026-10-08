@@ -44,7 +44,7 @@ export interface GoodActor {
   lastThankedAt: number | null
 }
 
-export type ModerateAction = 'warn' | 'suspend' | 'unsuspend' | 'ban' | 'clear' | 'thank'
+export type ModerateAction = 'warn' | 'suspend' | 'unsuspend' | 'ban' | 'unban' | 'clear' | 'thank'
 
 export async function getReportSummary(): Promise<{ urgent: number; pending: number }> {
   const { data } = await httpsCallable<{ summaryOnly: true }, { urgent: number; pending: number }>(
@@ -66,10 +66,10 @@ export async function getReports(): Promise<{ reported: ReportedUser[]; goodActo
 export async function moderate(
   uid: string,
   action: ModerateAction,
-  opts: { days?: 30 | 60 | 90; message?: string } = {},
+  opts: { days?: 30 | 60 | 90; message?: string; scam?: boolean } = {},
 ): Promise<{ resolved?: number; texted?: boolean; phoneBanned?: boolean }> {
   const { data } = await httpsCallable<
-    { uid: string; action: ModerateAction; days?: number; message?: string },
+    { uid: string; action: ModerateAction; days?: number; message?: string; scam?: boolean },
     { ok: true; resolved?: number; texted?: boolean; phoneBanned?: boolean }
   >(functions, 'adminModerate', { timeout: 120_000 })({ uid, action, ...opts })
   return data
