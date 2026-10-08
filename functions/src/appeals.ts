@@ -6,6 +6,7 @@ import { pauseEvidenceFor, resumeEvidenceFor } from './evidence'
 import { refreshEntry } from './explore'
 import { liftSuspension } from './reports'
 import { OUTCOME_RETENTION_MS } from './lockerCore'
+import { queueAdminAlert } from './adminAlerts'
 
 // T&S Phase 4 — one appeal per suspension.
 //
@@ -65,6 +66,7 @@ export const submitAppeal = onCall({ timeoutSeconds: 30, memory: '256MiB', invok
   })
   await pauseEvidenceFor(uid)
   await audit({ actor: uid, action: 'appeal.submit', target: uid, detail: { length: note.length } })
+  await queueAdminAlert('appeal', { subjectUid: uid })
   return { ok: true }
 })
 

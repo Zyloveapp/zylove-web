@@ -894,6 +894,22 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Admin notifications (functions/src/adminAlerts.ts): an admin reads
+    // their own settings (the Admin notifications screen); every write goes
+    // through adminSetNotificationSettings (validated, audited). The
+    // batching state and the event queue are server-only.
+    match /adminNotificationSettings/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid
+        && request.auth.token.admin == true;
+      allow write: if false;
+    }
+    match /adminNotificationState/{uid} {
+      allow read, write: if false;
+    }
+    match /adminAlertQueue/{id} {
+      allow read, write: if false;
+    }
+
     // ─── Reviews ────────────────────────────────────────────────────────────
     // Post-conversation reviews (Zylove Score input). CF-only writes; the
     // reviewee can read reviews written about them (needed for dispute flow

@@ -47,7 +47,9 @@ export const REVIEW_TONE = new Map(REVIEW_CATEGORY_DEFS.map((c) => [c.id, c.tone
 // Report-only categories (T&S Phase 2): offered when reporting, never in a
 // review, never part of the Zylove Score. "scam": 2 reports within 30 days
 // from unlinked 48h+ accounts suspend pending review (functions/src/scamReports.ts).
+// "child_safety": always urgent, and texts the admin at once (adminAlerts.ts).
 export const REPORT_ONLY_CATEGORY_DEFS: ReviewCategoryDef[] = [
+  { id: 'child_safety', label: 'Involves a minor / child safety', emoji: '🧒', tone: 'negative' },
   { id: 'scam', label: 'Scam or asked for money', emoji: '💸', tone: 'negative' },
 ]
 export const REPORT_ONLY_IDS = new Set(REPORT_ONLY_CATEGORY_DEFS.map((c) => c.id))

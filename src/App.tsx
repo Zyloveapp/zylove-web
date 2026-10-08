@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { BrowserRouter, Outlet, Routes, Route, useNavigate, useSearchParams } from 'react-router-dom'
+import { BrowserRouter, Navigate, Outlet, Routes, Route, useNavigate, useSearchParams } from 'react-router-dom'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from './services/firebase'
 import { useAuthStore } from './store/authStore'
@@ -54,6 +54,7 @@ import AdminActivity from './pages/admin/AdminActivity'
 import AdminReports from './pages/admin/AdminReports'
 import AdminTrust from './pages/admin/AdminTrust'
 import AdminLocker from './pages/admin/AdminLocker'
+import AdminNotifications from './pages/admin/AdminNotifications'
 import AdminNotice from './components/AdminNotice'
 import LegalUpdateNotice from './components/LegalUpdateNotice'
 import { touchLastActive } from './services/adminActivity'
@@ -223,6 +224,9 @@ export default function App() {
                 <Route path="/admin/reports" element={<AdminReports />} />
                 <Route path="/admin/trust" element={<AdminTrust />} />
                 <Route path="/admin/locker" element={<AdminLocker />} />
+                <Route path="/admin/notifications" element={<AdminNotifications />} />
+                {/* Summary texts link to zylove.app/admin: the Admin section in Settings. */}
+                <Route path="/admin" element={<Navigate to="/settings" replace />} />
               </Route>
             </Route>
           </Route>

@@ -292,8 +292,18 @@ function AdminSection({ uid }: { uid: string }) {
     <Section title="Admin">
       <button
         type="button"
-        onClick={() => navigate('/admin/reports')}
+        onClick={() => navigate('/admin/notifications')}
         className="flex w-full items-center justify-between px-5 py-4 text-left hover:bg-white/[0.03]"
+      >
+        <span className="font-medium">🔔 Admin notifications</span>
+        <span className="text-white/30" aria-hidden>
+          →
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => navigate('/admin/reports')}
+        className="flex w-full items-center justify-between border-t border-white/5 px-5 py-4 text-left hover:bg-white/[0.03]"
       >
         <span className="flex items-center gap-2 font-medium">
           Reports

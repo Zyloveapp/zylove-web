@@ -202,6 +202,22 @@ export async function sendConsentConfirmation(phone: string): Promise<Delivery> 
   return deliver(phone, SMS_CONFIRMATION)
 }
 
+// Admin alert texts (adminAlerts.ts) go to an admin's own verified sign-in
+// number. They don't read the user SMS settings (the admin opted in to admin
+// texts on the Admin notifications screen), but STOP still stops them: deliver()
+// checks the opt-out registry before every send.
+export async function textAdmin(uid: string, body: string): Promise<Delivery> {
+  const user = await getAuth().getUser(uid).catch(() => null)
+  if (user?.customClaims?.admin !== true || !user.phoneNumber) return 'failed'
+  return deliver(user.phoneNumber, body)
+}
+
+// For the settings screen: the admin's sign-in number and whether it replied STOP.
+export async function adminSmsStatus(uid: string): Promise<{ phone: string | null; optedOut: boolean }> {
+  const phone = (await getAuth().getUser(uid).catch(() => null))?.phoneNumber ?? null
+  return { phone, optedOut: phone ? (await optOutRef(phone).get()).exists : false }
+}
+
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/
 
 function toMinutes(hhmm: unknown): number | null {

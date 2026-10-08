@@ -15,6 +15,7 @@ import { internalRef, isSuspendedUid } from "../userData";
 import { setBlocked } from "../explore";
 import { clearLikes } from "../likes";
 import { liftBlock } from "../trust";
+import { queueAdminAlert } from "../adminAlerts";
 
 const REPORT_TIERS = {
   spam: 1, fake_profile: 1, low_effort: 1, misleading_photos: 1, inappropriate_username: 1,
@@ -126,6 +127,7 @@ export const requestAccountDeletion = onCall(LEGACY_RUNTIME, async (request) => 
     reason,
     status: "pending",
   });
+  await queueAdminAlert("deletionRequest", { subjectUid: uid });
 
   return { success: true, scheduledFor };
 });

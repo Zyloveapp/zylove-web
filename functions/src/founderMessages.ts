@@ -12,18 +12,15 @@
 
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { logger } from 'firebase-functions'
-import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type WriteBatch } from 'firebase-admin/firestore'
 import { accountRef, isAdminAuth, requireActive } from './userData'
 import { audit } from './audit'
 import { SMS_SECRETS, textAccount } from './sms'
+import { queueAdminAlert } from './adminAlerts'
 
 const MAX_BODY = 1000
 const PREVIEW_CHARS = 60
 const ADMIN_NAME = 'Matthew · Zylove Founder'
-const ADMIN_PHONE = '+15128841429'
-// At most one "new founder message" text to Matthew per founder per window.
-const ADMIN_SMS_COOLDOWN_MS = 10 * 60 * 1000
 const BOT_PREFIX = 'zbot-'
 // Revoked and converted founders no longer have isFounder, but be explicit.
 const FORMER_STATUSES = new Set(['revoked', 'converted'])
@@ -67,16 +64,6 @@ function requireAdmin(auth: { uid: string; token?: Record<string, unknown> } | u
 async function activeFounders(): Promise<{ id: string; data: DocumentData }[]> {
   const snap = await db().collection('users').where('isFounder', '==', true).get()
   return snap.docs.filter((d) => isActiveFounder(d.id, d.data())).map((d) => ({ id: d.id, data: d.data() }))
-}
-
-// The admin's own alert texts go through the same checks as everyone's: the
-// account signed in with ADMIN_PHONE needs SMS consent, SMS on, no STOP.
-async function textAdminPhone(body: string): Promise<boolean> {
-  const uid = await getAuth()
-    .getUserByPhoneNumber(ADMIN_PHONE)
-    .then((u) => u.uid)
-    .catch(() => null)
-  return uid ? textAccount(uid, 'account', body) : false
 }
 
 // Adds one admin message to a founder's thread (batched by the caller).
@@ -128,7 +115,7 @@ function millis(v: unknown): number | null {
 // ─── Founder → Matthew ───────────────────────────────────────────────────────
 
 export const sendFounderMessage = onCall(
-  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
+  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     await requireActive(request.auth.uid)
@@ -142,54 +129,47 @@ export const sendFounderMessage = onCall(
     const name = displayName(user)
     const threadRef = db().doc(`founderMessages/${uid}`)
     const now = FieldValue.serverTimestamp()
-    // Write, and claim the admin-text slot, in one transaction.
-    const textAdmin = await db().runTransaction(async (tx) => {
-      const lastSms = millis((await tx.get(threadRef)).data()?.lastAdminSmsAt)
-      const text = lastSms === null || Date.now() - lastSms >= ADMIN_SMS_COOLDOWN_MS
-      tx.set(threadRef.collection('thread').doc(), {
-        fromUid: uid,
-        fromName: name,
-        isFromAdmin: false,
-        body,
-        createdAt: now,
-        readAt: null,
-      })
-      tx.set(
-        threadRef,
-        {
-          uid,
-          displayName: name,
-          founderCity: user.founderCity ?? null,
-          founderBadge: user.founderBadge ?? null,
+    const batch = db().batch()
+    batch.set(threadRef.collection('thread').doc(), {
+      fromUid: uid,
+      fromName: name,
+      isFromAdmin: false,
+      body,
+      createdAt: now,
+      readAt: null,
+    })
+    batch.set(
+      threadRef,
+      {
+        uid,
+        displayName: name,
+        founderCity: user.founderCity ?? null,
+        founderBadge: user.founderBadge ?? null,
+        lastMessageAt: now,
+        lastMessagePreview: preview(body),
+        lastFromAdmin: false,
+        totalMessages: FieldValue.increment(1),
+        adminUnread: true,
+      },
+      { merge: true },
+    )
+    batch.set(
+      accountRef(uid),
+      {
+        founderThreadMeta: {
+          hasUnread: false,
           lastMessageAt: now,
           lastMessagePreview: preview(body),
-          lastFromAdmin: false,
           totalMessages: FieldValue.increment(1),
-          adminUnread: true,
-          ...(text && { lastAdminSmsAt: now }),
         },
-        { merge: true },
-      )
-      tx.set(
-        accountRef(uid),
-        {
-          founderThreadMeta: {
-            hasUnread: false,
-            lastMessageAt: now,
-            lastMessagePreview: preview(body),
-            totalMessages: FieldValue.increment(1),
-          },
-        },
-        { merge: true },
-      )
-      return text
-    })
+      },
+      { merge: true },
+    )
+    await batch.commit()
 
-    if (textAdmin) {
-      const city = typeof user.founderCity === 'string' && user.founderCity ? user.founderCity : 'Austin'
-      await textAdminPhone(`✦ New founder message from ${name} in ${city}: ${preview(body)}. Reply at zylove.app/admin/messages`)
-    }
-    logger.info('sendFounderMessage', { textedAdmin: textAdmin })
+    // The admin's text (adminAlerts.ts): a count and a link, never who or what.
+    await queueAdminAlert('founderMessage', { subjectUid: uid })
+    logger.info('sendFounderMessage')
     return { success: true }
   },
 )

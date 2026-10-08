@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { REPORT_ONLY_CATEGORY_DEFS, REVIEW_CATEGORY_DEFS } from '../../types/reviewCategories'
 import {
   decideAppeal,
@@ -193,7 +193,9 @@ function Appeals() {
 
 export default function AdminLocker() {
   const navigate = useNavigate()
-  const [tab, setTab] = useState<'evidence' | 'appeals'>('evidence')
+  // ?tab=appeals (the admin "new appeal" text links straight there).
+  const [params] = useSearchParams()
+  const [tab, setTab] = useState<'evidence' | 'appeals'>(params.get('tab') === 'appeals' ? 'appeals' : 'evidence')
   const [status, setStatus] = useState('open')
   const [category, setCategory] = useState('')
   const [rows, setRows] = useState<LockerRow[] | null>(null)

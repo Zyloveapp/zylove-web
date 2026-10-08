@@ -15,6 +15,7 @@ import { FieldValue } from 'firebase-admin/firestore'
 import Stripe = require('stripe')
 import { SMS_SECRETS, textAccount } from './sms'
 import { internalRef, loadInternal } from './userData'
+import { queueAdminAlert } from './adminAlerts'
 
 const stripeSecretKey = defineSecret('STRIPE_SECRET_KEY')
 const stripeWebhookSecret = defineSecret('STRIPE_WEBHOOK_SECRET')
@@ -241,6 +242,7 @@ async function onChargeReversed(charge: Stripe.Charge, why: 'refunded' | 'disput
   if (why === 'refunded' && charge.amount_refunded < charge.amount) return void logger.info('Partial refund: plan kept', { charge: charge.id })
   const customerId = idOf(charge.customer)
   const uid = customerId ? await uidForCustomer(customerId) : null
+  await queueAdminAlert('paymentDispute', { subjectUid: uid })
   if (!uid) return void logger.warn('Refund/dispute for unknown customer', { charge: charge.id })
   const subId: unknown = (await loadInternal(uid)).stripeSubscriptionId
   if (typeof subId === 'string' && subId) await stripe().subscriptions.cancel(subId).catch((err) => logger.warn('Cancel after refund/dispute failed', { message: String(err) }))

@@ -5,6 +5,7 @@ import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase
 import { categoriesOf } from './identity'
 import { updateSearchName } from './searchName'
 import { linkedAccounts } from './devices'
+import { queueAdminAlert } from './adminAlerts'
 
 // T&S Phase 1 — the risk score.
 //
@@ -148,7 +149,7 @@ export function scoreFeatures(f: Features, baseline: Baseline | null): { score: 
   }
   if (f.duplicateOpenerSenders >= 3) add('shared_opener', 30, `The same first message was sent by ${f.duplicateOpenerSenders} accounts`)
   if (f.reporters90d >= 2) add('reports', f.reporters90d >= 3 ? 40 : 25, `Reported by ${f.reporters90d} different people in 90 days`)
-  if (f.urgentReports90d >= 1) add('urgent_report', 20, `${plural(f.urgentReports90d, 'urgent report')} (felt unsafe / aggressive)`)
+  if (f.urgentReports90d >= 1) add('urgent_report', 20, `${plural(f.urgentReports90d, 'urgent report')} (felt unsafe / aggressive / child safety)`)
   if (f.seriousReviewFlags > 0) add('serious_reviews', 25 * f.seriousReviewFlags, 'Reviews crossed a "felt unsafe" or "aggressive" threshold')
   if (f.otherReviewFlags > 0) add('review_flags', 10 * f.otherReviewFlags, `${plural(f.otherReviewFlags, 'review category', 'review categories')} over the threshold`)
 
@@ -343,6 +344,7 @@ async function save(uid: string, cohort: string, f: Features, result: { score: n
     previous: flag ? { status: flag.status, score: flag.score ?? null, closedAt: flag.closedAt ?? null } : null,
     expiresAt: null,
   })
+  await queueAdminAlert('trustFlag', { subjectUid: uid, reasons: result.reasons.map((r) => r.key) })
   return true
 }
 

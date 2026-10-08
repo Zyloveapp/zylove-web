@@ -181,6 +181,11 @@ function ReportedCard({
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="font-semibold">{u.name}</span>
+            {u.pendingCount > 0 && u.categories.some((c) => c.category === 'child_safety') && (
+              <span className="rounded-full bg-[#E03131] px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white ring-2 ring-white/70">
+                🧒 Child safety
+              </span>
+            )}
             {u.pendingCount > 0 && (
               <span
                 className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide ${
@@ -203,7 +208,12 @@ function ReportedCard({
           </span>
           <span className="mt-2 flex flex-wrap gap-1.5">
             {u.categories.map((c) => (
-              <span key={c.category} className="rounded-full border border-amber-500/30 bg-red-500/5 px-2 py-0.5 text-xs text-white/70">
+              <span
+                key={c.category}
+                className={`rounded-full border px-2 py-0.5 text-xs ${
+                  c.category === 'child_safety' ? 'border-[#E03131] bg-[#E03131]/20 font-semibold text-white' : 'border-amber-500/30 bg-red-500/5 text-white/70'
+                }`}
+              >
                 {label(c.category)}
                 {c.count > 1 && ` ×${c.count}`}
               </span>

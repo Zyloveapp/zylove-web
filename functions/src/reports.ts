@@ -25,6 +25,7 @@ import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { REPORT_ONLY_IDS, REVIEW_TONE } from './shared/reviewCategories'
 import { checkScamSuspension } from './scamReports'
+import { queueAdminAlert } from './adminAlerts'
 import { SMS_SECRETS, textAccount } from './sms'
 import { phoneHash, wereMatched } from './trust'
 import { softDeleteAccount } from './adminActivity'
@@ -37,7 +38,7 @@ import { isPlayId, isPlayMatchId, requireUidOfPlayId } from './playIds'
 import { accountRef, adminUids, internalRef, isAdminAuth, isAdminUid, isSuspendedUid, loadInternal } from './userData'
 
 const BOT_PREFIXES = ['zbot-', 'seed-']
-const URGENT = new Set(['felt_unsafe', 'aggressive'])
+const URGENT = new Set(['felt_unsafe', 'aggressive', 'child_safety'])
 // An admin ban: far past onBeforeSignIn's threshold.
 const BANNED_REPORT_COUNT = 1000
 const SUSPEND_DAYS = [30, 60, 90] as const
@@ -151,6 +152,12 @@ export async function recordReport(input: {
     )
   })
   logger.info('recordReport', { source, categories, urgent: categories.some((c) => URGENT.has(c)) })
+  // Admin texts (adminAlerts.ts): child safety and felt unsafe / aggressive
+  // are urgent; everything else is batched.
+  await queueAdminAlert(
+    categories.includes('child_safety') ? 'childSafety' : categories.some((c) => URGENT.has(c)) ? 'reportUrgent' : 'reportNew',
+    { subjectUid: reporterUid },
+  )
   // T&S Phase 2: enough independent scam reports suspend pending review.
   if (categories.includes('scam')) await checkScamSuspension(reportedUid)
 
@@ -386,8 +393,10 @@ export const adminGetReports = onCall(
           .sort((a, b) => (b.reportedAt ?? 0) - (a.reportedAt ?? 0)),
       }
     })
-    // Urgent pending first, then pending, then resolved; newest first within.
-    const rank = (u: ReportedUser) => (u.pendingCount === 0 ? 2 : u.priority === 'urgent' ? 0 : 1)
+    // Open child-safety reports first, then urgent pending, then pending, then
+    // resolved; newest first within.
+    const childSafety = (u: ReportedUser) => u.pendingCount > 0 && u.categories.some((c) => c.category === 'child_safety')
+    const rank = (u: ReportedUser) => (childSafety(u) ? -1 : u.pendingCount === 0 ? 2 : u.priority === 'urgent' ? 0 : 1)
     reported.sort((a, b) => rank(a) - rank(b) || (b.lastReportedAt ?? 0) - (a.lastReportedAt ?? 0))
 
     const goodSnap = await db().collection('users').where('zyloveScoreTier', 'in', GOOD_TIERS).limit(100).get()

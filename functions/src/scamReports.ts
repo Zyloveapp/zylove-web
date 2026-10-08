@@ -7,6 +7,7 @@ import { refreshEntry } from './explore'
 import { suspendAccount } from './reports'
 import { rescoreTrust } from './trustScore'
 import { isAdminUid } from './userData'
+import { queueAdminAlert } from './adminAlerts'
 
 // T&S Phase 2 — "Report scam". Two scam reports within SCAM_WINDOW_MS from
 // different people suspend the account PENDING REVIEW (never a ban, never
@@ -99,6 +100,7 @@ export async function checkScamSuspension(uid: string): Promise<boolean> {
   })
   // The flag (scam_reports reason) puts it at the top of the review queue.
   await rescoreTrust(uid)
+  await queueAdminAlert('scamSuspend')
   logger.warn('scamReports: account suspended pending review', { reporters: independent.length })
   return true
 }

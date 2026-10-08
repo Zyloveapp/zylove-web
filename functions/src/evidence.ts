@@ -14,6 +14,7 @@ import { isPlayId, isPlayMatchId, uidOfPlayId } from './playIds'
 import { loadMatch, messagesPath } from './playMatch'
 import { loadPlayName } from './playName'
 import { REPORT_ONLY_CATEGORY_DEFS, REVIEW_CATEGORY_DEFS } from './shared/reviewCategories'
+import { queueAdminAlert } from './adminAlerts'
 
 // T&S Phase 4 — evidence capture and the locker.
 //
@@ -185,6 +186,7 @@ export const submitEvidence = onCall(
         expiresAt: Timestamp.fromMillis(expiryFor({ createdAt, decidedAt: null, ncmec: false, appealPending: false }) as number),
       })
     logger.info('submitEvidence', { ...summary })
+    await queueAdminAlert('evidence', { subjectUid: reporter })
     return { lockerId: id, summary }
   },
 )

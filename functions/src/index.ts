@@ -2338,6 +2338,16 @@ export { requestContactExchange, respondContactExchange, revokeContactExchange }
 export { frankOnMessage, frankOnPlayMessage } from './franking'
 export { adminLockerDecide, adminLockerDetail, adminLockerHold, adminLockerList, getEvidencePdf, purgeEvidence, submitEvidence } from './evidence'
 export { adminDecideAppeal, adminListAppeals, submitAppeal } from './appeals'
+export {
+  adminAlertOnAccountCreated,
+  adminAlertOnPlayProfile,
+  adminAlertOnProfile,
+  adminAlertOnQueue,
+  adminNotificationStatus,
+  adminSetNotificationSettings,
+  flushAdminAlerts,
+  warnExpiringEvidence,
+} from './adminAlerts'
 // T&S Phase 5: duplicate photos.
 export { photoHashOnDelete } from './photoHashTrigger'
 // F-062: private Play IDs — the public Play profile and the Play chat key.

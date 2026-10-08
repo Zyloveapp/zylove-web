@@ -20,7 +20,7 @@
 import * as admin from 'firebase-admin'
 import { onObjectFinalized } from 'firebase-functions/v2/storage'
 import { defineSecret } from 'firebase-functions/params'
-import { sendPush } from './notifications'
+import { queueAdminAlert } from '../adminAlerts'
 import { LEGACY_RUNTIME } from './legacyOptions'
 import { stripPhotoMetadata } from '../photoMetadata'
 import { takeRateLimit } from '../rateLimits'
@@ -140,31 +140,8 @@ export const onPhotoUpload = onObjectFinalized(
       await internalRef(uid).set({ hasPendingPhotos: true }, { merge: true })
     }
 
-    // Push-notify all admins so flagged uploads don't sit unseen in the
-    // review queue. Uses shared sendPush helper which swallows fetch errors.
-    async function notifyAdmins(displayName: string, photoUrl: string) {
-      try {
-        // Admins: userInternal/{uid}.admin (mirror of the auth claim).
-        const adminSnap = await db.collection('userInternal')
-          .where('admin', '==', true)
-          .get()
-
-        if (adminSnap.empty) return
-
-        const tokens: string[] = adminSnap.docs
-          .map(d => d.data().expoPushToken)
-          .filter((t: unknown): t is string => typeof t === 'string' && t.length > 0)
-
-        await sendPush(
-          tokens,
-          '📸 Photo needs review',
-          `${displayName || 'A user'} uploaded a photo that needs approval`,
-          { screen: 'admin/photos', photoUrl },
-        )
-      } catch (e) {
-        console.error('[onPhotoUpload] Admin notify failed:', e)
-      }
-    }
+    // Text the admins (adminAlerts.ts: batched, count + link only).
+    const notifyAdmins = () => queueAdminAlert('photoReview', { subjectUid: uid })
 
     // Stage B (F-052): metadata (EXIF GPS and the like) is stripped before
     // anything else — moderation included — sees the photo. The cleaned file
@@ -197,15 +174,11 @@ export const onPhotoUpload = onObjectFinalized(
           reason: { blocklist: true, distance: hashed.blocklisted.distance, match: hashed.blocklisted, more: hashed.blocklistMore },
           approved: false,
         })
-        await notifyAdmins(String((await userRef.get()).data()?.displayName ?? ''), photoRef)
+        await notifyAdmins()
         console.warn(`[moderation] Photo matches the banned-scammer blocklist for uid ${uid}; held for review`)
         return
       }
     }
-
-    // Fetch user doc once up-front for displayName in admin notifications.
-    // Used by all three flag paths (no-face, nudity/gore/offensive, error).
-    const userDoc = (await userRef.get()).data() ?? {}
 
     try {
       // Call Sightengine moderation API via multipart-form upload of the
@@ -262,7 +235,7 @@ export const onPhotoUpload = onObjectFinalized(
           reason: { noFace: true },
           approved: false,
         })
-        await notifyAdmins(userDoc.displayName ?? '', photoRef)
+        await notifyAdmins()
         console.warn(`[moderation] No face detected in first photo for uid ${uid}`)
         return
       }
@@ -291,7 +264,7 @@ export const onPhotoUpload = onObjectFinalized(
           reason: { ...scores, exceeded },
           approved: false,
         })
-        await notifyAdmins(userDoc.displayName ?? '', photoRef)
+        await notifyAdmins()
         console.warn(`[moderation] Photo flagged for uid ${uid}: ${filePath}`)
       } else {
         // Clean — add to photoURLs, visible immediately
@@ -310,7 +283,7 @@ export const onPhotoUpload = onObjectFinalized(
         reason: { error: e?.message ?? 'moderation_error' },
         approved: false,
       })
-      await notifyAdmins(userDoc.displayName ?? '', photoRef)
+      await notifyAdmins()
       console.warn(
         `[moderation] Sightengine error for uid ${uid}: ${e?.message ?? e}`,
       )

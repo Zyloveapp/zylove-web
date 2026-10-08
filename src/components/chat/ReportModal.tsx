@@ -6,8 +6,8 @@ import { useModeStore, type Mode } from '../../store/modeStore'
 import EvidencePicker from './EvidencePicker'
 import { downloadEvidencePdf, submitEvidence, type EvidenceCandidate } from '../../services/evidence'
 
-// Safety first (scam included — T&S Phase 2), then the rest of the negative categories.
-const ORDER = ['felt_unsafe', 'aggressive', 'scam', 'pushed_boundaries', 'inappropriate', 'pressured_me', 'disrespectful']
+// Safety first (child safety, scam — T&S Phase 2), then the rest of the negative categories.
+const ORDER = ['child_safety', 'felt_unsafe', 'aggressive', 'scam', 'pushed_boundaries', 'inappropriate', 'pressured_me', 'disrespectful']
 const REPORT_CATEGORIES = [...REPORT_ONLY_CATEGORY_DEFS, ...REVIEW_CATEGORY_DEFS.filter((c) => c.tone === 'negative')].sort((a, b) => {
   const ia = ORDER.indexOf(a.id)
   const ib = ORDER.indexOf(b.id)
