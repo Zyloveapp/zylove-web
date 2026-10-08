@@ -61,7 +61,8 @@ export async function planF062({ db }) {
     messages += (await m.ref.collection('messages').count().get()).data().count
     for (const u of strings(m.get('users') ?? m.get('participants'))) matchIndex.push(`users/${u}/matches/${m.id}`)
   }
-  const likeQueue = (await db.collectionGroup('likeQueue').where('mode', '==', 'play').get()).docs.map((d) => d.ref.path)
+  // Filtered here: a collection-group query on mode would need an index.
+  const likeQueue = (await db.collectionGroup('likeQueue').get()).docs.filter((d) => d.get('mode') === 'play').map((d) => d.ref.path)
   const pairLikes = (await db.collectionGroup('likes').get()).docs.filter((d) => d.id === 'play' && d.ref.parent.parent?.parent.id === 'pairs').map((d) => d.ref.path)
   const pendingBotLikes = (await db.collection('pendingBotLikes').where('mode', '==', 'play').get()).docs.map((d) => d.ref.path)
   const reveals = []
