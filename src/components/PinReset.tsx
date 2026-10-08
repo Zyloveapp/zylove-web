@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { ConfirmationResult, RecaptchaVerifier } from 'firebase/auth'
 import { PinScreen } from './PinPad'
+import { warmRecaptchaEnterprise } from '../services/auth'
 import { accountPhone, maskPhone, sendResetCode } from '../services/playPin'
 
 interface PinResetProps {
@@ -21,7 +22,11 @@ export default function PinReset({ onVerified, onCancel }: PinResetProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => () => verifier.current?.clear(), [])
+  // The PIN reset's text code goes through the same reCAPTCHA (Enterprise first).
+  useEffect(() => {
+    warmRecaptchaEnterprise()
+    return () => verifier.current?.clear()
+  }, [])
 
   async function send() {
     if (!captcha.current || busy) return

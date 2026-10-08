@@ -1,6 +1,6 @@
 import { auth, functions } from './firebase';
 import { httpsCallable } from 'firebase/functions';
-import { signInWithPhoneNumber, RecaptchaVerifier, type ConfirmationResult, type UserCredential } from 'firebase/auth';
+import { initializeRecaptchaConfig, signInWithPhoneNumber, RecaptchaVerifier, type ConfirmationResult, type UserCredential } from 'firebase/auth';
 
 let recaptchaVerifier: RecaptchaVerifier | null = null;
 let recaptchaInitialized = false;
@@ -15,6 +15,20 @@ function freshRecaptchaElement(): HTMLElement | string {
   const el = document.createElement('div');
   container.appendChild(el);
   return el;
+}
+
+// reCAPTCHA Enterprise (phone sign-in's SMS defense, in AUDIT): loads the
+// Enterprise config and script as the page opens, rather than on the first
+// Send, as Firebase recommends — so a send carries an Enterprise token and
+// doesn't fall back to the v2 RecaptchaVerifier (kept as AUDIT's fallback).
+// Once per session; not in dev/e2e, where app verification is off.
+let enterpriseWarmed = false;
+export function warmRecaptchaEnterprise(): void {
+  if (enterpriseWarmed || auth.settings.appVerificationDisabledForTesting) return;
+  enterpriseWarmed = true;
+  initializeRecaptchaConfig(auth).catch(() => {
+    enterpriseWarmed = false;
+  });
 }
 
 export function initRecaptcha(): void {

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { signInWithEmailAndPassword, type ConfirmationResult } from 'firebase/auth'
-import { checkPhoneNumber, clearRecaptcha, confirmOtp, initRecaptcha, sendOtp } from '../services/auth'
+import { checkPhoneNumber, clearRecaptcha, confirmOtp, initRecaptcha, sendOtp, warmRecaptchaEnterprise } from '../services/auth'
 import { auth } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import PublicFooter from '../components/public/PublicFooter'
@@ -106,6 +106,7 @@ function SignInCard() {
     : null
 
   useEffect(() => {
+    warmRecaptchaEnterprise()
     initRecaptcha()
     return clearRecaptcha
   }, [])
