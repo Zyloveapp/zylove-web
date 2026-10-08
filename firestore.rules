@@ -89,6 +89,20 @@ service cloud.firestore {
       return !exists(/databases/$(database)/documents/userInternal/$(uid))
           || get(/databases/$(database)/documents/userInternal/$(uid)).data.get('isSuspended', false) != true;
     }
+    // T&S Phase 4: the caller isn't suspended — enforced here as well as at
+    // sign-in (onBeforeSignIn), so a session that's still valid, or a
+    // blocking-function failure, can't write after a suspension. Accounts
+    // suspended only for a pending deletion, and suspensions past their end
+    // date, aren't refused (same as sign-in).
+    function suspensionInactive(n) {
+      return n.get('isSuspended', false) != true
+          || n.get('suspendedForDeletion', false) == true
+          || (n.get('suspendedUntil', null) != null && n.suspendedUntil <= request.time);
+    }
+    function callerActive() {
+      return !exists(/databases/$(database)/documents/userInternal/$(request.auth.uid))
+          || suspensionInactive(get(/databases/$(database)/documents/userInternal/$(request.auth.uid)).data);
+    }
     function profileVisible(uid) {
       return get(/databases/$(database)/documents/users/$(uid)).data.get('isDeleted', false) != true
           && notSuspended(uid);
@@ -189,7 +203,7 @@ service cloud.firestore {
                      || isUser(uid)
                      || (resource.data.get('isDeleted', false) != true && notSuspended(uid) && notBlockedFrom(uid)));
       allow list: if false;
-      allow create: if isUser(uid) && isSignedIn()
+      allow create: if callerActive() && isUser(uid) && isSignedIn()
                     && !request.resource.data.keys().hasAny(serverOnlyUserFields())
                     && request.resource.data.get('photoURLs', []).size() == 0;
       // Identity-lock fields (age, genderIdentity, matchableAs,
@@ -199,7 +213,7 @@ service cloud.firestore {
       // follows the private birthday server-side (refreshAges).
       // Public names (displayName, playDisplayName): the first one is set
       // directly by onboarding; after that only updateDisplayName changes them.
-      allow update: if isUser(uid) && isSignedIn()
+      allow update: if callerActive() && isUser(uid) && isSignedIn()
                     && !request.resource.data.diff(resource.data).affectedKeys().hasAny(serverOnlyUserFields())
                     && photosOnlyShrink(resource.data, request.resource.data)
                     && (resource.data.get('identityLockedAt', null) == null
@@ -246,9 +260,9 @@ service cloud.firestore {
       // as it was on the public doc.
       match /private/matching {
         allow read: if isSignedIn() && isUser(uid);
-        allow create: if isSignedIn() && isUser(uid) && validMatching(request.resource.data)
+        allow create: if callerActive() && isSignedIn() && isUser(uid) && validMatching(request.resource.data)
                       && (!('matchableAs' in request.resource.data) || identityUnlocked());
-        allow update: if isSignedIn() && isUser(uid) && validMatching(request.resource.data)
+        allow update: if callerActive() && isSignedIn() && isUser(uid) && validMatching(request.resource.data)
                       && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['matchableAs']) || identityUnlocked());
         allow delete: if false;
       }
@@ -295,7 +309,7 @@ service cloud.firestore {
       }
       match /private/profile {
         allow read: if isSignedIn() && isUser(uid);
-        allow create, update: if isSignedIn() && isUser(uid) && validPrivateProfile(request.resource.data);
+        allow create, update: if callerActive() && isSignedIn() && isUser(uid) && validPrivateProfile(request.resource.data);
         allow delete: if false;
       }
 
@@ -317,7 +331,7 @@ service cloud.firestore {
       match /sparkProfile/{doc} {
         allow read: if isSignedIn()
                     && (isUser(uid) || (profileVisible(uid) && notBlockedFrom(uid)));
-        allow write: if isUser(uid) && isSignedIn();
+        allow write: if callerActive() && isUser(uid) && isSignedIn();
       }
 
       // Play profile subcollection (Stage 2: the only home of Play profile
@@ -339,10 +353,10 @@ service cloud.firestore {
                             && notBlockedFrom(uid)
                             // Hidden from Play (Stage B): only their matches still see it.
                             && (resource == null || resource.data.get('playVisibility', 'active') != 'hidden' || matchedWith(uid))));
-        allow create: if isUser(uid) && isSignedIn()
+        allow create: if callerActive() && isUser(uid) && isSignedIn()
                       && request.resource.data.get('photoURLs', []).size() == 0
                       && !request.resource.data.keys().hasAny(playServerFields());
-        allow update: if isUser(uid) && isSignedIn()
+        allow update: if callerActive() && isUser(uid) && isSignedIn()
                       && photosOnlyShrink(resource.data, request.resource.data)
                       && !request.resource.data.diff(resource.data).affectedKeys().hasAny(playServerFields())
                       && (resource.data.get('playDisplayName', null) == null
@@ -380,9 +394,9 @@ service cloud.firestore {
         allow read: if isUser(uid) && isSignedIn() && (viewerHasSparkPlus() || doc.matches('^zbot-.*$'))
                     && (resource.data.get('mode', 'spark') != 'play' || viewerHasPlay());
         // The owner may dismiss an entry (and nothing else) or delete it.
-        allow update: if isSignedIn() && isUser(uid)
+        allow update: if callerActive() && isSignedIn() && isUser(uid)
                       && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['dismissed', 'dismissedAt']);
-        allow delete: if isSignedIn() && isUser(uid);
+        allow delete: if callerActive() && isSignedIn() && isUser(uid);
         allow create: if false;
       }
 
@@ -439,7 +453,7 @@ service cloud.firestore {
     // in pairs/{id}/modes/play: participants with Play access read them.
     match /pairs/{pairId} {
       allow read: if isSignedIn() && isPairParticipant(pairId);
-      allow update: if isSignedIn() && isPairParticipant(pairId)
+      allow update: if callerActive() && isSignedIn() && isPairParticipant(pairId)
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                         request.auth.uid + '_revealed', request.auth.uid + '_revealedAt',
                         request.auth.uid + '_revealed_spark', request.auth.uid + '_revealed_play']);
@@ -484,7 +498,7 @@ service cloud.firestore {
       // 'accepted' through the acceptPhotoConsent Cloud Function, which
       // checks the other person really asked; clients may request, decline
       // and pause.
-      allow update: if isSignedIn()
+      allow update: if callerActive() && isSignedIn()
                     && request.auth.uid in resource.data.get('users', [])
                     && (resource.data.get('mode', 'spark') != 'play' || viewerHasPlay())
                     && matchLive(resource.data)
@@ -594,7 +608,7 @@ service cloud.firestore {
                     && (resource.data.get('photoExpiresAt', null) == null
                         || resource.data.photoExpiresAt > request.time
                         || resource.data.senderId == request.auth.uid);
-        allow create: if isSignedIn()
+        allow create: if callerActive() && isSignedIn()
                       && isMatchParticipant(matchId)
                       && matchLive(matchDoc(matchId))
                       && request.resource.data.senderId == request.auth.uid
@@ -606,7 +620,7 @@ service cloud.firestore {
                           || validContactCard(request.resource.data, matchDoc(matchId)));
         // Read receipts by the recipient; "delete for me" adds only yourself;
         // only the sender revokes a photo.
-        allow update: if isSignedIn()
+        allow update: if callerActive() && isSignedIn()
                       && isMatchParticipant(matchId)
                       && matchReadable(matchDoc(matchId))
                       && request.resource.data.diff(resource.data).affectedKeys()
@@ -627,7 +641,7 @@ service cloud.firestore {
       // self-destruct photo sharing. Participants-only.
       match /photoConsent/{doc} {
         allow read: if isSignedIn() && isMatchParticipant(matchId) && matchReadable(matchDoc(matchId));
-        allow write: if isSignedIn() && isMatchParticipant(matchId) && matchLive(matchDoc(matchId));
+        allow write: if callerActive() && isSignedIn() && isMatchParticipant(matchId) && matchLive(matchDoc(matchId));
       }
 
       // Typing indicators — matches/{matchId}/typing/{uid} exists while that
@@ -636,7 +650,7 @@ service cloud.firestore {
         allow read: if isSignedIn()
                     && isMatchParticipant(matchId)
                     && matchReadable(matchDoc(matchId));
-        allow write: if isSignedIn()
+        allow write: if callerActive() && isSignedIn()
                      && request.auth.uid == typingUid
                      && isMatchParticipant(matchId)
                      && matchLive(matchDoc(matchId));
@@ -649,7 +663,7 @@ service cloud.firestore {
     match /swipes/{swipeId} {
       // Write path moved to recordSwipe + sendSuperLike Callables.
       // Rule retained for legacy compat — suspension enforced server-side.
-      allow create: if isSignedIn()
+      allow create: if callerActive() && isSignedIn()
                     && request.resource.data.swiperId == request.auth.uid;
       allow read, update, delete: if false; // Cloud Functions only
     }
@@ -663,7 +677,7 @@ service cloud.firestore {
                   && resource.data.uid == request.auth.uid;
       // Write path moved to submitUnmatch Callable. Rule retained for
       // legacy compat — suspension enforced server-side.
-      allow create: if isSignedIn()
+      allow create: if callerActive() && isSignedIn()
                     && request.resource.data.reason.matches('unmatch_.*');
       allow update, delete: if false; // Cloud Functions only
     }
@@ -692,7 +706,7 @@ service cloud.firestore {
     match /reviewQueue/{docId} {
       // Write path moved to submitUnmatch Callable. Rule retained for
       // legacy compat — suspension enforced server-side.
-      allow create: if isSignedIn()
+      allow create: if callerActive() && isSignedIn()
                     && request.resource.data.reporterUid == request.auth.uid;
       allow read, update, delete: if false;
     }

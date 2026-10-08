@@ -29,6 +29,17 @@ service firebase.storage {
           && (e.get('tier', 'free') == 'spark_plus' || e.get('tier', 'free') == 'elite');
     }
 
+    // T&S Phase 4: the caller isn't suspended (same rule as firestore.rules
+    // callerActive): no profile or chat photos from a suspended account, even
+    // with a session that's still valid.
+    function callerActive() {
+      return !firestore.exists(/databases/(default)/documents/userInternal/$(request.auth.uid))
+          || firestore.get(/databases/(default)/documents/userInternal/$(request.auth.uid)).data.get('isSuspended', false) != true
+          || firestore.get(/databases/(default)/documents/userInternal/$(request.auth.uid)).data.get('suspendedForDeletion', false) == true
+          || (firestore.get(/databases/(default)/documents/userInternal/$(request.auth.uid)).data.get('suspendedUntil', null) != null
+              && firestore.get(/databases/(default)/documents/userInternal/$(request.auth.uid)).data.suspendedUntil <= request.time);
+    }
+
     function noServerMetadata() {
       return request.resource.metadata == null
           || !('zyloveCopy' in request.resource.metadata);
@@ -91,6 +102,7 @@ service firebase.storage {
       // resource == null: a new file only (Storage treats overwriting one as
       // a create).
       allow create: if isUser(uid) && isSignedIn() && isImage() && isUnderSizeLimit()
+                    && callerActive()
                     && (mode == 'spark' || mode == 'play')
                     && resource == null
                     && noServerMetadata();
@@ -120,6 +132,7 @@ service firebase.storage {
       // Sending photos in chat is Spark+ (Stage C; userInternal entitlement,
       // a trial's tier ending at its `until`).
       allow create: if isSignedIn()
+        && callerActive()
         && sparkPlus()
         && request.resource.contentType == 'image/x-zylove-encrypted'
         && resource == null

@@ -102,7 +102,7 @@ export default function ReportModal({
               Report sent. Thank you for helping keep Zylove safe.
             </p>
             <p className="mt-2 text-sm text-white/60">
-              Our team reviews every report. {name} won't know who reported them.
+              Our team reviews every report. {name} won't be told about it.
             </p>
             {lockerId && (
               <button
@@ -148,7 +148,7 @@ export default function ReportModal({
               Report {name}
             </h2>
             <p className="mt-1 text-sm text-white/60">
-              Reports are confidential and go straight to the Zylove team. {name} won't know who reported them.
+              Reports are confidential and go straight to the Zylove team. {name} won't be told about your report.
             </p>
             <h3 className="mt-6 text-sm font-semibold text-white/80">What happened?</h3>
             <div className="mt-2 flex flex-wrap gap-2">

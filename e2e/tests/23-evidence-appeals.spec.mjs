@@ -5,6 +5,7 @@ import { test, expect } from '@playwright/test'
 import { createHash } from 'node:crypto'
 import {
   resetEmulators, seedUser, callAs, likeAs, db, adminAuth, fnLib, sortedPair, signIn, offline, quietFirstRun, CONTEXT, userDoc, internalDoc, Timestamp, APP, smsCode,
+  idTokenFor, PROJECT, setPlan,
 } from './helpers.mjs'
 
 test.beforeEach(resetEmulators)
@@ -103,7 +104,7 @@ test('franking + evidence on the devices: commitments and server tags; a tampere
   await A.page.getByRole('checkbox', { name: 'Bea: can you send me money through cash app' }).check()
   await A.page.getByRole('checkbox', { name: 'Bea: its urgent please' }).check()
   await A.page.getByRole('button', { name: /^Review/ }).click()
-  await expect(A.page.getByText(/Only the messages you selected will be sent to the Zylove safety team/)).toBeVisible()
+  await expect(A.page.getByText("Only the messages you selected will be sent to the Zylove safety team, unencrypted, so a person can review your report. Nothing else from this chat leaves your device, and the person you're reporting won't be told.", { exact: true })).toBeVisible()
   await A.page.getByRole('button', { name: 'Send report with 2 messages' }).click()
   await expect(A.page.getByText(/Report sent/)).toBeVisible({ timeout: 20000 })
   expect(bodies).toHaveLength(1)
@@ -321,4 +322,75 @@ test('appeal: a suspended account is refused at sign-in with an appeal; one appe
   await quietFirstRun(page, b.uid)
   await signIn(page, b.phone, { expectPath: /\/discover/ })
   await ctx.close()
+})
+
+// ─── Suspension in the rules ─────────────────────────────────────────────────
+
+const DOCS = `projects/${PROJECT}/databases/(default)/documents`
+const BASE = `http://127.0.0.1:8390/v1/${DOCS}`
+const val = (v) =>
+  typeof v === 'string' ? { stringValue: v } : typeof v === 'number' ? { integerValue: String(v) } : typeof v === 'boolean' ? { booleanValue: v }
+  : { mapValue: { fields: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, val(x)])) } }
+const asFields = (d) => Object.fromEntries(Object.entries(d).map(([k, v]) => [k, val(v)]))
+async function commit(token, writes) {
+  return (await fetch(`${BASE}:commit`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ writes }) })).status
+}
+const newDoc = (path, data, serverTime = null) => ({
+  update: { name: `${DOCS}/${path}`, fields: asFields(data) },
+  currentDocument: { exists: false },
+  ...(serverTime ? { updateTransforms: [{ fieldPath: serverTime, setToServerValue: 'REQUEST_TIME' }] } : {}),
+})
+const patch = (path, data) => ({ update: { name: `${DOCS}/${path}`, fields: asFields(data) }, updateMask: { fieldPaths: Object.keys(data) } })
+async function upload(token, path, contentType) {
+  const boundary = 'b' + Math.random().toString(36).slice(2)
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=utf-8\r\n\r\n${JSON.stringify({ name: path, contentType })}\r\n--${boundary}\r\nContent-Type: ${contentType}\r\n\r\n`),
+    Buffer.from('fake-image-bytes'),
+    Buffer.from(`\r\n--${boundary}--`),
+  ])
+  return (await fetch(`http://127.0.0.1:9909/v0/b/${BUCKET}/o?name=${encodeURIComponent(path)}`, {
+    method: 'POST', headers: { Authorization: `Firebase ${token}`, 'X-Goog-Upload-Protocol': 'multipart', 'Content-Type': `multipart/related; boundary=${boundary}` }, body,
+  })).status
+}
+
+test('rules: a suspended user with a still-valid session is refused — messages, photos, likes, match and profile writes, uploads; deletion-pending and expired suspensions are not', async () => {
+  const admin = await seedUser('Kim', { isAdmin: true })
+  const a = await seedUser('Ann')
+  const b = await woman('Bea')
+  await setPlan(a.uid, 'spark_plus')
+  const id = await matchOf(a, b)
+  await db.doc(`matches/${id}`).update({ photoConsent: { status: 'accepted', requestedBy: b.uid } })
+  const token = await idTokenFor(a.uid) // minted before the suspension: still valid
+  let n = 0
+  const tries = async () => {
+    n++
+    return {
+      message: await commit(token, [newDoc(`matches/${id}/messages/m${n}`, { senderId: a.uid, status: 'sent', messageType: 'text', ciphertext: 'c2VhbGVk', nonce: 'bm9uY2U=' }, 'sentAt')]),
+      profile: await commit(token, [patch(`users/${a.uid}`, { bio: `bio ${n}` })]),
+      like: await commit(token, [newDoc(`swipes/s${n}${a.uid}`, { swiperId: a.uid, swipedId: b.uid, action: 'like', mode: 'spark' }, 'timestamp')]),
+      match: await commit(token, [patch(`matches/${id}`, { hasUnread: n % 2 === 0 })]),
+      typing: await commit(token, [patch(`matches/${id}/typing/${a.uid}`, { at: n })]),
+      profilePhoto: await upload(token, `photos/${a.uid}/spark/p${n}.jpg`, 'image/jpeg'),
+      chatPhoto: await upload(token, `chat-photos/${id}/${a.uid}_${n}.bin`, 'image/x-zylove-encrypted'),
+    }
+  }
+  const before = await tries()
+  for (const [k, v] of Object.entries(before)) expect([k, v]).toEqual([k, 200])
+
+  await callAs(admin.uid, 'adminModerate', { uid: a.uid, action: 'suspend', days: 30 })
+  const during = await tries()
+  for (const [k, v] of Object.entries(during)) expect([k, v]).toEqual([k, 403])
+
+  // A suspension past its end date (waiting for the hourly lift) isn't enforced.
+  await db.doc(`userInternal/${a.uid}`).update({ suspendedUntil: Timestamp.fromMillis(Date.now() - 1000) })
+  expect((await tries()).message).toBe(200)
+  // Suspended only for a pending deletion: still allowed (they may cancel it).
+  await db.doc(`userInternal/${a.uid}`).update({ suspendedUntil: null, suspendedForDeletion: true })
+  expect((await tries()).profile).toBe(200)
+  // Lifted: everything works again.
+  await db.doc(`userInternal/${a.uid}`).update({ suspendedForDeletion: false })
+  expect((await tries()).message).toBe(403)
+  await callAs(admin.uid, 'adminModerate', { uid: a.uid, action: 'unsuspend' })
+  const after = await tries()
+  for (const [k, v] of Object.entries(after)) expect([k, v]).toEqual([k, 200])
 })

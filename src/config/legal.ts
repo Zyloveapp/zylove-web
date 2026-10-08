@@ -11,7 +11,7 @@ export const LEGAL_UPDATE = {
   updated: 'October 7, 2026',
   effective: 'October 7, 2026',
   changes: [
-    'Reporting with evidence: you can attach the messages you choose to a report. Only those leave your device; our safety team keeps them encrypted and every view is logged. The person you report is never told.',
+    'Reporting with evidence: you can attach the messages you choose to a report. Only those leave your device; our safety team keeps them encrypted and every view is logged. The person you report isn’t told about the report.',
     'Message verification: each message now carries a fingerprint so a reported message can be confirmed as genuine. The trade-off: a message you sent that someone reports can be confirmed as yours.',
     'Appeals: if your account is suspended you can appeal once, and a person reviews it.',
     'How long we keep report evidence: 30 days after a decision (longer only for child-safety cases or legal holds).',

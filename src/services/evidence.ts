@@ -6,10 +6,9 @@ import { functions } from './firebase'
 // text (or photo), and the per-message franking key so the server can check
 // they're genuine. The reported person is never told.
 
-// The words shown right before evidence is sent. Matthew: swap in the
-// brief's exact copy here (one place).
+// The words shown right before evidence is sent — Matthew's exact copy.
 export const EVIDENCE_CONFIRM_COPY =
-  'Only the messages you selected will be sent to the Zylove safety team, unencrypted, so a person can review your report. Nothing else from this chat leaves your device, and they won’t be told who reported them.'
+  "Only the messages you selected will be sent to the Zylove safety team, unencrypted, so a person can review your report. Nothing else from this chat leaves your device, and the person you're reporting won't be told."
 
 export interface EvidenceCandidate {
   id: string
