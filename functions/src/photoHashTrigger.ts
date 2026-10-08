@@ -5,6 +5,7 @@ import { forgetPhoto } from './photoHashes'
 // (kept in its own module: a Storage trigger needs the bucket at import).
 export const photoHashOnDelete = onObjectDeleted({ memory: '256MiB', timeoutSeconds: 60 }, async (event) => {
   const path = event.data.name
-  if (!path || !/^photos\/[^/]+\/(spark|play)\//.test(path)) return
+  // F-062: Play photos live under the Play ID (playPhotos/{playId}/…).
+  if (!path || !/^(photos\/[^/]+\/(spark|play)|playPhotos\/[^/]+)\//.test(path)) return
   await forgetPhoto(path)
 })

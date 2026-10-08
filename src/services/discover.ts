@@ -10,11 +10,15 @@ import type { DatingProfile } from '../types/profile'
 import type { Mode } from '../store/modeStore'
 import { parsePlayProfile, type PlayProfileData } from './playProfile'
 import { playNameOf } from './displayNames'
+import { isPlayId } from './playId'
 
 // Firestore docs are written by several clients over time, so every field is
 // treated as possibly missing. attractedTo was a single string on older docs.
+// F-062: in Play, `uid` holds the card's Play ID — Play never sees a uid.
 export type DiscoverProfile = Partial<Omit<DatingProfile, 'attractedTo'>> & {
   uid: string
+  // Play: a curated profile (its public Play profile says so).
+  curated?: boolean
   attractedTo?: string[] | string
   sparkVisibility?: string
   playVisibility?: string
@@ -81,9 +85,12 @@ export function displayAge(p: DiscoverProfile): number | null {
 // reach the browser. The deck only advances as the user swipes (calls without
 // swiping return the same cards), so it can't be used to page through
 // everyone. Photo URLs and distances come with it.
+// Spark: uid + public profile. Play (F-062): the Play ID and the public Play
+// profile (its age, curated) only.
 interface DeckCard {
-  uid: string
-  profile: DocumentData
+  uid?: string
+  playId?: string
+  profile?: DocumentData
   playProfile?: DocumentData
   distanceMiles: number | null
   sameMarket: boolean
@@ -95,16 +102,26 @@ export async function fetchCandidates(uid: string, mode: Mode): Promise<Discover
     { cards: DeckCard[]; photoUrls: Record<string, string>; expiresAt: number; exhausted: boolean }
   >(functions, 'getExploreDeck')({ mode })
   primePhotoUrls(data.photoUrls, data.expiresAt)
-  primeDistances(data.cards.flatMap((c) => (c.distanceMiles === null ? [] : [[c.uid, { miles: c.distanceMiles, sameMarket: c.sameMarket }] as const])))
+  const idOf = (c: DeckCard) => c.playId ?? c.uid ?? ''
+  primeDistances(data.cards.flatMap((c) => (c.distanceMiles === null ? [] : [[idOf(c), { miles: c.distanceMiles, sameMarket: c.sameMarket }] as const])))
   // A swipe this browser just made may not have reached the server yet.
   const swiped = loadSwiped(uid, mode)
-  return data.cards.filter((c) => !swiped.has(c.uid)).map((c) => {
-    const base = { ...(c.profile as DiscoverProfile), uid: c.uid, ...(c.distanceMiles !== null && { distanceMiles: c.distanceMiles }) }
-    if (mode !== 'play' || !c.playProfile) return base
-    const playProfile = parsePlayProfile(c.playProfile)
-    // Play Explore shows the Play name everywhere the card, details or match
-    // overlay read displayName.
-    return { ...base, playProfile, displayName: playNameOf(playProfile, base) || 'Someone' }
+  return data.cards.filter((c) => idOf(c) && !swiped.has(idOf(c))).map((c) => {
+    const distance = c.distanceMiles !== null ? { distanceMiles: c.distanceMiles } : {}
+    if (mode !== 'play' || !c.playProfile) return { ...(c.profile as DiscoverProfile), uid: idOf(c), ...distance }
+    // F-062: a Play card is its Play profile and age — nothing from Spark.
+    const raw = c.playProfile
+    const playProfile = parsePlayProfile(raw)
+    return {
+      uid: idOf(c),
+      ...distance,
+      age: typeof raw.age === 'number' && raw.age > 0 ? raw.age : undefined,
+      curated: raw.curated === true,
+      playProfile,
+      // Play Explore shows the Play name everywhere the card, details or
+      // match overlay read displayName.
+      displayName: playNameOf(playProfile) || 'Someone',
+    } as DiscoverProfile
   })
 }
 
@@ -158,7 +175,7 @@ interface OnLikeRequest {
 
 export interface OnLikeResponse {
   matched: boolean
-  pairId: string
+  pairId?: string // Spark only (F-062: never in Play — it's the uid pair)
   matchId: string | null
 }
 
@@ -188,7 +205,9 @@ export interface Tier1Result {
 }
 
 export interface CompatibilityResult {
-  pairId: string
+  pairId?: string // Spark only
+  // Play (F-062): the pair's Play archetype, from the server.
+  playArchetype?: unknown
   sparkScore?: number
   // Engine v2: false → too little to go on ("Not enough info").
   sparkEnoughInfo?: boolean
@@ -246,10 +265,11 @@ const compatibilityRequests = new Map<string, Promise<CompatibilityResult>>()
 export function fetchCompatibility(targetUid: string): Promise<CompatibilityResult> {
   let request = compatibilityRequests.get(targetUid)
   if (!request) {
-    request = httpsCallable<{ tappedUserId: string }, Omit<CompatibilityResult, 'tier1'> & { tier1?: unknown }>(
+    // F-062: a Play card is asked about by its Play ID (Play scores only).
+    request = httpsCallable<{ tappedUserId?: string; tappedPlayId?: string }, Omit<CompatibilityResult, 'tier1'> & { tier1?: unknown }>(
       functions,
       'onTap',
-    )({ tappedUserId: targetUid }).then(({ data }) => ({ ...data, tier1: parseTier1(data.tier1) }))
+    )(isPlayId(targetUid) ? { tappedPlayId: targetUid } : { tappedUserId: targetUid }).then(({ data }) => ({ ...data, tier1: parseTier1(data.tier1) }))
     // Forget failures so the next call retries.
     request.catch(() => compatibilityRequests.delete(targetUid))
     compatibilityRequests.set(targetUid, request)
@@ -264,6 +284,12 @@ export function fetchCompatibility(targetUid: string): Promise<CompatibilityResu
 // `${uid}_revealed_${mode}` records which mode it was seen in, so each mode's
 // Curious tab lists only its own visitors (getCuriousVisitors).
 export function recordReveal(uid: string, targetUid: string, mode?: Mode): void {
+  // F-062: a Play reveal is recorded server-side, by Play ID — never on the
+  // pair doc (a Spark partner can read it, and its id is the uid pair).
+  if (isPlayId(targetUid)) {
+    httpsCallable(functions, 'recordPlayReveal')({ playId: targetUid }).catch(() => {})
+    return
+  }
   updateDoc(doc(db, 'pairs', [uid, targetUid].sort().join('_')), {
     [`${uid}_revealed`]: true,
     [`${uid}_revealedAt`]: serverTimestamp(),
@@ -387,16 +413,12 @@ const PLAY_ARCHETYPE_COPY: Record<string, { label: string; copy: string }> = {
   curious_and_willing: { label: 'Curious & Willing', copy: "You're both open to where this goes. That's the whole point." },
 }
 
-// The pair's Play archetype. onTap only returns the Spark tier1, so this reads
-// pairs/{a_b}.tier1Play directly (participants can). Null when there's none.
-export async function fetchPlayArchetype(uid: string, targetUid: string): Promise<ArchetypeMatch | null> {
-  // Stage 2: Play scores live in pairs/{a_b}/modes/play (participants with
-  // Play access); older pairs had them on the pair doc.
-  const pairId = [uid, targetUid].sort().join('_')
-  const sub = await getDoc(doc(db, `pairs/${pairId}/modes/play`)).catch(() => null)
-  const legacy = sub?.exists() ? null : await getDoc(doc(db, 'pairs', pairId)).catch(() => null)
-  const tier1: unknown = sub?.data()?.tier1Play ?? legacy?.data()?.tier1Play
-  const archetype = typeof tier1 === 'object' && tier1 !== null ? parseArchetype((tier1 as Record<string, unknown>).archetype) : null
+// The pair's Play archetype, or null. F-062: from onTap by the other
+// person's Play ID (the pair's records are server-only).
+export async function fetchPlayArchetype(_uid: string, targetId: string): Promise<ArchetypeMatch | null> {
+  if (!isPlayId(targetId)) return null
+  const result = await fetchCompatibility(targetId).catch(() => null)
+  const archetype = parseArchetype(result?.playArchetype)
   const copy = archetype ? PLAY_ARCHETYPE_COPY[archetype.id] : undefined
   return archetype && copy ? { ...archetype, ...copy } : null
 }

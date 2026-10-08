@@ -55,7 +55,8 @@ function pendingOf(data: DocumentData | undefined): PendingEntry[] {
 // The entry's own mode, else the Storage path (photos/{uid}/spark|play/…).
 function modeOf(entry: PendingEntry): Mode {
   if (entry.mode === 'spark' || entry.mode === 'play') return entry.mode
-  return storagePath(entry.url)?.path.includes('/play/') ? 'play' : 'spark'
+  const path = storagePath(entry.url)?.path ?? ''
+  return path.startsWith('playPhotos/') || path.includes('/play/') ? 'play' : 'spark'
 }
 
 function millis(v: unknown): number | null {

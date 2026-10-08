@@ -174,8 +174,21 @@ export const adminPurgeAccount = onCall(
       db.collection('swipes').where('swipedId', '==', uid).get(),
     ])
     await deleteAll([...pairsA.docs, ...pairsB.docs, ...swiper.docs, ...swiped.docs])
-    // With their messages (onNightlyPurge leaves those behind).
+    // With their messages (onNightlyPurge leaves those behind). F-062: and
+    // their Play matches (playMatches, people in playMatchMembers).
     for (const m of matches.docs) await db.recursiveDelete(m.ref)
+    const playMembers = await db.collection('playMatchMembers').where('users', 'array-contains', uid).get()
+    for (const m of playMembers.docs) {
+      await db.recursiveDelete(db.doc(`playMatches/${m.id}`))
+      await m.ref.delete()
+    }
+    const playId: unknown = (await db.doc(`playIds/${uid}`).get()).get('playId')
+    if (typeof playId === 'string') {
+      await db.doc(`playProfiles/${playId}`).delete().catch(() => {})
+      await db.doc(`playIdOwners/${playId}`).delete().catch(() => {})
+      await getStorage().bucket().deleteFiles({ prefix: `playPhotos/${playId}/` }).catch(() => {})
+    }
+    await db.doc(`playIds/${uid}`).delete().catch(() => {})
     for (const path of [`popupTriggers/${uid}`, `deletionRequests/${uid}`, `founderRecords/${uid}`, `keyBackups/${uid}`, `userInternal/${uid}`, `userLocations/${uid}`, `rateLimits/${uid}`]) {
       await db.doc(path).delete().catch(() => {})
     }

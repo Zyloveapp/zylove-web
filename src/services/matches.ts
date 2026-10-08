@@ -10,13 +10,17 @@ import {
 } from 'firebase/firestore'
 import { db } from './firebase'
 import type { Mode } from '../store/modeStore'
-import { fetchPublicUserDoc } from './publicUserDoc'
 import { loadPlayProfileStatus } from './playProfile'
 import { playNameOf } from './displayNames'
+import { isPlayId, isPlayMatchId, myPlayId } from './playId'
 
+// F-062: in a Play match (playMatches/{pm_…}) everyone is named by Play ID:
+// partnerUid holds the partner's Play ID and selfId your own — never a uid.
+// In Spark both are uids.
 export interface MatchEntry {
   matchId: string
   partnerUid: string
+  selfId: string
   name: string
   age: number | null
   photoURL: string | null
@@ -36,6 +40,9 @@ export interface MatchEntry {
   ended: boolean
   // A reported chat kept read-only for its reporter until then (ms), else null.
   preservedUntil: number | null
+  // A curated profile's chat (server-set). In Play the partner's id doesn't
+  // say so (F-062), so this is what tells.
+  isBot: boolean
 }
 
 // Firestore Timestamp, epoch ms, or missing → epoch ms.
@@ -58,18 +65,24 @@ function str(v: unknown): string | null {
   return typeof v === 'string' && v ? v : null
 }
 
-export function toEntry(matchId: string, data: DocumentData, uid: string): MatchEntry | null {
+// `selfId`: how you're named in this match — your uid in Spark, your Play ID
+// in a Play match.
+export function toEntry(matchId: string, data: DocumentData, selfId: string): MatchEntry | null {
   // 'participants' is the legacy name for 'users'. A reported chat kept for
   // its reporter after an unmatch lists only the reporter in users; the
-  // pair is in pairUsers (T&S Phase 1).
-  const users: unknown = Array.isArray(data.pairUsers) ? data.pairUsers : (data.users ?? data.participants)
-  const partnerUid = Array.isArray(users) ? users.find((u): u is string => typeof u === 'string' && u !== uid) : undefined
-  if (!partnerUid) return null
+  // pair is in pairUsers (T&S Phase 1). Play: players / pairPlayers.
+  const play = isPlayMatchId(matchId)
+  const users: unknown = play
+    ? (Array.isArray(data.pairPlayers) ? data.pairPlayers : data.players)
+    : Array.isArray(data.pairUsers) ? data.pairUsers : (data.users ?? data.participants)
+  const partnerUid = Array.isArray(users) ? users.find((u): u is string => typeof u === 'string' && u !== selfId) : undefined
+  if (!partnerUid || !selfId) return null
 
   const snap: Record<string, unknown> = data.participantSnapshots?.[partnerUid] ?? {}
   return {
     matchId,
     partnerUid,
+    selfId,
     name: str(snap.displayName) ?? 'Someone',
     age: typeof snap.age === 'number' && snap.age > 0 ? snap.age : null,
     photoURL: str(snap.photoURL),
@@ -81,9 +94,10 @@ export function toEntry(matchId: string, data: DocumentData, uid: string): Match
         ? data.matchGeneration
         : earliest(toMillis(data.matchedAt), toMillis(data.createdAt)),
     lastSenderId: str(data.lastSenderId),
-    mode: data.mode === 'play' ? 'play' : 'spark',
+    mode: play || data.mode === 'play' ? 'play' : 'spark',
     ended: data.isBlocked === true || (data.unmatchedAt !== undefined && data.unmatchedAt !== null),
     preservedUntil: toMillis(data.preservedUntil) || null,
+    isBot: data.isBot === true || /^(zbot|seed)-/.test(partnerUid),
   }
 }
 
@@ -98,6 +112,12 @@ export function subscribeMatches(
 ): Unsubscribe {
   // Filtered by mode in the query: Play matches are readable only with Play
   // access (Stage 2 rules), and a query must not reach ones it can't read.
+  // F-062: Play matches are playMatches, found by your Play ID.
+  const sort = (entries: MatchEntry[]) =>
+    entries.sort((a, b) => Math.max(b.lastMessageAt, b.matchedAt) - Math.max(a.lastMessageAt, a.matchedAt))
+  if (mode === 'play') {
+    return listenPlay(uid, (entries) => onChange(sort(entries)), onError)
+  }
   const q = query(collection(db, 'matches'), where('users', 'array-contains', uid), where('mode', '==', mode))
   return onSnapshot(
     q,
@@ -105,11 +125,29 @@ export function subscribeMatches(
       const entries = snap.docs
         .map((d) => toEntry(d.id, d.data(), uid))
         .filter((e): e is MatchEntry => e !== null && e.mode === mode)
-        .sort((a, b) => Math.max(b.lastMessageAt, b.matchedAt) - Math.max(a.lastMessageAt, a.matchedAt))
-      onChange(entries)
+      onChange(sort(entries))
     },
     onError,
   )
+}
+
+// Your Play matches (playMatches where players contains your Play ID).
+function listenPlay(uid: string, onChange: (matches: MatchEntry[]) => void, onError: (err: Error) => void): Unsubscribe {
+  let off: Unsubscribe | null = null
+  let stopped = false
+  void myPlayId(uid).then((playId) => {
+    if (stopped) return
+    if (!playId) return onChange([])
+    off = onSnapshot(
+      query(collection(db, 'playMatches'), where('players', 'array-contains', playId)),
+      (snap) => onChange(snap.docs.map((d) => toEntry(d.id, d.data(), playId)).filter((e): e is MatchEntry => e !== null)),
+      onError,
+    )
+  })
+  return () => {
+    stopped = true
+    off?.()
+  }
 }
 
 // Live map of matchId → lastReadAt (ms) from users/{uid}/matches, the same
@@ -126,8 +164,8 @@ export function markMatchRead(uid: string, matchId: string): Promise<void> {
   return setDoc(doc(db, `users/${uid}/matches/${matchId}`), { lastReadAt: Date.now(), matchId }, { merge: true })
 }
 
-export function isUnread(m: MatchEntry, uid: string, lastRead: Map<string, number>): boolean {
-  return m.lastMessageAt > (lastRead.get(m.matchId) ?? 0) && m.lastSenderId !== uid
+export function isUnread(m: MatchEntry, _uid: string, lastRead: Map<string, number>): boolean {
+  return m.lastMessageAt > (lastRead.get(m.matchId) ?? 0) && m.lastSenderId !== m.selfId
 }
 
 export function relativeTime(ms: number): string {
@@ -153,21 +191,30 @@ export function subscribeAllMatches(
   onError: (err: Error) => void,
 ): Unsubscribe {
   const byMode: Partial<Record<Mode, MatchEntry[]>> = {}
-  const listen = (mode: Mode) =>
+  const update = () => byMode.spark && byMode.play && onChange([...byMode.spark, ...byMode.play])
+  const offs = [
     onSnapshot(
-      query(collection(db, 'matches'), where('users', 'array-contains', uid), where('mode', '==', mode)),
+      query(collection(db, 'matches'), where('users', 'array-contains', uid), where('mode', '==', 'spark')),
       (snap) => {
-        byMode[mode] = snap.docs.map((d) => toEntry(d.id, d.data(), uid)).filter((e): e is MatchEntry => e !== null)
-        if (byMode.spark && byMode.play) onChange([...byMode.spark, ...byMode.play])
+        byMode.spark = snap.docs.map((d) => toEntry(d.id, d.data(), uid)).filter((e): e is MatchEntry => e !== null)
+        update()
+      },
+      onError,
+    ),
+    listenPlay(
+      uid,
+      (entries) => {
+        byMode.play = entries
+        update()
       },
       (err) => {
-        if (mode === 'play' && (err as { code?: string }).code === 'permission-denied') {
+        if ((err as { code?: string }).code === 'permission-denied') {
           byMode.play = []
-          if (byMode.spark) onChange(byMode.spark)
+          update()
         } else onError(err)
       },
-    )
-  const offs = [listen('spark'), listen('play')]
+    ),
+  ]
   return () => offs.forEach((off) => off())
 }
 
@@ -198,11 +245,12 @@ const playIdentities = new Map<string, Promise<PlayIdentity>>()
 // snapshots that may carry Spark data (older match snapshots, like-queue
 // entries). Never the Spark photo; the name falls back as playNameOf does.
 // Cached for the session.
+// F-062: by Play ID (playProfiles/{playId}) — never the account doc.
 export function loadPlayIdentity(uid: string): Promise<PlayIdentity> {
   let request = playIdentities.get(uid)
   if (!request) {
-    request = Promise.all([fetchPublicUserDoc(uid), loadPlayProfileStatus(uid)]).then(([root, { play, denied }]) => ({
-      name: playNameOf(play, root),
+    request = (isPlayId(uid) ? loadPlayProfileStatus(uid) : Promise.resolve({ play: null, denied: true })).then(({ play, denied }) => ({
+      name: playNameOf(play, null),
       photoURL: play?.photoURLs[0] ?? null,
       // Their Play profile can't be read: they (or you) don't have Play
       // access right now — shown as unavailable, not as an error.

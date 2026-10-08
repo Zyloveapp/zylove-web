@@ -2,7 +2,8 @@ import { collection, doc, onSnapshot, serverTimestamp, setDoc, type Unsubscribe 
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { encryptMessage, isRealPublicKey } from './encryption'
-import { getSendingKey } from './keys'
+import { chatSendingKey } from './keys'
+import { matchPath, selfIdIn } from './playId'
 
 // T&S Phase 3 — "Share contact" (functions/src/contactExchange.ts). The
 // state is matches/{id}.contactExchange, moved only by callables; a card is a
@@ -67,7 +68,7 @@ export function parseCard(text: string | null): ContactCard | null {
 
 export function subscribeContactExchange(matchId: string, onChange: (ce: ContactExchange | null) => void): Unsubscribe {
   return onSnapshot(
-    doc(db, 'matches', matchId),
+    doc(db, matchPath(matchId)),
     (snap) => {
       const c = snap.data()?.contactExchange as Record<string, unknown> | undefined
       if (!c || typeof c.status !== 'string' || typeof c.requestedBy !== 'string') return onChange(null)
@@ -90,15 +91,16 @@ export const respondContact = (matchId: string, accept: boolean, shareBack = fal
 export const revokeContact = (matchId: string) => call('revokeContactExchange')({ matchId })
 
 // Encrypts the card to the partner's key — the same box as a text message.
+// F-062: in a Play match, with the Play key and as your Play ID.
 export async function sendContactCard(matchId: string, uid: string, card: ContactCard, partnerPublicKey: string): Promise<void> {
-  const privateKey = await getSendingKey(uid)
-  if (!isRealPublicKey(partnerPublicKey) || !privateKey) throw new Error('encryption_key_missing')
+  const [privateKey, sender] = await Promise.all([chatSendingKey(uid, matchId), selfIdIn(uid, matchId)])
+  if (!isRealPublicKey(partnerPublicKey) || !privateKey || !sender) throw new Error('encryption_key_missing')
   const { ciphertext, nonce } = encryptMessage(JSON.stringify(card), partnerPublicKey, privateKey)
   if (nonce === 'stub') throw new Error('encryption_key_missing')
-  await setDoc(doc(collection(db, `matches/${matchId}/messages`)), {
+  await setDoc(doc(collection(db, `${matchPath(matchId)}/messages`)), {
     ciphertext,
     nonce,
-    senderId: uid,
+    senderId: sender,
     sentAt: serverTimestamp(),
     status: 'sent',
     messageType: 'contact_card',

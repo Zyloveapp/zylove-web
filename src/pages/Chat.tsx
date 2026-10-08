@@ -4,6 +4,7 @@ import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { toEntry, type MatchEntry } from '../services/matches'
+import { matchPath, selfIdIn } from '../services/playId'
 import ChatView from '../components/chat/ChatView'
 import { useModeStore } from '../store/modeStore'
 import PlayGate from '../components/PlayGate'
@@ -21,11 +22,21 @@ export default function Chat() {
 
   useEffect(() => {
     if (!uid || !matchId) return
-    return onSnapshot(
-      doc(db, 'matches', matchId),
-      (snap) => setLoaded({ matchId, match: snap.exists() ? toEntry(snap.id, snap.data(), uid) : null }),
-      () => setLoaded({ matchId, match: null }),
-    )
+    // F-062: a Play match (pm_…) is in playMatches, where you're your Play ID.
+    let off: (() => void) | null = null
+    let stopped = false
+    void selfIdIn(uid, matchId).then((selfId) => {
+      if (stopped) return
+      off = onSnapshot(
+        doc(db, matchPath(matchId)),
+        (snap) => setLoaded({ matchId, match: snap.exists() ? toEntry(snap.id, snap.data(), selfId) : null }),
+        () => setLoaded({ matchId, match: null }),
+      )
+    })
+    return () => {
+      stopped = true
+      off?.()
+    }
   }, [uid, matchId])
 
   const container = 'h-[calc(100dvh-7rem)] lg:h-[calc(100dvh-7.5rem)] bg-gray-950'

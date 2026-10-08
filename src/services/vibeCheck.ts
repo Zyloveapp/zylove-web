@@ -2,6 +2,7 @@ import { deleteField, doc, getDoc, onSnapshot, Timestamp, updateDoc, type Unsubs
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { PLAY_PROMPTS, SPARK_PROMPTS, UNIVERSAL_PROMPTS, type PromptAnswer } from '../types/profile'
+import { matchPath } from './playId'
 import { loadPlayProfile } from './playProfile'
 
 // Mirrors mobile's vibeCheck.ts. Ratings go through the recordVibeRating
@@ -61,6 +62,8 @@ export function shouldTriggerVibeCheck(senderIds: string[], uid: string, state: 
 }
 
 // ─── State: matches/{id}.vibeCheckState_{uid} ───────────────────────────────
+// F-062: in a Play match (playMatches/{id}) the field is keyed by your Play
+// ID — callers pass the id the match knows you by (MatchEntry.selfId).
 // { lastThreshold, lastRatedAt } on the match doc, so every device agrees.
 // lastThreshold is written here when a check fires; lastRatedAt by
 // recordVibeRating. Older matches kept both in this browser's localStorage:
@@ -107,7 +110,7 @@ function toMillis(v: unknown): number | null {
 export function subscribeVibeCheckState(matchId: string, uid: string, onChange: (state: VibeCheckState) => void): Unsubscribe {
   let migrated = false
   return onSnapshot(
-    doc(db, 'matches', matchId),
+    doc(db, matchPath(matchId)),
     (snap) => {
       const raw: unknown = snap.data()?.[stateField(uid)]
       const remote = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
@@ -126,7 +129,7 @@ export function subscribeVibeCheckState(matchId: string, uid: string, onChange: 
         const up: Record<string, number> = {}
         if (localThreshold > remoteThreshold) up[`${stateField(uid)}.lastThreshold`] = localThreshold
         if (localRated !== null && localRated > (remoteRated ?? 0)) up[`${stateField(uid)}.lastRatedAt`] = localRated
-        const write = Object.keys(up).length > 0 ? updateDoc(doc(db, 'matches', matchId), up) : Promise.resolve()
+        const write = Object.keys(up).length > 0 ? updateDoc(doc(db, matchPath(matchId)), up) : Promise.resolve()
         write.then(() => clearLegacy(matchId)).catch(() => {})
       }
     },
@@ -138,7 +141,7 @@ export function subscribeVibeCheckState(matchId: string, uid: string, onChange: 
 // remembers it (the fallback) so the prompt doesn't repeat here.
 export async function markVibeCheckFired(matchId: string, uid: string, messageCount: number): Promise<void> {
   try {
-    await updateDoc(doc(db, 'matches', matchId), { [`${stateField(uid)}.lastThreshold`]: messageCount })
+    await updateDoc(doc(db, matchPath(matchId)), { [`${stateField(uid)}.lastThreshold`]: messageCount })
     clearLegacy(matchId)
   } catch {
     writeNumber(legacyFiredKey(matchId), messageCount)
@@ -160,7 +163,7 @@ export function markVibeCheckRated(matchId: string): void {
 // shows on reopening the chat. Admins also skip the server's rating cooldown.
 export async function resetVibeCheckForTesting(matchId: string, uid: string): Promise<void> {
   clearLegacy(matchId)
-  await updateDoc(doc(db, 'matches', matchId), { [stateField(uid)]: deleteField() })
+  await updateDoc(doc(db, matchPath(matchId)), { [stateField(uid)]: deleteField() })
 }
 
 // ─── Mutual vibe ─────────────────────────────────────────────────────────────
@@ -200,7 +203,7 @@ export function subscribeMutualVibe(
   let stopped = false
   const listen = () => {
     unsub = onSnapshot(
-      doc(db, 'matches', matchId),
+      doc(db, matchPath(matchId)),
       (snap) => onChange(mutualAt(snap.data() ?? {}, uid, partnerUid)),
       () => {
         if (!stopped) retry = setTimeout(listen, 3000)

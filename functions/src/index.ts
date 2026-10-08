@@ -57,10 +57,13 @@ import { takeRateLimit } from './rateLimits'
 import { takeQuota } from './usage'
 import { loadSparkDetails } from './pairSpark'
 import { clientIp } from './legal'
-import { playStatus, requirePlayAccess, requirePlayEntitled } from './playAccess'
+import { isBotUid, playStatus, requirePlayAccess, requirePlayEntitled } from './playAccess'
 import { loadPlayScores } from './pairPlay'
 import { markActed } from './explore'
 import { countMessages, generationOf, participants, pastConnectionId } from './matchGeneration'
+import { ensurePlayId, isPlayMatchId, requireUidOfPlayId } from './playIds'
+import { createPlayMatch, livePlayMatchOf, loadMatch, matchRefOf, requireMatchWith } from './playMatch'
+import { publicPlayProfile } from './playProfiles'
 import {
   FLAG_CATEGORY_IDS,
   MAX_NEGATIVE_DELTA,
@@ -503,17 +506,19 @@ export const likeBack = onCall(
   async (request): Promise<LikeBackResponse> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const callerId = request.auth.uid
-    const { likerUid, mode } = parseLikeBackRequest(request.data)
+    const req = parseLikeBackRequest(request.data)
+    const mode = req.mode
+    // F-062: in Play the liker is known by their Play ID (the queue entry's id).
+    if (mode === 'play') await requirePlayAccess(callerId)
+    const likerUid = mode === 'play' ? await requireUidOfPlayId(req.likerUid, callerId) : req.likerUid
     if (likerUid === callerId) throw new HttpsError('invalid-argument', 'Cannot like yourself back')
     // Stage 2: a Play match needs Play access on both sides.
-    if (mode === 'play') {
-      await requirePlayAccess(callerId)
-      if (!(await playStatus(likerUid)).access) throw new HttpsError('failed-precondition', "That profile isn't available in Play.")
-    }
+    if (mode === 'play' && !(await playStatus(likerUid)).access) throw new HttpsError('failed-precondition', "That profile isn't available in Play.")
 
     const db = getFirestore()
-    const callerQueueRef = db.doc(`users/${callerId}/likeQueue/${likerUid}`)
-    const likerQueueRef = db.doc(`users/${likerUid}/likeQueue/${callerId}`)
+    const [callerPlayId, likerPlayId] = mode === 'play' ? await Promise.all([ensurePlayId(callerId), ensurePlayId(likerUid)]) : [null, null]
+    const callerQueueRef = db.doc(`users/${callerId}/likeQueue/${likerPlayId ?? likerUid}`)
+    const likerQueueRef = db.doc(`users/${likerUid}/likeQueue/${callerPlayId ?? callerId}`)
     const queueEntry = await callerQueueRef.get()
     if (!queueEntry.exists) throw new HttpsError('not-found', 'No like from this person in your queue')
     // Stage A: the entry is only a pointer — the like itself must be real and
@@ -532,6 +537,50 @@ export const likeBack = onCall(
     }
     if (!bot) await recordLike(pairIdOf(callerId, likerUid), mode, callerId)
 
+    if (mode === 'play') {
+      // F-062: a Play match — its own id, Play IDs only.
+      const [callerSnap, likerSnap, callerPlay, likerPlay] = await Promise.all([
+        db.doc(`users/${callerId}`).get(),
+        db.doc(`users/${likerUid}`).get(),
+        playDataOf(callerId),
+        playDataOf(likerUid),
+      ])
+      if (!likerSnap.exists) throw new HttpsError('not-found', 'That profile no longer exists')
+      const now = Timestamp.now()
+      const snap = (uid: string, root: DocumentData | undefined, play: DocumentData, playId: string) => {
+        const pub = publicPlayProfile(uid, playId, play, root)
+        return { displayName: pub.playDisplayName || 'Someone', photoURL: pub.photoURLs?.[0] ?? null, age: pub.age ?? null }
+      }
+      const [matchId, created] = await createPlayMatch({
+        users: [callerId, likerUid],
+        pairId: pairIdOf(callerId, likerUid),
+        fields: (ids) => ({
+          matchedAt: now,
+          createdAt: now,
+          matchGeneration: now.toMillis(),
+          lastMessagePreview: null,
+          hasUnread: false,
+          isBlocked: false,
+          ...(isBotUid(likerUid) ? { isBot: true, botPlayer: ids.get(likerUid) } : {}),
+          participantSnapshots: {
+            [ids.get(callerId)!]: snap(callerId, callerSnap.data(), callerPlay, ids.get(callerId)!),
+            [ids.get(likerUid)!]: snap(likerUid, likerSnap.data(), likerPlay, ids.get(likerUid)!),
+          },
+        }),
+      })
+      if (created) {
+        await Promise.all([
+          db.doc(`users/${callerId}/matches/${matchId}`).set({ matchId, otherPlayId: likerPlayId, createdAt: now, mode }),
+          db.doc(`users/${likerUid}/matches/${matchId}`).set({ matchId, otherPlayId: callerPlayId, createdAt: now, mode }),
+        ])
+      }
+      await Promise.all([markActed(callerId, mode, likerUid), markActed(likerUid, mode, callerId)])
+      await callerQueueRef.delete()
+      await likerQueueRef.delete().catch(() => {})
+      logger.info(created ? 'likeBack: match created' : 'likeBack: match already existed', { mode })
+      return { matched: true, matchId }
+    }
+
     const matchId = [callerId, likerUid].sort().join('_')
     const matchRef = db.collection('matches').doc(matchId)
     // onBotMessage only replies on matches flagged isBot (zbot- isn't in its
@@ -547,12 +596,9 @@ export const likeBack = onCall(
         if (isBot && existing.data()?.isBot !== true) tx.update(matchRef, { isBot: true, botUid: likerUid })
         return false
       }
-      const [callerSnap, likerSnap, callerPlay, likerPlay] = await Promise.all([
+      const [callerSnap, likerSnap] = await Promise.all([
         tx.get(db.collection('users').doc(callerId)),
         tx.get(db.collection('users').doc(likerUid)),
-        // A Play match snapshots the Play names and photos.
-        mode === 'play' ? playDataOf(callerId) : Promise.resolve(null),
-        mode === 'play' ? playDataOf(likerUid) : Promise.resolve(null),
       ])
       if (!likerSnap.exists) throw new HttpsError('not-found', 'That profile no longer exists')
       // matchGeneration = matchedAt (see matchGeneration.ts).
@@ -569,8 +615,8 @@ export const likeBack = onCall(
         isBlocked: false,
         ...(isBot ? { isBot: true, botUid: likerUid } : {}),
         participantSnapshots: {
-          [callerId]: participantSnapshot(callerSnap.data(), callerPlay),
-          [likerUid]: participantSnapshot(likerSnap.data(), likerPlay),
+          [callerId]: participantSnapshot(callerSnap.data()),
+          [likerUid]: participantSnapshot(likerSnap.data()),
         },
       })
       return true
@@ -602,21 +648,6 @@ function requireString(data: unknown, field: string): string {
   return value
 }
 
-// Loads matches/{matchId} and checks that the caller and otherUid are its two
-// participants. Callables run with admin privileges, so without this check a
-// caller could move any user's score or read any pair of profiles.
-// Returns the match doc's data for callers that need more than the check.
-async function requireMatchPair(matchId: string, callerId: string, otherUid: string): Promise<DocumentData> {
-  if (otherUid === callerId) throw new HttpsError('invalid-argument', 'otherUid must be your match')
-  const snap = await getFirestore().collection('matches').doc(matchId).get()
-  // 'participants' is the legacy name for 'users'.
-  const users: unknown = snap.data()?.users ?? snap.data()?.participants
-  if (!snap.exists || !Array.isArray(users) || !users.includes(callerId) || !users.includes(otherUid)) {
-    throw new HttpsError('permission-denied', 'Not a participant in this match')
-  }
-  return snap.data() ?? {}
-}
-
 // ─── recordVibeRating ────────────────────────────────────────────────────────
 
 type VibeRating = 'loving_it' | 'alright' | 'meh'
@@ -633,13 +664,14 @@ const MUTUAL_VIBE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 // recent, and not already part of an earlier mutual, stamp the match
 // (mutualVibeAt) — both chats celebrate it once (ChatView). Transactional so
 // two near-simultaneous ratings stamp it once.
-async function markMutualVibe(matchId: string, otherUid: string): Promise<boolean> {
+// `otherId`: how the partner is known in this match (Play ID in Play).
+async function markMutualVibe(matchId: string, otherId: string): Promise<boolean> {
   const db = getFirestore()
-  const ref = db.collection('matches').doc(matchId)
+  const ref = matchRefOf(matchId)
   return db.runTransaction(async (tx) => {
     const m = (await tx.get(ref)).data() ?? {}
-    const theirs = m[`lastVibeRating_${otherUid}`]
-    const theirAt: unknown = m[`lastVibeRatedAt_${otherUid}`]
+    const theirs = m[`lastVibeRating_${otherId}`]
+    const theirAt: unknown = m[`lastVibeRatedAt_${otherId}`]
     const lastMutual: unknown = m.mutualVibeAt
     if (theirs !== 'loving_it' || !(theirAt instanceof Timestamp)) return false
     if (Date.now() - theirAt.toMillis() > MUTUAL_VIBE_WINDOW_MS) return false
@@ -660,13 +692,15 @@ export const recordVibeRating = onCall(
     await requireActive(request.auth.uid)
     const callerId = request.auth.uid
     const matchId = requireString(request.data, 'matchId')
-    const otherUid = requireString(request.data, 'otherUid')
     const rating = (request.data as Record<string, unknown>).rating
     if (!VIBE_RATINGS.includes(rating as VibeRating)) {
       throw new HttpsError('invalid-argument', "rating must be 'loving_it', 'alright' or 'meh'")
     }
     const vibe = rating as VibeRating
-    const match = await requireMatchPair(matchId, callerId, otherUid)
+    // F-062: otherUid is how the caller was shown the partner (a Play ID in Play).
+    const { ctx, other: otherUid } = await requireMatchWith(matchId, callerId, requireString(request.data, 'otherUid'))
+    const match = ctx.data
+    const me = ctx.idOf(callerId)
     // 'entanglement' is an older name for Play.
     const cooldownMs = match.mode === 'play' || match.mode === 'entanglement' ? VIBE_COOLDOWN_MS.play : VIBE_COOLDOWN_MS.spark
 
@@ -690,11 +724,11 @@ export const recordVibeRating = onCall(
     // the batch instead of being recreated as a stub doc.
     const batch = db.batch()
     batch.set(vibeRef, { matchId, generation, raterUid: callerId, rating: vibe, createdAt: FieldValue.serverTimestamp() })
-    batch.update(db.collection('matches').doc(matchId), {
-      [`lastVibeRating_${callerId}`]: vibe,
-      [`lastVibeRatedAt_${callerId}`]: FieldValue.serverTimestamp(),
+    batch.update(ctx.ref, {
+      [`lastVibeRating_${me}`]: vibe,
+      [`lastVibeRatedAt_${me}`]: FieldValue.serverTimestamp(),
       // The web client's vibe-check state (its cooldown reads this).
-      [`vibeCheckState_${callerId}.lastRatedAt`]: FieldValue.serverTimestamp(),
+      [`vibeCheckState_${me}.lastRatedAt`]: FieldValue.serverTimestamp(),
       ...(vibe === 'loving_it' ? { warmSignal: true } : {}),
     })
     const points = adminRepeat ? 0 : VIBE_POINTS[vibe]
@@ -714,7 +748,7 @@ export const recordVibeRating = onCall(
 
     const mutual =
       vibe === 'loving_it' &&
-      (await markMutualVibe(matchId, otherUid).catch((err: unknown) => {
+      (await markMutualVibe(matchId, ctx.idOf(otherUid)).catch((err: unknown) => {
         logger.error('recordVibeRating: mutual check failed', { matchId, message: err instanceof Error ? err.message : String(err) })
         return false
       }))
@@ -986,9 +1020,11 @@ async function resolveReviewTarget(
     if (!users.includes(callerId) || !users.includes(otherUid)) throw notParticipant()
   }
 
-  const live = (await db.collection('matches').doc(matchId).get()).data()
-  if (live) {
-    requireBoth(live)
+  // F-062: a Play match's people are in its server-only record.
+  const ctx = await loadMatch(matchId)
+  const live = ctx?.data
+  if (ctx && live) {
+    if (!ctx.users.includes(callerId) || !ctx.users.includes(otherUid)) throw notParticipant()
     const generation = generationOf(live)
     if (requested === null || requested === generation) {
       return { ended: matchEnded(live), generation, messageCount: (await countMessages(matchId, generation)).total }
@@ -1063,7 +1099,9 @@ export const submitReview = onCall(
     await requireActive(request.auth.uid)
     const callerId = request.auth.uid
     const matchId = requireString(request.data, 'matchId')
-    const reviewedUid = requireString(request.data, 'reviewedUid')
+    // F-062: in a Play match the reviewed person is named by their Play ID.
+    const reviewedArg = requireString(request.data, 'reviewedUid')
+    const reviewedUid = isPlayMatchId(matchId) ? await requireUidOfPlayId(reviewedArg, callerId) : reviewedArg
     const categories = parseCategories(request.data)
     if (BOT_PREFIXES.some((p) => reviewedUid.startsWith(p))) throw new HttpsError('invalid-argument', 'Bots cannot be reviewed')
     const requested: unknown = (request.data as Record<string, unknown> | null)?.generation
@@ -1226,11 +1264,7 @@ async function applyPendingNegative(reviewRef: DocumentReference): Promise<void>
 // unmatched (unmatchedAt), or deleted — mobile's submitUnmatch deletes the
 // match doc outright. Fires on every match write, so it returns early unless
 // this write is the one that ended the match.
-export const processMatchEnd = onDocumentWritten(
-  { document: 'matches/{matchId}', timeoutSeconds: 60, memory: '256MiB' },
-  async (event) => {
-    const before = event.data?.before.data()
-    const after = event.data?.after.data()
+async function applyHeldReviewsOnEnd(matchId: string, before: DocumentData | undefined, after: DocumentData | undefined): Promise<void> {
     if (!before) return
     // Deletion always counts, and so does a re-match overwriting the doc
     // (a new generation); applyPendingNegative skips anything already applied.
@@ -1239,7 +1273,6 @@ export const processMatchEnd = onDocumentWritten(
     const endedNow = after === undefined || replaced || (matchEnded(after) && !matchEnded(before))
     if (!endedNow) return
 
-    const { matchId } = event.params
     const reviews = await getFirestore().collection('reviews').where('matchId', '==', matchId).get()
     // The ended generation's reviews (pre-generation ones carry none).
     const pending = reviews.docs.filter((d) => {
@@ -1248,7 +1281,14 @@ export const processMatchEnd = onDocumentWritten(
     })
     for (const d of pending) await applyPendingNegative(d.ref)
     if (pending.length > 0) logger.info('processMatchEnd: applied held negative reviews', { matchId, count: pending.length })
-  },
+}
+
+export const processMatchEnd = onDocumentWritten({ document: 'matches/{matchId}', timeoutSeconds: 60, memory: '256MiB' }, async (event) =>
+  applyHeldReviewsOnEnd(event.params.matchId, event.data?.before.data(), event.data?.after.data()),
+)
+// F-062: Play matches (playMatches/{pm_…}) end the same way.
+export const processPlayMatchEnd = onDocumentWritten({ document: 'playMatches/{matchId}', timeoutSeconds: 60, memory: '256MiB' }, async (event) =>
+  applyHeldReviewsOnEnd(event.params.matchId, event.data?.before.data(), event.data?.after.data()),
 )
 
 // ─── generateConversationStarter ─────────────────────────────────────────────
@@ -1340,10 +1380,10 @@ export const generateConversationStarter = onCall(
     await requireActive(request.auth.uid)
     const callerId = request.auth.uid
     const matchId = requireString(request.data, 'matchId')
-    const otherUid = requireString(request.data, 'otherUid')
-    // Gates AI spend and profile reads to the caller's own match.
-    const match = await requireMatchPair(matchId, callerId, otherUid)
-    const play = match.mode === 'play'
+    // Gates AI spend and profile reads to the caller's own match. F-062:
+    // otherUid is how the caller was shown the partner (a Play ID in Play).
+    const { ctx, other: otherUid } = await requireMatchWith(matchId, callerId, requireString(request.data, 'otherUid'))
+    const play = ctx.play || ctx.data.mode === 'play'
     // Stage 2: a Play match is sealed while the caller has no Play access.
     if (play) await requirePlayAccess(callerId)
     const fallback = play ? PLAY_FALLBACK_STARTERS : FALLBACK_STARTERS
@@ -1665,8 +1705,10 @@ export const reviewPlayProfile = onCall(
 
 // ─── getSentSparks ───────────────────────────────────────────────────────────
 
+// F-062: a Play entry is named by its Play ID (no uid).
 interface SentSpark {
-  uid: string
+  uid?: string
+  playId?: string
   displayName: string
   age: number | null
   photoURL: string | null
@@ -1725,12 +1767,11 @@ export const getSentSparks = onCall(
         const pair = pairSnap.data() ?? {}
         const otherUid: unknown = pair.userA === uid ? pair.userB : pair.userA
         if (typeof otherUid !== 'string') return null
-        const [matchSnap, userSnap, queueSnap, play] = await Promise.all([
+        if (mode === 'play') return sentPlay(uid, otherUid, pairSnap.id, pair)
+        const [matchSnap, userSnap, queueSnap] = await Promise.all([
           db.collection('matches').doc(pairSnap.id).get(),
           db.collection('users').doc(otherUid).get(),
           db.doc(`users/${otherUid}/likeQueue/${uid}`).get(),
-          // Play lists show the Play name and photo.
-          mode === 'play' ? playDataOf(otherUid) : Promise.resolve(null),
         ])
         // likeBack creates matches without flipping pairs.matched.
         if (matchSnap.exists) return null
@@ -1738,17 +1779,14 @@ export const getSentSparks = onCall(
         if (!user || (await isSuspendedUid(otherUid, user))) return null
         const queue = queueSnap.data()
         if (queue && (queue.mode === 'play' ? 'play' : 'spark') !== mode) return null
-        // Play: only people who still have Play access; scores from the Play subdoc.
-        if (mode === 'play' && !(await playStatus(otherUid)).access) return null
-        const playScores = mode === 'play' ? await loadPlayScores(pairSnap.id, pair) : undefined
         return {
           uid: otherUid,
-          ...modeIdentity(user, play),
+          ...modeIdentity(user, null),
           age: typeof user.age === 'number' && user.age > 0 ? user.age : null,
-          sparkScore: mode === 'spark' && typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
+          sparkScore: typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
           sparkEnoughInfo: typeof pair.sparkEnoughInfo === 'boolean' ? pair.sparkEnoughInfo : null,
           engineVersion: typeof pair.engineVersion === 'number' ? pair.engineVersion : null,
-          playScore: typeof playScores?.playScore === 'number' ? playScores.playScore : null,
+          playScore: null,
           // Deep Fit is Elite (Stage C); its home is pairs/{id}/modes/deep.
           tier1Spark: callerTier === 'elite' ? (await loadSparkDetails(pairSnap.id, pair)).tier1Spark : null,
           likedAt: toMillis(queue?.likedAt) || toMillis(pair.createdAt),
@@ -1760,10 +1798,41 @@ export const getSentSparks = onCall(
   },
 )
 
+// F-062: a sent Play like — the Play ID, Play name and photo, Play score.
+async function sentPlay(uid: string, otherUid: string, pairId: string, pair: DocumentData): Promise<SentSpark | null> {
+  const db = getFirestore()
+  const [myPlayId, otherPlayId] = await Promise.all([ensurePlayId(uid), ensurePlayId(otherUid)])
+  const [live, userSnap, queueSnap, play] = await Promise.all([
+    livePlayMatchOf(uid, otherUid),
+    db.collection('users').doc(otherUid).get(),
+    db.doc(`users/${otherUid}/likeQueue/${myPlayId}`).get(),
+    playDataOf(otherUid),
+  ])
+  const user = userSnap.data()
+  if (live || !user || (await isSuspendedUid(otherUid, user))) return null
+  if (!(await playStatus(otherUid)).access) return null
+  const pub = publicPlayProfile(otherUid, otherPlayId, play, user)
+  const playScores = await loadPlayScores(pairId, pair)
+  return {
+    playId: otherPlayId,
+    displayName: pub.playDisplayName || 'Someone',
+    photoURL: pub.photoURLs?.[0] ?? null,
+    age: pub.age ?? null,
+    sparkScore: null,
+    sparkEnoughInfo: null,
+    engineVersion: typeof pair.engineVersion === 'number' ? pair.engineVersion : null,
+    playScore: typeof playScores?.playScore === 'number' ? playScores.playScore : null,
+    tier1Spark: null,
+    likedAt: toMillis(queueSnap.get('likedAt')) || toMillis(pair.createdAt),
+  }
+}
+
 // ─── getCuriousVisitors ──────────────────────────────────────────────────────
 
+// F-062: a Play visitor is named by their Play ID (no uid, no Spark details).
 interface CuriousVisitor {
-  uid: string
+  uid?: string
+  playId?: string
   displayName: string
   age: number | null
   photoURL: string | null
@@ -1817,6 +1886,12 @@ export const getCuriousVisitors = onCall(
     // Stage 2: Play visitors only for callers with Play access.
     if (mode === 'play' && !(await playStatus(uid)).access) return { locked: true, count: 0, visitors: [] }
     const db = getFirestore()
+    if (mode === 'play') {
+      const visitors = await curiousPlay(uid)
+      return (await tierNow(uid)) === 'elite'
+        ? { locked: false, count: visitors.length, visitors }
+        : { locked: true, count: visitors.length, visitors: [] }
+    }
 
     const [asA, asB] = await Promise.all([
       db.collection('pairs').where('userA', '==', uid).get(),
@@ -1848,30 +1923,21 @@ export const getCuriousVisitors = onCall(
       if (visitors.length >= CURIOUS_LIMIT) break
       const otherUid: string = pair.userA === uid ? pair.userB : pair.userA
       if (otherUid.startsWith('zbot-')) continue // real people only
-      const [matchSnap, userSnap, playSnap] = await Promise.all([
-        db.collection('matches').doc(id).get(),
-        db.collection('users').doc(otherUid).get(),
-        mode === 'play' ? db.doc(`users/${otherUid}/playProfile/data`).get().catch(() => null) : Promise.resolve(null),
-      ])
+      const [matchSnap, userSnap] = await Promise.all([db.collection('matches').doc(id).get(), db.collection('users').doc(otherUid).get()])
       const user = userSnap.data()
       if (matchSnap.exists || !user || (await isSuspendedUid(otherUid, user))) continue
-      // Play visitors need a Play profile; Spark visitors a Spark one (not
-      // Play-only). Covers older reveals that didn't record the mode.
-      const play = playSnap?.exists ? (playSnap.data() ?? {}) : null
-      if (mode === 'play' && (!play || !(await playStatus(otherUid)).access)) continue
-      // Play-only accounts have Spark hidden.
+      // Spark visitors need a Spark profile (Play-only accounts have Spark hidden).
       if (mode === 'spark' && user.sparkVisibility === 'hidden') continue
-      const playScores = mode === 'play' ? await loadPlayScores(id, pair) : undefined
       visitors.push({
         uid: otherUid,
-        ...modeIdentity(user, mode === 'play' ? play : null),
+        ...modeIdentity(user, null),
         age: typeof user.age === 'number' && user.age > 0 ? user.age : null,
         locationLabel: typeof user.locationLabel === 'string' && user.locationLabel ? user.locationLabel : null,
         intent: mode,
-        sparkScore: mode !== 'play' && typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
+        sparkScore: typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
         sparkEnoughInfo: typeof pair.sparkEnoughInfo === 'boolean' ? pair.sparkEnoughInfo : null,
         engineVersion: typeof pair.engineVersion === 'number' ? pair.engineVersion : null,
-        playScore: typeof playScores?.playScore === 'number' ? playScores.playScore : null,
+        playScore: null,
         tier1Spark: (await loadSparkDetails(id, pair)).tier1Spark, // Curious is Elite: Deep Fit included
         at: revealedAt(pair, uid),
       })
@@ -1883,9 +1949,60 @@ export const getCuriousVisitors = onCall(
   },
 )
 
+// F-062: Play reveals are recorded here, server-side — never on the pair doc,
+// which a Spark partner can read — in playReveals/{viewedUid}/by/{viewerUid}.
+export const recordPlayReveal = onCall({ timeoutSeconds: 15, invoker: 'public' }, async (request): Promise<{ ok: true }> => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+  const uid = request.auth.uid
+  await requirePlayAccess(uid)
+  const target = await requireUidOfPlayId((request.data as Record<string, unknown> | null)?.playId, uid)
+  await getFirestore().doc(`playReveals/${target}/by/${uid}`).set({ at: Date.now(), viewer: uid })
+  return { ok: true }
+})
+
+async function curiousPlay(uid: string): Promise<CuriousVisitor[]> {
+  const db = getFirestore()
+  const snap = await db.collection(`playReveals/${uid}/by`).orderBy('at', 'desc').limit(100).get()
+  const visitors: CuriousVisitor[] = []
+  for (const d of snap.docs) {
+    if (visitors.length >= CURIOUS_LIMIT) break
+    const otherUid = d.id
+    if (otherUid.startsWith('zbot-')) continue // real people only
+    const pairId = pairIdOf(uid, otherUid)
+    const [likes, live, userSnap, play] = await Promise.all([
+      db.doc(`pairs/${pairId}/likes/play`).get(),
+      livePlayMatchOf(uid, otherUid),
+      db.collection('users').doc(otherUid).get(),
+      playDataOf(otherUid),
+    ])
+    // Liked (either side, in Play) or matched: Flames / Chats cover them.
+    if ((likes.get('likedBy') ?? []).length > 0 || live) continue
+    const user = userSnap.data()
+    if (!user || (await isSuspendedUid(otherUid, user)) || !(await playStatus(otherUid)).access) continue
+    const playId = await ensurePlayId(otherUid)
+    const pub = publicPlayProfile(otherUid, playId, play, user)
+    const scores = await loadPlayScores(pairId)
+    visitors.push({
+      playId,
+      displayName: pub.playDisplayName || 'Someone',
+      photoURL: pub.photoURLs?.[0] ?? null,
+      age: pub.age ?? null,
+      locationLabel: null,
+      intent: 'play',
+      sparkScore: null,
+      sparkEnoughInfo: null,
+      engineVersion: null,
+      playScore: typeof scores?.playScore === 'number' ? scores.playScore : null,
+      tier1Spark: null,
+      at: typeof d.get('at') === 'number' ? d.get('at') : 0,
+    })
+  }
+  return visitors
+}
+
 // Bot chats: "typing…" while a bot reply is on its way (see botTyping.ts).
-export { botTypingStart, botTypingStop } from './botTyping'
-export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate, purgePreservedChats, unmatchConnection } from './behavior'
+export { botTypingStart, botTypingStartPlay, botTypingStop, botTypingStopPlay } from './botTyping'
+export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate, onPlayMatchBehaviorUpdate, purgePreservedChats, unmatchConnection } from './behavior'
 export { markChatPhotoViewed, sweepChatPhotos } from './photos'
 export { checkTrialStatus, onMarketOpened } from './trial'
 export { mirrorPlan } from './userData'
@@ -1910,9 +2027,11 @@ export const getLikeCount = onCall({ timeoutSeconds: 15, invoker: 'public' }, as
   // paid feature ever involves a bot), so it can be liked back on any plan.
   const snap = await getFirestore().collection(`users/${uid}/likeQueue`).where('mode', '==', mode).get()
   const live = snap.docs.filter((d) => d.get('dismissed') !== true)
+  // F-062: a Play entry is keyed by Play ID; a curated one says so (curated).
+  const curated = (d: FirebaseFirestore.QueryDocumentSnapshot) => d.id.startsWith('zbot-') || d.get('curated') === true
   return {
-    count: live.filter((d) => !d.id.startsWith('zbot-')).length,
-    bots: snap.docs.filter((d) => d.id.startsWith('zbot-')).map((d) => ({ id: d.id, data: d.data() })),
+    count: live.filter((d) => !curated(d)).length,
+    bots: snap.docs.filter(curated).map((d) => ({ id: d.id, data: d.data() })),
   }
 })
 export { playAccessOnPlan, playAccessOnPlayProfile, playAccessOnProfile } from './playAccess'
@@ -1969,49 +2088,57 @@ export const smsOnSpark = onDocumentCreated(
 
 // New message: texts the other participant, at most once per match every
 // 5 minutes. Protocol and system messages don't count, and neither do bot
-// chats — a bot reply never texts anyone.
+// chats — a bot reply never texts anyone. F-062: Play messages (under
+// playMatches, sender = Play ID) the same way, through loadMatch.
+async function textOnMessage(matchId: string, msg: DocumentData | undefined): Promise<void> {
+  if (!msg) return
+  const senderId: unknown = msg.senderId
+  if (typeof senderId !== 'string' || !senderId) return
+  const ciphertext = typeof msg.ciphertext === 'string' ? msg.ciphertext : ''
+  if (
+    msg.isBot === true ||
+    senderId.startsWith('zbot-') ||
+    senderId.startsWith('seed-') ||
+    msg.nonce === 'system' ||
+    msg.messageType === 'system' ||
+    msg.messageType === 'consent_request' ||
+    ciphertext.startsWith('photo_consent')
+  ) {
+    return
+  }
+
+  const ctx = await loadMatch(matchId)
+  const match = ctx?.data
+  if (!ctx || !match || match.isBlocked === true || match.isBot === true) return
+  const sender = ctx.uidOf(senderId)
+  const recipientUid = sender ? ctx.otherOf(sender) : null
+  if (!sender || !recipientUid) return
+  const play = ctx.play || match.mode === 'play'
+
+  const target = await smsTarget(recipientUid, 'newMessage', play ? 'play' : 'spark')
+  if (!target) return
+
+  // Claim the cooldown slot before sending, so a burst of messages sends one text.
+  const db = getFirestore()
+  const claimed = await db.runTransaction(async (tx) => {
+    const last = millis((await tx.get(ctx.ref)).data()?.lastMessageSmsAt)
+    if (last !== null && Date.now() - last < MESSAGE_SMS_COOLDOWN_MS) return false
+    tx.update(ctx.ref, { lastMessageSmsAt: FieldValue.serverTimestamp() })
+    return true
+  })
+  if (!claimed) return
+
+  const senderName = await nameFor(sender, play ? undefined : match.participantSnapshots, play ? 'play' : match.mode)
+  await sendSMS(target, `💬 ${senderName} sent you a message on Zylove. zylove.app/matches`)
+}
+
 export const smsOnMessage = onDocumentCreated(
   { document: 'matches/{matchId}/messages/{messageId}', secrets: SMS_SECRETS },
-  async (event) => {
-    const msg = event.data?.data()
-    if (!msg) return
-    const senderId: unknown = msg.senderId
-    if (typeof senderId !== 'string' || !senderId) return
-    const ciphertext = typeof msg.ciphertext === 'string' ? msg.ciphertext : ''
-    if (
-      msg.isBot === true ||
-      senderId.startsWith('zbot-') ||
-      senderId.startsWith('seed-') ||
-      msg.nonce === 'system' ||
-      msg.messageType === 'system' ||
-      msg.messageType === 'consent_request' ||
-      ciphertext.startsWith('photo_consent')
-    ) {
-      return
-    }
-
-    const db = getFirestore()
-    const matchRef = db.doc(`matches/${event.params.matchId}`)
-    const match = (await matchRef.get()).data()
-    if (!match || match.isBlocked === true || match.isBot === true) return
-    const recipientUid = participantsOf(match).find((u) => u !== senderId)
-    if (!recipientUid) return
-
-    const target = await smsTarget(recipientUid, 'newMessage', match.mode === 'play' ? 'play' : 'spark')
-    if (!target) return
-
-    // Claim the cooldown slot before sending, so a burst of messages sends one text.
-    const claimed = await db.runTransaction(async (tx) => {
-      const last = millis((await tx.get(matchRef)).data()?.lastMessageSmsAt)
-      if (last !== null && Date.now() - last < MESSAGE_SMS_COOLDOWN_MS) return false
-      tx.update(matchRef, { lastMessageSmsAt: FieldValue.serverTimestamp() })
-      return true
-    })
-    if (!claimed) return
-
-    const senderName = await nameFor(senderId, match.participantSnapshots, match.mode)
-    await sendSMS(target, `💬 ${senderName} sent you a message on Zylove. zylove.app/matches`)
-  },
+  async (event) => textOnMessage(event.params.matchId, event.data?.data()),
+)
+export const smsOnPlayMessage = onDocumentCreated(
+  { document: 'playMatches/{matchId}/messages/{messageId}', secrets: SMS_SECRETS },
+  async (event) => textOnMessage(event.params.matchId, event.data?.data()),
 )
 
 // New match: texts each participant who has it on. A trigger on the match doc
@@ -2033,6 +2160,20 @@ export const smsOnMatch = onDocumentCreated(
           ? "🔥 You're now entangled on Zylove Play. zylove.app/matches"
           : `✦ Sparks are flying. You and ${await nameFor(otherUid, match.participantSnapshots, match.mode)} connected on Zylove. zylove.app/matches`
         await sendSMS(target, body)
+      }),
+    )
+  },
+)
+// F-062: a Play match (its people from the server-only record).
+export const smsOnPlayMatch = onDocumentCreated(
+  { document: 'playMatches/{matchId}', secrets: SMS_SECRETS },
+  async (event) => {
+    const ctx = await loadMatch(event.params.matchId)
+    if (!ctx || ctx.users.length !== 2) return
+    await Promise.all(
+      ctx.users.map(async (uid) => {
+        const target = await smsTarget(uid, 'newMatch', 'play')
+        if (target) await sendSMS(target, "🔥 You're now entangled on Zylove Play. zylove.app/matches")
       }),
     )
   },
@@ -2181,9 +2322,9 @@ export { onLike } from './legacy/onLike'
 export { recordSwipe } from './legacy/recordSwipe'
 export { blockUser, unblockUser } from './legacy/trustSafety'
 // Batch (d): demo-mode bot chat replies.
-export { onBotMessage } from './legacy/onBotMessage'
+export { onBotMessage, onBotPlayMessage } from './legacy/onBotMessage'
 export { purgeAdminAudit } from './audit'
-export { purgeOpenerHashes, trustOnMessage } from './trustSignals'
+export { purgeOpenerHashes, trustOnMessage, trustOnPlayMessage } from './trustSignals'
 export { purgeDeviceSightings, recordDevice } from './devices'
 export { computeTrustScores, trustOnSignals } from './trustScore'
 export { adminSearchUsers, adminTrustAction, adminTrustDetail, adminTrustQueue, adminViewProfile } from './trustAdmin'
@@ -2194,8 +2335,10 @@ export { adminGetProbation, adminSetProbation } from './probation'
 // T&S Phase 3: contact exchange.
 export { requestContactExchange, respondContactExchange, revokeContactExchange } from './contactExchange'
 // T&S Phase 4: franking, the evidence locker, appeals.
-export { frankOnMessage } from './franking'
+export { frankOnMessage, frankOnPlayMessage } from './franking'
 export { adminLockerDecide, adminLockerDetail, adminLockerHold, adminLockerList, getEvidencePdf, purgeEvidence, submitEvidence } from './evidence'
 export { adminDecideAppeal, adminListAppeals, submitAppeal } from './appeals'
 // T&S Phase 5: duplicate photos.
 export { photoHashOnDelete } from './photoHashTrigger'
+// F-062: private Play IDs — the public Play profile and the Play chat key.
+export { getMyPlayId, playProfileOnUser, playProfileOnWrite, publishPlayKey } from './playProfiles'

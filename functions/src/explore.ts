@@ -10,6 +10,8 @@ import { takeRateLimit, takeRateLimitUpTo } from './rateLimits'
 import { signPhotoRefs } from './photoAccess'
 import { recordCapHit } from './trustSignals'
 import { bucketMiles } from './location'
+import { playIdsOf } from './playIds'
+import { publicPlayProfile } from './playProfiles'
 
 // Server-side Explore (Stage 3). Clients can no longer list users/{uid}
 // (rules); the deck comes from here, filtered exactly as the app's Explore
@@ -159,9 +161,12 @@ export async function setBlocked(a: string, b: string, blocked: boolean): Promis
 
 // ─── Deck ────────────────────────────────────────────────────────────────────
 
+// A Spark card: the uid and public profile. A Play card (F-062): the Play ID
+// and the Play profile (with the age) only — no uid, nothing from Spark.
 interface Card {
-  uid: string
-  profile: DocumentData
+  uid?: string
+  playId?: string
+  profile?: DocumentData
   playProfile?: DocumentData
   distanceMiles: number | null
   sameMarket: boolean
@@ -189,12 +194,6 @@ function milesBetween(a: DocumentData, b: DocumentData): number | null {
   return num(a.lat) !== null && num(a.lng) !== null && num(b.lat) !== null && num(b.lng) !== null
     ? distanceMiles(a.lat, a.lng, b.lat, b.lng)
     : null
-}
-
-// T&S Phase 2: "Member since" and the reply band show on Play cards too.
-const PLAY_CARD_FIELDS = ['age', 'genderIdentity', 'pronouns', 'locationLabel', 'verificationStatus', 'isFounder', 'founderBadge', 'founderCity', 'zyloveScoreTier', 'heightCm', 'memberSince', 'replyBand']
-function pickPlayCardFields(profile: DocumentData): DocumentData {
-  return Object.fromEntries(PLAY_CARD_FIELDS.filter((f) => profile[f] !== undefined).map((f) => [f, profile[f]]))
 }
 
 // The same rules the app's Explore applied (discover.ts isEligible / withinRadius).
@@ -242,7 +241,10 @@ export const getExploreDeck = onCall(
     if (!root || (await isSuspendedUid(uid, root))) throw new HttpsError('failed-precondition', 'Profile not available')
     const [stateSnap, matchSnap] = await Promise.all([
       stateRef(uid).get(),
-      db().collection('matches').where('users', 'array-contains', uid).where('mode', '==', mode).get(),
+      // F-062: Play matches are in playMatches (their members server-only).
+      mode === 'play'
+        ? db().collection('playMatchMembers').where('users', 'array-contains', uid).get()
+        : db().collection('matches').where('users', 'array-contains', uid).where('mode', '==', mode).get(),
     ])
     const loc = await loadLocation(uid, root)
     const myMarket = loc ? marketFor(loc) : null
@@ -320,24 +322,27 @@ export const getExploreDeck = onCall(
       // trusted from the index (a missed refresh would have shown them).
       uids.length ? db().getAll(...uids.map((u) => db().doc(`userInternal/${u}`))) : Promise.resolve([]),
     ])
+    const playIds = mode === 'play' ? await playIdsOf(uids) : new Map<string, string>()
     const cards: Card[] = []
     const refs: string[] = []
     deck.forEach((d, i) => {
       const profile = roots[i]?.data()
       if (!profile || profile.isDeleted === true || (!isBotUid(d.uid) && internals[i]?.get('isSuspended') === true)) return
-      const playProfile = mode === 'play' ? plays[i]?.data() : undefined
       const miles = milesBetween(me, d)
-      cards.push({
-        uid: d.uid,
-        // Stage C (Play pseudonymity, display level): a Play card carries
-        // only what Play shows from the public profile — never the Spark
-        // name, photos, bio or prompts.
-        profile: mode === 'play' ? pickPlayCardFields(profile) : profile,
-        ...(playProfile ? { playProfile } : {}),
-        distanceMiles: miles === null ? null : bucketMiles(miles),
-        sameMarket: !!me.marketCityId && d.marketCityId === me.marketCityId,
-      })
-      refs.push(...list(mode === 'play' ? playProfile?.photoURLs : profile.photoURLs).filter((r) => r.startsWith('photos/')))
+      const distance = { distanceMiles: miles === null ? null : bucketMiles(miles), sameMarket: !!me.marketCityId && d.marketCityId === me.marketCityId }
+      if (mode === 'play') {
+        // F-062: the Play ID and the Play profile (plus the age) — never the
+        // uid or anything else from the Spark profile.
+        const playData = plays[i]?.data()
+        const playId = playIds.get(d.uid)
+        if (!playData || !playId) return
+        const playProfile = publicPlayProfile(d.uid, playId, playData, profile)
+        cards.push({ playId, playProfile, ...distance })
+        refs.push(...list(playProfile.photoURLs).filter((r) => r.startsWith('playPhotos/')))
+        return
+      }
+      cards.push({ uid: d.uid, profile, ...distance })
+      refs.push(...list(profile.photoURLs).filter((r) => r.startsWith('photos/')))
     })
     const { urls, expiresAt } = await signPhotoRefs(refs)
     return { cards, photoUrls: urls, expiresAt, exhausted }

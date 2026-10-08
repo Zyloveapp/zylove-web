@@ -4,6 +4,7 @@ import { playStatus } from './playAccess'
 import { blockPair } from './legacy/trustSafety'
 import { parseCategories, recordReport } from './reports'
 import { generationOf } from './matchGeneration'
+import { loadMatch, playMatchIdsOf } from './playMatch'
 
 // Play connections while Play is locked (Stage 2). Someone whose Play access
 // lapses can't read their Play matches or chats until it returns (the data is
@@ -27,9 +28,11 @@ export const listLockedPlayConnections = onCall(
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const uid = request.auth.uid
     if ((await playStatus(uid)).access) return { connections: [] }
-    const snap = await getFirestore().collection('matches').where('users', 'array-contains', uid).where('mode', '==', 'play').get()
-    const connections = snap.docs
-      .filter((d) => d.get('isBlocked') !== true && d.get('unmatchedAt') == null)
+    // F-062: Play matches are in playMatches; who's in them is server-only.
+    const ids = await playMatchIdsOf(uid)
+    const docs = ids.length ? await getFirestore().getAll(...ids.map((id) => getFirestore().doc(`playMatches/${id}`))) : []
+    const connections = docs
+      .filter((d) => d.exists && d.get('isBlocked') !== true && d.get('unmatchedAt') == null)
       .map((d) => ({ matchId: d.id, matchedAt: toMs(d.get('matchedAt')) || toMs(d.get('createdAt')) }))
       .sort((a, b) => b.matchedAt - a.matchedAt)
     return { connections }
@@ -46,12 +49,10 @@ export const actOnPlayConnection = onCall(
     const matchId = typeof data.matchId === 'string' ? data.matchId : ''
     const action = data.action
     if (!matchId || (action !== 'report' && action !== 'block')) throw new HttpsError('invalid-argument', 'matchId and action (report | block) required')
-    const match = (await getFirestore().doc(`matches/${matchId}`).get()).data()
-    const users: unknown = match?.users
-    if (!match || match.mode !== 'play' || !Array.isArray(users) || !users.includes(uid)) {
-      throw new HttpsError('not-found', 'Connection not found.')
-    }
-    const other = users.find((u): u is string => typeof u === 'string' && u !== uid)
+    const ctx = await loadMatch(matchId)
+    if (!ctx || !ctx.play || !ctx.users.includes(uid)) throw new HttpsError('not-found', 'Connection not found.')
+    const match = ctx.data
+    const other = ctx.otherOf(uid)
     if (!other) throw new HttpsError('not-found', 'Connection not found.')
     if (action === 'block') {
       await blockPair(uid, other, matchId)

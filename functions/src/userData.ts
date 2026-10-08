@@ -215,15 +215,25 @@ export async function deletionView(uid: string, root: DocumentData): Promise<{ b
 // other person's Play match records. The other person's own data — the
 // conversation, their likes — stays. Called by every delete path
 // (clearPrivateData).
+// F-062: and its Play identity — the public Play profile, Play-ID-keyed
+// likes, Play matches (playMatches, named by Play ID), Play reveals, the
+// photos under playPhotos/{playId}/ and finally the Play ID mapping itself.
 export async function removePlayData(uid: string): Promise<void> {
   const firestore = db()
-  const [pairsA, pairsB, ownQueue, matches] = await Promise.all([
+  const { playIdOf, removePlayId } = await import('./playIds')
+  const { endPlayPair, loadMatch, playMatchIdsOf } = await import('./playMatch')
+  const playId = await playIdOf(uid)
+  const [pairsA, pairsB, ownQueue, matches, playMatchIds, reveals] = await Promise.all([
     firestore.collection('pairs').where('userA', '==', uid).get(),
     firestore.collection('pairs').where('userB', '==', uid).get(),
     firestore.collection(`users/${uid}/likeQueue`).where('mode', '==', 'play').get(),
     firestore.collection('matches').where('users', 'array-contains', uid).where('mode', '==', 'play').get(),
+    playMatchIdsOf(uid),
+    firestore.collectionGroup('by').where('viewer', '==', uid).get(),
   ])
   const refs: DocumentReference[] = [
+    ...(playId ? [firestore.doc(`playProfiles/${playId}`)] : []),
+    ...reveals.docs.filter((d) => d.ref.parent.parent?.parent.id === 'playReveals').map((d) => d.ref),
     firestore.doc(`users/${uid}/playProfile/data`),
     firestore.doc(`users/${uid}/settings/playPin`),
     // Holds the Play visibility and pause time (with Spark's).
@@ -236,6 +246,7 @@ export async function removePlayData(uid: string): Promise<void> {
     if (typeof other === 'string') {
       const sent = firestore.doc(`users/${other}/likeQueue/${uid}`)
       if ((await sent.get()).get('mode') === 'play') refs.push(sent)
+      if (playId) refs.push(firestore.doc(`users/${other}/likeQueue/${playId}`))
     }
   }
   for (let i = 0; i < refs.length; i += 400) {
@@ -249,10 +260,28 @@ export async function removePlayData(uid: string): Promise<void> {
       [`participantSnapshots.${uid}.photoURL`]: null,
     })
   }
-  await getStorage()
-    .bucket()
-    .deleteFiles({ prefix: `photos/${uid}/play/` })
-    .catch((err) => logger.warn('removePlayData: Storage delete failed', { message: String(err) }))
+  // Play chats end as Spark ones do (removeTraces): the other person keeps a
+  // read-only conversation with "Deleted User".
+  const now = Timestamp.now()
+  for (const id of playMatchIds) {
+    const ctx = await loadMatch(id)
+    if (!ctx) continue
+    const me = ctx.idOf(uid)
+    await ctx.ref.update({
+      ...(ctx.data.unmatchedAt ? {} : { unmatchedAt: now, unmatchedBy: me }),
+      [`participantSnapshots.${me}.displayName`]: 'Deleted User',
+      [`participantSnapshots.${me}.photoURL`]: null,
+    })
+    await endPlayPair(ctx)
+  }
+  await firestore.recursiveDelete(firestore.collection(`playReveals/${uid}/by`)).catch(() => {})
+  for (const prefix of [`photos/${uid}/play/`, ...(playId ? [`playPhotos/${playId}/`] : [])]) {
+    await getStorage()
+      .bucket()
+      .deleteFiles({ prefix })
+      .catch((err) => logger.warn('removePlayData: Storage delete failed', { message: String(err) }))
+  }
+  await removePlayId(uid)
 }
 
 // Removes the user's private docs, server-only record, location and (Stage 2)

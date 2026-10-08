@@ -142,6 +142,10 @@ export const adminGetActivity = onCall(
       db.collection('matches').select('users').get(),
       db.collection('behaviorSignals').select('matchCount').get(),
     ])
+    // F-062: Play chats name senders by Play ID; their matches' people are
+    // in the server-only records.
+    const [playOwners, playMembers] = await Promise.all([db.collection('playIdOwners').get(), db.collection('playMatchMembers').select('users').get()])
+    const ownerOf = new Map(playOwners.docs.map((d) => [d.id, String(d.get('uid'))]))
 
     // users/{uid}/<sub>/data → uid
     const owners = (docs: FirebaseFirestore.QuerySnapshot) =>
@@ -158,16 +162,19 @@ export const adminGetActivity = onCall(
     }
     let totalMessages = 0
     for (const m of messages.docs) {
-      if (m.ref.parent.parent?.parent.id !== 'matches') continue
+      const col = m.ref.parent.parent?.parent.id
+      if (col !== 'matches' && col !== 'playMatches') continue
       const d = m.data()
       if (d.nonce === 'system' || d.messageType === 'consent_request' || typeof d.senderId !== 'string') continue
+      const sender = col === 'playMatches' ? ownerOf.get(d.senderId) : d.senderId
+      if (!sender) continue
       totalMessages++
-      sentBy.set(d.senderId, (sentBy.get(d.senderId) ?? 0) + 1)
+      sentBy.set(sender, (sentBy.get(sender) ?? 0) + 1)
       const at = ms(d.sentAt)
-      if (at !== null && now - at <= CHART_DAYS * DAY_MS) markActive(dayKey(at), d.senderId)
+      if (at !== null && now - at <= CHART_DAYS * DAY_MS) markActive(dayKey(at), sender)
     }
     const matchesOf = new Map<string, number>()
-    for (const m of matches.docs) {
+    for (const m of [...matches.docs, ...playMembers.docs]) {
       const us: unknown = m.data().users
       if (Array.isArray(us)) for (const u of us) if (typeof u === 'string') matchesOf.set(u, (matchesOf.get(u) ?? 0) + 1)
     }

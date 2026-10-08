@@ -14,14 +14,18 @@ import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pair
 import { blockedEitherWay, likedInMode, recordLike } from "../likes";
 import { takeQuota } from "../usage";
 import { loadSparkDetails, writeSparkDetails } from "../pairSpark";
+import { ensurePlayId, requireUidOfPlayId } from "../playIds";
+import { createPlayMatch, livePlayMatchOf, matchRefOf } from "../playMatch";
+import { publicPlayProfile } from "../playProfiles";
 
 export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
 
   const db      = admin.firestore();
   const likerId = request.auth.uid;
-  const likedId: string = request.data?.likedUserId;
   const mode: "spark" | "play" = request.data?.mode === "play" ? "play" : "spark";
+  // F-062: in Play the liked person is known by their Play ID.
+  const likedId: string = mode === "play" ? await requireUidOfPlayId(request.data?.likedUserId, likerId) : request.data?.likedUserId;
   if (typeof likedId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(likedId) || likedId === likerId) {
     throw new HttpsError("invalid-argument", "likedUserId required");
   }
@@ -103,8 +107,12 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   // Stage A: a match needs the other person's like in THIS mode.
   const otherLiked = await likedInMode(likedId, likerId, mode, pair);
   await recordLike(pid, mode, likerId);
-  // A live match between them stays as it is (never overwritten).
-  const existingMatch = (await db.collection("matches").doc(pid).get()).data();
+  // A live match between them stays as it is (never overwritten). F-062: a
+  // Play match is its own doc (playMatches), apart from any Spark one.
+  const playMatchId = mode === "play" ? await livePlayMatchOf(likerId, likedId) : null;
+  const existingMatch = mode === "play"
+    ? (playMatchId ? (await matchRefOf(playMatchId).get()).data() : undefined)
+    : (await db.collection("matches").doc(pid).get()).data();
   const live = !!existingMatch && existingMatch.isBlocked !== true && !existingMatch.unmatchedAt;
   // T&S Phase 1: a reported chat kept for its reporter (unmatchConnection)
   // is never overwritten by a re-match while it's preserved.
@@ -148,8 +156,12 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   const likerPlay = mode === "play"
     ? (await db.doc(`users/${likerId}/playProfile/data`).get()).data() ?? {}
     : null;
-  await db.doc(`users/${likedId}/likeQueue/${likerId}`).set({
-    likerUid:              likerId,
+  // F-062: a Play like is keyed by the liker's Play ID and carries only their
+  // public Play profile (and age) — no uid.
+  const likerPlayId = mode === "play" ? await ensurePlayId(likerId) : null;
+  const likerPublic = likerPlay && likerPlayId ? publicPlayProfile(likerId, likerPlayId, likerPlay, likerDataForQueue) : null;
+  await db.doc(`users/${likedId}/likeQueue/${likerPlayId ?? likerId}`).set({
+    ...(likerPlayId ? { likerPlayId, ...(likerPublic?.curated ? { curated: true } : {}) } : { likerUid: likerId }),
     likedAt:               Date.now(),
     compatibilityScore:    mode === "play" ? (playScores?.playScore ?? 0) : (pair.sparkScore ?? 0),
     dealbreakersTriggered: mode === "play" ? [] : sparkDetails.triggeredDealbreakers,
@@ -161,15 +173,14 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
     isExpired:             false,
     action:                "like",
     mode,
-    likerProfile: likerPlay ? {
-      displayName:        likerPlay.playDisplayName ?? likerDataForQueue.playDisplayName ?? "",
-      age:                likerDataForQueue.age ?? 0,
-      photoURL:           likerPlay.photoURLs?.[0] ?? null,
-      photoURLs:          likerPlay.photoURLs ?? [],
-      bio:                likerPlay.playBio ?? "",
-      spiceLevel:         likerPlay.spiceLevel ?? null,
-      playInterestTags:   likerPlay.playInterestTags ?? [],
-      verificationStatus: likerDataForQueue.verificationStatus ?? "unverified",
+    likerProfile: likerPublic ? {
+      displayName:        likerPublic.playDisplayName ?? "",
+      age:                likerPublic.age ?? 0,
+      photoURL:           likerPublic.photoURLs?.[0] ?? null,
+      photoURLs:          likerPublic.photoURLs ?? [],
+      bio:                likerPublic.playBio ?? "",
+      spiceLevel:         likerPublic.spiceLevel ?? null,
+      playInterestTags:   likerPublic.playInterestTags ?? [],
     } : {
       displayName:        likerDataForQueue.displayName    ?? "",
       age:                likerDataForQueue.age            ?? 0,
@@ -191,7 +202,54 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
     },
   });
 
-  if (createMatch) {
+  let createdMatchId: string | null = null;
+  if (createMatch && mode === "play") {
+    // F-062: a Play match — its own id, Play IDs only.
+    const [likerP, likedP] = await Promise.all([
+      db.doc(`users/${likerId}/playProfile/data`).get(),
+      db.doc(`users/${likedId}/playProfile/data`).get(),
+    ]);
+    const snapOf = (uid: string, root: any, p: any, playId: string) => {
+      const pub = publicPlayProfile(uid, playId, p ?? {}, root);
+      return { displayName: pub.playDisplayName || "Someone new", photoURL: pub.photoURLs?.[0] ?? null, age: pub.age ?? null, isVerified: false, zyloveScoreTier: "" };
+    };
+    const now = admin.firestore.Timestamp.now();
+    const [matchId, created] = await createPlayMatch({
+      users: [likerId, likedId],
+      pairId: pid,
+      fields: (ids) => ({
+        matchedAt: now,
+        createdAt: now,
+        matchGeneration: now.toMillis(),
+        participantSnapshots: {
+          [ids.get(likerId)!]: snapOf(likerId, likerSnap.data(), likerP.data(), ids.get(likerId)!),
+          [ids.get(likedId)!]: snapOf(likedId, likedUser, likedP.data(), ids.get(likedId)!),
+        },
+        hasUnread: false,
+        isBlocked: false,
+        isBot: likedId.startsWith("zbot-") || likerId.startsWith("zbot-"),
+        playScore: playScores?.playScore ?? 0,
+        lastMessage: null,
+        lastMessagePreview: null,
+        lastMessageAt: null,
+      }),
+    });
+    createdMatchId = matchId;
+    const likedPlayId = await ensurePlayId(likedId);
+    if (created) {
+    const batch = db.batch();
+    batch.set(db.doc(`users/${likerId}/matches/${matchId}`), { matchId, otherPlayId: likedPlayId, createdAt: now, mode });
+    batch.set(db.doc(`users/${likedId}/matches/${matchId}`), { matchId, otherPlayId: likerPlayId, createdAt: now, mode });
+    batch.delete(db.doc(`users/${likerId}/likeQueue/${likedPlayId}`));
+    batch.delete(db.doc(`users/${likedId}/likeQueue/${likerPlayId}`));
+    await batch.commit();
+    const nameOf = async (uid: string, p: any, root: any) => publicPlayProfile(uid, await ensurePlayId(uid), p ?? {}, root).playDisplayName || "Someone";
+    const [likerName, likedName] = await Promise.all([nameOf(likerId, likerP.data(), likerSnap.data()), nameOf(likedId, likedP.data(), likedUser)]);
+    const [tokenLiker, tokenLiked] = await Promise.all([getToken(likerId), getToken(likedId)]);
+    if (tokenLiker) await sendPush([tokenLiker], "🔥 You're entangled", `You and ${likedName} are entangled — make a move`, { screen: "matches" }).catch(() => {});
+    if (tokenLiked) await sendPush([tokenLiked], "🔥 You're entangled", `You and ${likerName} are entangled — make a move`, { screen: "matches" }).catch(() => {});
+    }
+  } else if (createMatch) {
     const [userA, userB] = [likerId, likedId].sort();
     const matchId  = `${userA}_${userB}`;
     const matchRef = db.collection("matches").doc(matchId);
@@ -291,11 +349,14 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
     }
   }
 
-  // A — like push to receiver (only when no match was created)
+  // A — like push to receiver (only when no match was created). F-062: a
+  // Play like names the Play profile, never the Spark one.
   if (!matched && likedUser.notifyOnLike) {
     const receiverToken = await getToken(likedId);
     if (receiverToken) {
-      const senderName = (likerSnap.data() as any)?.displayName ?? "Someone";
+      const senderName = mode === "play"
+        ? (likerPublic?.playDisplayName || "Someone")
+        : ((likerSnap.data() as any)?.displayName ?? "Someone");
       const isPlay = mode === "play";
       await sendPush(
         [receiverToken],
@@ -306,6 +367,10 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
     }
   }
 
+  if (mode === "play") {
+    // F-062: no pair id (it's the uid pair) — just the Play match, if any.
+    return { matched, matchId: matched ? (createdMatchId ?? playMatchId) : null };
+  }
   return {
     matched,
     pairId:  pid,

@@ -8,6 +8,8 @@
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { LEGACY_RUNTIME } from "./legacyOptions";
+import { isPlayId, requireUidOfPlayId } from "../playIds";
+import { endPlayPair, loadMatch } from "../playMatch";
 import { setPlayVisibility } from "../playAccess";
 import { internalRef, isSuspendedUid } from "../userData";
 import { setBlocked } from "../explore";
@@ -274,14 +276,16 @@ export const blockUser = onCall(LEGACY_RUNTIME, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Not signed in");
 
-  const { targetUid, matchId } = request.data as {
+  const { targetUid: target, matchId } = request.data as {
     targetUid: string;
     matchId?: string;
   };
 
-  if (typeof targetUid !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(targetUid)) {
+  if (typeof target !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(target)) {
     throw new HttpsError("invalid-argument", "targetUid required");
   }
+  // F-062: from a Play chat, the other person is named by their Play ID.
+  const targetUid = isPlayId(target) ? await requireUidOfPlayId(target, uid) : target;
   if (uid === targetUid) throw new HttpsError("invalid-argument", "Cannot block yourself");
 
   // Stage B: blocking stays open to suspended accounts (as reporting does) —
@@ -301,13 +305,14 @@ export async function blockPair(uid: string, targetUid: string, matchId?: string
   const batch = db.batch();
 
   let mode: "spark" | "play" | null = null;
+  // F-062: a Play match (pm_…) too; its people are in the server-only record.
+  const ctx = matchId ? await loadMatch(matchId) : null;
   if (matchId) {
-    const match = (await db.collection("matches").doc(matchId).get()).data();
-    const users: unknown[] = Array.isArray(match?.users) ? match!.users : [];
-    if (!match || matchId !== [uid, targetUid].sort().join("_") || !users.includes(uid) || !users.includes(targetUid)) {
+    const sparkIdOk = ctx?.play || matchId === [uid, targetUid].sort().join("_");
+    if (!ctx || !sparkIdOk || !ctx.users.includes(uid) || !ctx.users.includes(targetUid)) {
       throw new HttpsError("permission-denied", "Not your match");
     }
-    mode = match.mode === "play" ? "play" : "spark";
+    mode = ctx.play || ctx.data.mode === "play" ? "play" : "spark";
   }
 
   // Mirror block — both directions
@@ -321,15 +326,16 @@ export async function blockPair(uid: string, targetUid: string, matchId?: string
   );
 
   // Soft-delete match if provided
-  if (matchId) {
-    batch.update(db.collection("matches").doc(matchId), {
+  if (ctx) {
+    batch.update(ctx.ref, {
       isBlocked: true,
-      blockedBy: uid,
+      blockedBy: ctx.idOf(uid),
       blockedAt: now,
     });
   }
 
   await batch.commit();
+  if (ctx) await endPlayPair(ctx);
   await clearLikes(uid, targetUid, null);
   // Explore (Stage 3): neither is shown to the other.
   await setBlocked(uid, targetUid, true);
@@ -349,7 +355,7 @@ export const unblockUser = onCall(LEGACY_RUNTIME, async (request) => {
     throw new HttpsError("invalid-argument", "targetUid required");
   }
   // Stage A: only a block the caller placed (as unblockMember) — the person
-  // blocked could lift it here.
-  await liftBlock(uid, targetUid);
+  // blocked could lift it here. F-062: a Play ID names the person in Play.
+  await liftBlock(uid, isPlayId(targetUid) ? await requireUidOfPlayId(targetUid, uid) : targetUid);
   return { success: true };
 });

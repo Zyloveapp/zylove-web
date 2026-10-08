@@ -33,6 +33,7 @@ import { markBannedDevices } from './devices'
 import { blocklistPhotosOf, unblockPhotosOf } from './photoHashes'
 import { reportCounts } from './blocklistContext'
 import { decideEvidenceFor } from './evidence'
+import { isPlayId, isPlayMatchId, requireUidOfPlayId } from './playIds'
 import { accountRef, adminUids, internalRef, isAdminAuth, isAdminUid, isSuspendedUid, loadInternal } from './userData'
 
 const BOT_PREFIXES = ['zbot-', 'seed-']
@@ -111,7 +112,11 @@ export async function recordReport(input: {
   }
 
   const ref = db().doc(`reports/${reporterUid}_${reportedUid}_${generation}`)
-  const photos: unknown = reported?.photoURLs
+  // F-062: a Play report keeps the Play name and photo (how the reporter
+  // knows them; admins can open the account from the uid).
+  const play = isPlayMatchId(matchId) ? (await db().doc(`users/${reportedUid}/playProfile/data`).get()).data() : undefined
+  const photos: unknown = play ? play.photoURLs : reported?.photoURLs
+  const snapshotName: unknown = play ? play.playDisplayName : reported?.displayName
   await db().runTransaction(async (tx) => {
     const existing = (await tx.get(ref)).data()
     const merged = [...new Set([...(Array.isArray(existing?.categories) ? (existing.categories as string[]) : []), ...categories])]
@@ -131,7 +136,8 @@ export async function recordReport(input: {
         source,
         // Kept for the dashboard even if the account is later deleted.
         reportedSnapshot: {
-          name: typeof reported?.displayName === 'string' ? reported.displayName : '',
+          name: typeof snapshotName === 'string' ? snapshotName : '',
+          ...(play ? { mode: 'play' } : {}),
           photoURL: Array.isArray(photos) && typeof photos[0] === 'string' ? photos[0] : null,
         },
         // Latest report time (mobile's field name); the first is kept apart.
@@ -161,13 +167,20 @@ function parseGeneration(data: unknown): number {
   return typeof g === 'number' && Number.isFinite(g) && g > 0 ? Math.floor(g) : 0
 }
 
+// The reported person as the caller was shown them: a uid in Spark, a Play
+// ID in Play (F-062) — mapped back to the account here.
+async function reportedArg(data: unknown, caller: string): Promise<string> {
+  const v = str(data, 'reportedUid')
+  return isPlayId(v) ? requireUidOfPlayId(v, caller) : v
+}
+
 export const submitReport = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     await recordReport({
       reporterUid: request.auth.uid,
-      reportedUid: str(request.data, 'reportedUid'),
+      reportedUid: await reportedArg(request.data, request.auth.uid),
       matchId: str(request.data, 'matchId'),
       generation: parseGeneration(request.data),
       categories: parseCategories(request.data),
@@ -187,7 +200,7 @@ export const reportAndBan = onCall(
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const categories = parseCategories(request.data).filter((c) => REVIEW_TONE.get(c) === 'negative')
-    const reportedUid = str(request.data, 'reportedUid')
+    const reportedUid = await reportedArg(request.data, request.auth.uid)
     if (categories.length === 0 || isBotUid(reportedUid)) return { success: true }
     await recordReport({
       reporterUid: request.auth.uid,

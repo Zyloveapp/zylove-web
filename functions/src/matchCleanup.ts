@@ -3,6 +3,7 @@ import { Timestamp, getFirestore, FieldPath } from 'firebase-admin/firestore'
 import { getStorage } from 'firebase-admin/storage'
 import { expireFranking } from './franking'
 import { generationOf } from './matchGeneration'
+import { matchRefOf } from './playMatch'
 
 // Deletes what an ended match leaves behind: its messages and its chat
 // photos (chat-photos/{matchId}/..., web and mobile alike). Run when the
@@ -14,7 +15,8 @@ import { generationOf } from './matchGeneration'
 // becomes the cutoff.
 export async function purgeMatchContent(matchId: string, cutoff: number | null): Promise<void> {
   const db = getFirestore()
-  const matchRef = db.collection('matches').doc(matchId)
+  // F-062: a Play match (pm_…) lives in playMatches.
+  const matchRef = matchRefOf(matchId)
   const limit = cutoff ?? (generationOf((await matchRef.get()).data()) || null)
 
   const messages = matchRef.collection('messages')

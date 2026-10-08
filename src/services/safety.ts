@@ -1,10 +1,10 @@
-import { collection, getDocs } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
-import { db, functions } from './firebase'
+import { functions } from './firebase'
 
 // Block goes through mobile's blockUser callable (already deployed): it marks
 // the match blocked and writes users/{uid}/blockedUsers/{other} for both
-// people, which only each owner can read — so who blocked whom stays private.
+// people — server-only (F-062), so who blocked whom stays private. In Play,
+// targetUid is the other person's Play ID; the server maps it.
 export async function blockMatch(matchId: string, targetUid: string): Promise<void> {
   await httpsCallable<{ targetUid: string; matchId: string }, { success: true }>(functions, 'blockUser')({ targetUid, matchId })
 }
@@ -15,17 +15,6 @@ export async function blockMatch(matchId: string, targetUid: string): Promise<vo
 // and photos.
 export async function unmatch(matchId: string): Promise<void> {
   await httpsCallable<{ matchId: string }, { success: true }>(functions, 'unmatchConnection')({ matchId })
-}
-
-// Everyone blocked in either direction. Unreadable → nobody, rather than
-// breaking Explore.
-export async function loadBlockedUids(uid: string): Promise<Set<string>> {
-  try {
-    const snap = await getDocs(collection(db, `users/${uid}/blockedUsers`))
-    return new Set(snap.docs.map((d) => d.id))
-  } catch {
-    return new Set()
-  }
 }
 
 // Serious categories: a review flagging one of these also files a report.
@@ -53,10 +42,13 @@ export interface BlockedUser {
 }
 
 // People the caller blocked (never people who blocked them), from that
-// mode's matches only.
+// mode's matches only. F-062: Play's list names them by Play ID (in uid here).
 export async function fetchBlockedUsers(mode: 'spark' | 'play'): Promise<BlockedUser[]> {
-  const res = await httpsCallable<{ mode: string }, { blocked: BlockedUser[] }>(functions, 'getBlockedUsers')({ mode })
-  return res.data.blocked
+  const res = await httpsCallable<{ mode: string }, { blocked: (Omit<BlockedUser, 'uid'> & { uid?: string; playId?: string })[] }>(
+    functions,
+    'getBlockedUsers',
+  )({ mode })
+  return res.data.blocked.map(({ playId, uid, ...b }) => ({ ...b, uid: playId ?? uid ?? '' }))
 }
 
 export async function unblockMember(targetUid: string): Promise<void> {

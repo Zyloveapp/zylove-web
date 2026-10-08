@@ -121,6 +121,37 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/matches/$(uid < request.auth.uid ? uid + '_' + request.auth.uid : request.auth.uid + '_' + uid));
     }
 
+    // ─── Private Play IDs (F-062) ────────────────────────────────────────────
+    // In Play, people are known by an opaque Play ID, never the uid
+    // (functions/src/playIds.ts). The mapping — playIds/{uid} and
+    // playIdOwners/{playId} — is server-only (default deny below); these rules
+    // read it to tell who the caller is in Play and whose a Play ID is, which
+    // a client never sees. No rule here compares a client-supplied uid with a
+    // Play ID's owner, so the rules can't be used to test the mapping either.
+    function myPlayId() {
+      return get(/databases/$(database)/documents/playIds/$(request.auth.uid)).data.playId;
+    }
+    function playOwner(playId) {
+      return get(/databases/$(database)/documents/playIdOwners/$(playId)).data.uid;
+    }
+    // The viewer and playId have a live Play match (playPairs: sorted Play IDs).
+    function playMatchedWith(playId) {
+      let me = myPlayId();
+      return exists(/databases/$(database)/documents/playPairs/$(playId < me ? playId + '_' + me : me + '_' + playId));
+    }
+    function playMatchDoc(matchId) {
+      return get(/databases/$(database)/documents/playMatches/$(matchId)).data;
+    }
+    // One of the two people in a Play match, with Play access.
+    function isPlayParticipant(matchId) {
+      return exists(/databases/$(database)/documents/playMatches/$(matchId))
+          && myPlayId() in playMatchDoc(matchId).get('players', [])
+          && viewerHasPlay();
+    }
+    function playMatchReadable(m) {
+      return m.get('isBlocked', false) != true || m.get('blockedBy', '') == myPlayId();
+    }
+
     // ─── Users ──────────────────────────────────────────────────────────────
     // users/{uid} is the public profile: every signed-in user can read it
     // (Explore, profiles, chat), so it holds profile fields only. Everything
@@ -345,14 +376,10 @@ service cloud.firestore {
       function playServerFields() {
         return ['pendingPhotoURLs', 'playVisibility', 'playDisplayNameUpdatedAt'];
       }
+      // F-062: owner-only — others see the server-kept copy, playProfiles/
+      // {playId}, which carries no uid.
       match /playProfile/{doc} {
-        allow read: if isSignedIn()
-                    && (isUser(uid)
-                        || (viewerHasPlay() && hasPlay(uid)
-                            && profileVisible(uid)
-                            && notBlockedFrom(uid)
-                            // Hidden from Play (Stage B): only their matches still see it.
-                            && (resource == null || resource.data.get('playVisibility', 'active') != 'hidden' || matchedWith(uid))));
+        allow read: if isSignedIn() && isUser(uid);
         allow create: if callerActive() && isUser(uid) && isSignedIn()
                       && request.resource.data.get('photoURLs', []).size() == 0
                       && !request.resource.data.keys().hasAny(playServerFields());
@@ -391,7 +418,10 @@ service cloud.firestore {
         // Stage C: the list (who, not how many) is Spark+; Free gets the
         // count from getLikeCount.
         // A bot's like is visible on every plan (no paid feature involves a bot).
-        allow read: if isUser(uid) && isSignedIn() && (viewerHasSparkPlus() || doc.matches('^zbot-.*$'))
+        // F-062: Play likes are keyed by the liker's Play ID; a curated one
+        // says so (curated).
+        allow read: if isUser(uid) && isSignedIn()
+                    && (viewerHasSparkPlus() || doc.matches('^zbot-.*$') || resource.data.get('curated', false) == true)
                     && (resource.data.get('mode', 'spark') != 'play' || viewerHasPlay());
         // The owner may dismiss an entry (and nothing else) or delete it.
         allow update: if callerActive() && isSignedIn() && isUser(uid)
@@ -400,11 +430,12 @@ service cloud.firestore {
         allow create: if false;
       }
 
-      // Blocked users list — CF-only writes via blockUser Callable.
-      // Rule retained for legacy compat.
+      // Blocked users list — CF-only writes via blockUser Callable. F-062:
+      // server-only (it's keyed by uid, and a block placed from Play would
+      // show the blocker the other person's uid). The app lists blocks with
+      // getBlockedUsers; these rules still check it (notBlockedFrom).
       match /blockedUsers/{targetUid} {
-        allow read: if isUser(uid) && isSignedIn();
-        allow write: if false; // CF-only via blockUser Callable
+        allow read, write: if false;
       }
 
       // Per-user match index — tracks lastReadAt / unread counts per match.
@@ -456,7 +487,7 @@ service cloud.firestore {
       allow update: if callerActive() && isSignedIn() && isPairParticipant(pairId)
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                         request.auth.uid + '_revealed', request.auth.uid + '_revealedAt',
-                        request.auth.uid + '_revealed_spark', request.auth.uid + '_revealed_play']);
+                        request.auth.uid + '_revealed_spark']);
       allow create, delete: if false;
 
       // Stage C: the compatibility report beyond the score — breakdown and
@@ -469,9 +500,11 @@ service cloud.firestore {
         allow read: if isSignedIn() && isPairParticipant(pairId) && viewerHasElite();
         allow write: if false;
       }
+      // F-062: server-only — a Play user gets Play scores from onTap by Play
+      // ID; the pair doc's id is the uid pair. (Play reveals are server-side
+      // too: recordPlayReveal.)
       match /modes/play {
-        allow read: if isSignedIn() && isPairParticipant(pairId) && viewerHasPlay();
-        allow write: if false;
+        allow read, write: if false;
       }
     }
 
@@ -654,6 +687,148 @@ service cloud.firestore {
                      && request.auth.uid == typingUid
                      && isMatchParticipant(matchId)
                      && matchLive(matchDoc(matchId));
+      }
+    }
+
+    // ─── Play profiles (F-062) ─────────────────────────────────────────────
+    // playProfiles/{playId}: the Play profile others see — no uid, nothing
+    // from Spark but the age (functions/src/playProfiles.ts). Same rules the
+    // Play profile had: the viewer and its owner both need Play access, the
+    // owner mustn't be deleted, suspended or have blocked the viewer, and a
+    // hidden profile is seen only by Play matches. Server-written.
+    match /playProfiles/{playId} {
+      allow read: if isSignedIn()
+                  && (playId == myPlayId()
+                      || (viewerHasPlay()
+                          && hasPlay(playOwner(playId))
+                          && profileVisible(playOwner(playId))
+                          && notBlockedFrom(playOwner(playId))
+                          && (resource == null || resource.data.get('playVisibility', 'active') != 'hidden' || playMatchedWith(playId))));
+      allow write: if false;
+    }
+
+    // ─── Play matches (F-062) ──────────────────────────────────────────────
+    // playMatches/{pm_…}: a Play match, its people named by Play ID only
+    // (players; every per-person field). Who they are is server-only
+    // (playMatchMembers). The same rules as matches, with Play IDs: the
+    // caller's own is myPlayId(). Created only by Cloud Functions.
+    match /playMatches/{matchId} {
+      allow read: if isSignedIn()
+                  && myPlayId() in resource.data.get('players', [])
+                  && viewerHasPlay()
+                  && playMatchReadable(resource.data);
+      allow create, delete: if false;
+      allow update: if callerActive() && isSignedIn()
+                    && myPlayId() in resource.data.get('players', [])
+                    && viewerHasPlay()
+                    && matchLive(resource.data)
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                         'lastMessagePreview', 'lastMessageAt', 'lastSenderId', 'hasUnread',
+                         'safetyCardShown', 'safetyCardShownAt', 'photoConsent',
+                         'vibeCheckState_' + myPlayId()])
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastMessagePreview'])
+                        || request.resource.data.lastMessagePreview == null
+                        || (request.resource.data.lastMessagePreview is string && request.resource.data.lastMessagePreview.size() <= 40))
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastSenderId'])
+                        || request.resource.data.lastSenderId == myPlayId())
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['photoConsent'])
+                        || request.resource.data.get('photoConsent', {}).get('status', '') != 'accepted'
+                        || resource.data.get('photoConsent', {}).get('status', '') == 'accepted');
+
+      // As under matches (see there); a curated partner is the server's isBot.
+      function playValidFrank(d) {
+        return !d.keys().hasAny(['fc', 'fk', 'fkn', 'cid', 'seq'])
+            || (d.keys().hasAll(['fc', 'fk', 'fkn', 'cid', 'seq'])
+                && d.fc is string && d.fc.matches('^[a-f0-9]{64}$')
+                && d.fk is string && d.fk.size() <= 200
+                && d.fkn is string && d.fkn.size() <= 64
+                && d.cid is string && d.cid.matches('^[A-Za-z0-9_-]{8,64}$')
+                && d.seq is int && d.seq >= 1 && d.seq <= 1000000);
+      }
+      function playValidText(d, m) {
+        return d.keys().hasOnly(['ciphertext', 'nonce', 'senderId', 'sentAt', 'status', 'messageType', 'fh', 'fc', 'fk', 'fkn', 'cid', 'seq'])
+            && playValidFrank(d)
+            && d.messageType == 'text'
+            && d.ciphertext is string && d.ciphertext.size() <= 20000
+            && d.nonce is string && d.nonce != 'system' && d.nonce.size() <= 64
+            && (!(d.nonce in ['stub', 'stub-nonce']) || m.get('isBot', false) == true)
+            && (!('fh' in d) || (d.fh is string && d.fh.matches('^[a-f0-9]{64}$')));
+      }
+      function playValidPhoto(d) {
+        return d.keys().hasOnly(['senderId', 'messageType', 'encrypted', 'storageRef', 'photoNonce',
+                                 'encryptedKeyForSender', 'encryptedKeyForRecipient', 'keyNonceForSender',
+                                 'keyNonceForRecipient', 'timerSeconds', 'firstViewedAt', 'photoExpiresAt',
+                                 'destructedAt', 'sentAt', 'status', 'fc', 'fk', 'fkn', 'cid', 'seq'])
+            && playValidFrank(d)
+            && d.messageType == 'photo'
+            && viewerHasSparkPlus()
+            && playMatchDoc(matchId).get('photoConsent', {}).get('status', '') == 'accepted'
+            && d.storageRef is string
+            && d.storageRef.matches('^chat-photos/' + matchId + '/' + myPlayId() + '_[A-Za-z0-9._-]+$')
+            && d.get('timerSeconds', 0) is int && d.get('timerSeconds', 0) >= 0 && d.get('timerSeconds', 0) <= 86400
+            && d.get('firstViewedAt', null) == null && d.get('photoExpiresAt', null) == null && d.get('destructedAt', null) == null;
+      }
+      function playValidConsent(d) {
+        return d.keys().hasOnly(['senderId', 'messageType', 'ciphertext', 'nonce', 'sentAt', 'status'])
+            && d.messageType == 'consent_request'
+            && d.nonce == 'system'
+            && d.ciphertext in ['photo_consent_request', 'photo_consent_declined', 'photo_consent_paused'];
+      }
+      function playValidContactCard(d, m) {
+        return d.keys().hasOnly(['ciphertext', 'nonce', 'senderId', 'sentAt', 'status', 'messageType'])
+            && d.messageType == 'contact_card'
+            && d.ciphertext is string && d.ciphertext.size() > 0 && d.ciphertext.size() <= 4000
+            && d.nonce is string && d.nonce.size() <= 64 && !(d.nonce in ['stub', 'stub-nonce', 'system', 'revoked'])
+            && m.get('isBot', false) != true
+            && m.get('contactExchange', {}).get('status', '') == 'accepted'
+            && (m.contactExchange.get('requestedBy', '') == myPlayId()
+                || m.contactExchange.get('shareBack', false) == true);
+      }
+      match /messages/{messageId} {
+        allow read: if isSignedIn()
+                    && isPlayParticipant(matchId)
+                    && playMatchReadable(playMatchDoc(matchId))
+                    && (resource.data.get('photoExpiresAt', null) == null
+                        || resource.data.photoExpiresAt > request.time
+                        || resource.data.senderId == myPlayId());
+        allow create: if callerActive() && isSignedIn()
+                      && isPlayParticipant(matchId)
+                      && matchLive(playMatchDoc(matchId))
+                      && request.resource.data.senderId == myPlayId()
+                      && request.resource.data.sentAt == request.time
+                      && request.resource.data.get('status', 'sent') == 'sent'
+                      && (playValidText(request.resource.data, playMatchDoc(matchId))
+                          || playValidPhoto(request.resource.data)
+                          || playValidConsent(request.resource.data)
+                          || playValidContactCard(request.resource.data, playMatchDoc(matchId)));
+        allow update: if callerActive() && isSignedIn()
+                      && isPlayParticipant(matchId)
+                      && playMatchReadable(playMatchDoc(matchId))
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['status', 'deletedFor', 'viewedBy', 'viewedAt', 'photoRevoked'])
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'viewedBy', 'viewedAt'])
+                          || resource.data.senderId != myPlayId())
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status'])
+                          || request.resource.data.status == 'read')
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['deletedFor'])
+                          || request.resource.data.deletedFor.toSet().difference(resource.data.get('deletedFor', []).toSet())
+                               .hasOnly([myPlayId()]))
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['photoRevoked'])
+                          || resource.data.senderId == myPlayId());
+        allow delete: if false;
+      }
+      match /photoConsent/{doc} {
+        allow read: if isSignedIn() && isPlayParticipant(matchId) && playMatchReadable(playMatchDoc(matchId));
+        allow write: if callerActive() && isSignedIn() && isPlayParticipant(matchId) && matchLive(playMatchDoc(matchId));
+      }
+      match /typing/{typingId} {
+        allow read: if isSignedIn()
+                    && isPlayParticipant(matchId)
+                    && playMatchReadable(playMatchDoc(matchId));
+        allow write: if callerActive() && isSignedIn()
+                     && typingId == myPlayId()
+                     && isPlayParticipant(matchId)
+                     && matchLive(playMatchDoc(matchId));
       }
     }
 

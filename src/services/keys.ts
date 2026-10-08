@@ -4,6 +4,9 @@ import { doc, getDoc, onSnapshot, updateDoc, type Unsubscribe } from 'firebase/f
 import { db } from './firebase'
 import { isRealPublicKey } from './encryption'
 import { deleteBackup, getBackupInfo, restoreBackup, saveBackup, type BackupInfo, type RestoreResult } from './keyBackup'
+import { httpsCallable } from 'firebase/functions'
+import { functions } from './firebase'
+import { isPlayId, isPlayMatchId, myPlayId } from './playId'
 
 // Private keys live in this browser's IndexedDB — never Firestore in the
 // clear, never localStorage. Only the public key is published on users/{uid};
@@ -173,6 +176,7 @@ export async function checkKeyState(uid: string): Promise<KeyState> {
     next = { status: info ? 'locked' : 'check_failed', backedUp: info ? false : null }
   }
   setState(uid, next)
+  if (next.status === 'ready') void publishMyPlayKey(uid).catch(() => {})
   return next
 }
 
@@ -197,6 +201,7 @@ export async function restoreKeyWithPin(uid: string, pin: string): Promise<Resto
   const published: unknown = (await getDoc(doc(db, 'users', uid))).data()?.publicKey
   if (published !== publicKey) await updateDoc(doc(db, 'users', uid), { publicKey })
   setState(uid, { status: 'ready', backedUp: true })
+  void publishMyPlayKey(uid).catch(() => {})
   return result
 }
 
@@ -211,6 +216,7 @@ export async function resetKeyOnThisDevice(uid: string): Promise<void> {
   await storePrivateKey(uid, privateKey)
   await updateDoc(doc(db, 'users', uid), { publicKey })
   setState(uid, { status: 'ready', backedUp: false })
+  void publishMyPlayKey(uid).catch(() => {})
 }
 
 const pending = new Map<string, Promise<void>>()
@@ -262,4 +268,77 @@ export function subscribePublicKey(
 // this device"). The chat PIN backup brings it back on the next sign-in.
 export async function deletePrivateKey(uid: string): Promise<void> {
   await withStore('readwrite', (s) => s.delete(storageKey(uid))).catch(() => {})
+}
+
+// ─── Play chat key (F-062) ───────────────────────────────────────────────────
+// Play chats use a second keypair: with the account's one, a Play partner's
+// key would equal the key on their public Spark profile and link the two.
+// It's derived one-way from the account's private key (SHA-512 of it plus a
+// fixed label → the Play secret key), so it needs no storage or backup of
+// its own — restoring the PIN backup restores both — and the two public keys
+// can't be connected without the private key. Published on the public Play
+// profile (playProfiles/{playId}.publicPlayKey) by publishPlayKey.
+
+const PLAY_KEY_LABEL = new TextEncoder().encode('zylove-play-chat-key-v1')
+
+export function playSecretFrom(privateKeyB64: string): string | null {
+  try {
+    const secret = naclUtil.decodeBase64(privateKeyB64)
+    if (secret.length !== nacl.box.secretKeyLength) return null
+    const input = new Uint8Array(secret.length + PLAY_KEY_LABEL.length)
+    input.set(secret)
+    input.set(PLAY_KEY_LABEL, secret.length)
+    const seed = nacl.hash(input).slice(0, nacl.box.secretKeyLength)
+    return naclUtil.encodeBase64(nacl.box.keyPair.fromSecretKey(seed).secretKey)
+  } catch {
+    return null
+  }
+}
+
+// The private key for a chat: the Play one in a Play match (pm_…).
+export async function chatPrivateKey(uid: string, matchId: string): Promise<string | null> {
+  await keysReady(uid)
+  const k = await getPrivateKey(uid)
+  return k && isPlayMatchId(matchId) ? playSecretFrom(k) : k
+}
+
+// As getSendingKey (null while this browser is locked), for a chat.
+export async function chatSendingKey(uid: string, matchId: string): Promise<string | null> {
+  const k = await getSendingKey(uid)
+  return k && isPlayMatchId(matchId) ? playSecretFrom(k) : k
+}
+
+// A chat partner's live public key: by Play ID from their public Play
+// profile, else (Spark) from users/{uid}.
+export function subscribePartnerKey(id: string, onChange: (publicKey: string) => void, onError: (err: Error) => void): Unsubscribe {
+  if (!isPlayId(id)) return subscribePublicKey(id, onChange, onError)
+  return onSnapshot(
+    doc(db, `playProfiles/${id}`),
+    (snap) => {
+      const key: unknown = snap.data()?.publicPlayKey
+      onChange(typeof key === 'string' && isRealPublicKey(key) ? key : '')
+    },
+    onError,
+  )
+}
+
+// One read of a partner's public key ('' when none).
+export async function fetchPartnerKey(id: string): Promise<string> {
+  const snap = await getDoc(doc(db, isPlayId(id) ? `playProfiles/${id}` : `users/${id}`))
+  const key: unknown = isPlayId(id) ? snap.data()?.publicPlayKey : snap.data()?.publicKey
+  return typeof key === 'string' && isRealPublicKey(key) ? key : ''
+}
+
+// Publishes this account's Play public key when it has a Play profile and
+// the published one isn't it (a new device, a restore, a reset).
+export async function publishMyPlayKey(uid: string): Promise<void> {
+  if (!(await getDoc(doc(db, `users/${uid}/playProfile/data`)).catch(() => null))?.exists()) return
+  const sending = await getSendingKey(uid)
+  const secret = sending ? playSecretFrom(sending) : null
+  const publicKey = secret ? publicKeyFor(secret) : null
+  if (!publicKey) return
+  const playId = await myPlayId(uid)
+  const current: unknown = playId ? (await getDoc(doc(db, `playProfiles/${playId}`)).catch(() => null))?.data()?.publicPlayKey : null
+  if (current === publicKey) return
+  await httpsCallable(functions, 'publishPlayKey')({ publicKey })
 }

@@ -5,6 +5,9 @@ import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { PLAY_TAG_LABELS, SPICE_META, type PlayInterestTag, type SpiceLevel } from './shared/dualProfile'
 import { isSuspendedUid } from './userData'
+import { ensurePlayId, isPlayId, uidOfPlayId } from './playIds'
+import { createPlayMatch, matchRefOf } from './playMatch'
+import { publicPlayProfile } from './playProfiles'
 
 // Demonstration profiles like back. When a real person likes a bot, the like
 // lands in the bot's like queue (users/{bot}/likeQueue/{liker}, written by
@@ -28,8 +31,10 @@ const isBotUid = (uid: string) => BOT_PREFIXES.some((p) => uid.startsWith(p))
 type Mode = 'spark' | 'play'
 
 export const queueBotLikeBack = onDocumentCreated('users/{botUid}/likeQueue/{likerUid}', async (event) => {
-  const { botUid, likerUid } = event.params
-  if (!isBotUid(botUid) || isBotUid(likerUid)) return
+  const { botUid } = event.params
+  // F-062: a Play like is keyed by the liker's Play ID.
+  const likerUid = isPlayId(event.params.likerUid) ? await uidOfPlayId(event.params.likerUid) : event.params.likerUid
+  if (!likerUid || !isBotUid(botUid) || isBotUid(likerUid)) return
   const like = event.data?.data()
   const mode: Mode = like?.mode === 'play' || like?.mode === 'entanglement' ? 'play' : 'spark'
   await getFirestore()
@@ -137,12 +142,68 @@ function snapshot(user: DocumentData, play?: DocumentData) {
   }
 }
 
+// F-062: a Play like-back — a Play match (pm_…), Play IDs only.
+async function likeBackPlay(pendingRef: FirebaseFirestore.DocumentReference, botUid: string, likerUid: string): Promise<void> {
+  const db = getFirestore()
+  const pairId = [botUid, likerUid].sort().join('_')
+  await pendingRef.delete()
+  const [bot, liker, botPlay, likerPlay] = await Promise.all([
+    db.doc(`users/${botUid}`).get(),
+    db.doc(`users/${likerUid}`).get(),
+    db.doc(`users/${botUid}/playProfile/data`).get(),
+    db.doc(`users/${likerUid}/playProfile/data`).get(),
+  ])
+  if (!bot.exists || !liker.exists || (await isSuspendedUid(likerUid))) return
+  const [botPlayId, likerPlayId] = await Promise.all([ensurePlayId(botUid), ensurePlayId(likerUid)])
+  const snap = (uid: string, root: DocumentData | undefined, play: DocumentData | undefined, playId: string) => {
+    const pub = publicPlayProfile(uid, playId, play ?? {}, root)
+    return { displayName: pub.playDisplayName || 'Someone new', photoURL: pub.photoURLs?.[0] ?? null, age: pub.age ?? null, isVerified: false, zyloveScoreTier: '' }
+  }
+  const now = Timestamp.now()
+  const [matchId, created] = await createPlayMatch({
+    users: [botUid, likerUid],
+    pairId,
+    fields: (ids) => ({
+      matchedAt: now,
+      createdAt: now,
+      matchGeneration: now.toMillis(),
+      participantSnapshots: {
+        [ids.get(botUid)!]: snap(botUid, bot.data(), botPlay.data(), ids.get(botUid)!),
+        [ids.get(likerUid)!]: snap(likerUid, liker.data(), likerPlay.data(), ids.get(likerUid)!),
+      },
+      hasUnread: false,
+      isBlocked: false,
+      isBot: true,
+      botPlayer: ids.get(botUid),
+      lastMessage: null,
+      lastMessagePreview: null,
+      lastMessageAt: null,
+    }),
+  })
+  if (!created) return
+  const batch = db.batch()
+  batch.set(db.doc(`pairs/${pairId}`), { userA: [botUid, likerUid].sort()[0], userB: [botUid, likerUid].sort()[1] }, { merge: true })
+  batch.set(db.doc(`pairs/${pairId}/likes/play`), { likedBy: FieldValue.arrayUnion(botUid, likerUid) }, { merge: true })
+  batch.set(db.doc(`users/${botUid}/matches/${matchId}`), { matchId, otherPlayId: likerPlayId, createdAt: now, mode: 'play' })
+  batch.set(db.doc(`users/${likerUid}/matches/${matchId}`), { matchId, otherPlayId: botPlayId, createdAt: now, mode: 'play' })
+  batch.delete(db.doc(`users/${botUid}/likeQueue/${likerPlayId}`))
+  batch.delete(db.doc(`users/${likerUid}/likeQueue/${botPlayId}`))
+  await batch.commit()
+
+  const opener = await writeOpener(bot.data() ?? {}, botPlay.data(), liker.data() ?? {}, likerPlay.data(), 'play')
+  const ref = matchRefOf(matchId)
+  await ref.collection('messages').add({ senderId: botPlayId, ciphertext: opener, nonce: 'stub', messageType: 'text', status: 'sent', sentAt: FieldValue.serverTimestamp(), isBot: true })
+  await ref.update({ lastMessagePreview: 'New message', lastMessageAt: FieldValue.serverTimestamp(), lastSenderId: botPlayId, hasUnread: true })
+  logger.info('botLikeBack: matched and opened', { mode: 'play' })
+}
+
 // One like-back: match (unless one already exists), then the opener.
 async function likeBack(pendingRef: FirebaseFirestore.DocumentReference, pending: DocumentData): Promise<void> {
   const db = getFirestore()
   const botUid = str(pending.botUid)
   const likerUid = str(pending.likerUid)
   const mode: Mode = pending.mode === 'play' ? 'play' : 'spark'
+  if (mode === 'play') return likeBackPlay(pendingRef, botUid, likerUid)
   const [userA, userB] = [botUid, likerUid].sort()
   const matchId = `${userA}_${userB}`
   const matchRef = db.collection('matches').doc(matchId)
@@ -150,14 +211,6 @@ async function likeBack(pendingRef: FirebaseFirestore.DocumentReference, pending
   const botRef = db.collection('users').doc(botUid)
   const likerRef = db.collection('users').doc(likerUid)
 
-  // Play data for the snapshots and the opener.
-  const [botPlay, likerPlay] =
-    mode === 'play'
-      ? await Promise.all([
-          botRef.collection('playProfile').doc('data').get().then((s) => s.data(), () => undefined),
-          likerRef.collection('playProfile').doc('data').get().then((s) => s.data(), () => undefined),
-        ])
-      : [undefined, undefined]
 
   // Suspension is in userInternal (Stage 3).
   const likerSuspended = await isSuspendedUid(likerUid)
@@ -183,8 +236,8 @@ async function likeBack(pendingRef: FirebaseFirestore.DocumentReference, pending
       matchGeneration: now.toMillis(),
       conversationId: matchId,
       participantSnapshots: {
-        [botUid]: snapshot(bot.data() ?? {}, mode === 'play' ? (botPlay ?? {}) : undefined),
-        [likerUid]: snapshot(liker.data() ?? {}, mode === 'play' ? (likerPlay ?? {}) : undefined),
+        [botUid]: snapshot(bot.data() ?? {}),
+        [likerUid]: snapshot(liker.data() ?? {}),
       },
       hasUnread: false,
       isBlocked: false,
@@ -203,7 +256,7 @@ async function likeBack(pendingRef: FirebaseFirestore.DocumentReference, pending
   })
   if (!created) return
 
-  const opener = await writeOpener(created.bot, botPlay, created.liker, likerPlay, mode)
+  const opener = await writeOpener(created.bot, undefined, created.liker, undefined, mode)
   // Plaintext with a 'stub' nonce, like every bot message.
   await matchRef.collection('messages').add({
     senderId: botUid,

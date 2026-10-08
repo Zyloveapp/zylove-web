@@ -15,10 +15,12 @@ export interface PastConnection {
 }
 
 // Only the given mode's connections (old matches without a mode are Spark).
+// F-062: a Play connection names the other person by Play ID (otherPlayId,
+// put in otherUid here — the id the app knows them by in Play).
 export async function fetchPastConnections(mode: 'spark' | 'play'): Promise<PastConnection[]> {
-  const res = await httpsCallable<{ mode: string }, { connections: PastConnection[] }>(
+  const res = await httpsCallable<{ mode: string }, { connections: (Omit<PastConnection, 'otherUid'> & { otherUid?: string; otherPlayId?: string })[] }>(
     functions,
     'getPastConnections',
   )({ mode })
-  return res.data.connections
+  return res.data.connections.map(({ otherPlayId, otherUid, ...c }) => ({ ...c, otherUid: otherPlayId ?? otherUid ?? '' }))
 }

@@ -9,6 +9,8 @@ import { connectionMode } from './behavior'
 import { setBlocked } from './explore'
 import { suspensionRefusal } from './appeals'
 import { probationOf } from './probation'
+import { loadMatch, messagesPath } from './playMatch'
+import { isPlayId, playIdOf, uidOfPlayId } from './playIds'
 
 // Trust & safety: phone-level bans, the caller's blocked list, and
 // server-side photo consent acceptance.
@@ -40,9 +42,10 @@ export async function wereMatched(matchId: string, a: string, b: string): Promis
     const users = participants(data)
     return users.includes(a) && users.includes(b)
   }
-  for (const ref of [db.collection('matches').doc(matchId), db.collection('pastConnections').doc(matchId)]) {
-    if (both((await ref.get()).data())) return true
-  }
+  // F-062: a live Play match's people are in its server-only record.
+  const live = await loadMatch(matchId)
+  if (live && live.users.includes(a) && live.users.includes(b)) return true
+  if (both((await db.collection('pastConnections').doc(matchId).get()).data())) return true
   const past = await db.collection('pastConnections').where('matchId', '==', matchId).get()
   return past.docs.some((d) => both(d.data()))
 }
@@ -91,9 +94,12 @@ export const onBeforeSignIn = beforeUserSignedIn({ timeoutSeconds: 7, memory: '2
 // mode's matches; legacy blocks (no match, no mode) count as Spark.
 async function blockedByCaller(uid: string, mode: 'spark' | 'play' | null = null): Promise<Map<string, number>> {
   const db = getFirestore()
-  const [mirror, matches, legacy] = await Promise.all([
+  const myPlayId = await playIdOf(uid)
+  const [mirror, matches, playMatches, legacy] = await Promise.all([
     db.collection(`users/${uid}/blockedUsers`).get(),
     db.collection('matches').where('blockedBy', '==', uid).get(),
+    // F-062: Play matches name the blocker by Play ID.
+    myPlayId ? db.collection('playMatches').where('blockedBy', '==', myPlayId).get() : Promise.resolve(null),
     db.collection('blocks').where('blockerUid', '==', uid).get(),
   ])
   const mine = new Set<string>()
@@ -112,6 +118,12 @@ async function blockedByCaller(uid: string, mode: 'spark' | 'play' | null = null
     const other = participants(m.data()).find((u) => u !== uid)
     if (other && (!mode || connectionMode(m.data()) === mode)) mine.add(other)
   }
+  if (mode !== 'spark') {
+    for (const m of playMatches?.docs ?? []) {
+      const other = (await loadMatch(m.id))?.otherOf(uid)
+      if (other) mine.add(other)
+    }
+  }
   if (mode !== 'play') {
     for (const b of legacy.docs) {
       const other: unknown = b.data().blockedUid
@@ -129,16 +141,18 @@ async function blockedByCaller(uid: string, mode: 'spark' | 'play' | null = null
 
 export const getBlockedUsers = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
-  async (request): Promise<{ blocked: { uid: string; name: string; blockedAt: number }[] }> => {
+  async (request): Promise<{ blocked: { uid?: string; playId?: string; name: string; blockedAt: number }[] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
-    const rawMode = (request.data as { mode?: unknown } | null)?.mode
-    const mode = rawMode === 'spark' || rawMode === 'play' ? rawMode : null
+    // One mode's list (Spark unless asked): a mixed list would name Play
+    // blocks by uid.
+    const mode = (request.data as { mode?: unknown } | null)?.mode === 'play' ? 'play' : 'spark'
     const blocked = await blockedByCaller(request.auth.uid, mode)
     const db = getFirestore()
     const rows = await Promise.all(
       [...blocked].map(async ([uid, blockedAt]) => {
-        // Play's list names them by their Play name, never the Spark one.
-        if (mode === 'play') return { uid, name: await loadPlayName(uid), blockedAt }
+        // Play's list names them by their Play name and Play ID (F-062),
+        // never the Spark name or the uid.
+        if (mode === 'play') return { playId: (await playIdOf(uid)) ?? undefined, name: await loadPlayName(uid), blockedAt }
         const name: unknown = (await db.collection('users').doc(uid).get()).data()?.displayName
         return { uid, name: typeof name === 'string' && name ? name : 'Someone', blockedAt }
       }),
@@ -153,7 +167,11 @@ export const unblockMember = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
-    await liftBlock(request.auth.uid, str(request.data, 'targetUid'))
+    // F-062: from Play's list, the person is named by Play ID.
+    const target = str(request.data, 'targetUid')
+    const targetUid = isPlayId(target) ? await uidOfPlayId(target) : target
+    if (!targetUid) throw new HttpsError('not-found', "You haven't blocked this person")
+    await liftBlock(request.auth.uid, targetUid)
     return { success: true }
   },
 )
@@ -188,15 +206,19 @@ export const acceptPhotoConsent = onCall(
     const uid = request.auth.uid
     const matchId = str(request.data, 'matchId')
     const db = getFirestore()
-    const matchRef = db.collection('matches').doc(matchId)
+    // F-062: a Play match too — its fields and messages name people by Play ID.
+    const ctx = await loadMatch(matchId)
+    if (!ctx || !ctx.users.includes(uid)) throw new HttpsError('permission-denied', 'Not a participant')
+    const matchRef = ctx.ref
+    const me = ctx.idOf(uid)
 
     // T&S Phase 2: no chat photos while either person is on probation.
-    const people = participants((await matchRef.get()).data())
-    if (people.includes(uid) && (await Promise.all(people.map((p) => probationOf(p)))).some((p) => p?.noChatPhotos)) {
+    const people = ctx.users
+    if ((await Promise.all(people.map((p) => probationOf(p)))).some((p) => p?.noChatPhotos)) {
       throw new HttpsError('failed-precondition', 'Photo sharing opens up once both accounts are a little older.')
     }
 
-    const requests = await matchRef.collection('messages').where('ciphertext', '==', 'photo_consent_request').get()
+    const requests = await db.collection(messagesPath(matchId)).where('ciphertext', '==', 'photo_consent_request').get()
     const latestRequester = requests.docs
       .map((d) => d.data())
       .filter((m) => m.messageType === 'consent_request')
@@ -204,21 +226,21 @@ export const acceptPhotoConsent = onCall(
 
     await db.runTransaction(async (tx) => {
       const match = (await tx.get(matchRef)).data()
-      if (!match || !participants(match).includes(uid)) throw new HttpsError('permission-denied', 'Not a participant')
+      if (!match) throw new HttpsError('permission-denied', 'Not a participant')
       const consent = (match.photoConsent ?? {}) as Record<string, unknown>
       if (consent.status !== 'pending') throw new HttpsError('failed-precondition', 'No pending photo request')
-      if (consent.requestedBy === uid) throw new HttpsError('failed-precondition', "You can't accept your own request")
+      if (consent.requestedBy === me) throw new HttpsError('failed-precondition', "You can't accept your own request")
       if (!latestRequester || latestRequester !== consent.requestedBy) {
         throw new HttpsError('failed-precondition', 'No matching photo request')
       }
       tx.update(matchRef, {
         'photoConsent.status': 'accepted',
         'photoConsent.acceptedAt': FieldValue.serverTimestamp(),
-        'photoConsent.acceptedBy': uid,
+        'photoConsent.acceptedBy': me,
       })
       // Same system-message format both apps render.
       tx.create(matchRef.collection('messages').doc(), {
-        senderId: uid,
+        senderId: me,
         messageType: 'consent_request',
         ciphertext: 'photo_consent_accepted',
         nonce: 'system',

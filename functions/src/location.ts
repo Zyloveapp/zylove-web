@@ -6,6 +6,7 @@ import { distanceMiles, getLinkedCity, getNearestCity } from './cities'
 import { marketFor } from './trial'
 import { accountRef, identityRef, internalRef, locationRef, userRef, requireActive } from './userData'
 import { takeRateLimit } from './rateLimits'
+import { isPlayId, uidOfPlayId } from './playIds'
 import {
   SMS_CONSENT_SOURCES,
   SMS_CONSENT_TEXTS,
@@ -173,17 +174,22 @@ function coordsFrom(loc: DocumentData | undefined, root: DocumentData | undefine
 // Of `uids`, those `uid` may get a distance for (getDistances).
 async function visibleTo(uid: string, uids: string[]): Promise<Set<string>> {
   const db = getFirestore()
-  const [state, matches, queue] = await Promise.all([
+  const [state, matches, playMatches, queue] = await Promise.all([
     db.doc(`exploreState/${uid}`).get(),
     db.collection('matches').where('users', 'array-contains', uid).select('users').get(),
+    // F-062: Play matches' people are in their server-only records.
+    db.collection('playMatchMembers').where('users', 'array-contains', uid).select('users').get(),
     db.collection(`users/${uid}/likeQueue`).select().get(),
   ])
   const st = state.data() ?? {}
   const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+  // Play likes are keyed by the liker's Play ID.
+  const likers = await Promise.all(queue.docs.map(async (d) => (isPlayId(d.id) ? await uidOfPlayId(d.id) : d.id)))
   const known = new Set<string>([
     ...list(st.spark?.deck), ...list(st.spark?.acted), ...list(st.play?.deck), ...list(st.play?.acted),
     ...matches.docs.flatMap((d) => list(d.get('users'))),
-    ...queue.docs.map((d) => d.id),
+    ...playMatches.docs.flatMap((d) => list(d.get('users'))),
+    ...likers.filter((u): u is string => !!u),
   ])
   const blocked = new Set(list(st.blocked))
   const candidates = uids.filter((u) => known.has(u) && !blocked.has(u))
@@ -205,7 +211,12 @@ export const getDistances = onCall(
     if (!Array.isArray(raw) || raw.length > MAX_UIDS || !raw.every((u) => typeof u === 'string' && UID_RE.test(u))) {
       throw new HttpsError('invalid-argument', `uids must be up to ${MAX_UIDS} user ids`)
     }
-    const uids = [...new Set(raw as string[])].filter((u) => u !== uid)
+    // F-062: in Play, people are named by Play ID — answered by the same ID.
+    const asked = [...new Set(raw as string[])]
+    const owners = await Promise.all(asked.map(async (x) => (isPlayId(x) ? await uidOfPlayId(x) : x)))
+    const idFor = new Map<string, string>()
+    asked.forEach((x, i) => owners[i] && idFor.set(owners[i]!, x))
+    const uids = [...idFor.keys()].filter((u) => u !== uid)
     await takeRateLimit(uid, 'distances', { max: MAX_CALLS_PER_WINDOW, windowMs: CALL_WINDOW_MS })
     const db = getFirestore()
 
@@ -230,7 +241,7 @@ export const getDistances = onCall(
       const them = coordsFrom(locs[i].data(), rootOf.get(u))
       if (!them) return
       const miles = distanceMiles(me.lat, me.lng, them.lat, them.lng)
-      distances[u] = {
+      distances[idFor.get(u) ?? u] = {
         miles: bucketMiles(miles),
         sameMarket: !!myMarket && marketFor(them)?.id === myMarket.id,
       }

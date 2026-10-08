@@ -36,19 +36,25 @@ export const pastConnectionId = (matchId: string, generation: number) => `${matc
 // Messages one generation sent: from `since` up to (not including) `until`,
 // counted per sender. since 0 = from the start; until null = to now. One
 // single-field range query (no composite index), reading only senderId.
+// F-062: a Play match's messages are under playMatches/{id} with Play IDs as
+// senders — counted here by uid all the same.
 export async function countMessages(
   matchId: string,
   since: number,
   until: number | null = null,
 ): Promise<{ total: number; bySender: Record<string, number> }> {
-  let q: FirebaseFirestore.Query = getFirestore().collection(`matches/${matchId}/messages`)
+  const play = /^pm_[A-Za-z0-9]{20}$/.test(matchId)
+  const ids: Record<string, string> = play ? ((await getFirestore().doc(`playMatchMembers/${matchId}`).get()).get('ids') ?? {}) : {}
+  const uidOf = new Map(Object.entries(ids).map(([u, p]) => [p, u]))
+  let q: FirebaseFirestore.Query = getFirestore().collection(`${play ? 'playMatches' : 'matches'}/${matchId}/messages`)
   if (since > 0) q = q.where('sentAt', '>=', Timestamp.fromMillis(since))
   if (until !== null) q = q.where('sentAt', '<', Timestamp.fromMillis(until))
   const snap = await q.select('senderId').get()
   const bySender: Record<string, number> = {}
   for (const d of snap.docs) {
-    const sender: unknown = d.get('senderId')
-    if (typeof sender === 'string') bySender[sender] = (bySender[sender] ?? 0) + 1
+    const raw: unknown = d.get('senderId')
+    const sender = typeof raw === 'string' ? (play ? uidOf.get(raw) : raw) : undefined
+    if (sender) bySender[sender] = (bySender[sender] ?? 0) + 1
   }
   return { total: snap.size, bySender }
 }

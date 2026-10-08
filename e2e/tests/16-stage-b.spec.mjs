@@ -2,7 +2,7 @@
 import { test, expect } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { resetEmulators, seedUser, callAs, likeAs, idTokenFor, db, fnLib, sortedPair, signIn, offline, quietFirstRun, CONTEXT, FieldValue, PROJECT, setPlan } from './helpers.mjs'
+import { resetEmulators, seedUser, callAs, likeAs, idTokenFor, db, fnLib, sortedPair, signIn, offline, quietFirstRun, CONTEXT, FieldValue, PROJECT, setPlan, playIdOf } from './helpers.mjs'
 import { planStageB, applyStageB } from '../../scripts/lib/stageB.mjs'
 
 test.beforeEach(resetEmulators)
@@ -158,8 +158,11 @@ test('distances and profile reads: blocks hide the blocker; Play "hidden" only f
   await likeAs(p1.uid, p2.uid, 'play')
   await likeAs(p2.uid, p1.uid, 'play')
   await db.doc(`users/${p2.uid}/playProfile/data`).update({ playVisibility: 'hidden' })
-  expect(await restGet(p1.uid, `users/${p2.uid}/playProfile/data`)).toBe(200) // matched
-  expect(await restGet(p3.uid, `users/${p2.uid}/playProfile/data`)).toBe(403) // not matched
+  // F-062: others read the public Play profile, by Play ID.
+  const p2Play = await playIdOf(p2.uid)
+  await fnLib('playProfiles').refreshPlayProfile(p2.uid)
+  expect(await restGet(p1.uid, `playProfiles/${p2Play}`)).toBe(200) // matched
+  expect(await restGet(p3.uid, `playProfiles/${p2Play}`)).toBe(403) // not matched
 })
 
 test('pairs: no like state on the shared pair doc; sent likes come from the per-mode records', async () => {
@@ -173,7 +176,8 @@ test('pairs: no like state on the shared pair doc; sent likes come from the per-
   const pair = (await db.doc(`pairs/${sortedPair(a.uid, b.uid)}`).get()).data()
   for (const f of ['userALiked', 'userBLiked', 'matched', 'initiatedBy']) expect(pair[f], f).toBeUndefined()
   expect(await restGet(b.uid, `pairs/${sortedPair(a.uid, b.uid)}/likes/play`)).toBe(403)
-  expect((await callAs(a.uid, 'getSentSparks', { mode: 'play' })).sent.map((s) => s.uid)).toEqual([b.uid])
+  // F-062: a Play entry is named by Play ID.
+  expect((await callAs(a.uid, 'getSentSparks', { mode: 'play' })).sent.map((s) => s.playId)).toEqual([await playIdOf(b.uid)])
   expect((await callAs(a.uid, 'getSentSparks', { mode: 'spark' })).sent).toEqual([])
 })
 

@@ -1,7 +1,8 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
-import { generationOf, participants } from './matchGeneration'
+import { generationOf } from './matchGeneration'
+import { loadMatch, type MatchCtx } from './playMatch'
 import { requireActive } from './userData'
 
 // T&S Phase 3 — contact exchange ("Share contact"), like photo consent with
@@ -49,18 +50,20 @@ export function unlockedAt(messages: { senderId: unknown; sentAt: number; messag
   return at
 }
 
-async function liveMatch(matchId: string, uid: string): Promise<{ ref: FirebaseFirestore.DocumentReference; match: DocumentData; people: string[] }> {
-  const ref = db().doc(`matches/${matchId}`)
-  const match = (await ref.get()).data()
-  const people = participants(match)
-  if (!match || !people.includes(uid)) throw new HttpsError('permission-denied', 'Not a participant')
-  if (match.isBot === true || people.some(isBot)) throw new HttpsError('failed-precondition', "Contact details can't be shared with a curated profile.")
+// F-062: a Play match (pm_…) too. Everything written on the match or its
+// messages names people as they're known there: `me` is the caller's Play ID
+// in Play, their uid in Spark; `people` likewise.
+async function liveMatch(matchId: string, uid: string): Promise<{ ref: FirebaseFirestore.DocumentReference; match: DocumentData; people: string[]; me: string; ctx: MatchCtx }> {
+  const ctx = await loadMatch(matchId)
+  const match = ctx?.data
+  if (!ctx || !match || !ctx.users.includes(uid)) throw new HttpsError('permission-denied', 'Not a participant')
+  if (match.isBot === true || ctx.users.some(isBot)) throw new HttpsError('failed-precondition', "Contact details can't be shared with a curated profile.")
   if (match.isBlocked === true || match.unmatchedAt || match.endedAt) throw new HttpsError('failed-precondition', 'This conversation has ended.')
-  return { ref, match, people }
+  return { ref: ctx.ref, match, people: ctx.users.map((u) => ctx.idOf(u)), me: ctx.idOf(uid), ctx }
 }
 
-function notice(code: string, uid: string) {
-  return { senderId: uid, messageType: 'contact_request', ciphertext: code, nonce: 'system', sentAt: FieldValue.serverTimestamp(), status: 'sent' }
+function notice(code: string, sender: string) {
+  return { senderId: sender, messageType: 'contact_request', ciphertext: code, nonce: 'system', sentAt: FieldValue.serverTimestamp(), status: 'sent' }
 }
 
 // Counts only (T&S Phase 1 signals): every request, and how soon after the
@@ -90,7 +93,7 @@ export const requestContactExchange = onCall({ timeoutSeconds: 30, memory: '256M
   const uid = request.auth.uid
   await requireActive(uid)
   const matchId = matchIdArg(request.data)
-  const { ref, match, people } = await liveMatch(matchId, uid)
+  const { ref, match, people, me } = await liveMatch(matchId, uid)
   const status = (match.contactExchange as DocumentData | undefined)?.status
   if (status === 'pending') throw new HttpsError('failed-precondition', 'A contact request is already waiting for an answer.')
   if (status === 'accepted') throw new HttpsError('failed-precondition', 'You already shared contact details here.')
@@ -103,8 +106,8 @@ export const requestContactExchange = onCall({ timeoutSeconds: 30, memory: '256M
   )
   if (unlocked === null) throw new HttpsError('failed-precondition', `Share contact unlocks once you've both sent ${UNLOCK_MESSAGES} messages.`)
   const batch = db().batch()
-  batch.update(ref, { contactExchange: { status: 'pending', requestedBy: uid, requestedAt: Date.now() } })
-  batch.create(ref.collection('messages').doc(), notice('contact_request', uid))
+  batch.update(ref, { contactExchange: { status: 'pending', requestedBy: me, requestedAt: Date.now() } })
+  batch.create(ref.collection('messages').doc(), notice('contact_request', me))
   await batch.commit()
   await recordRequestSignal(uid, Date.now() - unlocked < FAST_AFTER_UNLOCK_MS)
   logger.info('requestContactExchange')
@@ -119,17 +122,17 @@ export const respondContactExchange = onCall({ timeoutSeconds: 30, memory: '256M
   const matchId = matchIdArg(data)
   if (typeof data.accept !== 'boolean') throw new HttpsError('invalid-argument', 'accept required')
   const shareBack = data.accept && data.shareBack === true
-  const { ref } = await liveMatch(matchId, uid)
+  const { ref, me } = await liveMatch(matchId, uid)
   await db().runTransaction(async (tx) => {
     const ce = ((await tx.get(ref)).data()?.contactExchange ?? {}) as DocumentData
     if (ce.status !== 'pending') throw new HttpsError('failed-precondition', 'No contact request is waiting.')
-    if (ce.requestedBy === uid) throw new HttpsError('failed-precondition', "You can't answer your own request.")
+    if (ce.requestedBy === me) throw new HttpsError('failed-precondition', "You can't answer your own request.")
     tx.update(ref, {
       'contactExchange.status': data.accept ? 'accepted' : 'declined',
       'contactExchange.respondedAt': Date.now(),
       'contactExchange.shareBack': shareBack,
     })
-    tx.create(ref.collection('messages').doc(), notice(data.accept ? 'contact_accepted' : 'contact_declined', uid))
+    tx.create(ref.collection('messages').doc(), notice(data.accept ? 'contact_accepted' : 'contact_declined', me))
   })
   return { ok: true }
 })
@@ -138,17 +141,19 @@ export const revokeContactExchange = onCall({ timeoutSeconds: 60, memory: '256Mi
   if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
   const uid = request.auth.uid
   const matchId = matchIdArg(request.data)
-  const ref = db().doc(`matches/${matchId}`)
-  const match = (await ref.get()).data()
-  if (!match || !participants(match).includes(uid)) throw new HttpsError('permission-denied', 'Not a participant')
+  const ctx = await loadMatch(matchId)
+  const match = ctx?.data
+  if (!ctx || !match || !ctx.users.includes(uid)) throw new HttpsError('permission-denied', 'Not a participant')
+  const ref = ctx.ref
+  const me = ctx.idOf(uid)
   const status = (match.contactExchange as DocumentData | undefined)?.status
   if (status !== 'accepted' && status !== 'pending') throw new HttpsError('failed-precondition', 'Nothing to take back.')
-  await ref.update({ 'contactExchange.status': 'revoked', 'contactExchange.revokedBy': uid, 'contactExchange.revokedAt': Date.now() })
+  await ref.update({ 'contactExchange.status': 'revoked', 'contactExchange.revokedBy': me, 'contactExchange.revokedAt': Date.now() })
   // Every card in the chat, for both people: the encrypted payload goes.
   const cards = await ref.collection('messages').where('messageType', '==', 'contact_card').get()
   const batch = db().batch()
   for (const d of cards.docs) batch.update(d.ref, { ciphertext: '', nonce: 'revoked', revokedAt: Date.now() })
-  batch.create(ref.collection('messages').doc(), notice('contact_revoked', uid))
+  batch.create(ref.collection('messages').doc(), notice('contact_revoked', me))
   await batch.commit()
   return { ok: true, cardsRemoved: cards.size }
 })

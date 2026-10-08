@@ -1,5 +1,6 @@
 import { doc, onSnapshot } from 'firebase/firestore'
 import { ref, uploadBytes } from 'firebase/storage'
+import { myPlayId } from './playId'
 import { db, storage } from './firebase'
 
 // Profile photos go through the existing onPhotoUpload Cloud Function
@@ -116,8 +117,16 @@ export async function uploadModeratedPhoto(
     return { outcome: 'unsupported', url: null }
   }
   const fileName = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}.jpg`
+  // F-062: a Play photo goes under your Play ID (playPhotos/{playId}/…), so
+  // its path never carries your uid.
+  const playId = mode === 'play' ? await myPlayId(uid) : null
+  if (mode === 'play' && !playId) {
+    onUploaded?.()
+    return { outcome: 'failed', url: null }
+  }
+  const path = playId ? `playPhotos/${playId}/${fileName}` : `photos/${uid}/${mode}/${fileName}`
   try {
-    await uploadBytes(ref(storage, `photos/${uid}/${mode}/${fileName}`), resized, { contentType: 'image/jpeg' })
+    await uploadBytes(ref(storage, path), resized, { contentType: 'image/jpeg' })
   } catch (err) {
     console.error('Profile photo upload failed:', err)
     onUploaded?.()

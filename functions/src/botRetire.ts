@@ -1,6 +1,7 @@
 import { onDocumentUpdated } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { FieldPath, FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
+import { endPlayPair, loadMatch, playMatchIdsOf } from './playMatch'
 import { ZYLOVE_CITIES } from './cities'
 
 // Stage C: when a city's founding circle is full (50 + 50 founders, so
@@ -37,7 +38,9 @@ export const retireBotsOnCityClose = onDocumentUpdated({ document: 'config/{docI
       .where(FieldPath.documentId(), '<', BOT_HI)
       .select()
       .get()
-    for (const d of queue.docs) {
+    // F-062: a curated profile's Play like is keyed by its Play ID (curated: true).
+    const playQueue = await db.collection(`users/${uid}/likeQueue`).where('curated', '==', true).select().get()
+    for (const d of [...queue.docs, ...playQueue.docs]) {
       await d.ref.delete()
       likes++
     }
@@ -47,6 +50,17 @@ export const retireBotsOnCityClose = onDocumentUpdated({ document: 'config/{docI
       if (!other.startsWith(BOT_LO) || m.get('unmatchedAt')) continue
       await m.ref.collection('messages').add({ senderId: other, ciphertext: NOTE, nonce: 'system', messageType: 'text', status: 'sent', sentAt: FieldValue.serverTimestamp() })
       await m.ref.update({ unmatchedAt: Timestamp.now(), unmatchedBy: other, endedBy: 'curated_retired' })
+      chats++
+    }
+    // Play chats with a curated profile: the bot's Play ID speaks for it.
+    for (const id of await playMatchIdsOf(uid)) {
+      const ctx = await loadMatch(id)
+      const other = ctx?.otherOf(uid) ?? ''
+      if (!ctx || !other.startsWith(BOT_LO) || ctx.data.unmatchedAt) continue
+      const botId = ctx.idOf(other)
+      await ctx.ref.collection('messages').add({ senderId: botId, ciphertext: NOTE, nonce: 'system', messageType: 'text', status: 'sent', sentAt: FieldValue.serverTimestamp() })
+      await ctx.ref.update({ unmatchedAt: Timestamp.now(), unmatchedBy: botId, endedBy: 'curated_retired' })
+      await endPlayPair(ctx)
       chats++
     }
   }

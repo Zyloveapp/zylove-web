@@ -1,11 +1,12 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { getStorage } from 'firebase-admin/storage'
 import { getFirestore, type DocumentData } from 'firebase-admin/firestore'
-import { defaultBucket, isPhotoRef } from './storagePath'
+import { defaultBucket, isPhotoRef, isPlayPhotoRef } from './storagePath'
 import { isAdminAuth, requireActive } from './userData'
 import { takeRateLimit } from './rateLimits'
 import { audit } from './audit'
 import { playStatus } from './playAccess'
+import { uidOfPlayId } from './playIds'
 
 // Profile photos (F-021). Firestore holds each photo's Storage path
 // ("photos/{uid}/{spark|play}/{file}"), and Storage lets only the owner and
@@ -27,9 +28,20 @@ import { playStatus } from './playAccess'
 const MAX_REFS = 120
 const HOUR_MS = 60 * 60 * 1000
 
-function ownerOf(ref: string): { uid: string; mode: 'spark' | 'play' } {
-  const [, uid, mode] = ref.split('/')
-  return { uid, mode: mode as 'spark' | 'play' }
+// A photo path's owner and mode: photos/{uid}/{mode}/… or (F-062)
+// playPhotos/{playId}/… — the Play ID resolved here, server-side.
+async function ownersOf(refs: string[]): Promise<Map<string, { uid: string; mode: 'spark' | 'play' } | null>> {
+  const out = new Map<string, { uid: string; mode: 'spark' | 'play' } | null>()
+  await Promise.all(
+    refs.map(async (ref) => {
+      const parts = ref.split('/')
+      if (isPlayPhotoRef(ref)) {
+        const uid = await uidOfPlayId(parts[1])
+        out.set(ref, uid ? { uid, mode: 'play' } : null)
+      } else out.set(ref, { uid: parts[1], mode: parts[2] as 'spark' | 'play' })
+    }),
+  )
+  return out
 }
 
 function published(doc: DocumentData | undefined, ref: string): boolean {
@@ -48,9 +60,12 @@ export const getPhotoUrls = onCall(
       throw new HttpsError('invalid-argument', `refs must be up to ${MAX_REFS} photo paths`)
     }
     await takeRateLimit(viewer, 'photos', { max: 300, windowMs: 10 * 60 * 1000 })
-    const refs = [...new Set(raw as string[])]
+    const all = [...new Set(raw as string[])]
     const admin = isAdminAuth(request.auth)
     const db = getFirestore()
+    const owner = await ownersOf(all)
+    const refs = all.filter((r) => owner.get(r))
+    const ownerOf = (r: string) => owner.get(r)!
     // T&S Phase 1: an admin viewing other people's photos is audited (by
     // owner; never the paths themselves).
     const others = [...new Set(refs.map((r) => ownerOf(r).uid))].filter((u) => u !== viewer)

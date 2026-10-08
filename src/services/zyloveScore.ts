@@ -130,6 +130,8 @@ export interface KnownMatch {
   hadMessages: boolean
   // The connection's mode; absent on entries saved before it was kept.
   mode?: 'spark' | 'play'
+  // A curated profile (F-062: a Play partner's id doesn't say so).
+  isBot?: boolean
 }
 
 function knownKey(uid: string): string {

@@ -1,3 +1,6 @@
+import { doc, getDoc } from 'firebase/firestore'
+import { db } from '../../services/firebase'
+import { isPlayId } from '../../services/playId'
 import { useEffect, useState } from 'react'
 import { fetchPublicUserDoc } from '../../services/publicUserDoc'
 import { NEW_ACCOUNT_MS } from '../../services/scamRules'
@@ -15,7 +18,12 @@ export function useSenderTrust(uid: string, skip: boolean): SenderTrust | null {
   useEffect(() => {
     if (skip) return
     let cancelled = false
-    fetchPublicUserDoc(uid).then((d) => {
+    // F-062: a Play partner's new-account marker is on their public Play
+    // profile (by Play ID); founder status isn't shown in Play.
+    const read: Promise<{ newUntil?: unknown; isFounder?: unknown } | null> = isPlayId(uid)
+      ? getDoc(doc(db, `playProfiles/${uid}`)).then((s) => (s.data() ?? null) as { newUntil?: unknown } | null, () => null)
+      : fetchPublicUserDoc(uid)
+    read.then((d) => {
       if (!cancelled) setLoaded({ uid, trust: { newUntil: typeof d?.newUntil === 'number' ? d.newUntil : null, founder: d?.isFounder === true } })
     })
     return () => {

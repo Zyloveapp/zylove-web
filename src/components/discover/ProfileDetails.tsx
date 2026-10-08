@@ -87,7 +87,7 @@ export default function ProfileDetails({
         {!anonymous && (
           <>
             <div className="mt-2 flex flex-wrap gap-2 empty:hidden">
-              <CuratedBadge uid={profile.uid} />
+              <CuratedBadge uid={profile.uid} curated={profile.curated} />
               <FounderBadge profile={profile} />
               <TierBadge tier={(profile as Record<string, unknown>).zyloveScoreTier} />
             </div>

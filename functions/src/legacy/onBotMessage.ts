@@ -12,6 +12,7 @@ import * as admin from "firebase-admin";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { takeQuota } from "../usage";
+import { loadMatch } from "../playMatch";
 import {
   sendPush,
   getToken,
@@ -27,7 +28,8 @@ function getDb() {
 }
 
 function buildPersonaPrompt(bot: any, mode: string = "spark", playData?: any): string {
-  const name = bot.displayName || "Ava";
+  // F-062: in Play the bot is its Play profile — never its Spark name.
+  const name = (mode === "play" ? (playData?.playDisplayName || playData?.displayName) : bot.displayName) || "Ava";
   const age = bot.age || 25;
   const job = bot.occupation || "designer";
 
@@ -73,10 +75,23 @@ export const onBotMessage = onDocumentCreated(
     // Deployed with max 20 instances; pinned (the CLI doesn't carry it over).
     maxInstances: 20,
   },
-  async (event) => {
+  async (event) => botReply(event.params.matchId, event.id, event.data?.data())
+);
+
+// F-062: Play bot chats (playMatches/{pm_…}): senders are Play IDs.
+export const onBotPlayMessage = onDocumentCreated(
+  {
+    document: "playMatches/{matchId}/messages/{messageId}",
+    secrets: [anthropicKey],
+    timeoutSeconds: 30,
+    memory: "256MiB",
+    maxInstances: 20,
+  },
+  async (event) => botReply(event.params.matchId, event.id, event.data?.data())
+);
+
+async function botReply(matchId: string, eventId: string, message: admin.firestore.DocumentData | undefined): Promise<void> {
     const db = getDb();
-    const { matchId } = event.params;
-    const message = event.data?.data();
 
     if (!message) return;
 
@@ -84,18 +99,18 @@ export const onBotMessage = onDocumentCreated(
     if (message.isBot === true) return;
 
     // Check if this is a bot match
-    const matchRef = db.collection("matches").doc(matchId);
-    const matchSnap = await matchRef.get();
-    if (!matchSnap.exists) return;
+    const ctx = await loadMatch(matchId);
+    if (!ctx) return;
+    const matchRef = ctx.ref;
+    const match = ctx.data;
+    const matchMode: string = ctx.play ? "play" : (match as any).mode ?? "spark";
 
-    const match = matchSnap.data()!;
-    const matchMode: string = (match as any).mode ?? "spark";
-
-    // Find the bot UID using users array (falls back to legacy participants field).
-    const senderId = message.senderId;
-    const usersList: string[] = match.users ?? match.participants ?? [];
-    const botUid = usersList.find((u: string) => u !== senderId);
-    if (!botUid) return;
+    // The bot is the other participant (people by uid; ids as messages name them).
+    const senderId = typeof message.senderId === "string" ? ctx.uidOf(message.senderId) : null;
+    const usersList: string[] = ctx.users;
+    const botUid = senderId ? usersList.find((u: string) => u !== senderId) : undefined;
+    if (!senderId || !botUid) return;
+    const botId = ctx.idOf(botUid);
 
     // Gate (Stage A): the partner must BE a bot — by uid (zbot-, or the
     // older seed-). The isBot flag alone isn't enough: a reply here is
@@ -120,9 +135,7 @@ export const onBotMessage = onDocumentCreated(
     }
 
     // Fetch recent message history (last 8 messages for context)
-    const historySnap = await db
-      .collection("matches")
-      .doc(matchId)
+    const historySnap = await matchRef
       .collection("messages")
       .orderBy("sentAt", "desc")
       .limit(8)
@@ -139,7 +152,7 @@ export const onBotMessage = onDocumentCreated(
       .map((d) => {
         const msg = d.data();
         return {
-          role: msg.senderId === botUid ? "assistant" : "user",
+          role: msg.senderId === botId ? "assistant" : "user",
           content: String(msg.ciphertext || "").slice(0, 2000),
         };
       })
@@ -186,13 +199,11 @@ export const onBotMessage = onDocumentCreated(
     // Write bot reply — deterministic doc ID keyed on event.id makes this
     // idempotent. Firebase onDocumentCreated has at-least-once delivery,
     // so retries will upsert the same doc instead of duplicating.
-    await db
-      .collection("matches")
-      .doc(matchId)
+    await matchRef
       .collection("messages")
-      .doc(`bot_${event.id}`)
+      .doc(`bot_${eventId}`)
       .set({
-        senderId: botUid,
+        senderId: botId,
         ciphertext: replyText,
         nonce: "stub",
         messageType: "text",
@@ -219,7 +230,7 @@ export const onBotMessage = onDocumentCreated(
         if (!capReached) {
           const token = await getToken(humanUid);
           if (token) {
-            const botName = (bot as any)?.displayName ?? "Someone";
+            const botName = (matchMode === "play" ? (botPlayData?.playDisplayName || botPlayData?.displayName) : (bot as any)?.displayName) ?? "Someone";
             const preview = replyText.slice(0, 60);
             const isPlay = matchMode === "play";
             await sendPush(
@@ -235,5 +246,4 @@ export const onBotMessage = onDocumentCreated(
         }
       }
     }
-  }
-);
+}

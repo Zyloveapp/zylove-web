@@ -13,7 +13,7 @@ import {
   type ChatMessage,
 } from '../../services/chat'
 import { decryptMessage } from '../../services/encryption'
-import { getPrivateKey, keysReady, subscribeKeyState, subscribePublicKey, type KeyState } from '../../services/keys'
+import { chatPrivateKey, subscribeKeyState, subscribePartnerKey, type KeyState } from '../../services/keys'
 import { KEY_BACKUP_EVENT } from '../KeyBackupGate'
 import { markMatchRead, type MatchEntry } from '../../services/matches'
 import {
@@ -128,6 +128,11 @@ function isOnline(): boolean {
 
 export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   const { matchId, partnerUid } = entry
+  // F-062: you and the partner as this match names you — Play IDs in a Play
+  // chat (uid stays for this account's own things: its keys, its records).
+  const me = entry.selfId
+  // A curated profile: by the match (in Play the id doesn't say so).
+  const partnerIsBot = entry.isBot || isBotUid(partnerUid)
   // A Play chat shows their Play name and photo — never the Spark ones an
   // older snapshot may hold (blank while loading, 'Someone' with no name).
   const playIdentity = usePlayIdentity(partnerUid, entry.mode === 'play')
@@ -154,7 +159,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   // The first-chat card promises "You're talking to a real human", so it's
   // never shown for demonstration profiles — known by uid prefix right away,
   // or by isBot on their user doc (checked before the card appears).
-  const [showFirstChat, setShowFirstChat] = useState(() => !firstChatSeen(matchId) && !isBotUid(partnerUid))
+  const [showFirstChat, setShowFirstChat] = useState(() => !firstChatSeen(matchId) && !partnerIsBot)
   const [humanPartner, setHumanPartner] = useState<string | null>(null)
   const [partnerKeyState, setPartnerKeyState] = useState<PartnerKey | null>(null)
   const [myKeyState, setMyKeyState] = useState<{ uid: string; key: string | null } | null>(null)
@@ -169,7 +174,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   const [reportPreset, setReportPreset] = useState<string[]>([])
   // A message that looks like a one-time code waits for a second Send.
   const [confirmCode, setConfirmCode] = useState<string | null>(null)
-  const senderTrust = useSenderTrust(partnerUid, isBotUid(partnerUid))
+  const senderTrust = useSenderTrust(partnerUid, partnerIsBot)
   // T&S Phase 3: Share contact.
   const [contactSheet, setContactSheet] = useState<'share' | 'shareBack' | 'resend' | null>(null)
   const [contactBusy, setContactBusy] = useState(false)
@@ -197,11 +202,11 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     markMatchRead(uid, matchId).catch(() => {})
     return subscribeMessages(
       matchId,
-      uid,
+      me,
       match.startedAt,
       (messages) => {
         setLoaded({ matchId, messages, error: false })
-        const unreadFromPartner = messages.filter((m) => m.senderId !== uid && m.status !== 'read').map((m) => m.id)
+        const unreadFromPartner = messages.filter((m) => m.senderId !== me && m.status !== 'read').map((m) => m.id)
         if (unreadFromPartner.length > 0) {
           markMessagesRead(matchId, unreadFromPartner).catch(() => {})
           markMatchRead(uid, matchId).catch(() => {})
@@ -209,7 +214,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
       },
       () => setLoaded({ matchId, messages: [], error: true }),
     )
-  }, [matchId, uid, match.startedAt])
+  }, [matchId, uid, me, match.startedAt])
 
   useEffect(
     () => subscribePhotoConsent(matchId, (consent) => setConsentState({ matchId, consent })),
@@ -217,7 +222,13 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   )
 
   useEffect(() => {
-    if (isBotUid(partnerUid)) return
+    if (partnerIsBot) return
+    // F-062: a Play partner is known by Play ID only (the match's isBot says
+    // whether it's curated).
+    if (entry.mode === 'play') {
+      setHumanPartner(partnerUid)
+      return
+    }
     let cancelled = false
     fetchPublicUserDoc(partnerUid).then((partner) => {
       if (cancelled) return
@@ -227,7 +238,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     return () => {
       cancelled = true
     }
-  }, [partnerUid])
+  }, [partnerUid, partnerIsBot, entry.mode])
 
   // Hide the first-chat modal if it was already dismissed on mobile.
   useEffect(() => {
@@ -244,7 +255,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   const [keyChangedFor, setKeyChangedFor] = useState<string | null>(null)
   useEffect(
     () =>
-      subscribePublicKey(
+      subscribePartnerKey(
         partnerUid,
         (key) => {
           setPartnerKeyState({ partnerUid, key, error: false })
@@ -265,15 +276,14 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   const deviceKeyStatus = deviceKey?.status ?? 'unknown'
   useEffect(() => {
     let cancelled = false
-    keysReady(uid)
-      .then(() => getPrivateKey(uid))
-      .then((key) => {
-        if (!cancelled) setMyKeyState({ uid, key })
-      })
+    // A Play chat opens with the Play key (F-062).
+    chatPrivateKey(uid, matchId).then((key) => {
+      if (!cancelled) setMyKeyState({ uid, key })
+    })
     return () => {
       cancelled = true
     }
-  }, [uid, deviceKeyStatus])
+  }, [uid, matchId, deviceKeyStatus])
   const deviceLocked = deviceKeyStatus === 'needs_restore' || deviceKeyStatus === 'locked' || deviceKeyStatus === 'check_failed'
 
   const partnerKey = partnerKeyState?.partnerUid === partnerUid ? partnerKeyState : null
@@ -310,7 +320,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
 
   // This user's vibe-check state (matches/{id}.vibeCheckState_{uid}).
   const [vibeState, setVibeState] = useState<{ matchId: string; state: VibeCheckState } | null>(null)
-  useEffect(() => subscribeVibeCheckState(matchId, uid, (state) => setVibeState({ matchId, state })), [matchId, uid])
+  useEffect(() => subscribeVibeCheckState(matchId, me, (state) => setVibeState({ matchId, state })), [matchId, me])
   const vibe = vibeState?.matchId === matchId ? vibeState.state : null
   const vibeMode = vibeModeOf(match.mode)
 
@@ -318,12 +328,12 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     // Waits for the state, so a check already shown elsewhere doesn't repeat.
     if (vibeCheckFired.current || showFirstChat || !vibe) return
     const senders = conversation.map((m) => m.senderId)
-    if (!shouldTriggerVibeCheck(senders, uid, vibe, vibeMode)) return
+    if (!shouldTriggerVibeCheck(senders, me, vibe, vibeMode)) return
     vibeCheckFired.current = true
-    void markVibeCheckFired(matchId, uid, senders.length)
+    void markVibeCheckFired(matchId, me, senders.length)
     // Kept in a ref so a message arriving during the delay doesn't cancel it.
     vibeCheckTimer.current = setTimeout(() => setShowVibeCheck(true), VIBE_CHECK_DELAY_MS)
-  }, [conversation, showFirstChat, uid, matchId, vibe, vibeMode])
+  }, [conversation, showFirstChat, me, matchId, vibe, vibeMode])
 
   useEffect(() => () => clearTimeout(vibeCheckTimer.current), [])
 
@@ -334,7 +344,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     if (reviewChecked.current || messages === null || showFirstChat) return
     reviewChecked.current = true
     // Never stack on a vibe check fired by this open.
-    if (vibeCheckFired.current || isBotUid(partnerUid) || reviewed(matchId, match.startedAt) || coldReviewShown(matchId, match.startedAt)) return
+    if (vibeCheckFired.current || partnerIsBot || reviewed(matchId, match.startedAt) || coldReviewShown(matchId, match.startedAt)) return
     if (!conversationCold(conversation[conversation.length - 1]?.sentAt ?? null, conversation.length)) return
     markColdReviewShown(matchId, match.startedAt)
     setShowReview(true)
@@ -364,9 +374,9 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     () => () => {
       clearTimeout(typingIdleTimer.current)
       lastTypingWrite.current = 0
-      clearTyping(matchId, uid).catch(() => {})
+      clearTyping(matchId, me).catch(() => {})
     },
-    [matchId, uid],
+    [matchId, me],
   )
 
   useEffect(
@@ -392,7 +402,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     clearTimeout(typingIdleTimer.current)
     if (lastTypingWrite.current === 0) return
     lastTypingWrite.current = 0
-    clearTyping(matchId, uid).catch(() => {})
+    clearTyping(matchId, me).catch(() => {})
   }
 
   function handleTextChange(value: string) {
@@ -401,7 +411,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     const t = Date.now()
     if (t - lastTypingWrite.current >= TYPING_WRITE_MS) {
       lastTypingWrite.current = t
-      setTyping(matchId, uid).catch(() => {})
+      setTyping(matchId, me).catch(() => {})
     }
     clearTimeout(typingIdleTimer.current)
     typingIdleTimer.current = setTimeout(stopTyping, TYPING_IDLE_MS)
@@ -415,13 +425,14 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   const contact = useContactExchange({
     matchId,
     uid,
+    selfId: me,
     partnerUid,
     partnerKey: partnerKey && !partnerKey.error && partnerKey.key ? partnerKey.key : null,
     messages: rawMessages,
   })
   // T&S Phase 4: this sender's next message number (franking), the messages
   // whose commitment didn't check out (refused), and what a report may attach.
-  const mySeq = (rawMessages ?? []).filter((m) => m.senderId === uid && m.nonce !== 'system' && (m.messageType === 'text' || m.messageType === 'photo')).length + 1
+  const mySeq = (rawMessages ?? []).filter((m) => m.senderId === me && m.nonce !== 'system' && (m.messageType === 'text' || m.messageType === 'photo')).length + 1
   const partnerKeyValue = partnerKey && !partnerKey.error && partnerKey.key ? partnerKey.key : null
   const frankBad = useFrankChecks(messages, matchId, partnerKeyValue, myPrivateKey)
   const evidenceCandidates = useMemo<EvidenceCandidate[]>(
@@ -430,14 +441,14 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
         .filter((m) => m.nonce !== 'system' && !m.undecryptable && (m.messageType === 'text' || (m.messageType === 'photo' && m.photo)))
         .map((m) => ({
           id: m.id,
-          from: m.senderId === uid ? ('me' as const) : ('them' as const),
+          from: m.senderId === me ? ('me' as const) : ('them' as const),
           type: m.messageType === 'photo' ? ('photo' as const) : ('text' as const),
           text: m.messageType === 'photo' ? '📷 Photo' : m.text,
           sentAt: m.sentAt,
           revealKf: () => (m.frank && partnerKeyValue && myPrivateKey ? revealKf(m.frank, partnerKeyValue, myPrivateKey) : null),
-          ...(m.photo && partnerKeyValue ? { photoBytes: () => openPhotoBytes(m.photo!, m.senderId === uid, uid, partnerKeyValue) } : {}),
+          ...(m.photo && partnerKeyValue ? { photoBytes: () => openPhotoBytes(m.photo!, m.senderId === me, uid, partnerKeyValue) } : {}),
         })),
-    [messages, uid, partnerKeyValue, myPrivateKey],
+    [messages, uid, me, partnerKeyValue, myPrivateKey],
   )
   const latestContactNoticeId = useMemo(
     () => [...(messages ?? [])].reverse().find((m) => m.messageType === 'contact_request' && m.nonce === 'system')?.id ?? null,
@@ -451,11 +462,11 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   function handleContactTap() {
     setContactError(null)
     const ce = contact.ce
-    if (isBotUid(partnerUid)) return setContactNotice({ text: "Contact details can't be shared with a curated profile." })
+    if (partnerIsBot) return setContactNotice({ text: "Contact details can't be shared with a curated profile." })
     if (contact.needsCard) return setContactSheet('resend')
     if (ce?.status === 'pending') {
       return setContactNotice(
-        ce.requestedBy === uid ? { text: `Waiting for ${match.name} to answer your contact request.`, cancel: true } : { text: `${match.name} asked to share contact details — answer above.` },
+        ce.requestedBy === me ? { text: `Waiting for ${match.name} to answer your contact request.`, cancel: true } : { text: `${match.name} asked to share contact details — answer above.` },
       )
     }
     if (ce?.status === 'accepted') return setContactNotice({ text: 'Contact details are shared in this chat. Use "Take back" on a card to remove them.' })
@@ -512,7 +523,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     // T&S Phase 3 (on this device): contact details only through Share contact.
     if (detectContact(trimmed).length > 0) {
       setSendError(
-        isBotUid(partnerUid)
+        partnerIsBot
           ? "Phone numbers, handles and emails can't be sent in chat."
           : `Phone numbers, handles and emails can't be sent in chat — use Share contact 🪪 instead${contact.unlocked ? '' : ` (it unlocks once you've both sent ${UNLOCK_MESSAGES} messages)`}.`,
       )
@@ -520,11 +531,11 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     }
     // T&S Phase 2 (on this device only): no links in an account's first
     // 48 hours, and a code-like message is sent only on a second Send.
-    if (!isBotUid(partnerUid) && hasLink(trimmed) && !canSendLinks) {
+    if (!partnerIsBot && hasLink(trimmed) && !canSendLinks) {
       setSendError(LINKS_LATER)
       return
     }
-    if (!isBotUid(partnerUid) && looksLikeCode(trimmed) && confirmCode !== trimmed) {
+    if (!partnerIsBot && looksLikeCode(trimmed) && confirmCode !== trimmed) {
       setConfirmCode(trimmed)
       setSendError(null)
       return
@@ -551,9 +562,9 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     let delivered: Promise<void>
     try {
       // My first message in this chat: its on-device hash goes along (duplicate-opener check).
-      const firstFromMe = !(rawMessages ?? []).some((m) => m.senderId === uid && m.nonce !== 'system')
+      const firstFromMe = !(rawMessages ?? []).some((m) => m.senderId === me && m.nonce !== 'system')
       const fh = firstFromMe ? await openerHash(sent, match.name).catch(() => null) : null
-      delivered = (await sendMessage(matchId, uid, sent, partnerKey.key, partnerUid, fh, mySeq)).delivered
+      delivered = (await sendMessage(matchId, uid, sent, partnerKey.key, partnerUid, fh, mySeq, partnerIsBot)).delivered
     } catch (err) {
       restore(err)
       return
@@ -569,7 +580,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   // Photos are always encrypted, so sending also needs the partner's real
   // key — mobile-only users have a stubbed one until they sign in on the
   // web — and tapping explains that.
-  const botChat = isBotUid(partnerUid)
+  const botChat = partnerIsBot
   const photosAvailable = !match.ended && !botChat
   const partnerCanReceivePhotos = partnerKey !== null && partnerKey.key !== ''
   const latestRequestId = useMemo(
@@ -599,7 +610,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   }
 
   function startRequest() {
-    if (photoBannerSeen(matchId)) void runConsent(() => requestPhotoConsent(matchId, uid))
+    if (photoBannerSeen(matchId)) void runConsent(() => requestPhotoConsent(matchId, me))
     else setShowPhotoBanner(true)
   }
 
@@ -625,7 +636,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
       case 'pending':
         return setPhotoNotice({
           text:
-            consent.requestedBy === uid
+            consent.requestedBy === me
               ? `Waiting for ${match.name} to accept`
               : `${match.name} asked to share photos — answer above.`,
           offerRequest: false,
@@ -633,7 +644,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
       case 'declined':
         return setPhotoNotice({
           text:
-            consent.requestedBy === uid
+            consent.requestedBy === me
               ? `${match.name} declined photo sharing. Send a new request?`
               : 'You declined photo sharing. Send a request?',
           offerRequest: true,
@@ -659,7 +670,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     // Same rules as the app-wide prompt: a real person, a real conversation,
     // not already reviewed. Offered app-wide: unmatching deletes the match,
     // which closes this chat.
-    if (!isBotUid(partnerUid) && conversation.length > 0 && !reviewed(matchId, match.startedAt)) {
+    if (!partnerIsBot && conversation.length > 0 && !reviewed(matchId, match.startedAt)) {
       offerExitReview({ matchId, generation: match.startedAt, partnerUid, name: match.name, mode: match.mode })
     }
     leave()
@@ -677,7 +688,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
   // opening the chat later — then leave a system line where it happened.
   const [mutualVibeAt, setMutualVibeAt] = useState<number | null>(null)
   const [celebrating, setCelebrating] = useState(false)
-  useEffect(() => subscribeMutualVibe(matchId, uid, partnerUid, setMutualVibeAt), [matchId, uid, partnerUid])
+  useEffect(() => subscribeMutualVibe(matchId, me, partnerUid, setMutualVibeAt), [matchId, me, partnerUid])
   useEffect(() => {
     if (mutualVibeAt === null || mutualVibeCelebrated(matchId, uid, mutualVibeAt)) return
     markMutualVibeCelebrated(matchId, uid, mutualVibeAt)
@@ -703,9 +714,9 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
     () =>
       [...(messages ?? [])]
         .reverse()
-        .find((m) => m.senderId === uid && m.status === 'read' && m.nonce !== 'system' && m.messageType === 'text')?.id ??
+        .find((m) => m.senderId === me && m.status === 'read' && m.nonce !== 'system' && m.messageType === 'text')?.id ??
       null,
-    [messages, uid],
+    [messages, me],
   )
 
   function renderMessage(m: ChatMessage & { text: string; undecryptable: boolean; plaintext: boolean }) {
@@ -723,11 +734,11 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
                     key={m.id}
                     mode={match.mode}
                     code={code}
-                    isMine={m.senderId === uid}
+                    isMine={m.senderId === me}
                     partnerName={match.name}
                     live={m.id === latestRequestId && requestPending}
                     busy={consentBusy}
-                    onRespond={(accept) => void runConsent(() => respondToPhotoConsent(matchId, uid, accept))}
+                    onRespond={(accept) => void runConsent(() => respondToPhotoConsent(matchId, me, accept))}
                   />
                 )
               }
@@ -737,7 +748,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
                   <ContactNotice
                     key={m.id}
                     code={m.ciphertext as ContactCode}
-                    isMine={m.senderId === uid}
+                    isMine={m.senderId === me}
                     partnerName={match.name}
                     live={m.id === latestContactNoticeId && contact.ce?.status === 'pending'}
                     busy={contactBusy}
@@ -751,7 +762,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
                 )
               }
               if (m.messageType === 'contact_card') {
-                const own = m.senderId === uid
+                const own = m.senderId === me
                 return (
                   <div key={m.id} className={`flex flex-col ${own ? 'items-end' : 'items-start'}`}>
                     <ContactCardMessage
@@ -766,7 +777,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
                 )
               }
               if (m.messageType === 'photo' && m.photo) {
-                const own = m.senderId === uid
+                const own = m.senderId === me
                 return (
                   <div key={m.id} className={`flex flex-col ${own ? 'items-end' : 'items-start'}`}>
                     <PhotoMessage
@@ -789,7 +800,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
                   </p>
                 )
               }
-              const own = m.senderId === uid
+              const own = m.senderId === me
               // T&S Phase 4: its franking commitment didn't check out — refused.
               if (frankBad.has(m.id)) {
                 return (
@@ -869,7 +880,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
             {match.age !== null && <span className="font-normal text-white/50">, {match.age}</span>}
             {nearby && <span className="font-normal text-white/50"> · Nearby</span>}
           </span>
-          <CuratedBadge uid={partnerUid} />
+          <CuratedBadge uid={partnerUid} curated={partnerIsBot} />
         </button>
         <button
           type="button"
@@ -1112,7 +1123,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
                     consent?.status === 'accepted'
                       ? 'enabled'
                       : consent?.status === 'pending'
-                        ? consent.requestedBy === uid
+                        ? consent.requestedBy === me
                           ? 'waiting'
                           : 'incoming'
                         : 'off',
@@ -1120,13 +1131,13 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
                   // keys, first-time explainer, then the request).
                   onAllow: () => {
                     setShowActions(false)
-                    if (consent?.status === 'pending' && consent.requestedBy !== uid) {
-                      void runConsent(() => respondToPhotoConsent(matchId, uid, true))
+                    if (consent?.status === 'pending' && consent.requestedBy !== me) {
+                      void runConsent(() => respondToPhotoConsent(matchId, me, true))
                     } else handlePhotoTap()
                   },
                   onRevoke: () => {
                     setShowActions(false)
-                    void runConsent(() => pausePhotoSharing(matchId, uid))
+                    void runConsent(() => pausePhotoSharing(matchId, me))
                   },
                 }
           }
@@ -1140,7 +1151,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
           onProceed={() => {
             markPhotoBannerSeen(matchId)
             setShowPhotoBanner(false)
-            void runConsent(() => requestPhotoConsent(matchId, uid))
+            void runConsent(() => requestPhotoConsent(matchId, me))
           }}
         />
       )}

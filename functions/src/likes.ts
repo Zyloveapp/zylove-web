@@ -1,4 +1,5 @@
 import { FieldValue, getFirestore, type DocumentData } from 'firebase-admin/firestore'
+import { playIdOf } from './playIds'
 
 // Likes per mode (Stage A). pairs/{pairId}/likes/{mode} = { likedBy: [uid] },
 // server-only (the rules' default deny): who liked whom in which mode. A
@@ -34,12 +35,18 @@ export async function likedInMode(liker: string, target: string, mode: LikeMode,
 
 // After an unmatch or a block: both likes in that mode are gone, so liking
 // again can't bring the match back without the other person liking again.
+// F-062: Play likes in the queue are keyed by the liker's Play ID.
 export async function clearLikes(a: string, b: string, mode: LikeMode | null): Promise<void> {
   const pairId = pairIdOf(a, b)
   const batch = db().batch()
   for (const m of mode ? [mode] : (['spark', 'play'] as const)) batch.delete(likesRef(pairId, m))
   batch.delete(db().doc(`users/${a}/likeQueue/${b}`))
   batch.delete(db().doc(`users/${b}/likeQueue/${a}`))
+  if (mode !== 'spark') {
+    const [pa, pb] = await Promise.all([playIdOf(a), playIdOf(b)])
+    if (pb) batch.delete(db().doc(`users/${a}/likeQueue/${pb}`))
+    if (pa) batch.delete(db().doc(`users/${b}/likeQueue/${pa}`))
+  }
   await batch.commit()
 }
 

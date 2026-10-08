@@ -2,6 +2,7 @@ import { onDocumentUpdated } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { getStorage } from 'firebase-admin/storage'
+import { playIdOf } from './playIds'
 
 // Stage A: clients can't delete profile photos any more (storage.rules) — a
 // deleted name could be uploaded again with new bytes while Firestore still
@@ -20,7 +21,11 @@ const refsOf = (d: DocumentData | undefined, field: 'photoURLs' | 'pendingPhotoU
 }
 
 async function deleteUnlisted(uid: string, removed: string[]): Promise<void> {
-  const own = removed.filter((r) => r.startsWith(`photos/${uid}/spark/`) || r.startsWith(`photos/${uid}/play/`))
+  // F-062: Play photos are under the account's Play ID.
+  const playId = await playIdOf(uid)
+  const own = removed.filter(
+    (r) => r.startsWith(`photos/${uid}/spark/`) || r.startsWith(`photos/${uid}/play/`) || (!!playId && r.startsWith(`playPhotos/${playId}/`)),
+  )
   if (!own.length) return
   const db = getFirestore()
   // Current state, not the event's: an approval moves pending → published

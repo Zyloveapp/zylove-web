@@ -1,4 +1,5 @@
 import { doc, getDoc, updateDoc } from 'firebase/firestore'
+import { matchPath } from '../../services/playId'
 import { db } from '../../services/firebase'
 
 // Web tracks the first-chat modal per match in localStorage, mirrored to the
@@ -28,13 +29,13 @@ function markLocal(matchId: string): void {
 export function markFirstChatSeen(matchId: string): void {
   markLocal(matchId)
   // Same fields mobile writes. Best effort: localStorage already hides it here.
-  updateDoc(doc(db, 'matches', matchId), { safetyCardShown: true, safetyCardShownAt: Date.now() }).catch(() => {})
+  updateDoc(doc(db, matchPath(matchId)), { safetyCardShown: true, safetyCardShownAt: Date.now() }).catch(() => {})
 }
 
 // True when the card was already dismissed on another device (e.g. mobile).
 export async function firstChatSeenRemotely(matchId: string): Promise<boolean> {
   try {
-    const snap = await getDoc(doc(db, 'matches', matchId))
+    const snap = await getDoc(doc(db, matchPath(matchId)))
     const shown = snap.data()?.safetyCardShown === true
     if (shown) markLocal(matchId)
     return shown

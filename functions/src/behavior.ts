@@ -7,6 +7,8 @@ import { countMessages, generationOf, participants, pastConnectionId } from './m
 import { loadPlayName } from './playName'
 import { purgeMatchContent } from './matchCleanup'
 import { clearLikes } from './likes'
+import { contextOf, endPlayPair, loadMatch, type MatchCtx } from './playMatch'
+import { playIdOf } from './playIds'
 
 // Behavioral safety signals feeding behaviorRiskScore.
 //
@@ -59,7 +61,7 @@ function displayName(match: DocumentData, uid: string): string {
 // A Play connection's name is always the Play one — the snapshot may be an
 // older one holding the Spark name.
 function nameIn(match: DocumentData, uid: string): Promise<string> {
-  return connectionMode(match) === 'play' ? loadPlayName(uid) : Promise.resolve(displayName(match, uid))
+  return connectionMode(match) === 'play' || match.players ? loadPlayName(uid) : Promise.resolve(displayName(match, uid))
 }
 
 export async function bump(uid: string, field: string): Promise<void> {
@@ -74,15 +76,17 @@ export async function bump(uid: string, field: string): Promise<void> {
 // messages are gone (90 days). Never message content. until: the next
 // generation's start when a re-match overwrote this one. Returns the
 // per-person message counts.
+// F-062: by uid (server-only), for a Play match too (ctx.users).
 async function recordPastConnection(
-  matchId: string,
+  ctx: MatchCtx,
   match: DocumentData,
   endedAt: number,
   until: number | null,
   endedBy?: string,
 ): Promise<Record<string, number>> {
+  const matchId = ctx.id
   const generation = generationOf(match)
-  const users = participants(match)
+  const users = ctx.users
   const counts = await countMessages(matchId, generation, until)
   const sentCounts = Object.fromEntries(users.map((u) => [u, counts.bySender[u] ?? 0]))
   await getFirestore()
@@ -95,7 +99,7 @@ async function recordPastConnection(
       names: Object.fromEntries(await Promise.all(users.map(async (u) => [u, await nameIn(match, u)]))),
       matchedAt: matchedAtOf(match),
       endedAt,
-      mode: match.mode === 'play' ? 'play' : 'spark',
+      mode: ctx.play || match.mode === 'play' ? 'play' : 'spark',
       messageCount: counts.total,
       sentCounts,
       ...(endedBy ? { endedBy } : {}),
@@ -126,9 +130,13 @@ async function openReporters(matchId: string, match: DocumentData, a: string, b:
 export const purgePreservedChats = onSchedule(
   { schedule: '30 2 * * *', timeZone: 'America/Chicago', timeoutSeconds: 300, memory: '256MiB' },
   async () => {
-    const due = await getFirestore().collection('matches').where('preservedUntil', '<=', Timestamp.now()).limit(500).get()
-    for (const d of due.docs) await d.ref.delete()
-    logger.info('purgePreservedChats', { deleted: due.size })
+    let deleted = 0
+    for (const col of ['matches', 'playMatches']) {
+      const due = await getFirestore().collection(col).where('preservedUntil', '<=', Timestamp.now()).limit(500).get()
+      for (const d of due.docs) await d.ref.delete()
+      deleted += due.size
+    }
+    logger.info('purgePreservedChats', { deleted })
   },
 )
 
@@ -143,26 +151,30 @@ export const unmatchConnection = onCall(
     const uid = request.auth.uid
     const matchId = (request.data as { matchId?: unknown } | null)?.matchId
     if (typeof matchId !== 'string' || !matchId) throw new HttpsError('invalid-argument', 'matchId is required')
-    const ref = getFirestore().collection('matches').doc(matchId)
-    const match = (await ref.get()).data()
-    if (!match) return { success: true } // already gone
-    if (!participants(match).includes(uid)) throw new HttpsError('permission-denied', 'Not a participant in this match')
-    if (!isBotMatch(match) && !match.unmatchedAt) await recordPastConnection(matchId, match, Date.now(), null, uid)
+    // F-062: a Play match (pm_…) too — its people from the server-only record.
+    const ctx = await loadMatch(matchId)
+    if (!ctx) return { success: true } // already gone
+    const { ref, data: match } = ctx
+    if (!ctx.users.includes(uid)) throw new HttpsError('permission-denied', 'Not a participant in this match')
+    if (!isBotMatch(match) && !match.unmatchedAt) await recordPastConnection(ctx, match, Date.now(), null, uid)
     // Stage A: their likes in this mode go too, so a later like alone can't
     // bring the match back.
-    const [a, b] = participants(match)
-    if (a && b) await clearLikes(a, b, match.mode === 'play' ? 'play' : 'spark')
+    const [a, b] = ctx.users
+    if (a && b) await clearLikes(a, b, ctx.play || match.mode === 'play' ? 'play' : 'spark')
+    await endPlayPair(ctx)
     // T&S Phase 1: a chat with an open report is kept for the reporter —
     // read-only, still end-to-end encrypted — for PRESERVE_REPORTED_MS, then
     // deleted (purgePreservedChats). The other person loses it at once.
     const reporters = a && b ? await openReporters(matchId, match, a, b) : []
     if (reporters.length) {
+      // In Play every one of these is a Play ID (players is who may read it).
+      const ids = (us: string[]) => us.map((u) => ctx.idOf(u))
       await ref.update({
-        users: reporters,
-        pairUsers: [a, b],
+        [ctx.play ? 'players' : 'users']: ids(reporters),
+        [ctx.play ? 'pairPlayers' : 'pairUsers']: ids([a, b]),
         unmatchedAt: FieldValue.serverTimestamp(),
-        unmatchedBy: uid,
-        preservedFor: reporters,
+        unmatchedBy: ctx.idOf(uid),
+        preservedFor: ids(reporters),
         preservedUntil: Timestamp.fromMillis(Date.now() + PRESERVE_REPORTED_MS),
       })
       logger.info('unmatchConnection: preserved for reporter', { matchId, reporters: reporters.length })
@@ -190,18 +202,25 @@ export const unmatchConnection = onCall(
 // eventual delete, which purges everything older than any live generation.
 export const onMatchBehaviorUpdate = onDocumentWritten(
   { document: 'matches/{matchId}', timeoutSeconds: 300, memory: '512MiB' },
-  async (event) => {
-    const before = event.data?.before.data()
-    const after = event.data?.after.data()
-    const { matchId } = event.params
+  async (event) => matchLifecycle(event.params.matchId, event.data?.before.data(), event.data?.after.data()),
+)
+// F-062: Play matches (playMatches/{pm_…}); per-person fields hold Play IDs.
+export const onPlayMatchBehaviorUpdate = onDocumentWritten(
+  { document: 'playMatches/{matchId}', timeoutSeconds: 300, memory: '512MiB' },
+  async (event) => matchLifecycle(event.params.matchId, event.data?.before.data(), event.data?.after.data()),
+)
+
+async function matchLifecycle(matchId: string, before: DocumentData | undefined, after: DocumentData | undefined): Promise<void> {
     const db = getFirestore()
+    const ctx = await contextOf(matchId, before ?? after ?? {})
+    const uidOf = (v: unknown) => (typeof v === 'string' ? ctx.uidOf(v) : null)
     const beforeGen = generationOf(before)
     const afterGen = generationOf(after)
     // Same id, new match: the old generation ended without a delete.
     const replaced = Boolean(before && after && beforeGen && afterGen && beforeGen !== afterGen)
 
     if (after && typeof after.matchGeneration !== 'number' && afterGen > 0) {
-      await event.data?.after.ref.update({ matchGeneration: afterGen }).catch((err: unknown) =>
+      await ctx.ref.update({ matchGeneration: afterGen }).catch((err: unknown) =>
         logger.warn('onMatchBehaviorUpdate: matchGeneration stamp failed', {
           matchId,
           message: err instanceof Error ? err.message : String(err),
@@ -210,13 +229,13 @@ export const onMatchBehaviorUpdate = onDocumentWritten(
     }
 
     if (before && !isBotMatch(before)) {
-      const users = participants(before)
+      const users = ctx.users
 
       // Blocked: one more block received / initiated.
       if (after && !replaced && after.isBlocked === true && before.isBlocked !== true) {
-        const blocker: unknown = after.blockedBy
+        const blocker = uidOf(after.blockedBy)
         const blocked = users.find((u) => u !== blocker)
-        if (typeof blocker === 'string' && users.includes(blocker) && blocked) {
+        if (blocker && users.includes(blocker) && blocked) {
           await Promise.all([bump(blocked, 'receivedBlockCount'), bump(blocker, 'initiatedBlockCount')])
         }
       }
@@ -233,16 +252,17 @@ export const onMatchBehaviorUpdate = onDocumentWritten(
         const sent: Record<string, number> =
           recorded && typeof recorded.sentCounts === 'object' && recorded.sentCounts !== null
             ? (recorded.sentCounts as Record<string, number>)
-            : await recordPastConnection(matchId, before, endedAt, replaced ? afterGen : null)
+            : await recordPastConnection(ctx, before, endedAt, replaced ? afterGen : null)
 
         // T&S Phase 1: ended after both had written — attributed to whoever ended it.
         if (unmatchedNow && users.every((u) => num(sent[u]) > 0)) {
-          const ender: unknown = after?.unmatchedBy ?? recorded?.endedBy
+          // (recorded.endedBy is a uid; the doc's unmatchedBy a Play ID in Play.)
+          const ender = after?.unmatchedBy !== undefined ? uidOf(after.unmatchedBy) : recorded?.endedBy
           if (typeof ender === 'string' && users.includes(ender)) await bump(ender, 'unmatchAfterExchangeCount')
         }
         // Matched, talked, gone within a day — attributed to whoever ended it.
         if (unmatchedNow && matchedAt && endedAt - matchedAt < FAST_UNMATCH_MS && users.every((u) => num(sent[u]) > 0)) {
-          let unmatcher: unknown = after?.unmatchedBy ?? recorded?.endedBy
+          let unmatcher: unknown = after?.unmatchedBy !== undefined ? uidOf(after.unmatchedBy) : recorded?.endedBy
           if (typeof unmatcher !== 'string') {
             const reason = await db.collection('unmatchReasons').where('matchId', '==', matchId).limit(1).get()
             unmatcher = reason.docs[0]?.data().reporterUid
@@ -253,14 +273,21 @@ export const onMatchBehaviorUpdate = onDocumentWritten(
     }
 
     // Deleted: its messages and photos go, bot matches too. After the
-    // record above, which counts them first.
-    if (before && after === undefined) await purgeMatchContent(matchId, null)
+    // record above, which counts them first. A Play match's server-only
+    // record goes with it.
+    if (before && after === undefined) {
+      await purgeMatchContent(matchId, null)
+      if (ctx.play) {
+        await endPlayPair(ctx)
+        await db.doc(`playMatchMembers/${matchId}`).delete()
+      }
+    }
 
     // Created (or re-created in place): count it for both people.
     if (after && (!before || replaced) && !isBotMatch(after)) {
       const now = Date.now()
       await Promise.all(
-        participants(after).map((uid) =>
+        ctx.users.map((uid) =>
           db.runTransaction(async (tx) => {
             const ref = db.collection(SIGNALS).doc(uid)
             const recent = ((await tx.get(ref)).data()?.recentMatchAt ?? []) as number[]
@@ -279,8 +306,7 @@ export const onMatchBehaviorUpdate = onDocumentWritten(
         ),
       )
     }
-  },
-)
+}
 
 // ─── Vibe checks ─────────────────────────────────────────────────────────────
 
@@ -372,16 +398,16 @@ export async function recomputeBehaviorRisk(uid: string): Promise<number> {
 async function sweepNoResponse(): Promise<number> {
   const db = getFirestore()
   const now = Date.now()
-  const matches = await db.collection('matches').get()
+  const matches = [...(await db.collection('matches').get()).docs, ...(await db.collection('playMatches').get()).docs]
   let counted = 0
-  for (const m of matches.docs) {
+  for (const m of matches) {
     const match = m.data()
     const age = now - matchedAtOf(match)
     if (isBotMatch(match) || match.isBlocked === true || age < NO_RESPONSE_AFTER_MS || age > NO_RESPONSE_WINDOW_MS) continue
     const generation = generationOf(match)
     const checkRef = db.collection('behaviorChecks').doc(`${m.id}_${generation}`)
     if ((await checkRef.get()).exists) continue
-    const users = participants(match)
+    const users = (await contextOf(m.id, match)).users
     if (users.length !== 2) continue
     const { bySender } = await countMessages(m.id, generation)
     if (users.every((u) => !bySender[u])) continue // nobody's written yet; look again tomorrow
@@ -418,12 +444,15 @@ export const computeBehaviorScore = onSchedule(
 
 // ─── Past connections ────────────────────────────────────────────────────────
 
+// F-062: a Play connection names the other person by Play ID (otherPlayId),
+// never the uid.
 interface PastConnection {
   matchId: string
   // Which match between these two (see matchGeneration.ts); 0 for records
   // kept before generations existed.
   generation: number
-  otherUid: string
+  otherUid?: string
+  otherPlayId?: string
   name: string
   matchedAt: number
   ended: boolean
@@ -451,8 +480,9 @@ export const getPastConnections = onCall(
     const mode = requestedMode(request.data)
     const db = getFirestore()
     const since = Date.now() - RETENTION_MS
-    const [live, past] = await Promise.all([
+    const [live, livePlay, past] = await Promise.all([
       db.collection('matches').where('users', 'array-contains', uid).get(),
+      db.collection('playMatchMembers').where('users', 'array-contains', uid).get(),
       db.collection(PAST).where('users', 'array-contains', uid).get(),
     ])
 
@@ -479,6 +509,26 @@ export const getPastConnections = onCall(
         ended: true,
       })
     }
+    // Live Play matches (their docs hold Play IDs; the people are in the
+    // server-only records).
+    for (const mem of livePlay.docs) {
+      const ctx = await loadMatch(mem.id)
+      if (!ctx) continue
+      const m = ctx.data
+      const otherUid = ctx.otherOf(uid)
+      if (!otherUid || isBotMatch(m) || matchedAtOf(m) < since) continue
+      if (mode && mode !== 'play') continue
+      const generation = generationOf(m)
+      play.add(pastConnectionId(mem.id, generation))
+      byId.set(pastConnectionId(mem.id, generation), {
+        matchId: mem.id,
+        generation,
+        otherUid,
+        name: 'Someone',
+        matchedAt: matchedAtOf(m),
+        ended: m.isBlocked === true,
+      })
+    }
     for (const d of live.docs) {
       const m = d.data()
       const otherUid = participants(m).find((u) => u !== uid)
@@ -498,8 +548,16 @@ export const getPastConnections = onCall(
     }
     // Play connections are named by the Play name: stored names and older
     // snapshots may hold the Spark one.
+    // F-062: and by Play ID, not uid.
     await Promise.all(
-      [...byId].filter(([id]) => play.has(id)).map(async ([, c]) => (c.name = await loadPlayName(c.otherUid))),
+      [...byId]
+        .filter(([id]) => play.has(id))
+        .map(async ([, c]) => {
+          const other = c.otherUid ?? ''
+          c.name = await loadPlayName(other)
+          c.otherPlayId = (await playIdOf(other)) ?? undefined
+          delete c.otherUid
+        }),
     )
     // A pre-generation record (0) duplicates any other entry for its match.
     const all = [...byId.values()]

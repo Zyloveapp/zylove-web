@@ -2,7 +2,8 @@ import { onDocumentCreated } from 'firebase-functions/v2/firestore'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
-import { generationOf, participants } from './matchGeneration'
+import { generationOf } from './matchGeneration'
+import { loadMatch } from './playMatch'
 import { recordScamTrap } from './scamTraps'
 
 // T&S Phase 1 — behaviour signals that need no message content.
@@ -53,25 +54,38 @@ export async function recordCapHit(uid: string): Promise<void> {
 // Counts per message: sender, type and time only.
 export const trustOnMessage = onDocumentCreated(
   { document: 'matches/{matchId}/messages/{messageId}', memory: '256MiB', timeoutSeconds: 60 },
-  async (event) => {
-    const m = event.data?.data()
+  async (event) => countMessage(event.params.matchId, event.params.messageId, event.data?.data(), event.data?.ref),
+)
+// F-062: Play messages — the sender's Play ID mapped back to the account.
+export const trustOnPlayMessage = onDocumentCreated(
+  { document: 'playMatches/{matchId}/messages/{messageId}', memory: '256MiB', timeoutSeconds: 60 },
+  async (event) => countMessage(event.params.matchId, event.params.messageId, event.data?.data(), event.data?.ref),
+)
+
+async function countMessage(
+  matchId: string,
+  messageId: string,
+  m: FirebaseFirestore.DocumentData | undefined,
+  ref: FirebaseFirestore.DocumentReference | undefined,
+): Promise<void> {
     if (!m) return
     const fh: unknown = m.fh
-    const dropHash = () => (typeof fh === 'string' ? event.data?.ref.update({ fh: FieldValue.delete() }).catch(() => {}) : undefined)
+    const dropHash = () => (typeof fh === 'string' ? ref?.update({ fh: FieldValue.delete() }).catch(() => {}) : undefined)
     const type = m.messageType ?? 'text'
     if (m.isBot === true || m.nonce === 'system' || (type !== 'text' && type !== 'photo')) return void (await dropHash())
-    const sender: unknown = m.senderId
-    const match = (await db().doc(`matches/${event.params.matchId}`).get()).data()
-    const users = participants(match)
+    const ctx = await loadMatch(matchId)
+    const match = ctx?.data
+    const users = ctx?.users ?? []
+    const sender = typeof m.senderId === 'string' ? ctx?.uidOf(m.senderId) : null
     const recipient = users.find((u) => u !== sender)
     const botChat = match?.isBot === true || users.some((u) => /^(zbot|seed)-/.test(u))
     // T&S Phase 2: what a person sends a curated profile is plaintext — the
     // one place the server may read a message — and is checked for scams.
     if (botChat && typeof sender === 'string' && !/^(zbot|seed)-/.test(sender) && type === 'text' && (m.nonce === 'stub' || m.nonce === 'stub-nonce') && typeof m.ciphertext === 'string') {
-      await recordScamTrap(sender, event.params.matchId, event.params.messageId, m.ciphertext)
+      await recordScamTrap(sender, matchId, messageId, m.ciphertext)
     }
     if (typeof sender !== 'string' || !recipient || botChat) return void (await dropHash())
-    const statsRef = db().doc(`matchStats/${event.params.matchId}_${generationOf(match)}`)
+    const statsRef = db().doc(`matchStats/${matchId}_${generationOf(match)}`)
     const { firstFromSender, otherStarted } = await db().runTransaction(async (tx) => {
       const s = (await tx.get(statsRef)).data() ?? {}
       const first = (s.first ?? {}) as Record<string, number>
@@ -96,8 +110,7 @@ export const trustOnMessage = onDocumentCreated(
     }
     await Promise.all(writes)
     await dropHash()
-  },
-)
+}
 
 // The same opener (by on-device hash) to many people within a day.
 async function recordOpenerHash(sender: string, recipient: string, hash: string): Promise<void> {

@@ -48,7 +48,7 @@ export default function ReviewPrompter() {
         }))
         const present = new Set(matches.map((m) => knownKey(m.matchId, m.startedAt)))
         const presentIds = new Set(matches.map((m) => m.matchId))
-        const eligible = (p: Pending) => p.hadMessages && !isBotUid(p.partnerUid) && !reviewed(p.matchId, p.generation)
+        const eligible = (p: Pending) => p.hadMessages && !p.isBot && !isBotUid(p.partnerUid) && !reviewed(p.matchId, p.generation)
         // Gone: its generation isn't live any more. An unknown-generation
         // entry is gone only when its match id is.
         const gone = (p: Pending) =>
@@ -64,6 +64,7 @@ export default function ReviewPrompter() {
             name: m.name,
             hadMessages: m.lastMessageAt > 0,
             mode: m.mode,
+            isBot: m.isBot,
           }))
           .filter(eligible)
 
@@ -78,6 +79,7 @@ export default function ReviewPrompter() {
             name: p.name,
             hadMessages: p.hadMessages,
             mode: p.mode,
+            isBot: p.isBot,
           }
         }
         for (const m of matches) {
@@ -89,6 +91,7 @@ export default function ReviewPrompter() {
               name: m.name,
               hadMessages: m.lastMessageAt > 0,
               mode: m.mode,
+              isBot: m.isBot,
             })
           }
         }

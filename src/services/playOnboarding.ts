@@ -3,7 +3,7 @@ import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from './firebase'
 import { photoProgress, uploadModeratedPhotos, type SaveProgress } from './moderatedPhotos'
-import { keysReady, resolveKeypair } from './keys'
+import { keysReady, publishMyPlayKey, resolveKeypair } from './keys'
 import { getUserTier, isAlwaysElite, loadAccountView } from './subscription'
 import { changeDisplayName } from './displayNames'
 import { addIdentity } from './privateIdentity'
@@ -248,6 +248,8 @@ export async function savePlayOnboarding(
   await batch.commit()
 
   const { notices } = await uploadModeratedPhotos(uid, 'play', newPhotos, photoProgress(onProgress))
+  // F-062: the Play chat key, now there's a Play profile to put it on.
+  void publishMyPlayKey(uid).catch(() => {})
   const nameError = renaming ? await changeDisplayName('play', playName) : null
   return nameError ? [...notices, nameError] : notices
 }
@@ -372,6 +374,7 @@ export async function savePlayOnlyOnboarding(
 
   // playProfile/data exists now, so onPhotoUpload can publish to it.
   const { notices } = await uploadModeratedPhotos(uid, 'play', newPhotos, photoProgress(onProgress))
+  void publishMyPlayKey(uid).catch(() => {})
   const nameErrors = [
     renamingSpark ? await changeDisplayName('spark', sparkName) : null,
     renamingPlay ? await changeDisplayName('play', playName) : null,

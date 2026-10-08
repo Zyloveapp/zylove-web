@@ -27,6 +27,8 @@ import { takeRateLimit } from '../rateLimits'
 import { accountRef, internalRef } from '../userData'
 import { recordPhotoSignal, webMatches } from '../photoChecks'
 import { checkPhoto } from '../photoHashes'
+import { isPlayPhotoRef } from '../storagePath'
+import { uidOfPlayId } from '../playIds'
 
 // Sightengine score limits per mode (flag when a score is above its limit).
 // nudity-2.1 categories + gore-2.0 / offensive probabilities.
@@ -56,19 +58,27 @@ export const onPhotoUpload = onObjectFinalized(
     const filePath = event.data.name
     if (!filePath) return
 
-    // Profile photos only — spark and play paths
+    // Profile photos only: photos/{uid}/spark/{file}, and (F-062) Play
+    // photos under the Play ID — playPhotos/{playId}/{file}, the account
+    // resolved here. (photos/{uid}/play/… is the shape before F-062; the
+    // rules no longer let the app upload there.)
+    const playUpload: boolean = isPlayPhotoRef(String(filePath))
     const isProfilePhoto =
       filePath.match(/^photos\/[^/]+\/spark\//) ||
-      filePath.match(/^photos\/[^/]+\/play\//)
+      filePath.match(/^photos\/[^/]+\/play\//) ||
+      playUpload
     if (!isProfilePhoto) return
 
-    // Extract uid from path: photos/{uid}/spark/{filename}
-    const uid = filePath.split('/')[1]
-    if (!uid) return
+    const owner = playUpload ? await uidOfPlayId(filePath.split('/')[1]) : filePath.split('/')[1]
+    if (!owner) {
+      await admin.storage().bucket(event.data.bucket).file(filePath).delete({ ignoreNotFound: true })
+      return
+    }
+    const uid: string = owner
 
     // Determine target based on upload path — Spark writes to root user doc,
     // Play writes to the playProfile/data subcollection.
-    const isPlayPhoto = filePath.match(/^photos\/[^/]+\/play\//)
+    const isPlayPhoto = playUpload || filePath.match(/^photos\/[^/]+\/play\//)
 
     // Server-side copies (scripts/migrate-stage1b.mjs moving photos to new
     // names) were moderated as originals; the rules stop clients setting this.

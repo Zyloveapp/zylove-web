@@ -7,25 +7,28 @@ import { LEGACY_RUNTIME } from "./legacyOptions";
 import { requirePlayAccess } from "../playAccess";
 import { isSuspendedUid } from "../userData";
 import { markActed } from "../explore";
+import { requireUidOfPlayId } from "../playIds";
 
 export const recordSwipe = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
 
   const db = admin.firestore();
   const uid = request.auth.uid;
-  const { targetUid, action, mode } = request.data as {
+  const { targetUid: target, action, mode } = request.data as {
     targetUid: string;
     action: "like" | "pass" | "superlike" | "maybe";
     mode: "spark" | "play";
   };
 
-  if (!targetUid || !action || !mode) {
+  if (!target || !action || !mode) {
     throw new HttpsError("invalid-argument", "Missing required fields");
   }
 
   if (mode !== "spark" && mode !== "play") throw new HttpsError("invalid-argument", "Invalid mode");
   // Stage 2: swiping in Play needs Play access.
   if (mode === "play") await requirePlayAccess(uid);
+  // F-062: a Play card is named by its Play ID.
+  const targetUid = mode === "play" ? await requireUidOfPlayId(target, uid) : target;
 
   // "maybe" (T&S Phase 1) is recorded for behaviour signals only — the card
   // stays in the deck.

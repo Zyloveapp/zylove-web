@@ -10,6 +10,8 @@ import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pair
 import { loadMatching, requireActive, withPrivateProfile } from "../userData";
 import { atLeast, tierNow } from "../entitlements";
 import { loadSparkDetails, writeSparkDetails } from "../pairSpark";
+import { requireUidOfPlayId } from "../playIds";
+import { requirePlayAccess } from "../playAccess";
 
 export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
@@ -17,9 +19,13 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
 
   const db       = admin.firestore();
   const tapperId = request.auth.uid;
-  const tappedId: string = request.data.tappedUserId;
+  // F-062: a Play card is known by its Play ID — the answer then carries only
+  // Play scores (no pair id, nothing from Spark).
+  const playTap = request.data?.tappedPlayId !== undefined;
+  if (playTap) await requirePlayAccess(tapperId);
+  const tappedId: string = playTap ? await requireUidOfPlayId(request.data.tappedPlayId, tapperId) : request.data?.tappedUserId;
 
-  if (!tappedId) throw new HttpsError("invalid-argument", "tappedUserId required");
+  if (!tappedId || typeof tappedId !== "string" || tappedId.includes("/")) throw new HttpsError("invalid-argument", "tappedUserId required");
   if (tapperId === tappedId) throw new HttpsError("invalid-argument", "Cannot tap yourself");
 
   const pid     = pairId(tapperId, tappedId);
@@ -50,6 +56,7 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   if (existing.exists && (existing.data() as PairDoc).engineVersion === SCORE_ENGINE_VERSION) {
     const data = existing.data() as PairDoc;
     const playScores = play ? await loadPlayScores(pid, data) : undefined;
+    if (playTap) return playAnswer(playScores, full);
     const details = full ? await loadSparkDetails(pid, data) : null;
     return {
       pairId:     pid,
@@ -119,6 +126,7 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   writeSparkDetails(batch, pid, { breakdown: sparkBreakdown, dealbreakers: triggeredDealbreakers, tier1: sparkTier1 }, false);
   await batch.commit();
   if (playResult) await setPlayScores(pid, playFields(playResult.score, playResult.breakdown, playResult.tier1));
+  if (playTap) return playAnswer(playResult ? { playScore: playResult.score, playBreakdown: playResult.breakdown, tier1Play: playResult.tier1 } : undefined, full);
 
   return {
     pairId: pid,
@@ -133,3 +141,17 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
     locked: !full,
   };
 });
+
+// F-062: what a Play tap returns — the Play score, its breakdown and
+// the Play archetype (tier1Play's), no ids.
+function playAnswer(scores: admin.firestore.DocumentData | undefined, full: boolean) {
+  const tier1 = scores?.tier1Play as { archetype?: unknown } | undefined;
+  return {
+    engineVersion: SCORE_ENGINE_VERSION,
+    ...(scores && { playScore: scores.playScore }),
+    breakdown: { ...(scores && { play: scores.playBreakdown }) },
+    triggeredDealbreakers: [],
+    ...(tier1?.archetype ? { playArchetype: tier1.archetype } : {}),
+    locked: !full,
+  };
+}

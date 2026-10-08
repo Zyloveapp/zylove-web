@@ -118,9 +118,11 @@ function Explore() {
       if (action === 'interested') {
         const result = await likeProfile(uid, mode, current)
         likes.refresh()
-        if (result.matched) {
+        // F-062: a Play match's id comes from the server (never the uid pair).
+        const matchId = result.matchId ?? (mode === 'play' ? null : [uid, current.uid].sort().join('_'))
+        if (result.matched && matchId) {
           setNewMatch({
-            matchId: result.matchId ?? [uid, current.uid].sort().join('_'),
+            matchId,
             theirUid: current.uid,
             theirName: current.displayName ?? 'Someone',
             theirPhoto: photosOf(current, mode)[0] ?? null,

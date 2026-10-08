@@ -3,6 +3,7 @@ import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { displayScore, likeProfile, parseTier1, passProfile, type DiscoverProfile, type DisplayScore } from './discover'
 import type { Mode } from '../store/modeStore'
+import { isPlayId } from './playId'
 
 // users/{uid}/likeQueue/{likerUid} — people who liked this user. Written by
 // the mobile app and botEngine: { likerUid, likedAt (epoch ms), mode,
@@ -22,20 +23,23 @@ export interface SparkEntry {
   isBot: boolean
 }
 
+// F-062: a Play like is keyed by the liker's Play ID (likerPlayId) — likerUid
+// then holds that Play ID; a curated one says so (curated).
 function toSpark(id: string, data: DocumentData): SparkEntry {
-  const likerUid = typeof data.likerUid === 'string' && data.likerUid ? data.likerUid : id
+  const likerUid =
+    typeof data.likerPlayId === 'string' && data.likerPlayId ? data.likerPlayId : typeof data.likerUid === 'string' && data.likerUid ? data.likerUid : id
   const snap: Record<string, unknown> =
     typeof data.likerProfile === 'object' && data.likerProfile !== null ? data.likerProfile : {}
   const photoURLs = Array.isArray(snap.photoURLs)
     ? snap.photoURLs.filter((u): u is string => typeof u === 'string' && u !== '')
     : []
   if (photoURLs.length === 0 && typeof snap.photoURL === 'string' && snap.photoURL) photoURLs.push(snap.photoURL)
-  const isBot = likerUid.startsWith('zbot-')
+  const isBot = likerUid.startsWith('zbot-') || data.curated === true
   return {
     likerUid,
     likedAt: typeof data.likedAt === 'number' ? data.likedAt : 0,
     mode: data.mode === 'play' ? 'play' : 'spark',
-    profile: { ...(snap as Partial<DiscoverProfile>), uid: likerUid, photoURLs },
+    profile: { ...(snap as Partial<DiscoverProfile>), uid: likerUid, photoURLs, ...(isPlayId(likerUid) ? { curated: isBot } : {}) },
     compatibilityScore:
       !isBot && typeof data.compatibilityScore === 'number' && data.compatibilityScore > 0 ? data.compatibilityScore : null,
     expiresAt: typeof data.expiresAt === 'number' ? data.expiresAt : null,
@@ -126,7 +130,10 @@ export async function dismissSpark(uid: string, likerUid: string): Promise<void>
 }
 
 // Full, current profile for the detail view; falls back to the snapshot.
+// F-062: a Play liker's is their public Play profile (by Play ID), never the
+// account doc.
 export async function loadSparkProfile(spark: SparkEntry): Promise<DiscoverProfile> {
+  if (isPlayId(spark.likerUid)) return spark.profile
   const snap = await getDoc(doc(db, 'users', spark.likerUid))
   if (!snap.exists()) return spark.profile
   return { ...spark.profile, ...(snap.data() as DiscoverProfile), uid: spark.likerUid }
@@ -148,6 +155,7 @@ export async function likeBackSpark(uid: string, spark: SparkEntry, profile: Dis
 
 // ─── Sent ────────────────────────────────────────────────────────────────────
 
+// F-062: a Play entry's uid holds the Play ID.
 export interface SentSpark {
   uid: string
   name: string
@@ -158,7 +166,8 @@ export interface SentSpark {
 }
 
 interface SentSparkRaw {
-  uid: string
+  uid?: string
+  playId?: string
   displayName: string
   age: number | null
   photoURL: string | null
@@ -175,7 +184,7 @@ interface SentSparkRaw {
 export async function fetchSentSparks(mode: Mode): Promise<SentSpark[]> {
   const { data } = await httpsCallable<{ mode: Mode }, { sent: SentSparkRaw[] }>(functions, 'getSentSparks')({ mode })
   return data.sent.map((s) => ({
-    uid: s.uid,
+    uid: s.playId ?? s.uid ?? '',
     name: s.displayName,
     age: s.age,
     photoURL: s.photoURL,
@@ -212,8 +221,9 @@ export async function sparkFromProfile(
   const result = await likeProfile(uid, mode, profile)
   return {
     matched: result.matched,
-    // Same fallback as Explore: the match id is the sorted uid pair.
-    matchId: result.matched ? (result.matchId ?? [uid, profile.uid].sort().join('_')) : null,
+    // Same fallback as Explore: the match id is the sorted uid pair (Spark;
+    // a Play match's id always comes from the server).
+    matchId: result.matched ? (result.matchId ?? (mode === 'play' ? null : [uid, profile.uid].sort().join('_'))) : null,
   }
 }
 
@@ -242,7 +252,8 @@ export interface CuriousResult {
 export const CURIOUS_MAX = 20
 
 interface CuriousRaw {
-  uid: string
+  uid?: string
+  playId?: string
   displayName: string
   age: number | null
   photoURL: string | null
@@ -266,9 +277,9 @@ export async function fetchCurious(mode: Mode): Promise<CuriousResult> {
     locked: data.locked,
     count: data.count,
     visitors: data.visitors.map((v) => ({
-      uid: v.uid,
+      uid: v.playId ?? v.uid ?? '',
       profile: {
-        uid: v.uid,
+        uid: v.playId ?? v.uid ?? '',
         displayName: v.displayName,
         age: v.age ?? undefined,
         photoURLs: v.photoURL ? [v.photoURL] : [],

@@ -1,15 +1,17 @@
-import { addDoc, collection, doc, getDoc, onSnapshot, serverTimestamp, updateDoc, type Unsubscribe } from 'firebase/firestore'
+import { addDoc, collection, doc, onSnapshot, serverTimestamp, updateDoc, type Unsubscribe } from 'firebase/firestore'
 import { getBytes, ref, uploadBytes } from 'firebase/storage'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions, storage } from './firebase'
 import { ENCRYPTION_KEYS_UNAVAILABLE, decryptPhoto, encryptPhoto, isRealPublicKey } from './encryption'
-import { getPrivateKey, getSendingKey, keysReady, publicKeyFor } from './keys'
+import { chatPrivateKey, chatSendingKey, fetchPartnerKey, publicKeyFor } from './keys'
+import { matchPath, selfIdIn } from './playId'
 import { frank, photoPlaintext } from './franking'
 import type { ConsentCode, PhotoPayload } from './chat'
 
 // ─── Consent ─────────────────────────────────────────────────────────────────
 // Same shape as mobile: matches/{matchId}.photoConsent, plus a system message
-// in the chat for every change so both people see it happen.
+// in the chat for every change so both people see it happen. F-062: a Play
+// match is playMatches/{id}; `selfId` is you as the match names you.
 
 export type PhotoConsentStatus = 'pending' | 'accepted' | 'declined' | 'paused'
 
@@ -46,7 +48,7 @@ function listenPhotoConsent(
   onError: () => void,
 ): Unsubscribe {
   return onSnapshot(
-    doc(db, 'matches', matchId),
+    doc(db, matchPath(matchId)),
     (snap) => {
       const c: unknown = snap.data()?.photoConsent
       if (typeof c !== 'object' || c === null) return onChange(null)
@@ -65,9 +67,9 @@ function listenPhotoConsent(
   )
 }
 
-async function consentMessage(matchId: string, uid: string, code: ConsentCode): Promise<void> {
-  await addDoc(collection(db, `matches/${matchId}/messages`), {
-    senderId: uid,
+async function consentMessage(matchId: string, selfId: string, code: ConsentCode): Promise<void> {
+  await addDoc(collection(db, `${matchPath(matchId)}/messages`), {
+    senderId: selfId,
     messageType: 'consent_request',
     ciphertext: code,
     nonce: 'system',
@@ -76,27 +78,27 @@ async function consentMessage(matchId: string, uid: string, code: ConsentCode): 
   })
 }
 
-export async function requestPhotoConsent(matchId: string, uid: string): Promise<void> {
-  await updateDoc(doc(db, 'matches', matchId), {
-    photoConsent: { requestedBy: uid, requestedAt: Date.now(), status: 'pending' },
+export async function requestPhotoConsent(matchId: string, selfId: string): Promise<void> {
+  await updateDoc(doc(db, matchPath(matchId)), {
+    photoConsent: { requestedBy: selfId, requestedAt: Date.now(), status: 'pending' },
   })
-  await consentMessage(matchId, uid, 'photo_consent_request')
+  await consentMessage(matchId, selfId, 'photo_consent_request')
 }
 
 // Accepting goes through the acceptPhotoConsent callable — Firestore rules
 // refuse a client setting 'accepted'. Declining is a plain write.
-export async function respondToPhotoConsent(matchId: string, uid: string, accept: boolean): Promise<void> {
+export async function respondToPhotoConsent(matchId: string, selfId: string, accept: boolean): Promise<void> {
   if (accept) {
     await httpsCallable<{ matchId: string }, { success: true }>(functions, 'acceptPhotoConsent')({ matchId })
     return
   }
-  await updateDoc(doc(db, 'matches', matchId), { 'photoConsent.status': 'declined' })
-  await consentMessage(matchId, uid, 'photo_consent_declined')
+  await updateDoc(doc(db, matchPath(matchId)), { 'photoConsent.status': 'declined' })
+  await consentMessage(matchId, selfId, 'photo_consent_declined')
 }
 
-export async function pausePhotoSharing(matchId: string, uid: string): Promise<void> {
-  await updateDoc(doc(db, 'matches', matchId), { 'photoConsent.status': 'paused' })
-  await consentMessage(matchId, uid, 'photo_consent_paused')
+export async function pausePhotoSharing(matchId: string, selfId: string): Promise<void> {
+  await updateDoc(doc(db, matchPath(matchId)), { 'photoConsent.status': 'paused' })
+  await consentMessage(matchId, selfId, 'photo_consent_paused')
 }
 
 const bannerKey = (matchId: string) => `zylove_photo_consent_seen_${matchId}`
@@ -159,17 +161,21 @@ export async function sendEncryptedPhoto(
   // T&S Phase 4: this message's number among the sender's in the chat.
   seq = 1,
 ): Promise<void> {
-  const privateKey = await getSendingKey(uid)
+  // F-062: in a Play match, the Play keys and your Play ID.
+  const [privateKey, sender, recipientKey] = await Promise.all([
+    chatSendingKey(uid, matchId),
+    selfIdIn(uid, matchId),
+    fetchPartnerKey(recipientUid).catch(() => ''),
+  ])
   const senderPublicKey = privateKey ? publicKeyFor(privateKey) : null
-  const recipientKey: unknown = (await getDoc(doc(db, 'users', recipientUid))).data()?.publicKey
-  if (!privateKey || !senderPublicKey || typeof recipientKey !== 'string' || !isRealPublicKey(recipientKey)) {
+  if (!privateKey || !senderPublicKey || !sender || !isRealPublicKey(recipientKey)) {
     throw new Error(ENCRYPTION_KEYS_UNAVAILABLE)
   }
 
   const sealed = encryptPhoto(photoBytes, privateKey, senderPublicKey, recipientKey)
   // Franking binds the decrypted bytes (their SHA-256) to this message.
-  const franked = await frank({ plaintext: await photoPlaintext(photoBytes), matchId, sender: uid, seq, partnerPublicKey: recipientKey, myPrivateKey: privateKey })
-  const storagePath = `chat-photos/${matchId}/${uid}_${Date.now()}.bin`
+  const franked = await frank({ plaintext: await photoPlaintext(photoBytes), matchId, sender, seq, partnerPublicKey: recipientKey, myPrivateKey: privateKey })
+  const storagePath = `chat-photos/${matchId}/${sender}_${Date.now()}.bin`
   // The chat-photos Storage rule only accepts image/* content types, so the
   // ciphertext goes up labelled as an encrypted image.
   await uploadBytes(ref(storage, storagePath), sealed.encryptedPhoto, {
@@ -177,8 +183,8 @@ export async function sendEncryptedPhoto(
     customMetadata: { encryption: 'nacl-secretbox' },
   })
 
-  await addDoc(collection(db, `matches/${matchId}/messages`), {
-    senderId: uid,
+  await addDoc(collection(db, `${matchPath(matchId)}/messages`), {
+    senderId: sender,
     messageType: 'photo',
     encrypted: true,
     storageRef: storagePath,
@@ -195,10 +201,10 @@ export async function sendEncryptedPhoto(
     status: 'sent',
     ...(franked ?? {}),
   })
-  await updateDoc(doc(db, 'matches', matchId), {
+  await updateDoc(doc(db, matchPath(matchId)), {
     lastMessagePreview: '📷 Photo',
     lastMessageAt: serverTimestamp(),
-    lastSenderId: uid,
+    lastSenderId: sender,
     hasUnread: true,
   })
 }
@@ -227,8 +233,8 @@ export async function openPhotoBytes(
   partnerPublicKey: string,
 ): Promise<Uint8Array | null> {
   if (!photo.storageRef) return null
-  await keysReady(uid)
-  const privateKey = await getPrivateKey(uid)
+  // chat-photos/{matchId}/…: a Play match's photos open with the Play key.
+  const privateKey = await chatPrivateKey(uid, photo.storageRef.split('/')[1] ?? '')
   if (!privateKey) return null
   const senderPublicKey = isMine ? publicKeyFor(privateKey) : partnerPublicKey
   if (!senderPublicKey) return null

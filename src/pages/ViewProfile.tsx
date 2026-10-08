@@ -3,7 +3,8 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useModeStore, useBackLinkClass } from '../store/modeStore'
 import { loadOwnProfile, type OwnProfile } from '../services/profile'
-import { loadPlayProfile, type PlayProfileData } from '../services/playProfile'
+import { loadPlayExtras, loadPlayProfile, type PlayProfileData } from '../services/playProfile'
+import { isPlayId } from '../services/playId'
 import { subscribeAllMatches, type MatchEntry } from '../services/matches'
 import { actionErrorMessage } from '../services/discover'
 import { passFromProfile, sparkFromProfile } from '../services/sparks'
@@ -41,12 +42,28 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
     if (!targetUid || targetUid === uid) return
     let cancelled = false
     // Play data only while in Play (Stage B: not fetched into a Spark
-    // session, where the Play lock doesn't cover it).
-    Promise.all([loadOwnProfile(targetUid).catch(() => null), mode === 'play' ? loadPlayProfile(targetUid) : Promise.resolve(null)]).then(
-      ([data, play]) => {
-        if (!cancelled) setLoaded({ uid: targetUid, data, play })
-      },
-    )
+    // session, where the Play lock doesn't cover it). F-062: in Play a
+    // profile is a Play ID and shows its public Play profile (and age) only —
+    // never an account doc; a uid shows nothing in Play, a Play ID nothing in
+    // Spark.
+    const load: Promise<{ data: OwnProfile | null; play: PlayProfileData | null }> =
+      mode === 'play'
+        ? isPlayId(targetUid)
+          ? Promise.all([loadPlayProfile(targetUid), loadPlayExtras(targetUid)]).then(([play, x]) => ({
+              play,
+              data: play
+                ? { profile: { uid: targetUid, age: x.age ?? undefined, curated: x.curated }, bio: '', prompts: [], dealbreakers: [], seekingTraits: [], dynamicPrompt: null }
+                : null,
+            }))
+          : Promise.resolve({ data: null, play: null })
+        : isPlayId(targetUid)
+          ? Promise.resolve({ data: null, play: null })
+          : loadOwnProfile(targetUid)
+              .catch(() => null)
+              .then((data) => ({ data, play: null }))
+    void load.then(({ data, play }) => {
+      if (!cancelled) setLoaded({ uid: targetUid, data, play })
+    })
     return () => {
       cancelled = true
     }

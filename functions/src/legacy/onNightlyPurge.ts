@@ -92,6 +92,11 @@ const auth = admin.auth()
         for (const m of matchesSnap.docs) {
           await m.ref.delete()
         }
+        // F-062: Play matches (their people are in playMatchMembers).
+        const playMembers = await db.collection('playMatchMembers').where('users', 'array-contains', uid).get()
+        for (const m of playMembers.docs) {
+          await db.doc(`playMatches/${m.id}`).delete()
+        }
 
         // swipes/* where the uid is either swiper or swiped side
         const [swipesAsSwiper, swipesAsSwiped] = await Promise.all([

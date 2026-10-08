@@ -70,11 +70,16 @@ export function parsePlayProfile(d: DocumentData): PlayProfileData {
   }
 }
 
+// F-062: someone else's Play profile is playProfiles/{playId} (by Play ID,
+// no uid); your own is users/{uid}/playProfile/data (owner-only). An id that
+// isn't a Play ID reads your own.
+const playDoc = (id: string) => (/^p_[A-Za-z0-9]{20}$/.test(id) ? `playProfiles/${id}` : `users/${id}/playProfile/data`)
+
 // Someone's Play profile and whether the rules refused it (Stage 2: either
 // side without Play access) — denied isn't an error, just "unavailable".
-export async function loadPlayProfileStatus(uid: string): Promise<{ play: PlayProfileData | null; denied: boolean }> {
+export async function loadPlayProfileStatus(id: string): Promise<{ play: PlayProfileData | null; denied: boolean }> {
   try {
-    const snap = await getDoc(doc(db, `users/${uid}/playProfile/data`))
+    const snap = await getDoc(doc(db, playDoc(id)))
     const d = snap.data()
     return { play: d ? parsePlayProfile(d) : null, denied: false }
   } catch (err) {
@@ -83,8 +88,19 @@ export async function loadPlayProfileStatus(uid: string): Promise<{ play: PlayPr
 }
 
 // Someone's Play profile, or null if they don't have one (or it can't be read).
-export async function loadPlayProfile(uid: string): Promise<PlayProfileData | null> {
-  const snap = await getDoc(doc(db, `users/${uid}/playProfile/data`)).catch(() => null)
+export async function loadPlayProfile(id: string): Promise<PlayProfileData | null> {
+  const snap = await getDoc(doc(db, playDoc(id))).catch(() => null)
   const d = snap?.data()
   return d ? parsePlayProfile(d) : null
+}
+
+// The public Play profile's extras: age and whether it's curated (F-062:
+// Play shows the Play profile plus the age — nothing from Spark).
+export async function loadPlayExtras(playId: string): Promise<{ age: number | null; curated: boolean; publicPlayKey: string | null }> {
+  const d = (await getDoc(doc(db, `playProfiles/${playId}`)).catch(() => null))?.data()
+  return {
+    age: typeof d?.age === 'number' && d.age > 0 ? d.age : null,
+    curated: d?.curated === true,
+    publicPlayKey: typeof d?.publicPlayKey === 'string' ? d.publicPlayKey : null,
+  }
 }

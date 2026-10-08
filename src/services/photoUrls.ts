@@ -15,8 +15,9 @@ const BATCH = 100
 // Refresh this long before the server's expiry.
 const MARGIN_MS = 5 * 60 * 1000
 
+// F-062: Play photos are playPhotos/{playId}/{file} (no uid in the path).
 export function isPhotoRef(v: unknown): v is string {
-  return typeof v === 'string' && /^photos\/[^/]+\/(spark|play)\/[^/]+$/.test(v)
+  return typeof v === 'string' && (/^photos\/[^/]+\/(spark|play)\/[^/]+$/.test(v) || /^playPhotos\/p_[A-Za-z0-9]{20}\/[^/]+$/.test(v))
 }
 
 const cache = new Map<string, { url: string | null; until: number }>()

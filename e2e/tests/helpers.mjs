@@ -122,6 +122,9 @@ export async function seedUser(name, overrides = {}, { play = null, legacy = LEG
   // Stage 3: preferences and account state off the public doc; then the Explore index entry.
   if (!legacy && process.env.SEED_STAGE3_LEGACY !== "1") await migrateUserStage3({ db, FieldValue }, uid)
   await fnLib('explore').refreshEntry(uid)
+  // F-062: the public Play profile (playProfiles/{playId}) at once, rather
+  // than waiting on its trigger.
+  if (play) await fnLib('playProfiles').refreshPlayProfile(uid)
   // Onboarded users accepted the Terms then in force; 'current' keeps the
   // legal-update notice away, null seeds no acceptance, or pass old versions.
   if (legal) {
@@ -258,10 +261,27 @@ export async function callAs(uid, fn, data = {}) {
   return body.result
 }
 
-// `from` likes `to` exactly as the app does: onTap creates the pair, onLike records the like.
+// `from` likes `to` exactly as the app does: onTap creates the pair, onLike
+// records the like. F-062: in Play the app knows `to` by their Play ID.
 export async function likeAs(from, to, mode = 'spark') {
+  if (mode === 'play') {
+    const toPlay = await playIdOf(to)
+    await callAs(from, 'onTap', { tappedPlayId: toPlay })
+    return callAs(from, 'onLike', { likedUserId: toPlay, mode })
+  }
   await callAs(from, 'onTap', { tappedUserId: to })
   return callAs(from, 'onLike', { likedUserId: to, mode })
+}
+
+// F-062: someone's Play ID (created if they have none yet) — read from the
+// server-only mapping, as only tests may.
+export async function playIdOf(uid) {
+  return fnLib('playIds').ensurePlayId(uid)
+}
+
+// The Play match between two accounts (playMatches/{pm_…}), or null.
+export async function playMatchOf(a, b) {
+  return fnLib('playMatch').livePlayMatchOf(a, b)
 }
 
 // Stage C: a plan, set the way the server decides it (userInternal +

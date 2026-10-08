@@ -19,12 +19,19 @@ const db = () => getFirestore()
 
 export const frankOnMessage = onDocumentCreated(
   { document: 'matches/{matchId}/messages/{messageId}', secrets: [FRANKING_KEY], memory: '256MiB', timeoutSeconds: 30 },
-  async (event) => {
-    const m = event.data?.data()
+  async (event) => frank(event.params.matchId, event.params.messageId, event.data?.data(), event.time),
+)
+// F-062: Play messages (playMatches/{pm_…}). The tag binds the sender as the
+// message names them — their Play ID; evidence.ts maps it back server-side.
+export const frankOnPlayMessage = onDocumentCreated(
+  { document: 'playMatches/{matchId}/messages/{messageId}', secrets: [FRANKING_KEY], memory: '256MiB', timeoutSeconds: 30 },
+  async (event) => frank(event.params.matchId, event.params.messageId, event.data?.data(), event.time),
+)
+
+async function frank(matchId: string, messageId: string, m: FirebaseFirestore.DocumentData | undefined, time: string): Promise<void> {
     if (!m || typeof m.fc !== 'string' || !/^[a-f0-9]{64}$/.test(m.fc) || typeof m.senderId !== 'string') return
     if (typeof m.cid !== 'string' || typeof m.seq !== 'number') return
-    const { matchId, messageId } = event.params
-    const at = m.sentAt instanceof Timestamp ? m.sentAt.toMillis() : Date.parse(event.time)
+    const at = m.sentAt instanceof Timestamp ? m.sentAt.toMillis() : Date.parse(time)
     const [{ v, key }] = parseKeys(FRANKING_KEY.value())
     await db()
       .doc(`franking/${matchId}_${messageId}`)
@@ -33,8 +40,7 @@ export const frankOnMessage = onDocumentCreated(
         // At-least-once delivery: a retry finds the tag already there.
         if ((err as { code?: number }).code !== 6) throw err
       })
-  },
-)
+}
 
 // The match's messages were purged (before `cutoff`, or all): their tags go
 // FRANKING_AFTER_PURGE_MS later.

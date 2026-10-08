@@ -4,6 +4,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { logger } from 'firebase-functions'
 import { getStorage } from 'firebase-admin/storage'
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
+import { messagesPath, requireParticipant } from './playMatch'
 
 // Encrypted chat photos sent from the web (messageType 'photo' with
 // encryptedKeyForRecipient). The mobile codebase already deploys
@@ -21,11 +22,6 @@ import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 const EXPIRIES = 'photoExpiries'
 const SWEEP_BATCH = 100
 
-function participants(match: FirebaseFirestore.DocumentData): string[] {
-  const users: unknown = match.users ?? match.participants
-  return Array.isArray(users) ? users.filter((u): u is string => typeof u === 'string') : []
-}
-
 // Recipient's first tap on a photo: stamps firstViewedAt and, for timed
 // photos, photoExpiresAt = now + timerSeconds.
 export const markChatPhotoViewed = onCall(
@@ -41,20 +37,17 @@ export const markChatPhotoViewed = onCall(
     }
 
     const db = getFirestore()
-    const matchRef = db.collection('matches').doc(matchId)
-    const msgRef = matchRef.collection('messages').doc(messageId)
+    // F-062: Play matches too (senders are Play IDs there).
+    const ctx = await requireParticipant(matchId, uid)
+    const msgRef = db.doc(`${messagesPath(matchId)}/${messageId}`)
 
     await db.runTransaction(async (tx) => {
-      const [matchSnap, msgSnap] = await Promise.all([tx.get(matchRef), tx.get(msgRef)])
-      if (!matchSnap.exists || !participants(matchSnap.data()!).includes(uid)) {
-        throw new HttpsError('permission-denied', 'Not a participant in this match')
-      }
-      const msg = msgSnap.data()
+      const msg = (await tx.get(msgRef)).data()
       if (!msg || msg.messageType !== 'photo') throw new HttpsError('not-found', 'Photo not found')
       // Stage A: only this match's own chat photos start a timer (the sweep
       // deletes what the message points at).
       if (!isChatPhotoOf(matchId, msg.storageRef)) throw new HttpsError('not-found', 'Photo not found')
-      if (msg.senderId === uid) throw new HttpsError('failed-precondition', 'Senders cannot mark their own photo viewed')
+      if (msg.senderId === ctx.idOf(uid)) throw new HttpsError('failed-precondition', 'Senders cannot mark their own photo viewed')
       if (msg.firstViewedAt != null || msg.destructedAt != null) return // already started (or gone)
 
       const now = Timestamp.now()
@@ -88,7 +81,7 @@ export const sweepChatPhotos = onSchedule(
     let destroyed = 0
     for (const d of due.docs) {
       const { matchId, messageId } = d.data() as { matchId: string; messageId: string }
-      const msgRef = db.doc(`matches/${matchId}/messages/${messageId}`)
+      const msgRef = db.doc(`${messagesPath(matchId)}/${messageId}`)
       const msg = (await msgRef.get()).data()
       if (msg && msg.destructedAt == null) {
         // Stage A: only ever a file in this match's chat-photos folder — the

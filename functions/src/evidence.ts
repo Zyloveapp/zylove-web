@@ -10,7 +10,9 @@ import { requireAdminAudited } from './audit'
 import { FRANKING_KEY } from './franking'
 import { parseKeys, photoPlaintext, verifyItem, type Verdict } from './frankingCore'
 import { OUTCOME_RETENTION_MS, deletable, expiryFor, open, seal, type Sealed } from './lockerCore'
-import { participants } from './matchGeneration'
+import { isPlayId, isPlayMatchId, uidOfPlayId } from './playIds'
+import { loadMatch, messagesPath } from './playMatch'
+import { loadPlayName } from './playName'
 import { REPORT_ONLY_CATEGORY_DEFS, REVIEW_CATEGORY_DEFS } from './shared/reviewCategories'
 
 // T&S Phase 4 — evidence capture and the locker.
@@ -77,7 +79,10 @@ export const submitEvidence = onCall(
     const reporter = request.auth.uid
     const data = (request.data ?? {}) as Record<string, unknown>
     const matchId = str(data.matchId)
-    const reportedUid = str(data.reportedUid)
+    // F-062: in Play the reported person is named by their Play ID.
+    const reportedArg = str(data.reportedUid)
+    const reportedUid = isPlayId(reportedArg) ? ((await uidOfPlayId(reportedArg)) ?? '') : reportedArg
+    const play = isPlayMatchId(matchId)
     const generation = typeof data.generation === 'number' && data.generation > 0 ? Math.floor(data.generation) : 0
     const raw = Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : []
     if (!matchId || !reportedUid || matchId.includes('/') || reportedUid.includes('/')) throw new HttpsError('invalid-argument', 'matchId and reportedUid required')
@@ -86,24 +91,36 @@ export const submitEvidence = onCall(
     // Evidence belongs to a report this person filed.
     const report = (await db().doc(`reports/${reporter}_${reportedUid}_${generation}`).get()).data()
     if (!report || report.reporterUid !== reporter) throw new HttpsError('failed-precondition', 'Send the report first.')
-    const match = (await db().doc(`matches/${matchId}`).get()).data()
-    const people = match ? participants(match) : [reporter, reportedUid]
+    const ctx = await loadMatch(matchId)
+    const people = ctx ? ctx.users : [reporter, reportedUid]
     if (!people.includes(reporter) || !people.includes(reportedUid)) throw new HttpsError('permission-denied', 'Not your conversation.')
+    // A sender as messages name them (a Play ID in Play) → the account.
+    const senderUid = async (id: string | null): Promise<string | null> =>
+      id === null ? null : play ? ((ctx?.uidOf(id) ?? (await uidOfPlayId(id))) || '?') : id
 
     const ids = raw.map((r) => str(r.msgId, 128)).filter((id) => id && !id.includes('/'))
     if (ids.length !== raw.length || new Set(ids).size !== ids.length) throw new HttpsError('invalid-argument', 'Bad message list.')
     const [msgs, tags] = await Promise.all([
-      db().getAll(...ids.map((id) => db().doc(`matches/${matchId}/messages/${id}`))),
+      db().getAll(...ids.map((id) => db().doc(`${messagesPath(matchId)}/${id}`))),
       db().getAll(...ids.map((id) => db().doc(`franking/${matchId}_${id}`))),
     ])
     const keys = parseKeys(FRANKING_KEY.value())
     let total = 0
+    const senders = await Promise.all(
+      raw.map((_, i) => {
+        const record = msgs[i].data() ?? tags[i].data()
+        const id: unknown = record ? (msgs[i].data() ? record.senderId : record.sender) : null
+        return senderUid(typeof id === 'string' ? id : null)
+      }),
+    )
     const items: EvidenceItem[] = raw.map((r, i) => {
       const msg = msgs[i].data()
       const tag = tags[i].data()
       // The message on record, or (after the chat was purged) its franking tag.
       const record: DocumentData | null = msg ?? (tag ? { fc: tag.fc, cid: tag.cid, seq: tag.seq, senderId: tag.sender } : null)
-      const sender = typeof record?.senderId === 'string' ? record.senderId : null
+      // As committed (a Play ID in Play) for the check; the account for who's who.
+      const senderId = typeof record?.senderId === 'string' ? record.senderId : null
+      const sender = senders[i]
       if (sender !== null && sender !== reporter && sender !== reportedUid) throw new HttpsError('invalid-argument', 'That message isn’t from this conversation.')
       const photoB64 = typeof r.photo === 'string' ? r.photo : null
       const photo = photoB64 ? Buffer.from(photoB64, 'base64') : null
@@ -111,10 +128,10 @@ export const submitEvidence = onCall(
       const text = photo ? null : str(r.plaintext, MAX_TEXT)
       total += (text?.length ?? 0) + (photo?.length ?? 0)
       const verdict: Verdict =
-        record && sender
+        record && senderId
           ? verifyItem({
               revealed: { plaintext: photo ? photoPlaintext(photo) : (text ?? ''), kf: typeof r.kf === 'string' ? r.kf : null },
-              message: { fc: record.fc, cid: record.cid, seq: record.seq, senderId: sender },
+              message: { fc: record.fc, cid: record.cid, seq: record.seq, senderId },
               matchId,
               msgId: ids[i],
               tag: tag ? { r: String(tag.r), v: String(tag.v), at: Number(tag.at), sender: String(tag.sender) } : null,
@@ -164,6 +181,7 @@ export const submitEvidence = onCall(
         ncmec: false,
         appealPending: false,
         legalHold: null,
+        ...(play ? { mode: 'play' } : {}),
         expiresAt: Timestamp.fromMillis(expiryFor({ createdAt, decidedAt: null, ncmec: false, appealPending: false }) as number),
       })
     logger.info('submitEvidence', { ...summary })
@@ -205,8 +223,11 @@ export const getEvidencePdf = onCall(
     const locker = id ? (await db().doc(`evidenceLocker/${id}`).get()).data() : undefined
     if (!locker || locker.reporterUid !== request.auth.uid) throw new HttpsError('not-found', 'No such report.')
     const items = await readItems(locker.file, locker.v)
-    const reported = (await db().doc(`users/${locker.reportedUid}`).get()).data()
-    const lines = pdfLines({ reportedName: str(reported?.displayName, 60) || 'The other person', categories: locker.categories ?? [], createdAt: locker.createdAt, reference: id, items })
+    // F-062: a Play report names them by their Play name — never the Spark one.
+    const reportedName = locker.mode === 'play' || isPlayMatchId(locker.matchId)
+      ? await loadPlayName(locker.reportedUid)
+      : str((await db().doc(`users/${locker.reportedUid}`).get()).data()?.displayName, 60)
+    const lines = pdfLines({ reportedName: str(reportedName, 60) || 'The other person', categories: locker.categories ?? [], createdAt: locker.createdAt, reference: id, items })
     const doc = new PDFDocument({ size: 'LETTER', margins: { top: 56, bottom: 56, left: 56, right: 56 } })
     doc.registerFont('body', FONT)
     doc.registerFont('bold', FONT_BOLD)

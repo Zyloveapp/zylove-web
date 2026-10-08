@@ -13,7 +13,8 @@ import {
 import { db } from './firebase'
 import { encryptMessage, isRealPublicKey } from './encryption'
 import { isBotUid } from './zyloveScore'
-import { getSendingKey } from './keys'
+import { chatSendingKey } from './keys'
+import { matchPath, selfIdIn } from './playId'
 import { frank } from './franking'
 
 // Message format shared with the mobile app. `ciphertext` holds a base64
@@ -95,15 +96,16 @@ function toMillis(v: unknown): number | null {
 
 // Messages since `since` (ms; see MatchEntry.startedAt) — earlier ones are
 // left over from a previous match between the same two people. Unsent local
-// writes (sentAt still null) are kept.
+// writes (sentAt still null) are kept. `selfId`: you as this match names you
+// (your Play ID in a Play match — F-062).
 export function subscribeMessages(
   matchId: string,
-  uid: string,
+  selfId: string,
   since: number,
   onChange: (messages: ChatMessage[]) => void,
   onError: (err: Error) => void,
 ): Unsubscribe {
-  const q = query(collection(db, `matches/${matchId}/messages`), orderBy('sentAt', 'asc'))
+  const q = query(collection(db, `${matchPath(matchId)}/messages`), orderBy('sentAt', 'asc'))
   return onSnapshot(
     q,
     { includeMetadataChanges: false },
@@ -112,7 +114,7 @@ export function subscribeMessages(
       for (const d of snap.docs) {
         const data = d.data()
         const deletedFor: unknown = data.deletedFor
-        if (Array.isArray(deletedFor) && deletedFor.includes(uid)) continue
+        if (Array.isArray(deletedFor) && deletedFor.includes(selfId)) continue
         const sentAt = toMillis(data.sentAt)
         if (sentAt !== null && sentAt < since) continue
         const ciphertext = typeof data.ciphertext === 'string' ? data.ciphertext : ''
@@ -164,10 +166,14 @@ export async function sendMessage(
   openerHashHex: string | null = null,
   // T&S Phase 4: this message's number among the sender's in the chat.
   seq = 1,
+  // A curated profile (F-062: in Play its id doesn't say so — the match does).
+  recipientIsBot = isBotUid(recipientUid),
 ): Promise<{ delivered: Promise<void> }> {
   const recipientHasKey = isRealPublicKey(recipientPublicKey)
-  if (!recipientHasKey && !isBotUid(recipientUid)) throw new Error(RECIPIENT_NO_KEY)
-  const privateKey = await getSendingKey(uid)
+  if (!recipientHasKey && !recipientIsBot) throw new Error(RECIPIENT_NO_KEY)
+  // F-062: in a Play match you're your Play ID, with the Play key.
+  const [privateKey, sender] = await Promise.all([chatSendingKey(uid, matchId), selfIdIn(uid, matchId)])
+  if (!sender) throw new Error(ENCRYPTION_KEY_MISSING)
   if (recipientHasKey && !privateKey) throw new Error(ENCRYPTION_KEY_MISSING)
   const { ciphertext, nonce } =
     recipientHasKey && privateKey ? encryptMessage(text, recipientPublicKey, privateKey) : { ciphertext: text, nonce: 'stub' }
@@ -175,15 +181,15 @@ export async function sendMessage(
   if (recipientHasKey && nonce === 'stub') throw new Error(ENCRYPTION_KEY_MISSING)
   // Franked whenever it's encrypted (people, not curated profiles).
   const franked =
-    recipientHasKey && privateKey ? await frank({ plaintext: text, matchId, sender: uid, seq, partnerPublicKey: recipientPublicKey, myPrivateKey: privateKey }) : null
-  const delivered = setDoc(doc(collection(db, `matches/${matchId}/messages`)), {
+    recipientHasKey && privateKey ? await frank({ plaintext: text, matchId, sender, seq, partnerPublicKey: recipientPublicKey, myPrivateKey: privateKey }) : null
+  const delivered = setDoc(doc(collection(db, `${matchPath(matchId)}/messages`)), {
     ciphertext,
     nonce,
-    senderId: uid,
+    senderId: sender,
     sentAt: serverTimestamp(),
     status: 'sent',
     messageType: 'text',
-    ...(openerHashHex && !isBotUid(recipientUid) ? { fh: openerHashHex } : {}),
+    ...(openerHashHex && !recipientIsBot ? { fh: openerHashHex } : {}),
     ...(franked ?? {}),
   })
   // Same fields the mobile chat updates; lastSenderId drives unread state.
@@ -192,10 +198,10 @@ export async function sendMessage(
   // counts as sent (a retry would duplicate it), so it's logged, not thrown.
   void delivered.then(
     () =>
-      updateDoc(doc(db, 'matches', matchId), {
+      updateDoc(doc(db, matchPath(matchId)), {
         lastMessagePreview: 'New message',
         lastMessageAt: serverTimestamp(),
-        lastSenderId: uid,
+        lastSenderId: sender,
         hasUnread: true,
       }).catch((err: unknown) => console.warn('Message sent, but updating the match failed', err)),
     () => {}, // A rejected message reaches the caller through `delivered`.
@@ -209,7 +215,7 @@ export async function markMessagesRead(matchId: string, messageIds: string[]): P
   if (messageIds.length === 0) return
   const batch = writeBatch(db)
   for (const id of messageIds.slice(0, 450)) {
-    batch.update(doc(db, `matches/${matchId}/messages/${id}`), { status: 'read' })
+    batch.update(doc(db, `${matchPath(matchId)}/messages/${id}`), { status: 'read' })
   }
   await batch.commit()
 }

@@ -1,8 +1,8 @@
 import { collection, getDocs, limit, orderBy, query, Timestamp } from 'firebase/firestore'
 import { db } from './firebase'
 import { decryptMessage } from './encryption'
-import { getPrivateKey, keysReady } from './keys'
-import { fetchPublicUserDoc } from './publicUserDoc'
+import { chatPrivateKey, fetchPartnerKey } from './keys'
+import { matchPath } from './playId'
 import { CONSENT_CODES, type ConsentCode } from './chat'
 import { CONTACT_CODES, CONTACT_PREVIEWS, type ContactCode } from './contactExchange'
 import { maskContact } from './contactDetect'
@@ -32,15 +32,15 @@ function truncate(text: string): string {
   return flat.length > PREVIEW_LENGTH ? `${flat.slice(0, PREVIEW_LENGTH).trimEnd()}…` : flat
 }
 
-// One private-key read per user per session.
+// One private-key read per user (and kind of chat) per session. F-062: a
+// Play chat uses the Play key.
 const privateKeys = new Map<string, Promise<string | null>>()
-function privateKeyFor(uid: string): Promise<string | null> {
-  let key = privateKeys.get(uid)
+function privateKeyFor(uid: string, matchId: string): Promise<string | null> {
+  const k = `${uid}:${matchId.startsWith('pm_') ? 'play' : 'spark'}`
+  let key = privateKeys.get(k)
   if (!key) {
-    key = keysReady(uid)
-      .then(() => getPrivateKey(uid))
-      .catch(() => null)
-    privateKeys.set(uid, key)
+    key = chatPrivateKey(uid, matchId).catch(() => null)
+    privateKeys.set(k, key)
   }
   return key
 }
@@ -62,14 +62,14 @@ export function loadChatPreview(match: MatchEntry, uid: string): Promise<ChatPre
 
 async function fetchPreview(match: MatchEntry, uid: string): Promise<ChatPreview | null> {
   const snap = await getDocs(
-    query(collection(db, `matches/${match.matchId}/messages`), orderBy('sentAt', 'desc'), limit(1)),
+    query(collection(db, `${matchPath(match.matchId)}/messages`), orderBy('sentAt', 'desc'), limit(1)),
   )
   const data = snap.docs[0]?.data()
   if (!data) return null
   // Left over from an earlier match between the same two people.
   const sentAt: unknown = data.sentAt
   if (sentAt instanceof Timestamp && sentAt.toMillis() < match.startedAt) return null
-  const fromMe = data.senderId === uid
+  const fromMe = data.senderId === match.selfId
   const messageType = typeof data.messageType === 'string' ? data.messageType : 'text'
   const ciphertext = typeof data.ciphertext === 'string' ? data.ciphertext : ''
 
@@ -84,8 +84,7 @@ async function fetchPreview(match: MatchEntry, uid: string): Promise<ChatPreview
   }
 
   const nonce = typeof data.nonce === 'string' ? data.nonce : ''
-  const [privateKey, partner] = await Promise.all([privateKeyFor(uid), fetchPublicUserDoc(match.partnerUid)])
-  const partnerKey = typeof partner?.publicKey === 'string' ? partner.publicKey : ''
+  const [privateKey, partnerKey] = await Promise.all([privateKeyFor(uid, match.matchId), fetchPartnerKey(match.partnerUid).catch(() => '')])
   // The box key is shared, so the same keys open both sides' messages.
   const text = decryptMessage(ciphertext, nonce, partnerKey, privateKey ?? '')
   return { text: text ? truncate(fromMe ? text : maskContact(text)) : '🔒 Encrypted message', fromMe }

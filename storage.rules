@@ -103,7 +103,8 @@ service firebase.storage {
       // a create).
       allow create: if isUser(uid) && isSignedIn() && isImage() && isUnderSizeLimit()
                     && callerActive()
-                    && (mode == 'spark' || mode == 'play')
+                    // F-062: Play photos go under the Play ID (below), never the uid.
+                    && mode == 'spark'
                     && resource == null
                     && noServerMetadata();
       allow update: if false;
@@ -113,20 +114,53 @@ service firebase.storage {
       allow delete: if false;
     }
 
+    // ─── Play profile photos (F-062) ─────────────────────────────────────────
+    // Path: playPhotos/{playId}/{filename} — keyed by the uploader's Play ID
+    // (server-only mapping, read here), so a Play photo's path never carries
+    // the uid. Otherwise as photos/ above: onPhotoUpload moderates, signed
+    // URLs only, no updates or client deletes.
+    match /playPhotos/{playId}/{filename} {
+      allow read: if false;
+      allow create: if isSignedIn() && isImage() && isUnderSizeLimit()
+                    && callerActive()
+                    && firestore.get(/databases/(default)/documents/playIds/$(request.auth.uid)).data.playId == playId
+                    && resource == null
+                    && noServerMetadata();
+      allow update, delete: if false;
+    }
+
     // ─── Chat photos ─────────────────────────────────────────────────────────
     // Path: chat-photos/{matchId}/{filename}
     // Read/write gated on caller being a participant in the match doc.
     // firestore.get() validates membership server-side — adds one Firestore
     // read per access but eliminates matchId-enumeration risk.
 
+    // F-062: a Play match (pm_…) is playMatches/{id}, its people named by
+    // Play ID (players); the sender's file is named for their Play ID.
+    function myPlayId() {
+      return firestore.get(/databases/(default)/documents/playIds/$(request.auth.uid)).data.playId;
+    }
+    function inPlayMatch(matchId) {
+      return matchId.matches('^pm_[A-Za-z0-9]{20}$')
+        && myPlayId() in firestore.get(/databases/(default)/documents/playMatches/$(matchId)).data.get('players', []);
+    }
     match /chat-photos/{matchId}/{filename} {
-      allow read: if isSignedIn() &&
+      allow read: if isSignedIn() && (inPlayMatch(matchId) || (
         firestore.get(
           /databases/(default)/documents/matches/$(matchId)
         ).data.keys().hasAny(['users']) &&
         request.auth.uid in firestore.get(
           /databases/(default)/documents/matches/$(matchId)
-        ).data.users;
+        ).data.users));
+      allow create: if isSignedIn()
+        && callerActive()
+        && sparkPlus()
+        && request.resource.contentType == 'image/x-zylove-encrypted'
+        && resource == null
+        && isUnderSizeLimit()
+        && inPlayMatch(matchId)
+        && filename.matches(myPlayId() + '_[A-Za-z0-9._-]+')
+        && firestore.get(/databases/(default)/documents/playMatches/$(matchId)).data.get('photoConsent', {}).get('status', '') == 'accepted';
       // A new file only, named for its sender (Stage A: the other participant
       // can't replace it); the app uploads ciphertext as image/x-zylove-encrypted.
       // Sending photos in chat is Spark+ (Stage C; userInternal entitlement,

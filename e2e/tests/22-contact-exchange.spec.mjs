@@ -4,7 +4,7 @@
 // contact details on the device, and the two-device flow end to end.
 import { test, expect } from '@playwright/test'
 import {
-  resetEmulators, seedUser, callAs, likeAs, idTokenFor, db, sortedPair, signIn, offline, quietFirstRun, CONTEXT, userDoc, Timestamp, PROJECT,
+  resetEmulators, seedUser, callAs, likeAs, idTokenFor, db, sortedPair, signIn, offline, quietFirstRun, CONTEXT, userDoc, Timestamp, PROJECT, playIdOf, setPlan,
 } from './helpers.mjs'
 
 test.beforeEach(resetEmulators)
@@ -34,15 +34,17 @@ async function sendAs(uid, matchId, data) {
   return r.status
 }
 const card = { messageType: 'contact_card', ciphertext: 'c2VhbGVkLWNhcmQ=', nonce: 'bm9uY2U=' }
-const woman = (name, o = {}) => seedUser(name, { genderIdentity: 'woman', attractedTo: ['men'], ...o })
+const woman = (name, o = {}, opts) => seedUser(name, { genderIdentity: 'woman', attractedTo: ['men'], ...o }, opts)
 async function matchOf(a, b) {
   await likeAs(a.uid, b.uid)
   expect((await likeAs(b.uid, a.uid)).matched).toBe(true)
   return sortedPair(a.uid, b.uid)
 }
+// F-062: a Play match (pm_…) is playMatches/{id}, its senders Play IDs.
+const col = (matchId) => (matchId.startsWith('pm_') ? 'playMatches' : 'matches')
 const say = (matchId, senderId, n) =>
-  Promise.all(Array.from({ length: n }, (_, i) => db.collection(`matches/${matchId}/messages`).add({ senderId, messageType: 'text', ciphertext: 'x', nonce: 'n', status: 'sent', sentAt: new Date(Date.now() + i) })))
-const ce = async (id) => (await db.doc(`matches/${id}`).get()).data().contactExchange
+  Promise.all(Array.from({ length: n }, (_, i) => db.collection(`${col(matchId)}/${matchId}/messages`).add({ senderId, messageType: 'text', ciphertext: 'x', nonce: 'n', status: 'sent', sentAt: new Date(Date.now() + i) })))
+const ce = async (id) => (await db.doc(`${col(id)}/${id}`).get()).data().contactExchange
 const notices = async (id) =>
   (await db.collection(`matches/${id}/messages`).where('messageType', '==', 'contact_request').get()).docs.map((d) => d.data()).sort((a, b) => a.sentAt.toMillis() - b.sentAt.toMillis()).map((m) => m.ciphertext)
 
@@ -106,14 +108,19 @@ test('state machine: unlock after 3 messages each, accept, cards only while acce
 })
 
 test('who: either person, Spark and Play; never with a curated profile or after the chat ended', async () => {
-  const a = await seedUser('Ann')
-  const b = await woman('Bea')
-  const play = sortedPair(a.uid, b.uid)
-  await db.doc(`matches/${play}`).set({ users: [a.uid, b.uid].sort(), participants: [a.uid, b.uid].sort(), mode: 'play', matchedAt: Timestamp.now(), matchGeneration: Date.now() - 1000 })
-  await say(play, a.uid, 3)
-  await say(play, b.uid, 3)
+  const PLAY = (n) => ({ playDisplayName: n, playBio: 'b', spiceLevel: 'mild' })
+  const a = await seedUser('Ann', { intent: 'open', onboardingPath: 'both' }, { play: PLAY('Ann') })
+  const b = await woman('Bea', { intent: 'open', onboardingPath: 'both' }, { play: PLAY('Bea') })
+  for (const u of [a, b]) await setPlan(u.uid, 'elite') // Play, set the way the server decides it
+  await likeAs(a.uid, b.uid, 'play')
+  const { matchId: play } = await likeAs(b.uid, a.uid, 'play')
+  expect(play).toMatch(/^pm_/)
+  const [aPlay, bPlay] = [await playIdOf(a.uid), await playIdOf(b.uid)]
+  await db.doc(`playMatches/${play}`).update({ matchGeneration: Date.now() - 1000 })
+  await say(play, aPlay, 3)
+  await say(play, bPlay, 3)
   await callAs(b.uid, 'requestContactExchange', { matchId: play }) // the other person can start too
-  expect((await ce(play)).requestedBy).toBe(b.uid)
+  expect((await ce(play)).requestedBy).toBe(bPlay) // F-062: by Play ID
 
   const bot = 'zbot-e2e-contact'
   const botMatch = sortedPair(a.uid, bot)
@@ -122,7 +129,7 @@ test('who: either person, Spark and Play; never with a curated profile or after 
   await say(botMatch, bot, 3)
   await expect(callAs(a.uid, 'requestContactExchange', { matchId: botMatch })).rejects.toThrow(/curated profile/)
 
-  await db.doc(`matches/${play}`).update({ isBlocked: true })
+  await db.doc(`playMatches/${play}`).update({ isBlocked: true })
   await expect(callAs(a.uid, 'respondContactExchange', { matchId: play, accept: true })).rejects.toThrow(/ended/)
   const stranger = await seedUser('Cal')
   await expect(callAs(stranger.uid, 'requestContactExchange', { matchId: play })).rejects.toThrow(/Not a participant/)
