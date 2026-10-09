@@ -81,6 +81,8 @@ export async function buildEntry(uid: string): Promise<DocumentData | null> {
     playStatus(uid),
   ])
   if (!bot && (internal.isSuspended === true || root.isSuspended === true)) return null
+  // F-074: hidden from new people while scam reports wait for review (scamReports.ts).
+  if (!bot && internal.hiddenPendingReview) return null
   const play = playSnap.data()
   const sparkActive =
     (bot || root.onboardingComplete === true) &&
@@ -131,7 +133,7 @@ export const exploreOnUserDoc = onDocumentWritten({ document: 'users/{uid}/{sub}
 export const exploreOnLocation = onDocumentWritten({ document: 'userLocations/{uid}' }, async (e) => refreshQuietly(e.params.uid))
 export const exploreOnInternal = onDocumentWritten({ document: 'userInternal/{uid}' }, async (e) => {
   const b = e.data?.before.data(), a = e.data?.after.data()
-  const keys = ['isSuspended', 'playAccess', 'playAccessUntil']
+  const keys = ['isSuspended', 'hiddenPendingReview', 'playAccess', 'playAccessUntil']
   if (keys.some((k) => JSON.stringify(b?.[k] ?? null) !== JSON.stringify(a?.[k] ?? null))) await refreshQuietly(e.params.uid)
 })
 
@@ -331,8 +333,9 @@ export const getExploreDeck = onCall(
     const [roots, plays, internals] = await Promise.all([
       uids.length ? db().getAll(...uids.map((u) => userRef(u))) : Promise.resolve([]),
       mode === 'play' && uids.length ? db().getAll(...uids.map((u) => db().doc(`users/${u}/playProfile/data`))) : Promise.resolve([]),
-      // Stage B (F-055): suspension re-checked as the cards go out, not
-      // trusted from the index (a missed refresh would have shown them).
+      // Stage B (F-055): suspension (and F-074's hold for review) re-checked
+      // as the cards go out, not trusted from the index (a missed refresh
+      // would have shown them).
       uids.length ? db().getAll(...uids.map((u) => db().doc(`userInternal/${u}`))) : Promise.resolve([]),
     ])
     const playIds = mode === 'play' ? await playIdsOf(uids) : new Map<string, string>()
@@ -340,7 +343,8 @@ export const getExploreDeck = onCall(
     const refs: string[] = []
     deck.forEach((d, i) => {
       const profile = roots[i]?.data()
-      if (!profile || profile.isDeleted === true || (!isBotUid(d.uid) && internals[i]?.get('isSuspended') === true)) return
+      const n = internals[i]?.data()
+      if (!profile || profile.isDeleted === true || (!isBotUid(d.uid) && (n?.isSuspended === true || !!n?.hiddenPendingReview))) return
       const miles = milesBetween(me, d)
       const distance = { distanceMiles: miles === null ? null : bucketMiles(miles), sameMarket: !!me.marketCityId && d.marketCityId === me.marketCityId }
       if (mode === 'play') {

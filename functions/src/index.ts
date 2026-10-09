@@ -56,7 +56,7 @@ import { blockedEitherWay, likedInMode, likersInMode, pairIdOf, recordLike } fro
 import { takeRateLimit } from './rateLimits'
 import { takeQuota } from './usage'
 import { loadSparkDetails } from './pairSpark'
-import { clientIp } from './legal'
+import { clientIp, ipRateKey } from './clientIp'
 import { isBotUid, playStatus, requirePlayAccess, requirePlayEntitled } from './playAccess'
 import { loadPlayScores } from './pairPlay'
 import { otherUidOf } from './playPairQueries'
@@ -2285,10 +2285,14 @@ async function phoneHasAccount(phoneNumber: string): Promise<boolean> {
 const PHONE_LOOKUP_DAILY_BUDGET = 1000
 
 // Runs before the OTP is sent so VoIP / virtual / landline numbers can't sign
-// up. Callable without auth (it gates sign-in). Order: rate limit first (it
-// also stops this being used to probe which numbers have accounts), then
-// existing accounts skip the paid Lookup, then the Lookup itself. Fails open
-// on any Lookup or Firestore error.
+// up. Callable without auth (it gates sign-in). Order: every limit first —
+// per number, then per caller address — so the answer can't be used to probe
+// which numbers have accounts (F-072: the address limit used to come after
+// the account check, so once a caller was over it "allowed" meant "has an
+// account"). Then existing accounts skip the paid Lookup (the same
+// { allowed: true } a new mobile number gets), then the daily Lookup budget,
+// then the Lookup itself. Fails open on a Lookup or Firestore error, but not
+// once the budget is spent.
 export const validatePhoneNumber = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: LOOKUP_SECRETS },
   async (request): Promise<{ allowed: boolean; reason?: string }> => {
@@ -2307,18 +2311,22 @@ export const validatePhoneNumber = onCall(
       logger.info('validatePhoneNumber: rate limited')
       return { allowed: false, reason: 'rate_limited' }
     }
+    // Stage B (F-054): also per caller address (new random numbers each time
+    // got past the per-number limit). F-072: for every number, existing
+    // accounts included, and before the account check.
+    const ipKey = ipRateKey(clientIp(request.rawRequest as never))
+    const perIp = await takeRateLimit(ipKey, 'phoneLookup', { max: 10, windowMs: 60 * 60 * 1000 }).then(() => true, () => false)
+    if (!perIp) {
+      logger.info('validatePhoneNumber: rate limited (address)')
+      return { allowed: false, reason: 'rate_limited' }
+    }
 
-    // Existing users are never locked out, and don't cost a Lookup.
+    // Existing users are never refused by the budget, and don't cost a Lookup.
     if (await phoneHasAccount(phoneNumber)) return { allowed: true }
 
-    // Stage B (F-054): the paid Lookup is also limited per caller address
-    // (new random numbers each time got past the per-number limit) and by a
-    // daily budget. Past either: no Lookup — the number is allowed, as on
-    // any Lookup failure, so real people aren't locked out by a flood.
-    const ip = clientIp(request.rawRequest as never) ?? 'unknown'
-    const ipKey = `ip_${createHash('sha256').update(ip).digest('hex').slice(0, 32)}`
-    const perIp = await takeRateLimit(ipKey, 'phoneLookup', { max: 10, windowMs: 60 * 60 * 1000 }).then(() => true, () => false)
-    if (!perIp) return { allowed: false, reason: 'rate_limited' }
+    // A daily Lookup budget (Stage B). F-072: past it, new numbers get the
+    // generic "try again later" — allowing them unchecked let VoIP numbers
+    // through once someone had spent the budget.
     const day = new Date().toISOString().slice(0, 10)
     const budgetRef = getFirestore().doc(`rateLimits/_phoneLookup_${day}`)
     const spent = await getFirestore()
@@ -2330,8 +2338,8 @@ export const validatePhoneNumber = onCall(
       })
       .catch(() => true)
     if (!spent) {
-      logger.warn('validatePhoneNumber: daily Lookup budget reached — allowing without a Lookup')
-      return { allowed: true }
+      logger.warn('validatePhoneNumber: daily Lookup budget reached — refusing new numbers')
+      return { allowed: false, reason: 'rate_limited' }
     }
 
     const lineType = await lookupLineType(phoneNumber)

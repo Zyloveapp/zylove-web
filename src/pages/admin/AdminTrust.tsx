@@ -280,6 +280,14 @@ function Detail({ uid, onClose, onChanged, onOpenAccount }: { uid: string; onClo
         </p>
       )}
 
+      {d.hiddenPendingReview && (
+        <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          Hidden from new people since {fmtDate(d.hiddenPendingReview.at)} after scam reports from {d.hiddenPendingReview.reporters} unlinked
+          accounts that had talked with them — pending your review. They can still sign in and chat with their matches. Any action here
+          ends the hold: dismiss to show them again, or suspend.
+        </p>
+      )}
+
       {d.scamTraps.length > 0 && (
         <section>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/40">Sent to curated profiles (scam patterns)</h3>

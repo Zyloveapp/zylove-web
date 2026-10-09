@@ -166,6 +166,8 @@ export const adminTrustDetail = onCall({ timeoutSeconds: 60, memory: '256MiB', i
     // T&S Phase 2
     suspendedPendingReview: n.suspendedPendingReview === true,
     suspendSource: str(n.suspendSource) || null,
+    // F-074: hidden from new people after scam reports, pending review.
+    hiddenPendingReview: n.hiddenPendingReview ? { at: ms(n.hiddenPendingReview.at), reporters: Number(n.hiddenPendingReview.reporters ?? 0) } : null,
     countryCheck: n.countryCheck ? { ip: n.countryCheck.ip ?? null, phone: n.countryCheck.phone ?? null, city: n.countryCheck.city ?? null } : null,
     // What they sent curated profiles that matched scam patterns (excerpts only).
     scamTraps: traps.docs
@@ -236,7 +238,8 @@ type TrustAction = (typeof TRUST_ACTIONS)[number]
 const SUSPEND_DAYS = [30, 60, 90]
 
 // Dismiss the flag, reduce or restore visibility, suspend or lift a
-// suspension — each with a reason, logged. (Selfie verification requests wait for item 9.)
+// suspension — each with a reason, logged. Each also ends an automatic scam
+// hold (hiddenPendingReview). (Selfie verification requests wait for item 9.)
 export const adminTrustAction = onCall({ timeoutSeconds: 60, memory: '256MiB', invoker: 'public' }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
   const data = (request.data ?? {}) as Record<string, unknown>
@@ -298,6 +301,13 @@ export const adminTrustAction = onCall({ timeoutSeconds: 60, memory: '256MiB', i
       await refreshEntry(uid)
       if ((await flagRef.get()).exists) await close('dismissed')
       break
+  }
+  // F-074: any decision here is the review an automatic scam hold waits for
+  // (dismiss puts the account back in Explore; suspending hides it anyway).
+  const internalRef = db().doc(`userInternal/${uid}`)
+  if ((await internalRef.get()).data()?.hiddenPendingReview) {
+    await internalRef.set({ hiddenPendingReview: FieldValue.delete() }, { merge: true })
+    await refreshEntry(uid)
   }
   return { ok: true }
 })

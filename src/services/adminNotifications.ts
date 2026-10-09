@@ -12,7 +12,7 @@ export const ADMIN_ALERT_GROUPS: { title: string; items: { key: AdminToggle; lab
     title: 'Safety & reports',
     items: [
       { key: 'childSafety', label: 'Child-safety report', urgent: true },
-      { key: 'scamSuspend', label: 'Scam auto-suspend', urgent: true },
+      { key: 'scamSuspend', label: 'Scam reports: account hidden pending review', urgent: true },
       { key: 'reportUrgent', label: 'Urgent report (felt unsafe / aggressive)', urgent: true },
       { key: 'reportNew', label: 'New report' },
     ],

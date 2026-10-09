@@ -15,20 +15,28 @@ const base = (o: Partial<Features> = {}): Features => ({
   ...o,
 })
 
-test('scam reports: reporters must be 48h+ old and not linked to each other', () => {
+test('scam reports: reporters must be 7+ days old, have talked with them, and not be linked to each other (F-074)', () => {
+  assert.equal(REPORTER_MIN_AGE_MS, 7 * DAY)
   const created = new Map([
     ['a', now - 10 * DAY],
     ['b', now - 10 * DAY],
-    ['c', now - REPORTER_MIN_AGE_MS + 60_000], // a day and change old: too new
+    ['c', now - REPORTER_MIN_AGE_MS + 60_000], // just under a week old: too new
+    ['d', now - 3 * DAY], // passed the old 48-hour bar, not this one
+    ['e', now - 10 * DAY],
   ])
   const none = new Map<string, Set<string>>()
-  assert.deepEqual(independentReporters(['a', 'b'], created, none, now), ['a', 'b'])
-  assert.deepEqual(independentReporters(['a', 'c'], created, none, now), ['a'])
+  const talked = new Set(['a', 'b', 'c', 'd'])
+  assert.deepEqual(independentReporters(['a', 'b'], created, none, talked, now), ['a', 'b'])
+  assert.deepEqual(independentReporters(['a', 'c'], created, none, talked, now), ['a'])
+  assert.deepEqual(independentReporters(['a', 'd'], created, none, talked, now), ['a'])
+  // No conversation with the target in the reported match: doesn't count.
+  assert.deepEqual(independentReporters(['a', 'e'], created, none, talked, now), ['a'])
+  assert.deepEqual(independentReporters(['a', 'b'], created, none, new Set<string>(), now), [])
   // Linked (either direction) counts once.
-  assert.deepEqual(independentReporters(['a', 'b'], created, new Map([['a', new Set(['b'])]]), now), ['a'])
-  assert.deepEqual(independentReporters(['a', 'b'], created, new Map([['b', new Set(['a'])]]), now), ['a'])
+  assert.deepEqual(independentReporters(['a', 'b'], created, new Map([['a', new Set(['b'])]]), talked, now), ['a'])
+  assert.deepEqual(independentReporters(['a', 'b'], created, new Map([['b', new Set(['a'])]]), talked, now), ['a'])
   // Unknown age never counts.
-  assert.deepEqual(independentReporters(['a', 'x'], created, none, now), ['a'])
+  assert.deepEqual(independentReporters(['a', 'x'], created, none, new Set(['a', 'x']), now), ['a'])
 })
 
 test('signup country: any two known countries that disagree; unknowns ignored', () => {

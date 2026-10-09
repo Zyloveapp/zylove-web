@@ -53,6 +53,8 @@ export interface TrustDetail {
   // T&S Phase 2
   suspendedPendingReview: boolean
   suspendSource: string | null
+  // F-074: out of Explore after scam reports, until an admin acts here.
+  hiddenPendingReview: { at: number | null; reporters: number } | null
   countryCheck: { ip: string | null; phone: string | null; city: string | null } | null
   scamTraps: { hits: string[]; excerpt: string; at: number | null }[]
   duplicatePhotos: { otherUid: string; otherName: string; distance: number; status: string; photos: { mine: string | null; theirs: string | null }[] }[]
