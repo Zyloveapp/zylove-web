@@ -24,8 +24,14 @@ export interface OwnProfile {
   // scoring never read them; those show until migrated, and the next save
   // moves them to private/matching (a first value).
   dealbreakers: string[]
-  // Traits they want in a partner: the public doc's plus the private seeking prefs.
+  // What they look for — the body types, traits and height range (cm, both
+  // ends, or null) scoring uses: private/matching's, as with the
+  // dealbreakers; older web saves' seekingPreferences values until migrated.
+  seekingBodyTypes: string[]
   seekingTraits: string[]
+  seekingHeightCm: { min: number; max: number } | null
+  // The editor's "Doesn't matter" for body types (seekingPreferences).
+  seekingBodyNoPreference: boolean
   // Question text for the AI-written prompt, stored under promptId 'dynamic'
   // (mobile's convention for its Play "just for you" question).
   dynamicPrompt: string | null
@@ -33,6 +39,11 @@ export interface OwnProfile {
 
 function strings(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x !== '') : []
+}
+
+// A height range scoring would use: both ends, positive, min ≤ max.
+function heightRange(min: unknown, max: unknown): { min: number; max: number } | null {
+  return typeof min === 'number' && typeof max === 'number' && min > 0 && min <= max ? { min, max } : null
 }
 
 function promptList(v: unknown): PromptAnswer[] {
@@ -75,6 +86,7 @@ export async function loadOwnProfile(uid: string): Promise<OwnProfile | null> {
     ...(typeof meta.intent === 'string' && { intent: meta.intent as DiscoverProfile['intent'] }),
   }
   const sp = spark?.data() ?? {}
+  const old = seeking?.data() ?? {}
 
   // Mobile's editor saves the bio only to sparkProfile/data, so it wins.
   const bio = (typeof sp.bio === 'string' && sp.bio.trim() ? sp.bio : profile.bio ?? '').trim()
@@ -84,8 +96,13 @@ export async function loadOwnProfile(uid: string): Promise<OwnProfile | null> {
     profile,
     bio,
     prompts: prompts.length > 0 ? prompts : promptList(profile.promptAnswers),
-    dealbreakers: isUnset(profile.dealbreakers) ? strings(seeking?.data()?.dealbreakers) : strings(profile.dealbreakers),
-    seekingTraits: [...new Set([...strings(profile.seekingTraits), ...strings(seeking?.data()?.seekingTraits)])],
+    dealbreakers: isUnset(profile.dealbreakers) ? strings(old.dealbreakers) : strings(profile.dealbreakers),
+    seekingBodyTypes: isUnset(profile.seekingBodyTypes) ? strings(old.seekingBodyTypes) : strings(profile.seekingBodyTypes),
+    seekingTraits: isUnset(profile.seekingTraits) ? strings(old.seekingTraits) : strings(profile.seekingTraits),
+    seekingHeightCm:
+      heightRange(profile.seekingHeightMinCm, profile.seekingHeightMaxCm) ??
+      (old.seekingHeightNoPreference === true ? null : heightRange(old.seekingHeightMinCm, old.seekingHeightMaxCm)),
+    seekingBodyNoPreference: old.seekingBodyNoPreference === true,
     dynamicPrompt: str(sp.dynamicPrompt) ?? str((profile as Record<string, unknown>).dynamicPrompt),
   }
 }

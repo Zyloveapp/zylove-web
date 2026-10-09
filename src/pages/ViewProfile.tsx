@@ -52,7 +52,7 @@ function ViewProfileFor({ targetUid }: { targetUid: string }) {
           ? Promise.all([loadPlayProfile(targetUid), loadPlayExtras(targetUid)]).then(([play, x]) => ({
               play,
               data: play
-                ? { profile: { uid: targetUid, age: x.age ?? undefined, curated: x.curated }, bio: '', prompts: [], dealbreakers: [], seekingTraits: [], dynamicPrompt: null }
+                ? { profile: { uid: targetUid, age: x.age ?? undefined, curated: x.curated }, bio: '', prompts: [], dealbreakers: [], seekingBodyTypes: [], seekingTraits: [], seekingHeightCm: null, seekingBodyNoPreference: false, dynamicPrompt: null }
                 : null,
             }))
           : Promise.resolve({ data: null, play: null })
