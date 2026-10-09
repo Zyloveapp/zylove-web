@@ -72,6 +72,10 @@ type FKey = keyof FacetVector
 const bothHigh = (a: FacetVector, b: FacetVector, k: FKey): boolean =>
   (a[k] ?? 0.5) >= HIGH_THRESHOLD && (b[k] ?? 0.5) >= HIGH_THRESHOLD
 
+/** Both users at or below `t` on every facet in `caps` ({ facet: t }). */
+const bothAtMost = (a: FacetVector, b: FacetVector, caps: Partial<Record<FKey, number>>): boolean =>
+  (Object.entries(caps) as [FKey, number][]).every(([k, t]) => (a[k] ?? 0.5) <= t && (b[k] ?? 0.5) <= t)
+
 /** Both users at or above `t` on every facet in `bars` ({ facet: t }). */
 const bothAtLeast = (a: FacetVector, b: FacetVector, bars: Partial<Record<FKey, number>>): boolean =>
   (Object.entries(bars) as [FKey, number][]).every(([k, t]) => (a[k] ?? 0.5) >= t && (b[k] ?? 0.5) >= t)
@@ -425,8 +429,49 @@ export const PLAY_ARCHETYPES: PlayArchetypeDef[] = [
     id:    'talkers_first',
     label: 'Talkers First',
     copy:  'Both the type to discuss before diving in. Clear expectations, honored agreements.',
+    // Tightened 2026-10-09 (Play variety): verbal_expressiveness is >= 0.65
+    // for 95% of Play profiles and conflict_directness for 77%, so it
+    // labelled about a quarter of Play pairs. Now 0.75 on both (as Deep
+    // Talkers in Spark) — people who really do talk it through.
     predicate: (a, b) =>
-      signalArchetype(a, b, { conflict_directness: 0.65, verbal_expressiveness: 0.65, integrity_valued: 0.65 }),
+      signalArchetype(a, b, { conflict_directness: 0.75, verbal_expressiveness: 0.75, integrity_valued: 0.65 }),
+  },
+
+  {
+    // Strong chemistry, no hurry: both sensual, neither chasing intensity or
+    // acting on impulse.
+    id:    'slow_burn',
+    label: 'Slow Burn',
+    copy:  'Plenty of chemistry, and no rush. You both like to let it build.',
+    predicate: (a, b) =>
+      bothAtMost(a, b, { high_arousal_preference: 0.6, spontaneity: 0.6 })
+        ? signalArchetype(a, b, { sensuality: 0.75 })
+        : 0,
+  },
+
+  {
+    id:    'fully_present',
+    label: 'Fully Present',
+    copy:  'Warm, attentive, all there. You both notice the small things.',
+    predicate: (a, b) =>
+      signalArchetype(a, b, { emotional_availability: 0.8, emotional_depth: 0.7, sensuality: 0.75 }),
+  },
+
+  {
+    id:    'playful_pair',
+    label: 'Playful Pair',
+    copy:  'You both lead with fun. Easy laughs, light touch.',
+    predicate: (a, b) => signalArchetype(a, b, { playfulness: 0.65, spontaneity: 0.6 }),
+  },
+
+  {
+    // risk_tolerance barely moves in Play data (max 0.72; >= 0.65 for 2% of
+    // profiles), so it's left out: spontaneity and novelty carry it.
+    id:    'wild_cards',
+    label: 'Wild Cards',
+    copy:  "Both up for the unplanned and something new. Expect a story or two.",
+    predicate: (a, b) =>
+      signalArchetype(a, b, { spontaneity: 0.65, openness_to_novelty: 0.65 }),
   },
 
   {
@@ -446,9 +491,14 @@ export const PLAY_ARCHETYPES: PlayArchetypeDef[] = [
       for (const k of playFacets) {
         if (diff(a, b, k) <= 0.20) aligned++
       }
-      const fraction = aligned / playFacets.length
-      if (fraction < 0.8) return 0
-      return Math.min(1, fraction)
+      if (aligned / playFacets.length < 0.8) return 0
+      // Shared signal, not shared silence (2026-10-09): most of these facets
+      // sit at neutral 0.5 for most people, and two neutrals counted as
+      // "aligned", so this labelled ~40% of pairs. Now at least 3 of the 5
+      // must be active (>= 0.6) for both and close (within 0.15).
+      const shared = playFacets.filter((k) => (a[k] ?? 0.5) >= 0.6 && (b[k] ?? 0.5) >= 0.6 && diff(a, b, k) <= 0.15)
+      if (shared.length < 3) return 0
+      return confidenceFromSignal(avgSignal(a, b, shared, highSignal))
     },
   },
 
