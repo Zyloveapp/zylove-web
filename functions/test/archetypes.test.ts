@@ -148,33 +148,80 @@ test('picker: confidence is graded, so stronger signal ranks higher', () => {
 
 // ─── Play ────────────────────────────────────────────────────────────────────
 
+const playFires = (id: string, a: F, b: F = a, spice = true) => play(id).predicate(vec(a), vec(b), spice)
+
 test('play intense_pair: spice-aligned and both at 0.75+; not at the old 0.55', () => {
   const hot = { sensuality: 0.85, physical_expressiveness: 0.85 }
-  assert.ok(play('intense_pair').predicate(vec(hot), vec(hot), true) >= MIN_CONFIDENCE)
-  assert.equal(play('intense_pair').predicate(vec(hot), vec(hot), false), 0, 'spice not aligned')
-  const warm = { sensuality: 0.7, physical_expressiveness: 0.7 }
-  assert.equal(play('intense_pair').predicate(vec(warm), vec(warm), true), 0)
+  assert.ok(playFires('intense_pair', hot) >= MIN_CONFIDENCE)
+  assert.equal(playFires('intense_pair', hot, hot, false), 0, 'spice not aligned')
+  assert.equal(playFires('intense_pair', { sensuality: 0.7, physical_expressiveness: 0.7 }), 0)
 })
 
-test('play talkers_first: 0.65 on directness, words and integrity', () => {
-  const t = { conflict_directness: 0.8, verbal_expressiveness: 0.8, integrity_valued: 0.8 }
-  assert.ok(play('talkers_first').predicate(vec(t), vec(t), false) >= MIN_CONFIDENCE)
-  assert.equal(play('talkers_first').predicate(vec({ ...t, integrity_valued: 0.6 }), vec(t), false), 0)
+test('play talkers_first: 0.75 on directness and words, 0.65 integrity; not at the old 0.65 words', () => {
+  const t = { conflict_directness: 0.85, verbal_expressiveness: 0.85, integrity_valued: 0.8 }
+  assert.ok(playFires('talkers_first', t) >= MIN_CONFIDENCE)
+  assert.equal(playFires('talkers_first', { ...t, verbal_expressiveness: 0.7 }, t), 0, 'verbal under 0.75')
+  assert.equal(playFires('talkers_first', { ...t, integrity_valued: 0.6 }, t), 0, 'integrity under 0.65')
 })
 
-test('play same_frequency and curious_and_willing', () => {
+test('play slow_burn: both sensual, neither chasing intensity or impulse', () => {
+  const slow = { sensuality: 0.85, high_arousal_preference: 0.5, spontaneity: 0.5 }
+  assert.ok(playFires('slow_burn', slow) >= MIN_CONFIDENCE)
+  assert.equal(playFires('slow_burn', { ...slow, high_arousal_preference: 0.8 }, slow), 0, 'one chasing intensity')
+  assert.equal(playFires('slow_burn', { ...slow, spontaneity: 0.8 }, slow), 0, 'one impulsive')
+  assert.equal(playFires('slow_burn', { ...slow, sensuality: 0.7 }, slow), 0, 'sensuality under 0.75')
+})
+
+test('play fully_present: available, deep and sensual', () => {
+  const f = { emotional_availability: 0.9, emotional_depth: 0.8, sensuality: 0.8 }
+  assert.ok(playFires('fully_present', f) >= MIN_CONFIDENCE)
+  assert.equal(playFires('fully_present', { ...f, emotional_availability: 0.75 }, f), 0)
+  assert.equal(playFires('fully_present', { ...f, emotional_depth: 0.65 }, f), 0)
+})
+
+test('play playful_pair: both lead with fun', () => {
+  const p = { playfulness: 0.8, spontaneity: 0.7 }
+  assert.ok(playFires('playful_pair', p) >= MIN_CONFIDENCE)
+  assert.equal(playFires('playful_pair', { ...p, playfulness: 0.6 }, p), 0)
+  assert.equal(playFires('playful_pair', p, {}), 0, 'one-sided')
+})
+
+test('play wild_cards: both spontaneous and up for something new', () => {
+  const w = { spontaneity: 0.8, openness_to_novelty: 0.8 }
+  assert.ok(playFires('wild_cards', w) >= MIN_CONFIDENCE)
+  assert.equal(playFires('wild_cards', { ...w, openness_to_novelty: 0.6 }, w), 0)
+})
+
+test('play same_frequency: shared signal on 3+ of the 5, not shared neutrality', () => {
   const p = { sensuality: 0.8, physical_expressiveness: 0.8, high_arousal_preference: 0.8, spontaneity: 0.8, playfulness: 0.8 }
-  assert.equal(play('same_frequency').predicate(vec(p), vec(p), true), 1)
-  assert.equal(play('same_frequency').predicate(vec(p), vec(p), false), 0)
-  // Some alignment (3 of 5 within 0.35), not all: the fallback.
-  const q = { ...p, high_arousal_preference: 0.2, spontaneity: 0.2 }
-  assert.equal(play('curious_and_willing').predicate(vec(p), vec(q), true), MIN_CONFIDENCE)
-  assert.equal(play('curious_and_willing').predicate(vec(p), vec(p), true), 0, 'everything aligned is not this')
+  assert.ok(playFires('same_frequency', p) >= MIN_CONFIDENCE)
+  assert.equal(playFires('same_frequency', p, p, false), 0, 'spice not aligned')
+  // Two active facets and three neutral ones "agree" — that used to count.
+  const quiet = { sensuality: 0.8, physical_expressiveness: 0.8 }
+  assert.equal(playFires('same_frequency', quiet), 0)
 })
 
-test('play picker: strongest wins (was first-match), fallback loses to a clear pattern', () => {
-  const p = { sensuality: 0.95, physical_expressiveness: 0.95, high_arousal_preference: 0.8, spontaneity: 0.8, playfulness: 0.8 }
-  // Same Frequency (1.0) beats Intense Pair (0.95) though Intense is first.
-  assert.equal(matchPlayArchetype(vec(p), vec(p), true)?.id, 'same_frequency')
+test('play curious_and_willing: the fallback at MIN_CONFIDENCE', () => {
+  const p = { sensuality: 0.8, physical_expressiveness: 0.8, high_arousal_preference: 0.8, spontaneity: 0.8, playfulness: 0.8 }
+  const q = { ...p, high_arousal_preference: 0.2, spontaneity: 0.2 }
+  assert.equal(playFires('curious_and_willing', p, q), MIN_CONFIDENCE)
+  assert.equal(playFires('curious_and_willing', p, p), 0, 'everything aligned is not this')
+})
+
+test('every Play archetype has a test above', () => {
+  const tested = new Set(['intense_pair', 'talkers_first', 'slow_burn', 'fully_present', 'playful_pair', 'wild_cards', 'same_frequency', 'curious_and_willing'])
+  for (const d of PLAY_ARCHETYPES) assert.ok(tested.has(d.id), `untested: ${d.id}`)
+})
+
+test('play picker: strongest wins over list order; the fallback loses to any clear pattern', () => {
+  // Talkers First (earlier) at a bare fit; Playful Pair (later) far stronger.
+  const both = { conflict_directness: 0.76, verbal_expressiveness: 0.76, integrity_valued: 0.66, playfulness: 0.95, spontaneity: 0.95 }
+  assert.ok(playFires('talkers_first', both) > 0)
+  assert.equal(matchPlayArchetype(vec(both), vec(both), false)?.id, 'playful_pair')
+  // A clear pattern beats Curious & Willing even when both apply.
+  const a = { playfulness: 0.9, spontaneity: 0.9, sensuality: 0.8, physical_expressiveness: 0.8, high_arousal_preference: 0.8 }
+  const b = { playfulness: 0.9, spontaneity: 0.9, sensuality: 0.8, physical_expressiveness: 0.2, high_arousal_preference: 0.2 }
+  assert.equal(playFires('curious_and_willing', a, b), MIN_CONFIDENCE)
+  assert.equal(matchPlayArchetype(vec(a), vec(b), true)?.id, 'playful_pair')
   assert.equal(matchPlayArchetype(vec(), vec(), false), null)
 })

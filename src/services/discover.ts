@@ -406,6 +406,10 @@ const PLAY_ARCHETYPE_COPY: Record<string, { label: string; copy: string }> = {
   talkers_first: { label: 'Talkers First', copy: 'The conversation will be just as electric as everything else.' },
   same_frequency: { label: 'Same Frequency', copy: "You're tuned to the same channel. Rare." },
   curious_and_willing: { label: 'Curious & Willing', copy: "You're both open to where this goes. That's the whole point." },
+  slow_burn: { label: 'Slow Burn', copy: 'No rush. You both like to let it build.' },
+  fully_present: { label: 'Fully Present', copy: 'You both notice the small things. It shows.' },
+  playful_pair: { label: 'Playful Pair', copy: 'Easy laughs, light touch. You both lead with fun.' },
+  wild_cards: { label: 'Wild Cards', copy: "Both up for something new. Expect a story or two." },
 }
 
 // The pair's Play archetype, or null. F-062: from onTap by the other

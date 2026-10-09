@@ -17,7 +17,9 @@
 //           non-zero headline), both with a Spark profile
 //   pairs — the subset with a stored pairs/{id} doc (pairs people actually
 //           opened, liked or were matched)
-//   play  — every pair with a finished Play profile on both sides
+//   play  — every pair with a finished Play profile on both sides, at
+//           least one a real member; playAll adds curated × curated (a
+//           larger sample of realistic profiles; they never meet)
 // "Shown" mirrors the app: an archetype appears only with enough info, no
 // dealbreaker and confidence > 0.4 (CompatibilityBlock / MatchOverlay).
 // Credentials (--dump): Application Default Credentials.
@@ -71,7 +73,7 @@ const add = (t, key) => {
   t.total++
   t.counts[key] = (t.counts[key] ?? 0) + 1
 }
-const out = { spark: tally(), pairs: tally(), sparkReal: tally(), sparkAll: tally(), play: tally() }
+const out = { spark: tally(), pairs: tally(), sparkReal: tally(), sparkAll: tally(), play: tally(), playAll: tally() }
 
 const hasSpark = (u) => Array.isArray(u.spark.photoURLs) || typeof u.spark.genderIdentity === 'string'
 const hasPlay = (u) => u.full.playOnboardingComplete === true
@@ -101,9 +103,10 @@ for (let i = 0; i < users.length; i++) {
         if (stored.has(sorted(a.uid, b.uid))) add(out.pairs, key)
       }
     }
-    if (!botPair && hasPlay(a) && hasPlay(b)) {
-      const p = calculatePlayScore(a.full, b.full)
-      add(out.play, p.tier1?.archetype?.id ?? '(none)')
+    if (hasPlay(a) && hasPlay(b)) {
+      const key = calculatePlayScore(a.full, b.full).tier1?.archetype?.id ?? '(none)'
+      add(out.playAll, key)
+      if (!botPair) add(out.play, key)
     }
   }
 }
@@ -115,7 +118,7 @@ function table(name, t) {
   // Among pairs that show something (enough info, no dealbreaker).
   const shown = rows.filter(([k]) => !k.startsWith('(not enough') && !k.startsWith('(dealbreaker'))
   const base = shown.reduce((s, [, n]) => s + n, 0)
-  if (base && name !== 'play') {
+  if (base && !name.startsWith('play')) {
     console.log(`  — of the ${base} pairs with enough info and no dealbreaker:`)
     for (const [k, n] of shown) console.log(`    ${k.padEnd(26)} ${((100 * n) / base).toFixed(1)}%`)
   }
@@ -126,4 +129,5 @@ table('spark (real member pairs only)', out.sparkReal)
 table('pairs (stored pair docs)', out.pairs)
 table('spark, all pairs incl. curated × curated (larger sample)', out.sparkAll)
 table('play', out.play)
+table('play, all pairs incl. curated × curated (larger sample)', out.playAll)
 if (flag('--json')) writeFileSync(flag('--json'), JSON.stringify(out, null, 2))
