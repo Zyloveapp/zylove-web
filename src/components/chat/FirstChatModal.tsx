@@ -14,7 +14,7 @@ const FEATURES: { icon: string; title: string; body: string }[] = [
   {
     icon: '🔒',
     title: 'End-to-end encrypted',
-    body: 'Your messages are encrypted on your device. Only you two can read them. Not even us.',
+    body: "Your messages are encrypted on your device, and only you two hold the keys. If you back up your chat key with a chat PIN, that backup is only as strong as the PIN.",
   },
   {
     icon: '📸',

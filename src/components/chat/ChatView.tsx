@@ -1188,7 +1188,7 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
           intro={
             contactSheet === 'share'
               ? `Pick what goes on your card. ${match.name} chooses whether to accept; your card is only sent if they do.`
-              : 'Pick what goes on your card. It is end-to-end encrypted — Zylove can’t read it.'
+              : 'Pick what goes on your card. It is end-to-end encrypted on your device.'
           }
           initial={savedDefaults(uid)}
           confirmLabel={contactSheet === 'share' ? 'Send request' : contactSheet === 'shareBack' ? 'Accept and share' : 'Send card'}

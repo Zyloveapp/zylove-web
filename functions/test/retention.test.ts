@@ -2,7 +2,8 @@
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { Timestamp } from 'firebase-admin/firestore'
-import { RETENTION, cutoffMs, cutoffValue, isDue, reportProtected, type RetentionEntry } from '../src/retention'
+import { RETENTION, cutoffMs, cutoffValue, isDue, notificationCapDay, reportProtected, type RetentionEntry } from '../src/retention'
+import { orphanedOpenFlags } from '../src/trustScore'
 
 const DAY = 24 * 60 * 60 * 1000
 const NOW = Date.UTC(2026, 9, 8, 8, 40)
@@ -56,4 +57,23 @@ test('retention: a report stays while open, held or in the locker', () => {
   assert.equal(reportProtected({ status: 'cleared' }, true), true)
   assert.equal(reportProtected({ status: 'actioned', legalHold: null }, false), false)
   assert.equal(reportProtected({ status: 'cleared' }, false), false)
+})
+
+test('retention (F-085): TTL backstops — sign-in windows and admin alerts go after 30 days', () => {
+  assert.deepEqual(entry('phoneVerificationAttempts'), { collection: 'phoneVerificationAttempts', field: 'firstAttempt', kind: 'timestamp', maxAgeMs: 30 * DAY })
+  assert.deepEqual(entry('adminAlertQueue'), { collection: 'adminAlertQueue', field: 'at', kind: 'timestamp', maxAgeMs: 30 * DAY })
+})
+
+test('retention (F-085): a notification counter is dated by the day in its id', () => {
+  assert.equal(notificationCapDay('abc_2025-01-31'), Date.UTC(2025, 0, 31) + DAY - 1)
+  assert.equal(notificationCapDay('a_b_c_2024-02-29'), Date.UTC(2024, 1, 29) + DAY - 1)
+  assert.equal(notificationCapDay('abc_2025-02-29'), null)
+  assert.equal(notificationCapDay('abc'), null)
+  assert.equal(notificationCapDay('abc_2025-1-31'), null)
+})
+
+test('retention (F-085): open trust flags of deleted or missing accounts close; live and curated ones stay', () => {
+  const live = new Set(['u1', 'u2'])
+  assert.deepEqual(orphanedOpenFlags(['u1', 'gone', 'u2', 'zbot-austin-1', 'seed-x', 'deleted'], live), ['gone', 'deleted'])
+  assert.deepEqual(orphanedOpenFlags([], live), [])
 })

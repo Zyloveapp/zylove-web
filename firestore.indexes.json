@@ -392,6 +392,18 @@
   ],
   "fieldOverrides": [
     {
+      "collectionGroup": "phoneVerificationAttempts",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "adminAlertQueue",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
       "collectionGroup": "likes",
       "fieldPath": "likedBy",
       "indexes": [

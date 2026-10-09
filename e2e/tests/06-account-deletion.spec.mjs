@@ -39,7 +39,7 @@ test('deletion: delete account from Settings → soft-deleted, recovery doc, aut
   expect(newUid).not.toBe(me.uid)
   const elig = await callAs(newUid, 'checkRestoreEligibility')
   expect(elig.status).toBe('hard_block')
-  await callAs(newUid, 'restoreAccount')
+  await callAs(newUid, 'restoreAccount', { birthday: '1995-03-14' }) // F-086: the old birthday, typed
   const restored = await userDoc(newUid)
   expect(restored.displayName).toBe('Rowan')
   // F-028: the phone and birthday stay off the public doc.

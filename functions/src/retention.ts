@@ -51,7 +51,27 @@ export const RETENTION: RetentionEntry[] = [
   { collection: 'usage', field: 'updatedAt', kind: 'timestamp', maxAgeMs: 2 * YEAR_MS },
   { collection: 'notificationCaps', field: 'updatedAt', kind: 'timestamp', maxAgeMs: 2 * YEAR_MS },
   { collection: 'purgeLog', field: 'purgedAt', kind: 'timestamp', maxAgeMs: 2 * YEAR_MS },
+  // F-085: short-lived docs a Firestore TTL policy on expiresAt removes
+  // (firestore.indexes.json fieldOverrides). A backstop in case the policy
+  // isn't on: a 1-hour sign-in window (hashed phone, count) and a 7-day
+  // admin alert queue entry, gone after 30 days whatever happens.
+  { collection: 'phoneVerificationAttempts', field: 'firstAttempt', kind: 'timestamp', maxAgeMs: 30 * DAY_MS },
+  { collection: 'adminAlertQueue', field: 'at', kind: 'timestamp', maxAgeMs: 30 * DAY_MS },
 ]
+
+// notificationCaps/{uid}_{YYYY-MM-DD}: the counter's day, from its id — for
+// dating docs written before incrementMessageCap stamped updatedAt
+// (scripts/backfill-notification-cap-dates.mjs). The end of that UTC day, or
+// null if the id doesn't end in a real date.
+export function notificationCapDay(id: string): number | null {
+  const m = /_(\d{4})-(\d{2})-(\d{2})$/.exec(id)
+  if (!m) return null
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const start = Date.UTC(y, mo - 1, d)
+  const t = new Date(start)
+  if (t.getUTCFullYear() !== y || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d) return null
+  return start + DAY_MS - 1
+}
 
 export function cutoffMs(entry: RetentionEntry, now: number): number {
   return now - entry.maxAgeMs
