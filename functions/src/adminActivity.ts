@@ -12,6 +12,8 @@ import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { getNearestCity } from './cities'
+import { normalizeGender } from './gender'
+import { eliteByMatching } from './identity'
 import { claimFounderSpot, type FounderResult } from './founders'
 import { revokeFounderStatus } from './founderActivity'
 import { STRIPE_SECRETS, cancelSubscriptionsForDeletion } from './stripe'
@@ -24,8 +26,6 @@ const PAGE_SIZE = 25
 const CHART_DAYS = 30
 const TZ = 'America/Chicago'
 const BOT_PREFIX = 'zbot-'
-// Same list as initUserDefaults / subscription.ts: complimentary Elite.
-const ELITE_IDENTITIES = new Set(['woman', 'trans_woman', 'nonbinary', 'non_binary', 'genderfluid', 'agender', 'self_describe'])
 
 // createdAt / lastActive are a Timestamp (mobile) or epoch ms (web).
 function ms(v: unknown): number | null {
@@ -86,8 +86,7 @@ export interface ActivityResponse {
 
 function tierOf(u: DocumentData, now: number): Tier {
   if (u.isFounder === true) return 'founder'
-  const g = Array.isArray(u.genderIdentity) ? u.genderIdentity[0] : u.genderIdentity
-  if (u.subscriptionTier === 'elite' || (typeof g === 'string' && ELITE_IDENTITIES.has(g))) return 'elite'
+  if (u.subscriptionTier === 'elite' || eliteByMatching(u.genderIdentity, u.matchableAs)) return 'elite'
   if (u.subscriptionTier === 'spark_plus') return 'spark_plus'
   // No trial yet: their market hasn't opened (trial.ts).
   if (u.trialStartedAt == null) return 'prelaunch'
@@ -104,8 +103,8 @@ function statusOf(u: DocumentData): Status {
 }
 
 function genderOf(u: DocumentData): string {
-  const g = Array.isArray(u.genderIdentity) ? u.genderIdentity[0] : u.genderIdentity
-  return typeof g === 'string' && g ? g.replace(/_/g, ' ') : '—'
+  const g = normalizeGender(u.genderIdentity)
+  return g ? g.replace(/_/g, ' ') : '—'
 }
 
 // Launch city by coordinates, else the label's city, else Unknown.
@@ -202,6 +201,7 @@ export const adminGetActivity = onCall(
       const u: DocumentData = {
         ...doc.data(),
         ...(m?.genderIdentity !== undefined && { genderIdentity: m.genderIdentity }),
+        ...(m?.matchableAs !== undefined && { matchableAs: m.matchableAs }),
         ...internalOf.get(doc.id),
         ...(typeof loc?.lat === 'number' && { locationLat: loc.lat, locationLng: loc.lng }),
       }

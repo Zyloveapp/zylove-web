@@ -24,21 +24,12 @@ import { eliteByMatching } from './identity'
 
 export const TRIAL_MS = 30 * 24 * 60 * 60 * 1000
 
-// Women and other non-male identities get lifetime Elite on the web
-// ('nonbinary' is how it's stored). Mobile still elevates only woman /
-// trans_woman.
-export const ALWAYS_ELITE_IDENTITIES = ['woman', 'trans_woman', 'nonbinary', 'non_binary', 'genderfluid', 'agender', 'self_describe']
-
-function genderOf(user: DocumentData): string {
-  const g: unknown = Array.isArray(user.genderIdentity) ? user.genderIdentity[0] : user.genderIdentity
-  return typeof g === 'string' ? g.toLowerCase().trim() : ''
-}
-
 // Stage C (decision 2): by how they're matched (women / nonbinary people),
 // not the identity they describe. `user` should carry matchableAs (from
-// private/matching) for identities that don't map to a category.
+// private/matching) for identities that don't map to a category. H2: the
+// gender is read by identity.ts (gender.ts), as Explore reads it.
 export function hasEliteIdentity(user: DocumentData): boolean {
-  return eliteByMatching(genderOf(user) || user.genderIdentity, user.matchableAs)
+  return eliteByMatching(user.genderIdentity, user.matchableAs)
 }
 
 export function hasPaidSubscription(user: DocumentData | undefined): boolean {

@@ -361,14 +361,21 @@ service cloud.firestore {
             && limitedChangeOk(before, after, 'attractedTo')
             && limitedChangeOk(before, after, 'dealbreakers');
       }
-      // §4.A2: a key from the app's list (a string), or a list from older
-      // mobile Play builds; null when unset. Self-description and pronouns go
-      // on the public genderLine (sanitised server-side), so short strings.
+      // §4.A2: null when unset. Self-description and pronouns go on the
+      // public genderLine (sanitised server-side), so short strings.
+      // H2: the gender itself is one of the app's keys (functions/src/
+      // gender.ts GENDER_KEYS) — any other spelling ("Woman", "cis woman",
+      // a list) was read one way for Elite and another by Explore. Checked
+      // when it's written (genderIdentityOk), so an older stored form doesn't
+      // block saving other preferences before the migration rewrites it.
+      function genderKeyOk(v) {
+        return v == null || (v is string && v in ['man', 'woman', 'trans_man', 'trans_woman', 'nonbinary', 'genderfluid', 'agender', 'self_describe']);
+      }
+      function genderIdentityOk(before, after) {
+        return !('genderIdentity' in after.diff(before).affectedKeys()) || genderKeyOk(after.get('genderIdentity', null));
+      }
       function validGender(d) {
-        return (!('genderIdentity' in d) || d.genderIdentity == null
-                || (d.genderIdentity is string && d.genderIdentity.size() <= 40)
-                || (d.genderIdentity is list && d.genderIdentity.size() <= 8))
-            && (!('genderSelfDescribe' in d) || d.genderSelfDescribe == null || (d.genderSelfDescribe is string && d.genderSelfDescribe.size() <= 40))
+        return (!('genderSelfDescribe' in d) || d.genderSelfDescribe == null || (d.genderSelfDescribe is string && d.genderSelfDescribe.size() <= 40))
             && (!('pronouns' in d) || d.pronouns == null || (d.pronouns is string && d.pronouns.size() <= 40))
             && (!('genderHidden' in d) || d.genderHidden is bool)
             && (!('showGender' in d) || d.showGender is bool);
@@ -396,9 +403,11 @@ service cloud.firestore {
       match /private/matching {
         allow read: if isSignedIn() && isUser(uid);
         allow create: if callerActive() && isSignedIn() && isUser(uid) && validMatching(request.resource.data)
+                      && genderKeyOk(request.resource.data.get('genderIdentity', null))
                       && !('fieldChangedAt' in request.resource.data)
                       && (!request.resource.data.keys().hasAny(identityLockedKeys()) || identityUnlocked());
         allow update: if callerActive() && isSignedIn() && isUser(uid) && validMatching(request.resource.data)
+                      && genderIdentityOk(resource.data, request.resource.data)
                       && limitedMatchingOk(resource.data, request.resource.data)
                       && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(identityLockedKeys()) || identityUnlocked());
         allow delete: if false;

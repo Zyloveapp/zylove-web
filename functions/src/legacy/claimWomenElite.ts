@@ -16,6 +16,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https'
 import * as admin from 'firebase-admin'
 import { LEGACY_RUNTIME } from './legacyOptions'
+import { normalizeGender } from '../gender'
 
 const db = admin.firestore()
 
@@ -23,9 +24,9 @@ const db = admin.firestore()
 // underscore form actually stored in genderIdentity (the client helper
 // has a divergence — see PR notes). Exported so other server modules
 // (founderCodes, etc.) can reuse without redefining.
-export function isWomanIdentity(g: string | undefined): boolean {
-  if (!g) return false
-  const v = g.toLowerCase().trim()
+// H2: read by the one normaliser (gender.ts), as Explore reads it.
+export function isWomanIdentity(g: unknown): boolean {
+  const v = normalizeGender(g)
   return v === 'woman' || v === 'trans_woman'
 }
 

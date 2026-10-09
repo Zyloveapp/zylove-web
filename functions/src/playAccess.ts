@@ -174,11 +174,13 @@ export const playAccessOnPlayProfile = onDocumentWritten({ document: 'users/{uid
 })
 
 // Stage C: how someone is matched (matchableAs) and their launch city also
-// decide the tier. §4.A2: the gender lives here now too, but identity-based
+// decide the tier. §4.A2: the gender lives here now too; identity-based
 // Elite needs the lock, and the lock (playAccessOnProfile) comes after it.
+// H2: a server rewrite of a locked gender (scripts/migrate-gender-keys.mjs)
+// is followed too.
 export const entitlementOnMatching = onDocumentWritten({ document: 'users/{uid}/private/matching', memory: '256MiB' }, async (event) => {
   if (isBotUid(event.params.uid)) return
-  if (event.data?.before.exists && !changed(event.data.before.data(), event.data?.after.data(), ['matchableAs'])) return
+  if (event.data?.before.exists && !changed(event.data.before.data(), event.data?.after.data(), ['matchableAs', 'genderIdentity'])) return
   await refreshPlayAccess(event.params.uid)
 })
 export const entitlementOnLocation = onDocumentWritten({ document: 'userLocations/{uid}', memory: '256MiB' }, async (event) => {

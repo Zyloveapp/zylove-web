@@ -4,20 +4,21 @@
 // identity-locked like the identity itself. Mirrors the web app's
 // genderToAttractedToCategory (src/utils/genderUtils.ts).
 
+import { normalizeGender } from './gender'
+
 export type Category = 'men' | 'women' | 'nonbinary_people' | 'everyone'
 
 export function categoriesOf(genderIdentity: unknown, matchableAs: unknown): string[] {
-  const g = Array.isArray(genderIdentity) ? genderIdentity[0] : genderIdentity
-  switch (typeof g === 'string' ? g.toLowerCase().trim() : g) {
+  // H2: the one normaliser (gender.ts) — Explore, scoring and the founding
+  // circle read the same key from the same stored value.
+  switch (normalizeGender(genderIdentity)) {
     case 'man':
     case 'trans_man':
       return ['men']
     case 'woman':
     case 'trans_woman':
-    case 'cis woman':
       return ['women']
     case 'nonbinary':
-    case 'non_binary':
       return ['nonbinary_people']
     default:
       return Array.isArray(matchableAs) && matchableAs.length ? matchableAs.filter((x): x is string => typeof x === 'string') : ['everyone']
