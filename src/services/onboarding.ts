@@ -101,8 +101,6 @@ type OptionalRootField =
   | 'genderHidden'
   | 'heightCm'
   | 'bodyType'
-  | 'religion'
-  | 'politicalView'
   | 'parentalCurrent'
   | 'parentalIntent'
   | 'bioGeneratedAt'
@@ -116,8 +114,6 @@ const OPTIONAL_ROOT_FIELDS: OptionalRootField[] = [
   'genderHidden',
   'heightCm',
   'bodyType',
-  'religion',
-  'politicalView',
   'parentalCurrent',
   'parentalIntent',
   'bioGeneratedAt',
@@ -240,6 +236,10 @@ export async function saveSparkOnboarding(
     ageMin: d.ageMin,
     ageMax: d.ageMax,
     drinkingHabit: d.drinkingHabit ?? deleteField(),
+    // F-018: religion and politics are never shown — owner-only here, not
+    // on the public doc (the rules refuse them there).
+    religion: d.religion ?? deleteField(),
+    politicalView: d.politicalView ?? deleteField(),
   }
 
   const optional: Partial<OptionalRootFields> = {
@@ -250,8 +250,6 @@ export async function saveSparkOnboarding(
     ...(d.genderHidden && { genderHidden: true }),
     ...(heightCm !== null && { heightCm }),
     ...(d.bodyType && { bodyType: d.bodyType }),
-    ...(d.religion && { religion: d.religion }),
-    ...(d.politicalView && { politicalView: d.politicalView }),
     ...(d.parentalCurrent && { parentalCurrent: d.parentalCurrent }),
     ...(d.parentalIntent && { parentalIntent: d.parentalIntent }),
     ...(bio && d.bioGeneratedAt !== null && { bioGeneratedAt: d.bioGeneratedAt }),

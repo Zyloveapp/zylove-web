@@ -11,6 +11,7 @@ import { FRANKING_KEY } from './franking'
 import { parseKeys, photoPlaintext, verifyItem, type Verdict } from './frankingCore'
 import { OUTCOME_RETENTION_MS, deletable, expiryFor, open, seal, type Sealed } from './lockerCore'
 import { isPlayMatchId, uidNamedIn, uidOfPlayId } from './playIds'
+import { reportGeneration } from './trust'
 import { loadMatch, messagesPath } from './playMatch'
 import { loadPlayName } from './playName'
 import { REPORT_ONLY_CATEGORY_DEFS, REVIEW_CATEGORY_DEFS } from './shared/reviewCategories'
@@ -85,7 +86,9 @@ export const submitEvidence = onCall(
     // "Send the report first", the same as a wrong id.
     const reportedUid = (await uidNamedIn(matchId, data.reportedUid)) ?? ''
     const play = isPlayMatchId(matchId)
-    const generation = typeof data.generation === 'number' && data.generation > 0 ? Math.floor(data.generation) : 0
+    const claimed = typeof data.generation === 'number' && data.generation > 0 ? Math.floor(data.generation) : 0
+    // F-070: the report was filed under the server's generation — look it up the same way.
+    const generation = reportedUid ? ((await reportGeneration(matchId, reporter, reportedUid, claimed)) ?? claimed) : claimed
     const raw = Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : []
     if (!matchId || matchId.includes('/') || typeof data.reportedUid !== 'string' || !data.reportedUid) throw new HttpsError('invalid-argument', 'matchId and reportedUid required')
     if (!raw.length) throw new HttpsError('invalid-argument', 'Pick at least one message.')

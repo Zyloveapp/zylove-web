@@ -221,11 +221,12 @@ test('unmatch: a later like alone does not re-create the match', async () => {
   const b = await seedUser('Bea', { genderIdentity: 'woman', attractedTo: ['men'] })
   const id = await mutualMatch(a, b)
   await callAs(a.uid, 'unmatchConnection', { matchId: id })
-  await expect.poll(async () => (await db.doc(`matches/${id}`).get()).exists).toBe(false)
+  // F-069: the chat is kept read-only for Bea (ended), not deleted.
+  await expect.poll(async () => (await db.doc(`matches/${id}`).get()).data()?.unmatchedAt ?? null).not.toBeNull()
   const r = await likeAs(a.uid, b.uid)
   expect(r.matched).toBe(false)
-  expect((await db.doc(`matches/${id}`).get()).exists).toBe(false)
-  // Both liking again does.
+  expect((await db.doc(`matches/${id}`).get()).data().users).toEqual([b.uid])
+  // Both liking again does (a chat kept only by default gives way).
   expect((await likeAs(b.uid, a.uid)).matched).toBe(true)
 })
 

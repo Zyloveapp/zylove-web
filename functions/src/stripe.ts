@@ -74,6 +74,41 @@ async function verifiedCustomerId(uid: string): Promise<string | null> {
   }
 }
 
+// For functions that delete accounts (they cancel the plan first).
+export const STRIPE_SECRETS = [stripeSecretKey]
+
+// F-076: an account being deleted stops paying. A subscription in good
+// standing is set to end with its current period — Terms 7.3: cancellation
+// takes effect at the end of the billing period, no refunds for part of one —
+// so it never bills again; one that's past due or unpaid is cancelled now
+// (Stripe would keep retrying the charge). Throws if Stripe can't be reached:
+// the deletion then stops, rather than leave an account that's gone but
+// still billed. Returns how many were cancelled.
+export async function cancelSubscriptionsForDeletion(uid: string): Promise<number> {
+  const customerId = await verifiedCustomerId(uid)
+  if (!customerId) return 0
+  const subs = await stripe().subscriptions.list({ customer: customerId, status: 'all', limit: 20 })
+  let n = 0
+  for (const sub of subs.data) {
+    if (!LIVE_STATUSES.has(sub.status)) continue
+    if (sub.status === 'past_due' || sub.status === 'unpaid') await stripe().subscriptions.cancel(sub.id)
+    else if (!sub.cancel_at_period_end) await stripe().subscriptions.update(sub.id, { cancel_at_period_end: true, metadata: { ...sub.metadata, endedBy: 'account_deletion' } })
+    else continue
+    n++
+  }
+  if (n) logger.info('Subscriptions cancelled for account deletion', { count: n })
+  return n
+}
+
+// F-076: an account that's been deleted gets no billing writes — its
+// subscription was cancelled on deletion, and a late event would otherwise
+// bring its userInternal (and private/account mirror) back.
+async function accountGone(uid: string): Promise<boolean> {
+  const { getFirestore } = await import('firebase-admin/firestore')
+  const root = await getFirestore().doc(`users/${uid}`).get()
+  return !root.exists || root.data()?.isDeleted === true
+}
+
 function parseTier(data: unknown): PaidTier {
   const tier = typeof data === 'object' && data !== null ? (data as Record<string, unknown>).tier : undefined
   if (tier !== 'spark_plus' && tier !== 'elite') throw new HttpsError('invalid-argument', "tier must be 'spark_plus' or 'elite'")
@@ -151,6 +186,7 @@ async function applySubscription(eventSub: Stripe.Subscription, deletedEvent: bo
   const customerId = idOf(sub.customer)
   const uid = customerId ? await uidForCustomer(customerId) : null
   if (!uid) return void logger.warn('Subscription event for unknown customer', { subscription: sub.id })
+  if (await accountGone(uid)) return void logger.info('Subscription event for a deleted account — skipped', { subscription: sub.id })
 
   const ref = billingRef(uid)
   const onFile: unknown = (await loadInternal(uid)).stripeSubscriptionId
@@ -216,6 +252,7 @@ async function onCheckoutCompleted(session: Stripe.Checkout.Session): Promise<vo
   if (!uid || (tier !== 'spark_plus' && tier !== 'elite') || !subscriptionId) {
     return void logger.error('Checkout session missing uid, tier or subscription', { session: session.id })
   }
+  if (await accountGone(uid)) return void logger.info('Checkout for a deleted account — skipped', { session: session.id })
   await billingRef(uid).set(
     {
       subscriptionTier: tier,
@@ -244,6 +281,7 @@ async function onChargeReversed(charge: Stripe.Charge, why: 'refunded' | 'disput
   const uid = customerId ? await uidForCustomer(customerId) : null
   await queueAdminAlert('paymentDispute', { subjectUid: uid })
   if (!uid) return void logger.warn('Refund/dispute for unknown customer', { charge: charge.id })
+  if (await accountGone(uid)) return void logger.info('Refund/dispute for a deleted account — no billing write', { charge: charge.id })
   const subId: unknown = (await loadInternal(uid)).stripeSubscriptionId
   if (typeof subId === 'string' && subId) await stripe().subscriptions.cancel(subId).catch((err) => logger.warn('Cancel after refund/dispute failed', { message: String(err) }))
   await billingRef(uid).set(
@@ -257,6 +295,7 @@ async function onPaymentFailed(invoice: Stripe.Invoice): Promise<void> {
   const customerId = idOf(invoice.customer)
   const uid = customerId ? await uidForCustomer(customerId) : null
   if (!uid) return void logger.warn('Payment failed for unknown customer', { invoice: invoice.id })
+  if (await accountGone(uid)) return void logger.info('Payment failed for a deleted account — skipped', { invoice: invoice.id })
   await billingRef(uid).set({ subscriptionStatus: 'past_due', subscriptionUpdatedAt: FieldValue.serverTimestamp() }, { merge: true })
 
   // One text per invoice (Stripe retries several times), only for people with

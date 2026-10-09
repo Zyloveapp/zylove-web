@@ -172,6 +172,19 @@ interface Card {
   sameMarket: boolean
 }
 
+// What a Spark card carries of the public profile. F-018 / §4.A1: never
+// religion or politics (owner-only in private/matching now; older docs may
+// still hold a copy until migrated), and with "Don't show on my profile"
+// (genderHidden) not the gender identity or its self-description either.
+const NEVER_ON_CARDS = ['religion', 'politicalView']
+const HIDDEN_GENDER = ['genderIdentity', 'genderSelfDescribe']
+export function sparkCardProfile(profile: DocumentData): DocumentData {
+  const out: DocumentData = { ...profile }
+  for (const k of NEVER_ON_CARDS) delete out[k]
+  if (profile.genderHidden === true) for (const k of HIDDEN_GENDER) delete out[k]
+  return out
+}
+
 function shuffle<T>(items: T[]): T[] {
   const a = [...items]
   for (let i = a.length - 1; i > 0; i--) {
@@ -341,7 +354,7 @@ export const getExploreDeck = onCall(
         refs.push(...list(playProfile.photoURLs).filter((r) => r.startsWith('playPhotos/')))
         return
       }
-      cards.push({ uid: d.uid, profile, ...distance })
+      cards.push({ uid: d.uid, profile: sparkCardProfile(profile), ...distance })
       refs.push(...list(profile.photoURLs).filter((r) => r.startsWith('photos/')))
     })
     const { urls, expiresAt } = await signPhotoRefs(refs)

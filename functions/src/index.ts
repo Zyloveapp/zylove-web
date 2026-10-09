@@ -48,7 +48,7 @@ export { deleteModePhotos } from './profilePhotos'
 export { updateDisplayName } from './displayName'
 export { processBotLikeBacks, queueBotLikeBack } from './botLikeBack'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
-import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
+import { keptForReport, recomputeBehaviorRisk, recordVibeSignal } from './behavior'
 import { newTrial, noteTrialHistory, planView, priorTrial, trialExempt } from './trial'
 import { cityIsOpen, launchCityOf, requireTier, tierNow } from './entitlements'
 import { accountRef, internalRef, isAdminAuth, isSuspendedUid, loadInternal, loadMatching, loadSettings, requireActive } from './userData'
@@ -591,11 +591,17 @@ export const likeBack = onCall(
     // Transaction so two taps (or both people at once) create one match.
     const created = await db.runTransaction(async (tx) => {
       const existing = await tx.get(matchRef)
-      if (existing.exists) {
-        // onLike (triggered by the client's like just before this call) may
-        // have created the match first, without the bot flag.
-        if (isBot && existing.data()?.isBot !== true) tx.update(matchRef, { isBot: true, botUid: likerUid })
+      const prior = existing.data()
+      // A live match (onLike, triggered by the client's like just before this
+      // call, may have created it first, without the bot flag) stays.
+      if (existing.exists && prior?.unmatchedAt == null && prior?.isBlocked !== true) {
+        if (isBot && prior?.isBot !== true) tx.update(matchRef, { isBot: true, botUid: likerUid })
         return false
+      }
+      // F-069: an ended chat kept for a report, or a blocked one, is never
+      // replaced; one kept only by default gives way to the new match.
+      if (existing.exists && (prior?.isBlocked === true || keptForReport(prior))) {
+        throw new HttpsError('failed-precondition', "That profile isn't available.")
       }
       const [callerSnap, likerSnap] = await Promise.all([
         tx.get(db.collection('users').doc(callerId)),
@@ -604,7 +610,7 @@ export const likeBack = onCall(
       if (!likerSnap.exists) throw new HttpsError('not-found', 'That profile no longer exists')
       // matchGeneration = matchedAt (see matchGeneration.ts).
       const now = Timestamp.now()
-      tx.create(matchRef, {
+      tx.set(matchRef, {
         matchId,
         users: [callerId, likerUid].sort(),
         mode,

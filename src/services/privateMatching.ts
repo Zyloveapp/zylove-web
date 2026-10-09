@@ -9,6 +9,8 @@ import { db } from './firebase'
 export const MATCHING_KEYS = [
   'attractedTo', 'matchableAs', 'ageMin', 'ageMax', 'radiusMiles', 'drinkingHabit', 'showOrientation',
   'dealbreakers', 'seekingBodyTypes', 'seekingTraits', 'seekingHeightMinCm', 'seekingHeightMaxCm',
+  // F-018: never shown to anyone — matching only.
+  'religion', 'politicalView',
 ] as const
 export type Matching = Partial<Record<(typeof MATCHING_KEYS)[number], unknown>>
 

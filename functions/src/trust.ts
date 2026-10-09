@@ -38,6 +38,15 @@ export function phoneHash(phone: string): string {
 // and those of the 90-day records behavior.ts keeps when a match ends
 // (pastConnections/{matchId}_{generation}, or {matchId} for records from
 // before generations, as 0). Empty: they weren't matched here.
+// The generation a report (and its evidence) is filed under (F-070): the
+// claimed one if it's a real match between them, else their latest; null if
+// they never matched here.
+export async function reportGeneration(matchId: string, a: string, b: string, claimed: number): Promise<number | null> {
+  const gens = await matchGenerations(matchId, a, b)
+  if (!gens.length) return null
+  return gens.includes(claimed) ? claimed : Math.max(...gens)
+}
+
 export async function matchGenerations(matchId: string, a: string, b: string): Promise<number[]> {
   const db = getFirestore()
   const both = (data: DocumentData | undefined) => {
@@ -236,6 +245,8 @@ export async function liftBlock(uid: string, targetUid: string, mode: 'spark' | 
 // message from the other person (messages can only be written as yourself),
 // so nobody can fake a request "from" their match and accept it themselves.
 
+const CONSENT_CODES = ['photo_consent_request', 'photo_consent_declined', 'photo_consent_paused', 'photo_consent_accepted']
+
 export const acceptPhotoConsent = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
@@ -256,19 +267,25 @@ export const acceptPhotoConsent = onCall(
       throw new HttpsError('failed-precondition', 'Photo sharing opens up once both accounts are a little older.')
     }
 
-    const requests = await db.collection(messagesPath(matchId)).where('ciphertext', '==', 'photo_consent_request').get()
-    const latestRequester = requests.docs
+    // F-077: the latest consent message of ANY kind must be a request from
+    // the person named — a request from before a pause, a decline or an
+    // earlier acceptance can't be replayed by re-marking the match pending.
+    const consent = await db.collection(messagesPath(matchId)).where('ciphertext', 'in', CONSENT_CODES).get()
+    const latest = consent.docs
       .map((d) => d.data())
       .filter((m) => m.messageType === 'consent_request')
-      .sort((a, b) => (b.sentAt?.toMillis?.() ?? 0) - (a.sentAt?.toMillis?.() ?? 0))[0]?.senderId as string | undefined
+      .sort((a, b) => (b.sentAt?.toMillis?.() ?? 0) - (a.sentAt?.toMillis?.() ?? 0))[0]
+    const latestRequester = latest?.ciphertext === 'photo_consent_request' ? (latest.senderId as string | undefined) : undefined
 
     await db.runTransaction(async (tx) => {
       const match = (await tx.get(matchRef)).data()
       if (!match) throw new HttpsError('permission-denied', 'Not a participant')
-      const consent = (match.photoConsent ?? {}) as Record<string, unknown>
-      if (consent.status !== 'pending') throw new HttpsError('failed-precondition', 'No pending photo request')
-      if (consent.requestedBy === me) throw new HttpsError('failed-precondition', "You can't accept your own request")
-      if (!latestRequester || latestRequester !== consent.requestedBy) {
+      // F-077: not on a chat that's been blocked or ended.
+      if (match.isBlocked === true || match.unmatchedAt != null) throw new HttpsError('failed-precondition', 'This conversation has ended.')
+      const pending = (match.photoConsent ?? {}) as Record<string, unknown>
+      if (pending.status !== 'pending') throw new HttpsError('failed-precondition', 'No pending photo request')
+      if (pending.requestedBy === me) throw new HttpsError('failed-precondition', "You can't accept your own request")
+      if (!latestRequester || latestRequester !== pending.requestedBy) {
         throw new HttpsError('failed-precondition', 'No matching photo request')
       }
       tx.update(matchRef, {

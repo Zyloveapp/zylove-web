@@ -87,6 +87,8 @@ export const PRIVATE_PROFILE_FIELDS = ['intent', 'onboardingPath', 'mode', 'inte
 export const MATCHING_FIELDS = [
   'attractedTo', 'matchableAs', 'ageMin', 'ageMax', 'radiusMiles', 'drinkingHabit', 'showOrientation',
   'dealbreakers', 'seekingBodyTypes', 'seekingTraits', 'seekingHeightMinCm', 'seekingHeightMaxCm',
+  // F-018 / §4.A1: never shown to anyone — matching only.
+  'religion', 'politicalView',
 ] as const
 
 export async function loadMatching(uid: string, root?: DocumentData): Promise<DocumentData> {
@@ -387,6 +389,8 @@ export async function clearPrivateData(uid: string, { keepTrustLinks = false }: 
     // T&S Phase 5: its photo hashes and duplicate pairs (a scam ban copies
     // them to the blocklist first).
     removePhotoHashes(uid),
+    // F-071: blocklist holds' context (kept server-only, photoHolds.ts).
+    import('./photoHolds').then((m) => m.removePhotoHolds(uid)),
   ])
 }
 

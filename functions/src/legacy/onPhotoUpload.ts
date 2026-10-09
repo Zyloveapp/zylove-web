@@ -27,6 +27,7 @@ import { takeRateLimit } from '../rateLimits'
 import { accountRef, internalRef } from '../userData'
 import { recordPhotoSignal, webMatches } from '../photoChecks'
 import { checkPhoto } from '../photoHashes'
+import { photoHoldRef } from '../photoHolds'
 import { isPlayPhotoRef } from '../storagePath'
 import { uidOfPlayId } from '../playIds'
 
@@ -165,13 +166,21 @@ export const onPhotoUpload = onObjectFinalized(
         return null
       })
       if (hashed?.blocklisted) {
+        // The match's ban context is stored now (the banned account's records
+        // may be gone by the time someone reviews it) — server-only (F-071).
+        await photoHoldRef(uid, photoRef).set({
+          uid,
+          url: photoRef,
+          match: hashed.blocklisted,
+          more: hashed.blocklistMore,
+          distance: hashed.blocklisted.distance,
+          heldAt: admin.firestore.Timestamp.now(),
+        })
         await flagPending({
           url: photoRef,
           mode: isPlayPhoto ? 'play' : 'spark',
           flaggedAt: admin.firestore.Timestamp.now(),
-          // The match's ban context is stored now: the banned account's
-          // records may be gone by the time someone reviews it.
-          reason: { blocklist: true, distance: hashed.blocklisted.distance, match: hashed.blocklisted, more: hashed.blocklistMore },
+          reason: { blocklist: true },
           approved: false,
         })
         await notifyAdmins()

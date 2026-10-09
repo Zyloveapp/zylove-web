@@ -90,7 +90,7 @@ test('F-018: "Don\'t show my gender" in Edit profile hides it on the profile; de
   const dialog = page.getByRole('dialog', { name: 'Delete your account?' })
   await expect(dialog.getByText(/read-only copy of each chat, shown as "Deleted User"/)).toBeVisible()
   await expect(dialog.getByText(/recovery record .* for 18 months/)).toBeVisible()
-  await expect(dialog.getByText(/doesn't cancel it — cancel first under Upgrade → Manage subscription/)).toBeVisible()
+  await expect(dialog.getByText(/Deleting your account cancels it: it won't renew, and the rest of the current period isn't refunded/)).toBeVisible()
   await shots(page, 'delete-dialog')
   expect(net.errors).toEqual([])
   await ctx.close()

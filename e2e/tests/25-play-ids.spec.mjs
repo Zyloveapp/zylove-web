@@ -180,8 +180,8 @@ test('a Spark match and a Play match side by side; unmatching one leaves the oth
   expect(r.matchId).toMatch(/^pm_/)
   expect((await db.doc(`matches/${sortedPair(a.uid, b.uid)}`).get()).data()?.mode).toBe('spark')
   await callAs(a.uid, 'unmatchConnection', { matchId: r.matchId })
-  await expect.poll(async () => (await db.doc(`playMatches/${r.matchId}`).get()).exists, { timeout: 20000 }).toBe(false)
-  await expect.poll(async () => (await db.doc(`playMatchMembers/${r.matchId}`).get()).exists, { timeout: 20000 }).toBe(false)
+  // F-069: kept read-only for Bella's Play ID only; no longer their live match.
+  await expect.poll(async () => (await db.doc(`playMatches/${r.matchId}`).get()).data()?.players ?? null, { timeout: 20000 }).toEqual([await playIdOf(b.uid)])
   expect(await playMatchOf(a.uid, b.uid)).toBeNull()
   expect((await db.doc(`matches/${sortedPair(a.uid, b.uid)}`).get()).exists).toBe(true)
 })

@@ -142,6 +142,7 @@ const SCORED_PRIVATE_FIELDS = [
   "intent",
   "attractedTo", "matchableAs", "ageMin", "ageMax", "drinkingHabit",
   "dealbreakers", "seekingBodyTypes", "seekingHeightMinCm", "seekingHeightMaxCm",
+  "religion", "politicalView",
 ] as const;
 
 async function rescoreOnPrivateChange(

@@ -98,7 +98,7 @@ function FounderWarningModal({
 const ACCOUNT_DELETE_BODY = [
   'Your Spark and Play profiles and your matches come down right away, and your chats end. The people you were talking to keep a read-only copy of each chat, shown as "Deleted User", until it is permanently deleted within 12 months.',
   `Changed your mind? Email ${SUPPORT_EMAIL} within 90 days and we can restore your account. We keep a recovery record (your phone number, name, birthday, gender, pronouns, bio, photo links and moderation status) for 18 months — for a banned account, as long as the ban stands.`,
-  'Paying for Spark+ or Elite? Deleting your account doesn\'t cancel it — cancel first under Upgrade → Manage subscription.',
+  'Paying for Spark+ or Elite? Deleting your account cancels it: it won\'t renew, and the rest of the current period isn\'t refunded.',
 ].join('\n\n')
 
 const COPY = {

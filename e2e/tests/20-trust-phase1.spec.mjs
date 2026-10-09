@@ -133,13 +133,19 @@ test('unmatch: a reported chat is kept for the reporter (read-only), gone for th
   await expect.poll(async () => (await db.doc(`matches/${id}/messages/${msg.id}`).get()).exists, { timeout: 15000 }).toBe(false)
 })
 
-test('unmatch without a report still deletes the chat at once', async () => {
+test('F-069: unmatch without a report keeps the chat read-only for the other person (not for a report), then it goes', async () => {
   const a = await seedUser('Ann')
   const b = await woman('Bea')
   const id = await matchOf(a, b)
-  await adminMessage(id, a.uid)
+  const msg = await adminMessage(id, a.uid)
   await callAs(a.uid, 'unmatchConnection', { matchId: id })
-  expect((await db.doc(`matches/${id}`).get()).exists).toBe(false)
+  expect((await db.doc(`matches/${id}`).get()).data()).toMatchObject({ users: [b.uid], preservedFor: [b.uid], preservedForReport: false })
+  expect(await restGet(a.uid, `matches/${id}`)).toBe(403)
+  expect(await restGet(b.uid, `matches/${id}`)).toBe(200)
+  await db.doc(`matches/${id}`).update({ preservedUntil: Timestamp.fromMillis(Date.now() - 1000) })
+  await fnLib('behavior').purgePreservedChats.run({})
+  await expect.poll(async () => (await db.doc(`matches/${id}`).get()).exists, { timeout: 15000 }).toBe(false)
+  if (msg?.id) await expect.poll(async () => (await db.doc(`matches/${id}/messages/${msg.id}`).get()).exists, { timeout: 15000 }).toBe(false)
 })
 
 test('unmatch offers "Report first" in the chat menu', async ({ browser }) => {

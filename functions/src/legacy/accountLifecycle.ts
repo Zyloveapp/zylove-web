@@ -4,12 +4,13 @@ import { LEGACY_RUNTIME } from "./legacyOptions";
 import { UserDoc } from "./types";
 import { normalizeE164 } from "./utils/phone";
 import { priorTrial } from "../trial";
+import { STRIPE_SECRETS, cancelSubscriptionsForDeletion } from "../stripe";
 import { ROOT_SCRUB, clearPrivateData, identityRef, internalRef, isSuspendedUid, matchingRef, moderationCarry, profileRef, recoveryRecord } from "../userData";
 
 
 
 // ─── deleteAccount ────────────────────────────────────────────────────────────
-export const deleteAccount = onCall(LEGACY_RUNTIME, async (request) => {
+export const deleteAccount = onCall({ ...LEGACY_RUNTIME, secrets: STRIPE_SECRETS }, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
 const db = admin.firestore();
 const auth = admin.auth();
@@ -34,6 +35,13 @@ const auth = admin.auth();
       "Cannot delete account without a valid phone number.",
     );
   }
+
+  // F-076: the plan stops first (cancelled at the end of its period; a past-due
+  // one now). If Stripe can't be reached nothing is deleted — try again.
+  await cancelSubscriptionsForDeletion(uid).catch((err: unknown) => {
+    console.error("deleteAccount: subscription cancel failed", err instanceof Error ? err.message : err);
+    throw new HttpsError("unavailable", "We couldn't cancel your subscription just now, so nothing was deleted. Please try again in a minute.");
+  });
 
   // The recovery record (userData.ts — the shape every delete path writes),
   // with any suspension in force and the report count (F-067).

@@ -99,10 +99,12 @@ test('sealing: Play photos, Play scores and Play callables need Play access', as
   // Two Play users: Play scores (by Play ID), in the server-only subdoc.
   const both = await callAs(p1.uid, 'onTap', { tappedPlayId: p2Play })
   expect(typeof both.playScore).toBe('number')
+  // F-065: never on the uid pair — in playPairData, keyed by the Play IDs.
   const pp = sortedPair(p1.uid, p2.uid)
-  expect((await db.doc(`pairs/${pp}`).get()).data().playScore).toBeUndefined()
-  expect(typeof (await db.doc(`pairs/${pp}/modes/play`).get()).data().playScore).toBe('number')
-  expect(await restGet(p1.uid, `pairs/${pp}/modes/play`)).toBe(403)
+  expect((await db.doc(`pairs/${pp}`).get()).exists).toBe(false)
+  const ppd = `playPairData/${[await playIdOf(p1.uid), p2Play].sort().join('_')}`
+  expect(typeof (await db.doc(ppd).get()).data().playScore).toBe('number')
+  expect(await restGet(p1.uid, ppd)).toBe(403)
 
   for (const [fn, data] of [['recordSwipe', { targetUid: p1Play, action: 'like', mode: 'play' }], ['getSentSparks', { mode: 'play' }], ['onLike', { likedUserId: p1Play, mode: 'play' }]]) {
     await expect(callAs(s.uid, fn, data), fn).rejects.toThrow(/permission-denied|PERMISSION_DENIED/)
@@ -251,14 +253,14 @@ async function seedPlayFootprint() {
   // A Play like each way still in a queue (as if sent before the match).
   await db.doc(`users/${p2.uid}/likeQueue/${p1Play}`).set({ likerPlayId: p1Play, mode: 'play', likedAt: Date.now(), likerProfile: { displayName: 'Pia' } })
   await db.doc(`users/${p1.uid}/likeQueue/${p2Play}`).set({ likerPlayId: p2Play, mode: 'play', likedAt: Date.now(), likerProfile: { displayName: 'Paz' } })
-  expect((await db.doc(`pairs/${sortedPair(p1.uid, p2.uid)}/modes/play`).get()).exists).toBe(true)
+  expect((await db.doc(`playPairData/${[p1Play, p2Play].sort().join('_')}`).get()).exists).toBe(true)
   return { p1, p2, matchId, ref, p1Play, p2Play }
 }
 
 async function expectNoPlayLeft(p1, p2, matchId, ref, p1Play, p2Play) {
   for (const path of [
     `users/${p1.uid}/playProfile/data`, `users/${p1.uid}/settings/playPin`, `users/${p1.uid}/settings/pause`, `users/${p1.uid}/private/profile`,
-    `userInternal/${p1.uid}`, `pairs/${sortedPair(p1.uid, p2.uid)}/modes/play`, `users/${p2.uid}/likeQueue/${p1Play}`, `users/${p1.uid}/likeQueue/${p2Play}`,
+    `userInternal/${p1.uid}`, `playPairData/${[p1Play, p2Play].sort().join('_')}`, `users/${p2.uid}/likeQueue/${p1Play}`, `users/${p1.uid}/likeQueue/${p2Play}`,
     // F-062: the public Play profile and the Play ID mapping go too.
     `playProfiles/${p1Play}`, `playIds/${p1.uid}`, `playIdOwners/${p1Play}`,
   ]) expect((await db.doc(path).get()).exists, path).toBe(false)

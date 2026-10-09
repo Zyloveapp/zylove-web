@@ -18,6 +18,7 @@ import { loadSparkDetails, writeSparkDetails } from "../pairSpark";
 import { ensurePlayId, requireUidOfPlayId } from "../playIds";
 import { createPlayMatch, livePlayMatchOf, matchRefOf } from "../playMatch";
 import { publicPlayProfile } from "../playProfiles";
+import { keptForReport } from "../behavior";
 
 export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
@@ -119,8 +120,8 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   const live = !!existingMatch && existingMatch.isBlocked !== true && !existingMatch.unmatchedAt;
   // T&S Phase 1: a reported chat kept for its reporter (unmatchConnection)
   // is never overwritten by a re-match while it's preserved.
-  const preserved = !!existingMatch && typeof existingMatch.preservedUntil?.toMillis === "function" &&
-    existingMatch.preservedUntil.toMillis() > Date.now();
+  // F-069: a chat kept only by default (not for a report) gives way to a re-match.
+  const preserved = keptForReport(existingMatch);
   const matched   = otherLiked && !preserved;
   const createMatch = otherLiked && !live && !preserved;
 

@@ -192,6 +192,8 @@ service cloud.firestore {
         // moderation notes (→ userInternal / private/account)
         'attractedTo', 'matchableAs', 'ageMin', 'ageMax', 'radiusMiles', 'drinkingHabit', 'showOrientation',
         'dealbreakers', 'seekingBodyTypes', 'seekingTraits', 'seekingHeightMinCm', 'seekingHeightMaxCm',
+        // F-018 / §4.A1: never shown — owner-only in private/matching
+        'religion', 'politicalView',
         'suspendedAt', 'suspendedUntil', 'suspendedBy', 'suspendSource', 'suspendReason', 'suspendedPendingReview',
         'bannedAt', 'bannedBy', 'deletionRequestedAt', 'deletionScheduledFor', 'deletionReason',
         'adminNotice', 'lastWarnedAt', 'lastThankedAt',
@@ -288,7 +290,9 @@ service cloud.firestore {
       // scoring read them server-side. These keys only.
       function matchingKeys() {
         return ['attractedTo', 'matchableAs', 'ageMin', 'ageMax', 'radiusMiles', 'drinkingHabit', 'showOrientation',
-                'dealbreakers', 'seekingBodyTypes', 'seekingTraits', 'seekingHeightMinCm', 'seekingHeightMaxCm'];
+                'dealbreakers', 'seekingBodyTypes', 'seekingTraits', 'seekingHeightMinCm', 'seekingHeightMaxCm',
+                // F-018 / §4.A1: never shown — matching only
+                'religion', 'politicalView'];
       }
       function validMatching(d) {
         return d.keys().hasOnly(matchingKeys())
@@ -297,7 +301,9 @@ service cloud.firestore {
             && (!('ageMin' in d) || d.ageMin is int)
             && (!('ageMax' in d) || d.ageMax is int)
             // Stage C: the viewer's own distance, 1–100 miles (no "no limit").
-            && (!('radiusMiles' in d) || (d.radiusMiles is number && d.radiusMiles >= 1 && d.radiusMiles <= 100));
+            && (!('radiusMiles' in d) || (d.radiusMiles is number && d.radiusMiles >= 1 && d.radiusMiles <= 100))
+            && (!('religion' in d) || d.religion == null || (d.religion is string && d.religion.size() <= 40))
+            && (!('politicalView' in d) || d.politicalView == null || (d.politicalView is string && d.politicalView.size() <= 40));
       }
       // matchableAs (how off-map identities are matched) stays identity-locked,
       // as it was on the public doc.
@@ -371,10 +377,18 @@ service cloud.firestore {
       }
 
       // Spark profile subcollection
+      // F-075: the owner's only — others see a Spark profile through the
+      // root doc and the server — and only `data`, with the fields the app
+      // writes (it was readable by everyone and took any doc and any fields).
       match /sparkProfile/{doc} {
-        allow read: if isSignedIn()
-                    && (isUser(uid) || (profileVisible(uid) && notBlockedFrom(uid)));
-        allow write: if callerActive() && isUser(uid) && isSignedIn();
+        allow read: if isSignedIn() && isUser(uid);
+        allow create, update: if callerActive() && isUser(uid) && isSignedIn() && doc == 'data'
+                              && request.resource.data.keys().hasOnly([
+                                  'uid', 'displayName', 'age', 'pronouns', 'genderIdentity', 'photoURLs', 'bio',
+                                  'promptAnswers', 'sparkPromptAnswers', 'lifestyleTags', 'personalityTags', 'topValues',
+                                  'intent', 'height', 'bodyType', 'isActive', 'completeness', 'lastUpdated',
+                                  'goDeeper', 'dynamicPrompt']);
+        allow delete: if isUser(uid) && isSignedIn() && doc == 'data';
       }
 
       // Play profile subcollection (Stage 2: the only home of Play profile
@@ -538,7 +552,12 @@ service cloud.firestore {
                         || request.resource.data.lastSenderId == request.auth.uid)
                     && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['photoConsent'])
                         || request.resource.data.get('photoConsent', {}).get('status', '') != 'accepted'
-                        || resource.data.get('photoConsent', {}).get('status', '') == 'accepted');
+                        || resource.data.get('photoConsent', {}).get('status', '') == 'accepted')
+                    // F-077: a request names its sender only (a pending consent
+                    // "from" the other person let an old request be accepted again).
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['photoConsent'])
+                        || request.resource.data.get('photoConsent', {}).get('status', '') != 'pending'
+                        || request.resource.data.get('photoConsent', {}).get('requestedBy', '') == request.auth.uid);
       // Unmatching goes through unmatchConnection; a client can't delete the
       // chat (and the other person's copy of it).
       allow delete: if false;
@@ -725,7 +744,10 @@ service cloud.firestore {
                         || request.resource.data.lastSenderId == myPlayId())
                     && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['photoConsent'])
                         || request.resource.data.get('photoConsent', {}).get('status', '') != 'accepted'
-                        || resource.data.get('photoConsent', {}).get('status', '') == 'accepted');
+                        || resource.data.get('photoConsent', {}).get('status', '') == 'accepted')
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['photoConsent'])
+                        || request.resource.data.get('photoConsent', {}).get('status', '') != 'pending'
+                        || request.resource.data.get('photoConsent', {}).get('requestedBy', '') == myPlayId());
 
       // As under matches (see there); a curated partner is the server's isBot.
       function playValidFrank(d) {
@@ -828,11 +850,10 @@ service cloud.firestore {
     // Users can create their own swipes, read none (server-side only)
 
     match /swipes/{swipeId} {
-      // Write path moved to recordSwipe + sendSuperLike Callables.
-      // Rule retained for legacy compat — suspension enforced server-side.
-      allow create: if callerActive() && isSignedIn()
-                    && request.resource.data.swiperId == request.auth.uid;
-      allow read, update, delete: if false; // Cloud Functions only
+      // Written only by recordSwipe and sendSuperLike. F-075: no client
+      // writes — any timestamp and size were accepted, enough to sink the
+      // nightly trust job.
+      allow read, write: if false;
     }
 
     // ─── Score Events ────────────────────────────────────────────────────────
@@ -842,22 +863,16 @@ service cloud.firestore {
     match /scoreEvents/{eventId} {
       allow read: if isSignedIn()
                   && resource.data.uid == request.auth.uid;
-      // Write path moved to submitUnmatch Callable. Rule retained for
-      // legacy compat — suspension enforced server-side.
-      allow create: if callerActive() && isSignedIn()
-                    && request.resource.data.reason.matches('unmatch_.*');
-      allow update, delete: if false; // Cloud Functions only
+      // F-075: server-written only (any uid was accepted).
+      allow create, update, delete: if false;
     }
 
     // ─── Unmatch Reasons ────────────────────────────────────────────────────
     // Write only — no one reads these except admins via Cloud Functions
 
     match /unmatchReasons/{docId} {
-      // Write path moved to submitUnmatch Callable. Rule retained for
-      // legacy compat — suspension enforced server-side.
-      allow create: if isSignedIn()
-                    && request.resource.data.reporterUid == request.auth.uid;
-      allow read, update, delete: if false;
+      // F-075: server-written only.
+      allow read, write: if false;
     }
 
     // ─── Banned phones ──────────────────────────────────────────────────────
@@ -871,11 +886,9 @@ service cloud.firestore {
     // Write only — safety team reads via admin SDK
 
     match /reviewQueue/{docId} {
-      // Write path moved to submitUnmatch Callable. Rule retained for
-      // legacy compat — suspension enforced server-side.
-      allow create: if callerActive() && isSignedIn()
-                    && request.resource.data.reporterUid == request.auth.uid;
-      allow read, update, delete: if false;
+      // F-075: server-written only — client docs with any reportedUid
+      // counted towards trust flags (two opened one on anyone).
+      allow read, write: if false;
     }
 
     // ─── Reports ────────────────────────────────────────────────────────────
@@ -950,7 +963,8 @@ service cloud.firestore {
     match /notifications/{notificationId} {
       allow read, update: if isSignedIn()
                           && resource.data.uid == request.auth.uid;
-      allow create: if isSignedIn(); // Cloud Functions create these
+      // F-075: nothing writes these any more (anyone could create one for anyone).
+      allow create: if false;
       allow delete: if isSignedIn()
                     && resource.data.uid == request.auth.uid;
     }

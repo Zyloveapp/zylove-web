@@ -112,6 +112,14 @@ async function recordPastConnection(
 // How long a reported chat stays readable to its reporter after an unmatch.
 export const PRESERVE_REPORTED_MS = 30 * DAY_MS
 
+// A chat kept read-only for a report (unmatchConnection) and still within its
+// window: nothing replaces it. Older kept chats (no preservedForReport) were
+// all kept for a report.
+export function keptForReport(m: DocumentData | undefined): boolean {
+  const until = m?.preservedUntil
+  return !!m && typeof until?.toMillis === 'function' && until.toMillis() > Date.now() && m.preservedForReport !== false
+}
+
 // Participants with an open (pending) report against the other one for this
 // match's generation — reports/{reporter}_{reported}_{generation}.
 async function openReporters(matchId: string, match: DocumentData, a: string, b: string): Promise<string[]> {
@@ -187,6 +195,9 @@ export const unmatchConnection = onCall(
         unmatchedBy: ctx.idOf(uid),
         preservedFor: ids(keepFor),
         preservedUntil: Timestamp.fromMillis(Date.now() + PRESERVE_REPORTED_MS),
+        // Kept for a report (never replaced by a re-match while it lasts), or
+        // just by default (a mutual re-match starts a new chat over it).
+        preservedForReport: reporters.length > 0,
       })
       logger.info('unmatchConnection: kept read-only', { matchId, kept: keepFor.length, reported: reporters.length > 0 })
       return { success: true }

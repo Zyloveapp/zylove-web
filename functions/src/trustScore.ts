@@ -352,12 +352,18 @@ const isBot = (uid: string) => /^(zbot|seed)-/.test(uid)
 
 // Review-threshold hits (reviewQueue review_{uid}_{category}, reason
 // "review_<category>"); the behaviour-risk entries count via behaviorRiskScore.
-const reviewCategory = (r: DocumentData): string | null =>
-  typeof r.reason === 'string' && r.reason.startsWith('review_') ? r.reason.slice('review_'.length) : null
+// F-075: only the server's own docs — id review_{reportedUid}_{category},
+// matching the doc's reason. Clients could create reviewQueue docs with any
+// reportedUid and reason (no longer: rules), and two of those opened a flag.
+const reviewCategory = (r: DocumentData, id: string): string | null => {
+  if (typeof r.reason !== 'string' || !r.reason.startsWith('review_')) return null
+  const cat = r.reason.slice('review_'.length)
+  return typeof r.reportedUid === 'string' && id === `review_${r.reportedUid}_${cat}` ? cat : null
+}
 
-async function reviewFlagsOf(uid: string): Promise<string[]> {
+export async function reviewFlagsOf(uid: string): Promise<string[]> {
   const q = await db().collection('reviewQueue').where('reportedUid', '==', uid).get().catch(() => null)
-  return (q?.docs ?? []).map((d) => reviewCategory(d.data())).filter((c): c is string => c !== null)
+  return (q?.docs ?? []).map((d) => reviewCategory(d.data(), d.id)).filter((c): c is string => c !== null)
 }
 
 // One account, now (after a strong event), against the last nightly baselines.
@@ -448,7 +454,7 @@ export const computeTrustScores = onSchedule(
     const reviewBy = new Map<string, string[]>()
     for (const d of reviewQueue.docs) {
       const r = d.data()
-      const cat = reviewCategory(r)
+      const cat = reviewCategory(r, d.id)
       if (typeof r.reportedUid === 'string' && cat) reviewBy.set(r.reportedUid, [...(reviewBy.get(r.reportedUid) ?? []), cat])
     }
     const rejectBy = new Map<string, number>()

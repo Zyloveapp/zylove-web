@@ -27,7 +27,8 @@ import { REPORT_ONLY_IDS, REVIEW_TONE } from './shared/reviewCategories'
 import { checkScamSuspension } from './scamReports'
 import { queueAdminAlert } from './adminAlerts'
 import { SMS_SECRETS, textAccount } from './sms'
-import { matchGenerations, phoneHash } from './trust'
+import { STRIPE_SECRETS } from './stripe'
+import { phoneHash, reportGeneration } from './trust'
 import { takeRateLimit } from './rateLimits'
 import { softDeleteAccount } from './adminActivity'
 import { audit, requireAdminAudited } from './audit'
@@ -115,11 +116,10 @@ export async function recordReport(input: {
   // F-070: the generation is the server's — the claimed one only if it's a
   // real match between them, else their latest — so there's one report per
   // reporter, person and match, however it's called.
-  const generations = await matchGenerations(matchId, reporterUid, reportedUid)
-  if (!generations.length) {
+  const generation = await reportGeneration(matchId, reporterUid, reportedUid, input.generation)
+  if (generation === null) {
     throw new HttpsError('permission-denied', 'You can only report people you matched with.')
   }
-  const generation = generations.includes(input.generation) ? input.generation : Math.max(...generations)
   await takeRateLimit(reporterUid, 'report', REPORT_LIMIT).catch(() => {
     throw new HttpsError('resource-exhausted', "You've sent a lot of reports today. Our team has them — you can send more tomorrow.")
   })
@@ -523,7 +523,7 @@ export async function liftSuspension(uid: string): Promise<void> {
 }
 
 export const adminModerate = onCall(
-  { timeoutSeconds: 120, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
+  { timeoutSeconds: 120, memory: '256MiB', invoker: 'public', secrets: [...SMS_SECRETS, ...STRIPE_SECRETS] },
   async (request): Promise<{ ok: true; resolved?: number; texted?: boolean; phoneBanned?: boolean }> => {
     const adminUid = requireAdmin(request.auth)
     const data = (request.data ?? {}) as Record<string, unknown>

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { resetEmulators, seedUser, signIn, offline, quietFirstRun, callAs, idTokenFor, db, Timestamp, CONTEXT, PROJECT } from './helpers.mjs'
+import { resetEmulators, seedUser, signIn, offline, quietFirstRun, callAs, idTokenFor, db, Timestamp, FieldValue, CONTEXT, PROJECT } from './helpers.mjs'
 
 // The /contact form through submitContactMessage (signed out, per-address
 // and daily limits), the retired public forms, and the admin inbox
@@ -152,7 +152,11 @@ test('contact inbox: the admin page renders at 1280 and 390 with no sideways scr
     email: `${'long'.repeat(20)}@example.com`,
     message: `A long message with an unbroken run: ${'x'.repeat(300)}\nand a second line.`,
   })
+  // Each browser context is a new device: an account with a key already
+  // would get the key-restore prompt, which isn't under test here.
+  const freshDevice = (uid) => Promise.all([db.doc(`users/${uid}`).update({ publicKey: FieldValue.delete() }), db.doc(`keyBackups/${uid}`).delete()])
   for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    await freshDevice(admin.uid)
     const ctx = await browser.newContext({ ...CONTEXT, viewport })
     const page = await ctx.newPage()
     await offline(page)
@@ -187,6 +191,7 @@ test('contact inbox: the admin page renders at 1280 and 390 with no sideways scr
   await ctx.close()
 
   // Marking handled from the page moves it out of "To handle".
+  await freshDevice(admin.uid)
   const actx = await browser.newContext({ ...CONTEXT, viewport: { width: 390, height: 844 } })
   const apage = await actx.newPage()
   await offline(apage)

@@ -120,10 +120,13 @@ test('blocklist: a scam ban lists the photos; the same photo from a new account 
   expect((await getStorage().bucket(BUCKET).file(pn).exists())[0]).toBe(true) // not deleted
   await expect.poll(async () => (await flag(n.uid))?.reasons?.map((r) => r.key) ?? [], { timeout: 20000 }).toContain('blocklist_photo')
 
-  // The hold carries the match's context, stored when it was held.
+  // F-071: the owner's entry says only that it's held; the match's context,
+  // stored when it was held, is server-only (photoHolds).
   const held = (await accountDoc(n.uid)).pendingPhotoURLs.find((p) => p.url === pn)
-  expect(held.reason).toMatchObject({ blocklist: true, distance: 0, more: 1, match: { uid: s.uid, name: 'Sam', distance: 0, adminMarkedScam: true, reports: { scam: 2, harassment: 1 } } })
-  expect(typeof held.reason.match.bannedAt).toBe('number')
+  expect(held.reason).toEqual({ blocklist: true })
+  const hold = (await db.doc(`photoHolds/${fnLib('photoHolds').photoHoldId(n.uid, pn)}`).get()).data()
+  expect(hold).toMatchObject({ uid: n.uid, distance: 0, more: 1, match: { uid: s.uid, name: 'Sam', distance: 0, adminMarkedScam: true, reports: { scam: 2, harassment: 1 } } })
+  expect(typeof hold.match.bannedAt).toBe('number')
   // Photo review shows it: which account, when and why banned, how close.
   const { photos } = await callAs(admin.uid, 'listPendingPhotos')
   const row = photos.find((p) => p.url === pn)

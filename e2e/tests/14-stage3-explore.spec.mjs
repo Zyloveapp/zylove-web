@@ -113,7 +113,9 @@ test('rules: no listing users; suspended and deleted profiles unreadable', async
   const q = await fetch(`${BASE}:runQuery`, { method: 'POST', headers: await auth(a.uid), body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'users' }], limit: 5 } }) })
   expect(q.status).toBe(403)
   expect(await restGet(a.uid, `users/${b.uid}`)).toBe(200)
-  expect(await restGet(a.uid, `users/${b.uid}/sparkProfile/data`)).toBe(200)
+  // F-075: sparkProfile is the owner's only now.
+  expect(await restGet(a.uid, `users/${b.uid}/sparkProfile/data`)).toBe(403)
+  expect(await restGet(b.uid, `users/${b.uid}/sparkProfile/data`)).toBe(200)
   for (const u of [s, d]) {
     expect(await restGet(a.uid, `users/${u.uid}`), u.name).toBe(403)
     expect(await restGet(a.uid, `users/${u.uid}/sparkProfile/data`), u.name).toBe(403)

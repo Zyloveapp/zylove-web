@@ -13,6 +13,7 @@ import * as admin from 'firebase-admin'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { LEGACY_RUNTIME } from './legacyOptions'
 import { ROOT_SCRUB, clearPrivateData, moderationCarry, recoveryRecord } from '../userData'
+import { STRIPE_SECRETS, cancelSubscriptionsForDeletion } from '../stripe'
 
 
 
@@ -210,7 +211,7 @@ const auth = admin.auth()
 // reason, status } and never persists the phone.
 
 export const processGraceExpiredDeletions = onSchedule(
-  { schedule: '0 3 * * *', timeZone: 'America/Chicago', ...LEGACY_RUNTIME },
+  { schedule: '0 3 * * *', timeZone: 'America/Chicago', ...LEGACY_RUNTIME, secrets: STRIPE_SECRETS },
   async () => {
     const db = admin.firestore()
     const auth = admin.auth()
@@ -249,6 +250,14 @@ export const processGraceExpiredDeletions = onSchedule(
         }
 
         const userData = userSnap.data()!
+
+        // F-076: the plan stops first; if Stripe can't be reached the request
+        // waits for the next run.
+        const cancelled = await cancelSubscriptionsForDeletion(uid).then(() => true, () => false)
+        if (!cancelled) {
+          await reqDoc.ref.update({ lastError: 'subscription cancel failed — retried next run', processedAt: now })
+          continue
+        }
 
         // Recovery doc — the same record deleteAccount writes (F-067: with the
         // identity restore needs and any suspension in force).

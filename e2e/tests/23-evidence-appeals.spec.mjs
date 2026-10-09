@@ -367,7 +367,7 @@ test('rules: a suspended user with a still-valid session is refused — messages
     return {
       message: await commit(token, [newDoc(`matches/${id}/messages/m${n}`, { senderId: a.uid, status: 'sent', messageType: 'text', ciphertext: 'c2VhbGVk', nonce: 'bm9uY2U=' }, 'sentAt')]),
       profile: await commit(token, [patch(`users/${a.uid}`, { bio: `bio ${n}` })]),
-      like: await commit(token, [newDoc(`swipes/s${n}${a.uid}`, { swiperId: a.uid, swipedId: b.uid, action: 'like', mode: 'spark' }, 'timestamp')]),
+      // (swipes: no client writes for anyone since F-075 — recordSwipe only.)
       match: await commit(token, [patch(`matches/${id}`, { hasUnread: n % 2 === 0 })]),
       typing: await commit(token, [patch(`matches/${id}/typing/${a.uid}`, { at: n })]),
       profilePhoto: await upload(token, `photos/${a.uid}/spark/p${n}.jpg`, 'image/jpeg'),

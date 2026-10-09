@@ -173,9 +173,15 @@ test('pairs: no like state on the shared pair doc; sent likes come from the per-
   await setPlan(a.uid, 'elite')
   await fnLib('playAccess').refreshPlayAccess(b.uid)
   await likeAs(a.uid, b.uid, 'play')
+  // F-065: a Play like leaves nothing on (or under) the uid pair; its record
+  // is server-only, keyed by the Play IDs.
+  expect((await db.doc(`pairs/${sortedPair(a.uid, b.uid)}`).get()).exists).toBe(false)
+  const ppd = `playPairData/${[await playIdOf(a.uid), await playIdOf(b.uid)].sort().join('_')}`
+  expect((await db.doc(ppd).get()).data().likedBy).toEqual([a.uid])
+  expect(await restGet(b.uid, ppd)).toBe(403)
+  await callAs(a.uid, 'onTap', { tappedUserId: b.uid })
   const pair = (await db.doc(`pairs/${sortedPair(a.uid, b.uid)}`).get()).data()
   for (const f of ['userALiked', 'userBLiked', 'matched', 'initiatedBy']) expect(pair[f], f).toBeUndefined()
-  expect(await restGet(b.uid, `pairs/${sortedPair(a.uid, b.uid)}/likes/play`)).toBe(403)
   // F-062: a Play entry is named by Play ID.
   expect((await callAs(a.uid, 'getSentSparks', { mode: 'play' })).sent.map((s) => s.playId)).toEqual([await playIdOf(b.uid)])
   expect((await callAs(a.uid, 'getSentSparks', { mode: 'spark' })).sent).toEqual([])

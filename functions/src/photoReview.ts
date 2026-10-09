@@ -7,6 +7,7 @@ import { storagePath } from './storagePath'
 import { requireAdminAudited, audit } from './audit'
 import { accountRef, internalRef, isAdminAuth, userRef } from './userData'
 import { matchView, type BlocklistMatchView } from './blocklistContext'
+import { photoHoldRef, withHoldContext } from './photoHolds'
 
 // Admin photo review (/admin/photos). onPhotoUpload parks flagged photos of
 // both modes in users/{uid}/private/account pendingPhotoURLs (owner-only; each
@@ -87,15 +88,18 @@ export const listPendingPhotos = onCall(
         const data = (await userRef(uid).get()).data() ?? {}
         const [account, play] = await Promise.all([accountRef(uid).get(), userRef(uid).collection('playProfile').doc('data').get()])
         const displayName = typeof data.displayName === 'string' ? data.displayName : ''
-        return [...pendingOf(account.data()), ...pendingOf(data), ...pendingOf(play.data())].map(
-          (entry): PendingPhoto => ({
-            uid,
-            displayName,
-            mode: modeOf(entry),
-            url: entry.url,
-            flaggedAt: millis(entry.flaggedAt),
-            reason: entry.reason ?? null,
-          }),
+        return Promise.all(
+          [...pendingOf(account.data()), ...pendingOf(data), ...pendingOf(play.data())].map(
+            async (entry): Promise<PendingPhoto> => ({
+              uid,
+              displayName,
+              mode: modeOf(entry),
+              url: entry.url,
+              flaggedAt: millis(entry.flaggedAt),
+              // F-071: a blocklist hold's context is kept server-only (photoHolds).
+              reason: (await withHoldContext(uid, entry.url, entry.reason)) ?? null,
+            }),
+          ),
         )
       }),
     )
@@ -178,6 +182,8 @@ export const reviewPendingPhoto = onCall(
     // T&S Phase 1: the one admin audit log (replaces moderationLog). The
     // photo is identified by its mode only, never its URL.
     await audit({ actor: adminUid, action: action === 'approve' ? 'photo.approve' : 'photo.reject', target: targetUid, detail: { mode } })
+    // Decided: the hold's kept context (F-071) goes with it.
+    await photoHoldRef(targetUid, photoUrl as string).delete().catch(() => {})
 
     await textUser(targetUid, mode, action === 'approve' ? APPROVED_SMS : REJECTED_SMS).catch((err) =>
       logger.error('reviewPendingPhoto: SMS failed', { message: String(err) }),
