@@ -19,6 +19,12 @@
 // is production data — a scratch path outside the repo, deleted after.
 // Otherwise it prints only.
 //
+// F-098 / F-100 (engine v3): --apply also rewrites every stored Deep Fit
+// (modes/deep), Spark breakdown (modes/spark: the physical bar per viewer)
+// and Play tier1 (playPairData) in the trimmed shape; the dry run counts how
+// many still carry the old raw fields. (The functions trim them at read
+// time anyway; the rewrite removes them from storage.)
+//
 // Run --apply after the engine v2 functions are live (or onTap would serve
 // v1 scores to clients that call it in between — harmless, it re-scores
 // anything below the current engine version). Idempotent.
@@ -45,7 +51,7 @@ initializeApp({ credential: applicationDefault(), projectId: 'zylove' })
 const db = getFirestore()
 
 const { rescorePair, scoringDocs } = require('./lib/legacy/onProfileWrite.js')
-const { SCORE_ENGINE_VERSION, calculatePlayScore } = require('./lib/legacy/scoring.js')
+const { SCORE_ENGINE_VERSION, calculatePlayScore, hasRawDeepFit, hasRawPlayTier1 } = require('./lib/legacy/scoring.js')
 const { bothHavePlay, playFields, setPlayScores } = require('./lib/pairPlay.js')
 const { isSuspendedUid } = require('./lib/userData.js')
 
@@ -96,17 +102,31 @@ async function mine(uid) {
 
 const rows = []
 const skipped = []
+// F-098: stored docs still in the pre-trim shape (counted before any write).
+const raw = { deep: 0, deepOf: 0, spark: 0, sparkOf: 0, play: 0, playOf: 0 }
+const twoWayPhysical = (b) => !!b && typeof b === 'object' && ('physicalPrefs' in b || !('physicalPrefsFor' in b))
 let batch = apply ? db.batch() : null
 let inBatch = 0
 let written = 0
 for (const snap of pairs) {
   const pair = snap.data()
+  const [deepSnap, sparkSnap] = await Promise.all([db.doc(`pairs/${snap.id}/modes/deep`).get(), db.doc(`pairs/${snap.id}/modes/spark`).get()])
+  const storedDeep = deepSnap.data()?.tier1Spark ?? pair.tier1Spark
+  if (storedDeep) {
+    raw.deepOf++
+    if (hasRawDeepFit(storedDeep)) raw.deep++
+  }
+  const storedBreakdown = sparkSnap.data()?.sparkBreakdown ?? pair.sparkBreakdown
+  if (storedBreakdown) {
+    raw.sparkOf++
+    if (twoWayPhysical(storedBreakdown)) raw.spark++
+  }
   const me = await mine(pair.userA)
   if (!me) {
     skipped.push(`${snap.id} (${pair.userA} deleted or suspended)`)
     continue
   }
-  const deep = (await db.doc(`pairs/${snap.id}/modes/deep`).get()).data()?.tier1Spark ?? pair.tier1Spark ?? null
+  const deep = storedDeep ?? null
   const r = await rescorePair(batch, snap, pair.userA, me)
   if (!r) {
     skipped.push(`${snap.id} (${pair.userB} gone)`)
@@ -169,6 +189,10 @@ const playRows = []
 const playSkipped = []
 for (const snap of playPairs) {
   const p = snap.data()
+  if (p.tier1Play) {
+    raw.playOf++
+    if (hasRawPlayTier1(p.tier1Play)) raw.play++
+  }
   const [a, b] = Array.isArray(p.users) ? p.users : []
   if (typeof a !== 'string' || typeof b !== 'string') {
     playSkipped.push(`${snap.id} (no users)`)
@@ -193,4 +217,6 @@ console.log(`\nPlay pairs: ${playPairs.length}; re-scored ${playRows.length}; sk
 for (const s of playSkipped) console.log(`  skipped ${s}`)
 console.log(`Play labels changed: ${playChanged.length} of ${playRows.length}; scores changed: ${playRows.filter((r) => r.scoreBefore !== r.scoreAfter).length}`)
 console.log(`  ${tally(playChanged.map((r) => `${r.before ?? 'none'} → ${r.after ?? 'none'}`))}`)
+console.log(`\nF-098: stored docs in the pre-trim shape (before this run): modes/deep with raw floats/confidence/coverage ${raw.deep} of ${raw.deepOf}; modes/spark with the two-way physical bar ${raw.spark} of ${raw.sparkOf}; playPairData tier1Play with confidence/raw fields ${raw.play} of ${raw.playOf}.`)
+console.log(`  ${apply ? 'Rewritten' : '--apply rewrites'} all of them except the skipped pairs above (trimmed at read time until re-scored).`)
 console.log(apply ? `\nApplied: ${written} Spark pairs and ${playRows.length} Play pairs written.` : '\nDry run — nothing written.')
