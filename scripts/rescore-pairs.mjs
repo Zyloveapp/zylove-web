@@ -157,8 +157,10 @@ dist('before (Free, non-bot)', rows.map((r) => r.before))
 dist('before (Elite)', rows.map((r) => r.beforeElite))
 dist('after (every plan)', rows.map((r) => num(r.after)))
 console.log(`  after: Not enough info ${rows.filter((r) => !r.enoughInfo).length}; dealbreaker pairs ${rows.filter((r) => r.dealbreakers).length} (highest shown ${Math.max(0, ...rows.filter((r) => r.dealbreakers).map((r) => r.headline))})`)
-const sparkChanged = rows.filter((r) => !r.bot && r.archBefore !== r.archAfter)
-console.log(`\nSpark Deep Fit labels changed: ${sparkChanged.length} of ${rows.filter((r) => !r.bot).length} (non-bot pairs)`)
+// Every pair (most Spark pairs have a bot in them), then the non-bot ones.
+const sparkChanged = rows.filter((r) => r.archBefore !== r.archAfter)
+const sparkChangedNonBot = sparkChanged.filter((r) => !r.bot)
+console.log(`\nSpark Deep Fit labels changed: ${sparkChanged.length} of ${rows.length} (all pairs); ${sparkChangedNonBot.length} of ${rows.filter((r) => !r.bot).length} non-bot`)
 const tally = (xs) => Object.entries(xs.reduce((m, k) => ((m[k] = (m[k] ?? 0) + 1), m), {})).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ')
 console.log(`  ${tally(sparkChanged.map((r) => `${r.archBefore ?? 'none'} → ${r.archAfter ?? 'none'}`))}`)
 
