@@ -52,7 +52,11 @@ import { keptForReport, recomputeBehaviorRisk, recordVibeSignal } from './behavi
 import { newTrial, noteTrialHistory, planView, priorTrial, trialExempt } from './trial'
 import { cityIsOpen, launchCityOf, requireTier, tierNow } from './entitlements'
 import { accountRef, internalRef, isAdminAuth, isDeletedUid, isSuspendedUid, loadInternal, loadMatching, loadSettings, requireActive } from './userData'
-import { blockedEitherWay, likedInMode, likersInMode, pairIdOf, recordLike } from './likes'
+import { blockedEitherWay, likedInMode, likersInMode, pairIdOf } from './likes'
+// §4.A3: likes are named to the liked person by an opaque like id.
+import { isLikeId } from './likerPreviewCore'
+import { listLikes, resolveLike } from './likerPreview'
+import { performLike } from './legacy/onLike'
 import { takeRateLimit } from './rateLimits'
 import { logId } from './logSafe'
 import { PROFILE_DATA_RULE, hasLinkOrNumber, profileBlock, safeBio, safeStarters } from './aiOutput'
@@ -437,24 +441,24 @@ export const initUserDefaults = onCall(
 
 // ─── likeBack ────────────────────────────────────────────────────────────────
 
+// §4.A3: the like is named by its opaque like id (getLikes) — the app never
+// has the liker's uid or Play ID before the match.
 interface LikeBackRequest {
-  likerUid: string
-  mode: 'spark' | 'play'
+  likeId: string
 }
 
 interface LikeBackResponse {
   matched: true
   matchId: string
+  // Who they are, now that you're linked: their uid (Spark) or Play ID (Play).
+  partnerId: string
 }
 
 function parseLikeBackRequest(data: unknown): LikeBackRequest {
   if (typeof data !== 'object' || data === null) throw new HttpsError('invalid-argument', 'Missing request data')
-  const { likerUid, mode } = data as Record<string, unknown>
-  if (typeof likerUid !== 'string' || !likerUid || likerUid.includes('/')) {
-    throw new HttpsError('invalid-argument', 'likerUid required')
-  }
-  if (mode !== 'spark' && mode !== 'play') throw new HttpsError('invalid-argument', "mode must be 'spark' or 'play'")
-  return { likerUid, mode }
+  const { likeId } = data as Record<string, unknown>
+  if (!isLikeId(likeId)) throw new HttpsError('invalid-argument', 'likeId required')
+  return { likeId }
 }
 
 function firstString(v: unknown): string | null {
@@ -519,27 +523,25 @@ export const likeBack = onCall(
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const callerId = request.auth.uid
     const req = parseLikeBackRequest(request.data)
-    const mode = req.mode
-    // F-062: in Play the liker is known by their Play ID (the queue entry's id).
+    // §4.A3: the like id → the like, from the caller's own queue, server-side
+    // (hidden likes — blocked, suspended, deleted — aren't found).
+    const like = await resolveLike(callerId, req.likeId)
+    const mode = like.mode
     if (mode === 'play') await requirePlayAccess(callerId)
-    const likerUid = mode === 'play' ? await requireUidOfPlayId(req.likerUid, callerId) : req.likerUid
-    if (likerUid === callerId) throw new HttpsError('invalid-argument', 'Cannot like yourself back')
+    const likerUid = like.likerUid
     // Stage 2: a Play match needs Play access on both sides.
     if (mode === 'play' && !(await playStatus(likerUid)).access) throw new HttpsError('failed-precondition', "That profile isn't available in Play.")
 
     const db = getFirestore()
     const [callerPlayId, likerPlayId] = mode === 'play' ? await Promise.all([ensurePlayId(callerId), ensurePlayId(likerUid)]) : [null, null]
-    const callerQueueRef = db.doc(`users/${callerId}/likeQueue/${likerPlayId ?? likerUid}`)
+    const callerQueueRef = like.ref
     const likerQueueRef = db.doc(`users/${likerUid}/likeQueue/${callerPlayId ?? callerId}`)
-    const queueEntry = await callerQueueRef.get()
-    if (!queueEntry.exists) throw new HttpsError('not-found', 'No like from this person in your queue')
     // Stage A: the entry is only a pointer — the like itself must be real and
     // in this mode (bots' likes are server-written queue entries), and
     // neither side gone, suspended or blocked.
-    const entryMode = queueEntry.get('mode') === 'play' ? 'play' : 'spark'
     const bot = likerUid.startsWith('zbot-')
-    if (entryMode !== mode || (!bot && !(await likedInMode(likerUid, callerId, mode)))) {
-      throw new HttpsError('not-found', 'No like from this person in your queue')
+    if (!bot && !(await likedInMode(likerUid, callerId, mode))) {
+      throw new HttpsError('not-found', "That like isn't available.")
     }
     // Stage C: liking back from "who liked you" is Spark+ — except a bot's
     // like (no paid feature ever involves a bot).
@@ -547,7 +549,12 @@ export const likeBack = onCall(
     if ((await isSuspendedUid(callerId)) || (!bot && (await isSuspendedUid(likerUid))) || (await blockedEitherWay(callerId, likerUid))) {
       throw new HttpsError('failed-precondition', "That profile isn't available.")
     }
-    if (!bot) await recordLike(callerId, likerUid, mode, callerId)
+    // §4.A3: the like back itself is an ordinary like (the app used to call
+    // onLike with the uid first): recorded, scored, matched and notified by
+    // the same code. A match it creates is found live below.
+    await performLike(callerId, likerUid, mode)
+    // The behaviour record recordSwipe kept for the app's like (best effort).
+    await db.collection('swipes').add({ swiperId: callerId, swipedId: likerUid, action: 'like', mode, timestamp: Timestamp.now() }).catch(() => {})
 
     if (mode === 'play') {
       // F-062: a Play match — its own id, Play IDs only.
@@ -590,7 +597,7 @@ export const likeBack = onCall(
       await callerQueueRef.delete()
       await likerQueueRef.delete().catch(() => {})
       logger.info(created ? 'likeBack: match created' : 'likeBack: match already existed', { mode })
-      return { matched: true, matchId }
+      return { matched: true, matchId, partnerId: likerPlayId! }
     }
 
     const matchId = [callerId, likerUid].sort().join('_')
@@ -603,8 +610,8 @@ export const likeBack = onCall(
     const created = await db.runTransaction(async (tx) => {
       const existing = await tx.get(matchRef)
       const prior = existing.data()
-      // A live match (onLike, triggered by the client's like just before this
-      // call, may have created it first, without the bot flag) stays.
+      // A live match (performLike, just above, may have created it first,
+      // without the bot flag) stays.
       if (existing.exists && prior?.unmatchedAt == null && prior?.isBlocked !== true) {
         if (isBot && prior?.isBot !== true) tx.update(matchRef, { isBot: true, botUid: likerUid })
         return false
@@ -652,7 +659,7 @@ export const likeBack = onCall(
     )
 
     logger.info(created ? 'likeBack: match created' : 'likeBack: match already existed', { matchId: logId(matchId), mode })
-    return { matched: true, matchId }
+    return { matched: true, matchId, partnerId: likerUid }
   },
 )
 
@@ -2075,24 +2082,21 @@ export { getUsage } from './usage'
 export { retireBotsOnCityClose } from './botRetire'
 export { entitlementOnLocation, entitlementOnMatching } from './playAccess'
 
-// How many people are waiting in "who liked you" — all a Free plan shows
-// (Stage C: the list itself is Spark+, enforced by the rules).
+// How many people are waiting in "who liked you". §4.A3: the app now uses
+// getLikes (likerPreview.ts); this stays for app versions from before it,
+// with the count only — curated likes are listed by getLikes (by like id),
+// no longer here by uid.
 export const getLikeCount = onCall({ timeoutSeconds: 15, invoker: 'public' }, async (request): Promise<{ count: number; bots: { id: string; data: DocumentData }[] }> => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
   const uid = request.auth.uid
   await requireActive(uid)
   const mode = (request.data as Record<string, unknown> | null)?.mode === 'play' ? 'play' : 'spark'
   if (mode === 'play') await requirePlayAccess(uid)
-  // Real people are counted; a curated profile's like is shown in full (no
-  // paid feature ever involves a bot), so it can be liked back on any plan.
-  const snap = await getFirestore().collection(`users/${uid}/likeQueue`).where('mode', '==', mode).get()
-  const live = snap.docs.filter((d) => d.get('dismissed') !== true)
-  // F-062: a Play entry is keyed by Play ID; a curated one says so (curated).
-  const curated = (d: FirebaseFirestore.QueryDocumentSnapshot) => d.id.startsWith('zbot-') || d.get('curated') === true
-  return {
-    count: live.filter((d) => !curated(d)).length,
-    bots: snap.docs.filter(curated).map((d) => ({ id: d.id, data: d.data() })),
-  }
+  await takeRateLimit(uid, 'likeList', { max: 120, windowMs: 10 * 60 * 1000 })
+  // Blocked, suspended and deleted likers aren't counted.
+  const now = Date.now()
+  const live = (await listLikes(uid, mode)).filter((l) => !l.entry.curated && !l.entry.dismissed && l.raw.isExpired !== true && (l.entry.expiresAt === null || l.entry.expiresAt > now))
+  return { count: live.length, bots: [] }
 })
 export { playAccessOnPlan, playAccessOnPlayProfile, playAccessOnProfile } from './playAccess'
 export { identityGuardOnIdentity, identityGuardOnUser } from './identityGuard'
@@ -2402,6 +2406,7 @@ export { claimWomenElite } from './legacy/claimWomenElite'
 // Batch (c): Explore taps and likes, swipes, blocking.
 export { onTap } from './legacy/onTap'
 export { onLike } from './legacy/onLike'
+export { dismissLike, getLikerPreview, getLikes } from './likerPreview'
 export { recordSwipe } from './legacy/recordSwipe'
 export { blockUser, unblockUser } from './legacy/trustSafety'
 // Batch (d): demo-mode bot chat replies.

@@ -11,6 +11,7 @@ import { requireUidOfPlayId } from "../playIds";
 import { requireAvailableTarget } from "../likes";
 import { takeRateLimit } from "../rateLimits";
 import { isUidShape } from "../tapGuards";
+import { dismissQueuedLike } from "../likerPreview";
 
 export const recordSwipe = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
@@ -59,6 +60,9 @@ export const recordSwipe = onCall(LEGACY_RUNTIME, async (request) => {
   });
   // Explore (Stage 3): never shown again in this mode; the deck moves on.
   if (action !== "maybe") await markActed(uid, mode, targetUid);
+  // §4.A3: passing on someone who liked you also moves their like to Viewed
+  // (the app can't name a queue entry by uid any more).
+  if (action === "pass") await dismissQueuedLike(uid, targetUid, mode);
 
   return { success: true };
 });
