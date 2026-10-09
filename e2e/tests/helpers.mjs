@@ -36,7 +36,16 @@ const PNG = readFileSync(FIXTURE)
 // ─── Emulator state ──────────────────────────────────────────────────────────
 
 export async function resetEmulators() {
-  await fetch(`http://127.0.0.1:8390/emulator/v1/projects/${PROJECT}/databases/(default)/documents`, { method: 'DELETE' })
+  // The emulator can refuse or only partly apply the wipe while a function
+  // from the previous test is still mid-transaction; its data then leaks into
+  // the next test. Wipe until the root collections are really empty.
+  for (let i = 0; ; i++) {
+    const res = await fetch(`http://127.0.0.1:8390/emulator/v1/projects/${PROJECT}/databases/(default)/documents`, { method: 'DELETE' })
+    const left = (await db.listCollections()).length
+    if (res.ok && left === 0) break
+    if (i === 20) throw new Error(`resetEmulators: Firestore not empty (HTTP ${res.status}, ${left} collections left)`)
+    await new Promise((r) => setTimeout(r, 500))
+  }
   await fetch(`http://127.0.0.1:9409/emulator/v1/projects/${PROJECT}/accounts`, { method: 'DELETE' })
   const { getStorage } = require('firebase-admin/storage')
   await getStorage().bucket('demo-zylove.appspot.com').deleteFiles({ force: true }).catch(() => {})
