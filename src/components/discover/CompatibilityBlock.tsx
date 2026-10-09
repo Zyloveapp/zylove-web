@@ -331,7 +331,8 @@ function RevealedScore({
     <div
       className={`mt-4 transition-all duration-500 ${visible ? 'translate-y-0 opacity-100 blur-0' : 'translate-y-1 opacity-0 blur-sm'}`}
     >
-      {fullAccess && archetype && (
+      {/* F-098: Play's archetype is Elite, as Spark's (in Deep Fit) is; the server sends it only then. */}
+      {(isPlay ? deepAccess : fullAccess) && archetype && (
         <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/5 p-4">
           <p className={`text-sm font-semibold ${isPlay ? 'text-[#E03131]' : 'text-[#1B4FD8]'}`}>
             {isPlay ? '🔥' : '✦'} {archetype.label}

@@ -3,10 +3,10 @@
 // settings (legacyOptions.ts) are new.
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { calculateSparkScore, calculatePlayScore, deepFitRecord, publicPlayTier1, SCORE_ENGINE_VERSION, sparkBreakdownFor, sparkBreakdownRecord, sparkPairFields } from "./scoring";
+import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkBreakdownFor, sparkBreakdownRecord, sparkPairFields } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
-import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
+import { bothHavePlay, loadPlayScores, playFields, playTapAnswer, setPlayScores } from "../pairPlay";
 import { scoringDocs } from "./onProfileWrite";
 import { loadMatching, requireActive, withPrivateProfile } from "../userData";
 import { atLeast, tierNow } from "../entitlements";
@@ -43,7 +43,8 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
 
   // Stage C / engine v2: everyone sees the score (Deep Fit's headline) and
   // its label; Spark+ the breakdown and dealbreakers; Elite Deep Fit's detail
-  // (tier1: both directions, the reasons).
+  // (tier1: both directions, the reasons, the archetype). F-098: Play the
+  // same — Spark+ its breakdown, Elite its archetype (playTapAnswer).
   // No paid feature ever involves a bot: a bot's report is shown in full.
   const tier = await tierNow(tapperId);
   const bot = tappedId.startsWith("zbot-");
@@ -56,7 +57,7 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   if (playTap) {
     if (!(await bothHavePlay(tapperId, tappedId))) throw new HttpsError("failed-precondition", "That profile isn't available.");
     const cached = await loadPlayScores(tapperId, tappedId);
-    if (cached && cached.engineVersion === SCORE_ENGINE_VERSION) return playAnswer(cached, full);
+    if (cached && cached.engineVersion === SCORE_ENGINE_VERSION) return playTapAnswer(cached, { full, deep });
     const [tapperSnap, tappedSnap] = await Promise.all([db.doc(`users/${tapperId}`).get(), db.doc(`users/${tappedId}`).get()]);
     if (!tapperSnap.exists || !tappedSnap.exists) throw new HttpsError("failed-precondition", "That profile isn't available.");
     const [mine, theirs] = await Promise.all([
@@ -66,7 +67,7 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
     const result = calculatePlayScore(mine.full, theirs.full);
     const fields = { ...playFields(result.score, result.breakdown, result.tier1), engineVersion: SCORE_ENGINE_VERSION };
     await setPlayScores(tapperId, tappedId, fields);
-    return playAnswer(fields, full);
+    return playTapAnswer(fields, { full, deep });
   }
   // F-090: of the triggered dealbreakers, only the tapper's own are shown
   // (tapGuards.ts ownDealbreakers) — the other person's are their private
@@ -157,17 +158,3 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   };
 });
 
-// F-062: what a Play tap returns — the Play score, its breakdown and
-// the Play archetype (tier1Play's), no ids. F-098: the archetype in its
-// public shape (no confidence), whatever the stored doc still carries.
-function playAnswer(scores: admin.firestore.DocumentData | undefined, full: boolean) {
-  const tier1 = publicPlayTier1(scores?.tier1Play);
-  return {
-    engineVersion: SCORE_ENGINE_VERSION,
-    ...(scores && { playScore: scores.playScore }),
-    breakdown: { ...(scores && { play: scores.playBreakdown }) },
-    triggeredDealbreakers: [],
-    ...(tier1 ? { playArchetype: tier1.archetype } : {}),
-    locked: !full,
-  };
-}
