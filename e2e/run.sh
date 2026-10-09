@@ -38,6 +38,13 @@ grep -E '^[A-Z_][A-Z0-9_]*=' "$E/.env.test" > "$E/web-fn/.secret.local"
 # production ones, which only Matthew sets) unless .env.test defines its own.
 grep -q '^FRANKING_KEY=' "$E/web-fn/.secret.local" || echo "FRANKING_KEY=v1:$(printf 'e2e-franking-key' | shasum -a 256 | cut -c1-64)" >> "$E/web-fn/.secret.local"
 grep -q '^EVIDENCE_LOCKER_KEY=' "$E/web-fn/.secret.local" || echo "EVIDENCE_LOCKER_KEY=v1:$(printf 'e2e-locker-key' | shasum -a 256 | cut -c1-64)" >> "$E/web-fn/.secret.local"
+# Every other secret a function declares, empty: the emulator otherwise asks
+# Secret Manager for it on each cold start, fails (no credentials here), and
+# over a long run that failure crashes the Firebase CLI. Empty reads the same
+# to the code as the failed lookup did (not configured).
+for s in $(grep -rhoE "defineSecret\('[A-Z_]+'\)" "$E/../functions/src" | sed -E "s/defineSecret\('([A-Z_]+)'\)/\1/" | sort -u); do
+  grep -q "^$s=" "$E/web-fn/.secret.local" || echo "$s=" >> "$E/web-fn/.secret.local"
+done
 
 # The repo's own rules (the emulator only reads files inside e2e/).
 cp "$WEB/firestore.rules" "$WEB/storage.rules" "$C/"
