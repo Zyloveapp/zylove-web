@@ -228,6 +228,9 @@ test('signals: "maybe" is recorded but keeps the card; replies counted both ways
 test('signals: the same opener to 5 people is noted; to 10 it flags the sender; the hash leaves the message', async () => {
   test.setTimeout(180000)
   const a = await seedUser('Ann')
+  // A month-old account: the server now records every account's age (H1), and
+  // a brand-new one with five alike openers is flagged by itself (new_and_busy).
+  await db.doc(`userInternal/${a.uid}`).set({ accountCreatedAt: Date.now() - 30 * 864e5 }, { merge: true })
   const fh = createHash('sha256').update('same opener every time').digest('hex')
   let first
   for (let i = 0; i < 10; i++) {
