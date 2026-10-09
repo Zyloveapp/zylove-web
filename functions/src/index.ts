@@ -2293,6 +2293,8 @@ const PHONE_LOOKUP_DAILY_BUDGET = 1000
 // { allowed: true } a new mobile number gets), then the daily Lookup budget,
 // then the Lookup itself. Fails open on a Lookup or Firestore error, but not
 // once the budget is spent.
+export const PHONE_IP_LIMIT = 30
+
 export const validatePhoneNumber = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: LOOKUP_SECRETS },
   async (request): Promise<{ allowed: boolean; reason?: string }> => {
@@ -2315,7 +2317,10 @@ export const validatePhoneNumber = onCall(
     // got past the per-number limit). F-072: for every number, existing
     // accounts included, and before the account check.
     const ipKey = ipRateKey(clientIp(request.rawRequest as never))
-    const perIp = await takeRateLimit(ipKey, 'phoneLookup', { max: 10, windowMs: 60 * 60 * 1000 }).then(() => true, () => false)
+    // 30 an hour: existing accounts count now, and several people can share
+    // one address (a carrier's NAT) — still a hard ceiling per real address,
+    // which can't be spoofed since F-073.
+    const perIp = await takeRateLimit(ipKey, 'phoneLookup', { max: PHONE_IP_LIMIT, windowMs: 60 * 60 * 1000 }).then(() => true, () => false)
     if (!perIp) {
       logger.info('validatePhoneNumber: rate limited (address)')
       return { allowed: false, reason: 'rate_limited' }

@@ -45,8 +45,8 @@ test('F-072: over the per-address limit, an existing and a new number get the sa
   const existing = await seedUser('Eve')
   // Under the limit, an existing account is allowed (no Lookup).
   expect(await checkPhone(existing.phone)).toEqual({ allowed: true })
-  // Fill the address's hour (10 checks in all) with new numbers.
-  for (let i = 0; i < 9; i++) await checkPhone(freshNumber(i))
+  // Fill the address's hour (PHONE_IP_LIMIT checks in all) with new numbers.
+  for (let i = 0; i < 29; i++) await checkPhone(freshNumber(i))
   const forExisting = await checkPhone(existing.phone)
   const forNew = await checkPhone(freshNumber(50))
   expect(forExisting).toEqual({ allowed: false, reason: 'rate_limited' })
