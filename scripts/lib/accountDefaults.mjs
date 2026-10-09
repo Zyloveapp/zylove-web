@@ -25,7 +25,7 @@ const isBot = (uid) => /^(zbot|seed)-/.test(uid)
 
 // authOf(uids) → Map uid → { phone, createdAt } (from the Auth record).
 export async function planAccountDefaults(db, { authOf, onlyUids = null } = {}) {
-  const { decideTrial, needsAccountDefaults } = lib('accountDefaults')
+  const { decideTrial } = lib('accountDefaults')
   const { computeEntitlement, cityIsOpen, launchCityOf } = lib('entitlements')
   const { newTrial, priorTrial } = lib('trial')
   const plan = { uids: [], refresh: [], known: {}, counts: {}, before: {}, after: {} }
@@ -84,6 +84,7 @@ export async function planAccountDefaults(db, { authOf, onlyUids = null } = {}) 
     if ((typeof internal.accountCreatedAt !== 'number' || typeof root.memberSince !== 'string') && !a.createdAt) count('no Auth record (account age left missing)')
 
     let after = internal
+    let todo = typeof internal.accountCreatedAt !== 'number' || typeof root.memberSince !== 'string'
     if (internal.trialStartedAt === undefined && internal.hadPaidPlan !== true) {
       const d = decideTrial({ root, internal, matching, cityOpen: open, prior: await priorTrial(a.phone) })
       if (d.kind === 'new') count('trial: new (open city, phone never had one)')
@@ -93,6 +94,7 @@ export async function planAccountDefaults(db, { authOf, onlyUids = null } = {}) 
       if (d.kind === 'new') after = { ...internal, ...newTrial() }
       if (d.kind === 'prior') after = { ...internal, trialStartedAt: d.trialStartedAt, trialEndsAt: d.trialEndsAt, trialExpired: d.trialEndsAt.toMillis() <= Date.now() }
       if (d.kind === 'paid') after = { ...internal, hadPaidPlan: true }
+      if (d.kind !== 'none') todo = true
     }
     const e = computeEntitlement({
       root,
@@ -103,7 +105,7 @@ export async function planAccountDefaults(db, { authOf, onlyUids = null } = {}) 
       linkedCityOpen: open,
     })
     tally('after', e)
-    if (needsAccountDefaults(root, internal)) plan.uids.push(uid)
+    if (todo) plan.uids.push(uid)
     if (stored?.tier !== e.tier || stored?.source !== e.source) {
       plan.refresh.push(uid)
       count('entitlements to recompute')

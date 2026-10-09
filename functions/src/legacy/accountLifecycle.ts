@@ -336,17 +336,10 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
   ]);
   const trustFlag = await db.doc(`trustFlags/${previousUid}`).get();
 
-  // NOTE: previousUid's user doc may have been purged by onNightlyPurge
-  // if the account was deleted >12 months ago. This batch.delete is a no-op
-  // in that case, which is fine. Any future logic that READS
-  // users/{previousUid} must handle missing doc.
-  batch.delete(db.collection("users").doc(previousUid));
-  batch.delete(recoveryRef);
-
-  await batch.commit();
   // H6: the blocks, re-keyed to the new uid on both sides (so they apply
   // both ways again), Explore's lists with them, and the account's open trust
-  // flag (the scam hold's) — before the old uid's own list goes below.
+  // flag (the scam hold's) — before the account comes back, so it never
+  // exists unblocked (a failure here leaves the recovery record for a retry).
   const rekeyed = rekeyBlocks(previousUid, newUid, blockEntries);
   const writes: ((b: admin.firestore.WriteBatch) => void)[] = [
     ...rekeyed.set.map((w) => (b: admin.firestore.WriteBatch) => b.set(db.doc(w.path), w.data)),
@@ -367,6 +360,14 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
     await setBlocked(newUid, other, true);
     await stateRef(other).set({ blocked: admin.firestore.FieldValue.arrayRemove(previousUid) }, { merge: true });
   }
+  // NOTE: previousUid's user doc may have been purged by onNightlyPurge
+  // if the account was deleted >12 months ago. This batch.delete is a no-op
+  // in that case, which is fine. Any future logic that READS
+  // users/{previousUid} must handle missing doc.
+  batch.delete(db.collection("users").doc(previousUid));
+  batch.delete(recoveryRef);
+
+  await batch.commit();
   // Stage B (F-057): the old uid's leftover subcollections too — the nightly
   // purge never finds them once its root doc is gone. Its published photo
   // files stay: the restored profile still points at them.
