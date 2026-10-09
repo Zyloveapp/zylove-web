@@ -21,7 +21,23 @@ export async function scoringDocs(userId: string, root: UserDoc): Promise<{ spar
   const playSnap = await db.collection("users").doc(userId)
     .collection("playProfile").doc("data").get().catch(() => null);
   const playData = playSnap?.exists ? playSnap.data() ?? {} : {};
-  return { spark, full: { ...spark, ...playData } as UserDoc };
+  return { spark, full: { ...spark, ...playOverlay(playData) } as UserDoc };
+}
+
+// F-099: what the Play profile may add for Play scoring — its Play fields,
+// never the owner-only matching or identity fields. The Play profile takes
+// any keys from its owner, so a copy there would dodge the 30-day limit on
+// religion, politics, drinking, attraction, dealbreakers and intent, and the
+// identity lock on gender and age. (The app never writes them there; older
+// curated profiles carry copies equal to their own values.)
+export const PLAY_OVERLAY_EXCLUDED = [
+  'religion', 'politicalView', 'drinkingHabit', 'attractedTo', 'dealbreakers', 'intent',
+  'genderIdentity', 'genderSelfDescribe', 'matchableAs', 'age', 'birthday',
+] as const;
+export function playOverlay(playData: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...playData };
+  for (const k of PLAY_OVERLAY_EXCLUDED) delete out[k];
+  return out;
 }
 
 // Re-scores one pair from `userId`'s side and adds the writes to `batch`
