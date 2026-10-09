@@ -80,8 +80,9 @@ export function whyThisWorks(key: string, value: number, asymmetryBand: number |
         ? `You both prioritize ${joinNames(facts.sharedValues.slice(0, 2).map(valueLabel))}`
         : 'Broadly aligned intentions — different paths to similar places'
 
+    // F-098: how well they fit your own physical preferences (never theirs).
     case 'physicalPrefs':
-      if (value > 70) return 'Your preferences are mutually compatible'
+      if (value > 70) return 'They fit what you’re looking for'
       if (value >= 50) return 'Good physical compatibility'
       return 'Some preference differences — worth a conversation'
 

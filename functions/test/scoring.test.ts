@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { asymmetryBand, calculatePlayScore, calculateSparkScore, deepFitRecord, hasRawDeepFit, hasRawPlayTier1, publicDeepFit, publicPlayTier1, SCORE_ENGINE_VERSION, sparkPairFields } from '../src/legacy/scoring'
+import { asymmetryBand, calculatePlayScore, calculateSparkScore, deepFitRecord, hasRawDeepFit, hasRawPlayTier1, publicDeepFit, publicPlayTier1, SCORE_ENGINE_VERSION, sparkBreakdownFor, sparkBreakdownRecord, sparkPairFields } from '../src/legacy/scoring'
 import { DEALBREAKER_CAP } from '../src/legacy/tier1/scorePair'
 import type { UserDoc } from '../src/legacy/types'
 import { person, quantile, rng, type Profile } from './population'
@@ -329,4 +329,37 @@ test('F-098: the Play label does not depend on dealbreakers', () => {
     const play = (x: Profile, y: Profile) => calculatePlayScore(x as unknown as UserDoc, y as unknown as UserDoc).tier1?.archetype?.id ?? null
     assert.equal(play(a, b), play({ ...a, dealbreakers: [] }, { ...b, dealbreakers: [] }))
   }
+})
+
+// ─── F-098: the Spark+ physical bar is the viewer's own direction ───────────
+
+test('F-098: the physical bar shows each viewer only how the other fits their own preferences', () => {
+  // She wants tall athletic men and he is; he wants slim and she isn't.
+  const him = man({ ...HOMEBODY, heightCm: 188, bodyType: 'athletic', seekingBodyTypes: ['slim'] })
+  const her = woman({ ...HOMEBODY, bodyType: 'curvy', seekingBodyTypes: ['athletic'], seekingHeightMinCm: 180, seekingHeightMaxCm: 200 })
+  const r = score(him, her)
+  const stored = sparkBreakdownRecord(r, 'him', 'her')
+  assert.equal('physicalPrefs' in stored, false)
+  assert.deepEqual(stored.physicalPrefsFor, { him: 30, her: 100 })
+  assert.equal(sparkBreakdownFor(stored, 'him').physicalPrefs, 30)
+  assert.equal(sparkBreakdownFor(stored, 'her').physicalPrefs, 100)
+  // The rest of the breakdown is the same for both.
+  const { physicalPrefs: _a, ...hisRest } = sparkBreakdownFor(stored, 'him')
+  const { physicalPrefs: _b, ...herRest } = sparkBreakdownFor(stored, 'her')
+  assert.deepEqual(hisRest, herRest)
+  assert.equal('physicalPrefsFor' in hisRest, false)
+  // Her preferences don't move his bar.
+  const r2 = score(him, woman({ ...HOMEBODY, bodyType: 'curvy', seekingBodyTypes: ['slim'] }))
+  assert.equal(sparkBreakdownFor(sparkBreakdownRecord(r2, 'him', 'her'), 'him').physicalPrefs, 30)
+  // No preferences of his own: no bar for him.
+  const r3 = score(man({ ...HOMEBODY, heightCm: 188, bodyType: 'athletic' }), her)
+  assert.equal(sparkBreakdownFor(sparkBreakdownRecord(r3, 'him', 'her'), 'him').physicalPrefs, null)
+  // The headline (Tier 0 included) is unchanged by this: it still uses both.
+  assert.equal(r.breakdown.physicalPrefs, 65)
+})
+
+test('F-098: an old stored breakdown (two-way mean) shows no physical bar', () => {
+  const old = { coreFit: 100, dealbreakers: 100, valuesIntentions: 67, physicalPrefs: 65, loveLanguages: 50, lifestyle: null, personality: 33 }
+  assert.deepEqual(sparkBreakdownFor(old, 'anyone'), { ...old, physicalPrefs: null })
+  assert.deepEqual(sparkBreakdownFor(null, 'anyone'), {})
 })

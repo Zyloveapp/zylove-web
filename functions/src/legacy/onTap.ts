@@ -3,7 +3,7 @@
 // settings (legacyOptions.ts) are new.
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { calculateSparkScore, calculatePlayScore, deepFitRecord, publicPlayTier1, SCORE_ENGINE_VERSION, sparkPairFields } from "./scoring";
+import { calculateSparkScore, calculatePlayScore, deepFitRecord, publicPlayTier1, SCORE_ENGINE_VERSION, sparkBreakdownFor, sparkBreakdownRecord, sparkPairFields } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
@@ -86,7 +86,7 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   const existing = await pairRef.get();
   if (existing.exists && (existing.data() as PairDoc).engineVersion === SCORE_ENGINE_VERSION) {
     const data = existing.data() as PairDoc;
-    const details = full ? await loadSparkDetails(pid, data) : null;
+    const details = full ? await loadSparkDetails(pid, tapperId, data) : null;
     return {
       pairId:     pid,
       sparkScore: data.sparkScore,
@@ -114,7 +114,8 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   const tappedDoc  = await withPrivateProfile(tappedId, tappedSnap.data() ?? {}) as UserDoc;
 
   const spark = calculateSparkScore(tapperDoc, tappedDoc);
-  const { score: sparkScore, breakdown: sparkBreakdown, triggeredDealbreakers } = spark;
+  const { score: sparkScore, triggeredDealbreakers } = spark;
+  const sparkBreakdown = sparkBreakdownRecord(spark, tapperId, tappedId);
   const sparkTier1 = deepFitRecord(spark.tier1, tapperId, tappedId);
 
   const [userA, userB] = [tapperId, tappedId].sort();
@@ -147,7 +148,8 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
     sparkScore,
     sparkEnoughInfo: spark.enoughInfo,
     engineVersion: SCORE_ENGINE_VERSION,
-    breakdown: { ...(full && { spark: sparkBreakdown }) },
+    // F-098: the physical bar is the tapper's own direction.
+    breakdown: { ...(full && { spark: sparkBreakdownFor(sparkBreakdown, tapperId) }) },
     triggeredDealbreakers: full ? visibleDealbreakers(triggeredDealbreakers) : [],
     ...(deep && sparkTier1 ? { tier1: sparkTier1 } : {}),
     hasPhysicalPrefs,

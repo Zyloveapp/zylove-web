@@ -3,7 +3,7 @@
 // settings (legacyOptions.ts) are new.
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkPairFields } from "./scoring";
+import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkBreakdownRecord, sparkPairFields } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { getToken, sendPush } from "./notifications";
 import { LEGACY_RUNTIME } from "./legacyOptions";
@@ -94,7 +94,7 @@ export async function performLike(likerId: string, likedId: string, mode: "spark
     const likedDoc = await withPrivateProfile(likedId, likedUserSnap.data() ?? {}) as UserDoc;
 
     const spark = calculateSparkScore(likerDoc, likedDoc);
-    const { breakdown: sparkBreakdown, triggeredDealbreakers } = spark;
+    const { triggeredDealbreakers } = spark;
 
     const [userA, userB] = [likerId, likedId].sort();
 
@@ -110,7 +110,7 @@ export async function performLike(likerId: string, likedId: string, mode: "spark
 
     const pairBatch = db.batch();
     pairBatch.set(pairRef, pair);
-    writeSparkDetails(pairBatch, pid, { breakdown: sparkBreakdown, dealbreakers: triggeredDealbreakers, tier1: deepFitRecord(spark.tier1, likerId, likedId) }, false);
+    writeSparkDetails(pairBatch, pid, { breakdown: sparkBreakdownRecord(spark, likerId, likedId), dealbreakers: triggeredDealbreakers, tier1: deepFitRecord(spark.tier1, likerId, likedId) }, false);
     await pairBatch.commit();
   }
 

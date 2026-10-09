@@ -78,13 +78,13 @@ function dealbreakerLabel(id: string): string {
 // With nothing to score against, the server returns a neutral default, so
 // these are hidden rather than shown as a misleading number.
 // Whether they have physical preferences comes from the server (onTap's
-// hasPhysicalPrefs) — their preferences are private (Stage 3).
+// hasPhysicalPrefs) — their preferences are private (Stage 3). Spark's
+// physical bar is the viewer's own direction (F-098), which the server
+// leaves null when the viewer stated no preferences; only Play's (both
+// directions) still depends on theirs.
 function emptyCategories(p: DiscoverProfile, hasPhysicalPrefs: boolean | undefined): Set<string> {
   const empty = new Set<string>()
-  if (hasPhysicalPrefs !== true) {
-    empty.add('physicalPrefs')
-    empty.add('physicalCompatibility')
-  }
+  if (hasPhysicalPrefs !== true) empty.add('physicalCompatibility')
   if (!p.loveLangGive?.length && !p.loveLangReceive?.length) empty.add('loveLanguages')
   return empty
 }

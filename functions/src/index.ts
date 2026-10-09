@@ -1829,7 +1829,7 @@ export const getSentSparks = onCall(
           engineVersion: typeof pair.engineVersion === 'number' ? pair.engineVersion : null,
           playScore: null,
           // Deep Fit is Elite (Stage C); its home is pairs/{id}/modes/deep.
-          tier1Spark: callerTier === 'elite' ? (await loadSparkDetails(pairSnap.id, pair)).tier1Spark : null,
+          tier1Spark: callerTier === 'elite' ? (await loadSparkDetails(pairSnap.id, uid, pair)).tier1Spark : null,
           likedAt: toMillis(queue?.likedAt) || toMillis(pair.createdAt),
         }
       }),
@@ -1981,7 +1981,7 @@ export const getCuriousVisitors = onCall(
         sparkEnoughInfo: typeof pair.sparkEnoughInfo === 'boolean' ? pair.sparkEnoughInfo : null,
         engineVersion: typeof pair.engineVersion === 'number' ? pair.engineVersion : null,
         playScore: null,
-        tier1Spark: (await loadSparkDetails(id, pair)).tier1Spark, // Curious is Elite: Deep Fit included
+        tier1Spark: (await loadSparkDetails(id, uid, pair)).tier1Spark, // Curious is Elite: Deep Fit included
         at: revealedAt(pair, uid),
       })
     }

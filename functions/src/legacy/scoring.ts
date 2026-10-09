@@ -258,7 +258,13 @@ export function calculateSparkScore(
   raw: { tier0: number; tier1: number | null };
   // The Tier 0 score on the display scale (the headline's fallback).
   tier0Score: number;
+  // The Tier 0 categories. physicalPrefs here is the mean of both
+  // directions (it feeds tier0Score); never stored or shown as is — F-098:
+  // see sparkBreakdownRecord.
   breakdown: SparkBreakdown;
+  // Each direction's physical fit, 0–100 (null: no criteria stated):
+  // ab = how well B fits A's physical preferences, ba = A fits B's.
+  physicalDirections: { ab: number | null; ba: number | null };
   triggeredDealbreakers: string[];
   tier1: Tier1Spark | null;
 } {
@@ -334,6 +340,7 @@ export function calculateSparkScore(
     enoughInfo: attraction !== 0 && hasEnoughInfo(coverage, facetsA.recognized, facetsB.recognized),
     raw: { tier0: raw0, tier1: raw1 },
     breakdown,
+    physicalDirections: { ab: pct(physicalOrNull(a, b)), ba: pct(physicalOrNull(b, a)) },
     triggeredDealbreakers: dealbreakerResult.triggered,
     tier1,
   };
@@ -444,6 +451,33 @@ export function hasRawDeepFit(v: unknown): boolean {
 export function hasRawPlayTier1(v: unknown): boolean {
   if (typeof v !== "object" || v === null) return false;
   return JSON.stringify(v) !== JSON.stringify(publicPlayTier1(v));
+}
+
+// ─── F-098: the Spark+ physical bar, per viewer ──────────────────────────────
+// The breakdown's physicalPrefs was the mean of both directions, so with
+// your own preferences known (or cleared) it gave away the other person's
+// private seeking body type / height. Each person sees only their own
+// direction — how well the other person fits what THEY want, from their own
+// preferences and the other's public height and body type. Stored keyed by
+// uid like Deep Fit's fitFor (pairs/{id}/modes/spark is server-only) and
+// picked per viewer on every read (sparkBreakdownFor).
+
+export type StoredSparkBreakdown = Omit<SparkBreakdown, "physicalPrefs"> & { physicalPrefsFor: Record<string, number | null> };
+
+// What pairs/{id}/modes/spark stores; A/B = calculateSparkScore's arguments.
+export function sparkBreakdownRecord(result: Pick<ReturnType<typeof calculateSparkScore>, "breakdown" | "physicalDirections">, uidA: string, uidB: string): StoredSparkBreakdown {
+  const { physicalPrefs: _mean, ...rest } = result.breakdown;
+  return { ...rest, physicalPrefsFor: { [uidA]: result.physicalDirections.ab, [uidB]: result.physicalDirections.ba } };
+}
+
+// A stored breakdown (any shape) as `viewerUid` may see it: physicalPrefs
+// is their own direction. An older doc (only the two-way mean) shows none
+// until re-scored.
+export function sparkBreakdownFor(stored: unknown, viewerUid: string): Record<string, unknown> {
+  if (typeof stored !== "object" || stored === null) return {};
+  const { physicalPrefs: _mean, physicalPrefsFor, ...rest } = stored as Record<string, unknown>;
+  const own = typeof physicalPrefsFor === "object" && physicalPrefsFor !== null ? (physicalPrefsFor as Record<string, unknown>)[viewerUid] : null;
+  return { ...rest, physicalPrefs: finite(own) ? own : null };
 }
 
 // The pair-doc fields for a Spark result (the headline everyone sees).
