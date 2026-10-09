@@ -11,7 +11,7 @@ import { clearDraft, loadDraft, saveDraft, storablePhotos } from '../components/
 import { MAX_PHOTOS, releasePhotoPreview } from '../components/onboarding/types'
 import { selectPlayPrompts } from '../types/dualProfile'
 import { PLAY_BODY_TYPE_LABELS, type PlayBodyType } from '../types/playDescriptors'
-import { nextNameChange } from '../services/displayNames'
+import { nextNameChange, publicNameOk } from '../services/displayNames'
 import { loadMatching } from '../services/privateMatching'
 import {
   MIN_PLAY_ANSWERS,
@@ -228,7 +228,7 @@ export default function PlayOnboarding() {
       case 'photos':
         return draft.photos.length >= 1 && draft.photos.length <= MAX_PHOTOS
       case 'playName':
-        return draft.playDisplayName.trim().length > 0
+        return wantsEdit ? draft.playDisplayName.trim().length > 0 : publicNameOk(draft.playDisplayName)
       case 'spice':
         return draft.spiceLevel !== null
       case 'arrangement':

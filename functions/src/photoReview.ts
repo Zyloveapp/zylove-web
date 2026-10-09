@@ -7,14 +7,17 @@ import { storagePath } from './storagePath'
 import { requireAdminAudited, audit } from './audit'
 import { accountRef, internalRef, isAdminAuth, userRef } from './userData'
 import { matchView, type BlocklistMatchView } from './blocklistContext'
-import { photoHoldRef, withHoldContext } from './photoHolds'
+import { holdReason, photoHoldRef, withHoldContext } from './photoHolds'
+import { playIdOf } from './playIds'
 
 // Admin photo review (/admin/photos). onPhotoUpload parks flagged photos of
 // both modes in users/{uid}/private/account pendingPhotoURLs (owner-only; each
 // entry has its mode) and sets userInternal/{uid}.hasPendingPhotos. Accounts
 // not yet migrated may still hold Play ones on playProfile/data (readable by
 // other users — F-031) or Spark ones on the root doc; both are read too.
-// Entries' `url` is the photo's Storage path (older ones: a URL).
+// Entries' `url` is the photo's Storage path (older ones: a URL). Holds kept
+// for review (content flags, blocklist matches — photoHolds, F-081) are
+// listed and decided even when their entry has gone.
 // Other users' docs and Storage files are out of a client's reach, so the page
 // lists and decides through these admin-gated callables.
 
@@ -39,6 +42,7 @@ export interface PendingPhoto {
 }
 
 const MAX_USERS = 200
+const MAX_HOLDS = 500
 const APPROVED_SMS = '✦ Your photo has been approved on Zylove.'
 const REJECTED_SMS = 'Your photo was not approved. Please upload a different photo.'
 
@@ -103,8 +107,32 @@ export const listPendingPhotos = onCall(
         )
       }),
     )
+    // F-081: kept holds (content flags, blocklist matches) whose entry has
+    // gone from the owner's list are still listed, from photoHolds.
+    const listed = new Set(perUser.flat().map((p) => `${p.uid}\n${p.url}`))
+    const holds = (await db.collection('photoHolds').limit(MAX_HOLDS).get()).docs
+      .map((d) => d.data())
+      .filter((h) => typeof h.uid === 'string' && typeof h.url === 'string' && !listed.has(`${h.uid}\n${h.url}`))
+    const names = new Map(
+      await Promise.all(
+        [...new Set(holds.map((h) => h.uid as string))].map(async (uid) => {
+          const name: unknown = (await userRef(uid).get()).data()?.displayName
+          return [uid, typeof name === 'string' ? name : ''] as const
+        }),
+      ),
+    )
+    const orphaned = holds.map(
+      (h): PendingPhoto => ({
+        uid: h.uid,
+        displayName: names.get(h.uid) ?? '',
+        mode: modeOf({ url: h.url, mode: h.mode }),
+        url: h.url,
+        flaggedAt: millis(h.heldAt),
+        reason: holdReason(h),
+      }),
+    )
     // Oldest first: the queue is worked in order.
-    const photos = perUser.flat().sort((a, b) => (a.flaggedAt ?? 0) - (b.flaggedAt ?? 0))
+    const photos = [...perUser.flat(), ...orphaned].sort((a, b) => (a.flaggedAt ?? 0) - (b.flaggedAt ?? 0))
     // Blocklist holds: the context stored at hold time, and whether the
     // banned account still has a user doc to open in admin.
     const matched = [...new Set(photos.map((p) => matchView(p.reason, () => false)?.uid).filter((u): u is string => !!u))]
@@ -137,8 +165,9 @@ export const reviewPendingPhoto = onCall(
     const acctRef = accountRef(targetUid)
     const playRef = rootRef.collection('playProfile').doc('data')
 
+    const holdRef = photoHoldRef(targetUid, photoUrl)
     const { mode, entry } = await db.runTransaction(async (tx) => {
-      const [userSnap, accountSnap, playSnap] = await Promise.all([tx.get(rootRef), tx.get(acctRef), tx.get(playRef)])
+      const [userSnap, accountSnap, playSnap, holdSnap] = await Promise.all([tx.get(rootRef), tx.get(acctRef), tx.get(playRef), tx.get(holdRef)])
       // The queues: private/account (both modes), plus the older homes.
       const queues = [
         { key: 'account' as const, entries: pendingOf(accountSnap.data()) },
@@ -146,29 +175,38 @@ export const reviewPendingPhoto = onCall(
         { key: 'play' as const, entries: pendingOf(playSnap.data()) },
       ]
       const source = queues.find((q) => q.entries.some((p) => p.url === photoUrl))
-      const found = source?.entries.find((p) => p.url === photoUrl)
-      if (!source || !found) throw new HttpsError('not-found', 'That photo is no longer pending.')
+      // F-081: a kept hold whose entry has gone is decided from photoHolds.
+      const hold = holdSnap.data()
+      const found: PendingEntry | undefined =
+        source?.entries.find((p) => p.url === photoUrl) ?? (hold ? { url: photoUrl, mode: hold.mode, reason: holdReason(hold) } : undefined)
+      if (!found) throw new HttpsError('not-found', 'That photo is no longer pending.')
       // Older homes decide the mode by where they sit; account entries carry it.
-      const where: Mode = source.key === 'root' ? 'spark' : source.key === 'play' ? 'play' : modeOf(found)
-      const remaining = source.entries.filter((p) => p.url !== photoUrl)
+      const where: Mode = source?.key === 'root' ? 'spark' : source?.key === 'play' ? 'play' : modeOf(found)
+      const remaining = source ? source.entries.filter((p) => p.url !== photoUrl) : []
       const othersLeft = queues.some((q) => q !== source && q.entries.length > 0)
 
       // Approve: onto the profile of the photo's mode. Reject: stamped on the account.
+      if (action === 'approve' && where === 'play' && !playSnap.exists) throw new HttpsError('failed-precondition', 'That Play profile no longer exists.')
       if (action === 'approve') tx.update(where === 'spark' ? rootRef : playRef, { photoURLs: FieldValue.arrayUnion(photoUrl) })
       else tx.set(acctRef, { photoRejectedAt: Timestamp.now(), photoRejectionReason: found.reason ?? null }, { merge: true })
-      if (source.key === 'account') tx.set(acctRef, { pendingPhotoURLs: remaining }, { merge: true })
-      else tx.update(source.key === 'root' ? rootRef : playRef, { pendingPhotoURLs: remaining.length ? remaining : FieldValue.delete() })
+      if (source?.key === 'account') tx.set(acctRef, { pendingPhotoURLs: remaining }, { merge: true })
+      else if (source) tx.update(source.key === 'root' ? rootRef : playRef, { pendingPhotoURLs: remaining.length ? remaining : FieldValue.delete() })
       if (remaining.length === 0 && !othersLeft) {
         tx.set(internalRef(targetUid), { hasPendingPhotos: false }, { merge: true })
         if (userSnap.data()?.hasPendingPhotos !== undefined) tx.update(rootRef, { hasPendingPhotos: FieldValue.delete() })
       }
+      // Decided: the hold's kept copy and context (F-071, F-081) go with it —
+      // in this transaction, so photo cleanup no longer counts it as held.
+      if (holdSnap.exists) tx.delete(holdRef)
       return { mode: where, entry: found }
     })
 
     if (action === 'reject') {
       const location = storagePath(entry.url)
-      // Only ever this user's own profile photos.
-      if (location?.path.startsWith(`photos/${targetUid}/`)) {
+      // Only ever this user's own profile photos (F-062: Play ones under
+      // their Play ID).
+      const playId = await playIdOf(targetUid)
+      if (location?.path.startsWith(`photos/${targetUid}/`) || (!!playId && location?.path.startsWith(`playPhotos/${playId}/`))) {
         await getStorage()
           .bucket(location.bucket)
           .file(location.path)
@@ -182,8 +220,6 @@ export const reviewPendingPhoto = onCall(
     // T&S Phase 1: the one admin audit log (replaces moderationLog). The
     // photo is identified by its mode only, never its URL.
     await audit({ actor: adminUid, action: action === 'approve' ? 'photo.approve' : 'photo.reject', target: targetUid, detail: { mode } })
-    // Decided: the hold's kept context (F-071) goes with it.
-    await photoHoldRef(targetUid, photoUrl as string).delete().catch(() => {})
 
     await textUser(targetUid, mode, action === 'approve' ? APPROVED_SMS : REJECTED_SMS).catch((err) =>
       logger.error('reviewPendingPhoto: SMS failed', { message: String(err) }),

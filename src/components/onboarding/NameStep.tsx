@@ -1,5 +1,6 @@
 import { MAX_RANGE_AGE, MIN_AGE, parseBirthday } from './types'
 import { StepHeader, StyledSelect } from './ui'
+import { NAME_RULE, publicNameOk } from '../../services/displayNames'
 
 interface NameStepProps {
   legalName: string
@@ -84,6 +85,9 @@ export default function NameStep({ legalName, displayName, birthdayRaw, birthday
           className={inputClass}
         />
         <span className="block text-xs text-white/50">This is what others will see on your profile.</span>
+        {displayName.trim() !== '' && !publicNameOk(displayName) && (
+          <span className="block text-xs text-red-400">{NAME_RULE}</span>
+        )}
       </label>
       {birthdayLocked && (
         <div className="mt-5 space-y-1">

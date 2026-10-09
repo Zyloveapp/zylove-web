@@ -10,6 +10,7 @@ import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { loadPlayName } from './playName'
+import { smsSafeName } from './smsName'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { internalRef, loadAccount, loadSettings, userRef } from './userData'
 
@@ -330,16 +331,15 @@ export async function claimSparkSmsSlot(uid: string): Promise<boolean> {
 
 // Display name for texts: the match's participant snapshot, then the user
 // doc. A Play match always uses the Play name — its snapshot may be an older
-// one holding the Spark name.
+// one holding the Spark name. Every name passes smsSafeName (F-079).
 export async function nameFor(
   uid: string,
   snapshots?: Record<string, { displayName?: unknown }>,
   mode?: unknown,
 ): Promise<string> {
-  if (mode === 'play' || mode === 'entanglement') return loadPlayName(uid)
+  if (mode === 'play' || mode === 'entanglement') return smsSafeName(await loadPlayName(uid))
   const fromSnapshot = snapshots?.[uid]?.displayName
-  if (typeof fromSnapshot === 'string' && fromSnapshot.trim()) return fromSnapshot.trim()
+  if (typeof fromSnapshot === 'string' && fromSnapshot.trim()) return smsSafeName(fromSnapshot)
   const snap = await getFirestore().doc(`users/${uid}`).get().catch(() => null)
-  const name: unknown = snap?.data()?.displayName
-  return typeof name === 'string' && name.trim() ? name.trim() : 'Someone'
+  return smsSafeName(snap?.data()?.displayName)
 }

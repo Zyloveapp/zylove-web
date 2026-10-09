@@ -22,6 +22,16 @@ export function nextNameChange(updatedAt: unknown, now = Date.now()): Date | nul
   return new Date(last + NAME_CHANGE_INTERVAL_MS)
 }
 
+// F-079: what a new public name may be — the rules (a first name) and
+// updateDisplayName (a change) take the same: 2–20 characters, letters (any
+// language), numbers, and single spaces, hyphens or apostrophes between them.
+const NAME_PATTERN = /^[\p{L}\p{M}\p{N}]+(?:[ '’-][\p{L}\p{M}\p{N}]+)*$/u
+export const NAME_RULE = 'Names are 2–20 characters: letters, numbers, spaces, hyphens and apostrophes.'
+export function publicNameOk(name: string): boolean {
+  const n = name.trim()
+  return n.length >= 2 && n.length <= 20 && NAME_PATTERN.test(n)
+}
+
 export function formatNameChangeDate(d: Date): string {
   return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
 }

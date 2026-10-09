@@ -70,11 +70,12 @@ test('privacy: clients cannot write moved fields to the public doc, or the plan 
   }
   for (const [k, v] of Object.entries(blocked)) expect(await restPatch(a.uid, `users/${a.uid}`, { [k]: v }), k).toBe(403)
   expect(await restPatch(a.uid, `users/${a.uid}`, { bio: 'still editable' })).toBe(200)
-  // private/account: server-written, except emptying the photo-review queue.
+  // private/account: server-written — the photo-review queue too (F-081: it
+  // could be emptied, hiding flagged photos before review).
   expect(await restPatch(a.uid, `users/${a.uid}/private/account`, { subscriptionTier: 'elite' })).toBe(403)
   expect(await restPatch(a.uid, `users/${a.uid}/private/account`, { hasBillingAccount: true })).toBe(403)
   expect(await restPatch(a.uid, `users/${a.uid}/private/account`, { pendingPhotoURLs: ['x'] })).toBe(403)
-  expect(await restPatch(a.uid, `users/${a.uid}/private/account`, { pendingPhotoURLs: [] })).toBe(200)
+  expect(await restPatch(a.uid, `users/${a.uid}/private/account`, { pendingPhotoURLs: [] })).toBe(403)
   // private/settings: allow-listed keys only.
   expect(await restPatch(a.uid, `users/${a.uid}/private/settings`, { smsQuietHours: { enabled: false } })).toBe(200)
   expect(await restPatch(a.uid, `users/${a.uid}/private/settings`, { subscriptionTier: 'elite' })).toBe(403)

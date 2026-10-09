@@ -91,7 +91,7 @@ test('play onboarding: Spark member builds a Play profile', async ({ browser }) 
   await page.locator('input[type=file]').setInputFiles(FIXTURE)
   await expect(page.getByLabel('Remove photo 1')).toBeVisible()
   await nextBtn()
-  await page.getByLabel('Play name').fill('Q')
+  await page.getByLabel('Play name').fill('Quill') // F-079: 2–20 characters
   await nextBtn()
   await page.getByRole('button', { name: /^Spicy/ }).click()
   await nextBtn()

@@ -3,6 +3,7 @@ import { logger } from 'firebase-functions'
 import { getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { getStorage } from 'firebase-admin/storage'
 import { playIdOf } from './playIds'
+import { heldUrls } from './photoHolds'
 
 // Stage A: clients can't delete profile photos any more (storage.rules) — a
 // deleted name could be uploaded again with new bytes while Firestore still
@@ -42,6 +43,8 @@ async function deleteUnlisted(uid: string, removed: string[]): Promise<void> {
     ...refsOf(play.data(), 'photoURLs'),
     ...refsOf(play.data(), 'pendingPhotoURLs'),
     ...refsOf(account.data(), 'pendingPhotoURLs'),
+    // F-081: a photo held for review (photoHolds) stays until it's decided.
+    ...(await heldUrls(uid)),
   ])
   const bucket = getStorage().bucket()
   for (const ref of own.filter((r) => !listed.has(r))) {

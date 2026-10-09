@@ -68,6 +68,7 @@ import {
   SpiceStep,
 } from '../components/onboarding/PlaySteps'
 import { loadPrivateProfile } from '../services/privateProfile'
+import { publicNameOk } from '../services/displayNames'
 import {
   CONFLICT_STYLE_LABELS,
   INITIAL_DRAFT,
@@ -189,7 +190,7 @@ function isStepValid(
     case 'name': {
       if (identityLocked) return d.displayName.trim().length > 0
       const b = parseBirthday(d.birthdayRaw)
-      return d.legalName.trim().length > 0 && d.displayName.trim().length > 0 && b !== null && b.age >= MIN_AGE
+      return d.legalName.trim().length > 0 && publicNameOk(d.displayName) && b !== null && b.age >= MIN_AGE
     }
     case 'photos':
       return d.photos.length >= 1 && d.photos.length <= maxPhotos
@@ -233,7 +234,7 @@ function isStepValid(
     case 'bio':
       return !bioGenerating
     case 'playName':
-      return play.playDisplayName.trim().length > 0
+      return publicNameOk(play.playDisplayName)
     case 'spice':
       return play.spiceLevel !== null
     case 'arrangement':

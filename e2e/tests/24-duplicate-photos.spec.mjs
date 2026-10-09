@@ -1,6 +1,7 @@
 // Trust & Safety Phase 5 (2026-10): duplicate photos — perceptual hashes on
-// every profile photo upload; the same photo on two accounts flags both for
-// review (never rejected); a banned scammer's photos form a blocklist that
+// every profile photo upload; the same photo on two accounts is listed for
+// side-by-side review and counts against the newer uploader (F-087; never
+// rejected); a banned scammer's photos form a blocklist that
 // holds matching uploads for review; lifting the ban removes them; a deleted
 // photo's hash goes with it.
 import { test, expect } from '@playwright/test'
@@ -27,7 +28,7 @@ const published = (uid, path) => expect.poll(async () => (await userDoc(uid)).ph
 const signals = async (uid) => (await db.doc(`behaviorSignals/${uid}`).get()).data() ?? {}
 const flag = async (uid) => (await db.doc(`trustFlags/${uid}`).get()).data()
 
-test('duplicates: the same photo on two accounts flags both, side by side; one account reusing its own photo is not a match; nothing is rejected', async () => {
+test('duplicates: the same photo on two accounts is listed side by side and counts against the newer uploader only, below the flag threshold; one account reusing its own photo is not a match; nothing is rejected', async () => {
   const admin = await seedUser('Kim', { isAdmin: true })
   const a = await seedUser('Ann')
   const b = await seedUser('Abe')
@@ -49,12 +50,14 @@ test('duplicates: the same photo on two accounts flags both, side by side; one a
   await expect.poll(async () => (await db.doc(`photoDuplicates/${pairId}`).get()).data()?.status, { timeout: 30000 }).toBe('open')
   const pair = (await db.doc(`photoDuplicates/${pairId}`).get()).data()
   expect(pair).toMatchObject({ uids: [a.uid, b.uid].sort(), distance: 0 })
-  expect(pair.photos.some((p) => p[b.uid] === pb && [pa1, pa2].includes(p[a.uid]))).toBe(true)
-  for (const u of [a, b]) {
-    await expect.poll(async () => (await signals(u.uid)).duplicatePhotos?.accounts ?? 0, { timeout: 20000 }).toBe(1)
-    await expect.poll(async () => (await flag(u.uid))?.reasons?.[0]?.key, { timeout: 20000 }).toBe('duplicate_photo')
-  }
-  expect((await flag(a.uid)).reasons[0].text).toMatch(/near-same photo as 1 other account/)
+  expect(pair.photos.some((p) => p[b.uid] === pb && [pa1, pa2].includes(p[a.uid]) && p.newer === b.uid)).toBe(true)
+  // F-087: it counts against B only (A had it first), and a duplicate alone
+  // stays under the flag threshold.
+  await expect.poll(async () => (await signals(b.uid)).duplicatePhotos?.accounts ?? 0, { timeout: 20000 }).toBe(1)
+  await expect.poll(async () => (await db.doc(`trustProfiles/${b.uid}`).get()).data()?.reasons?.find((r) => r.key === 'duplicate_photo')?.points ?? 0, { timeout: 20000 }).toBe(25)
+  expect((await db.doc(`trustProfiles/${b.uid}`).get()).data().reasons.find((r) => r.key === 'duplicate_photo').text).toMatch(/near-same photo as 1 other account/)
+  expect((await signals(a.uid)).duplicatePhotos).toBeUndefined()
+  for (const u of [a, b]) expect(((await flag(u.uid))?.reasons ?? []).some((r) => r.key === 'duplicate_photo')).toBe(false)
   // The dashboard shows both photos side by side (short-lived links).
   const d = await callAs(admin.uid, 'adminTrustDetail', { uid: a.uid })
   expect(d.duplicatePhotos).toHaveLength(1)

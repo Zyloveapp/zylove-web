@@ -13,7 +13,8 @@ if (realFetch && !globalThis.__anthropicStub) {
     }
     // T&S Phase 2 photo checks: only photos named e2e-* are answered (so the
     // other tests keep Sightengine unreachable → pending review). e2e-ai*:
-    // AI-generated; e2e-stolen*: found on the web; any other e2e-*: clean.
+    // AI-generated; e2e-stolen*: found on the web; e2e-nsfw*: over the
+    // nudity limits (a content flag, F-081); any other e2e-*: clean.
     if (url.startsWith('http://metadata.google.internal/')) {
       return new Response(JSON.stringify({ access_token: 'e2e-token', expires_in: 3600 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
@@ -22,7 +23,9 @@ if (realFetch && !globalThis.__anthropicStub) {
       if (name.startsWith('e2e-')) {
         const body = {
           status: 'success',
-          nudity: { sexual_activity: 0.01, sexual_display: 0.01, erotica: 0.01, very_suggestive: 0.01 },
+          nudity: name.startsWith('e2e-nsfw')
+            ? { sexual_activity: 0.95, sexual_display: 0.95, erotica: 0.9, very_suggestive: 0.99 }
+            : { sexual_activity: 0.01, sexual_display: 0.01, erotica: 0.01, very_suggestive: 0.01 },
           gore: { prob: 0.01 }, offensive: { prob: 0.01 }, faces: [{ x1: 0.1, y1: 0.1, x2: 0.5, y2: 0.5 }],
           type: { ai_generated: name.startsWith('e2e-ai') ? 0.97 : 0.02, deepfake: 0.01 },
         }
