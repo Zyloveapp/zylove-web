@@ -9,8 +9,15 @@ import { getFirestore } from 'firebase-admin/firestore'
 // Any user doc without a sortKey gets one the next time it's written. Covers
 // mobile sign-ups (which never call initUserDefaults), bots, and accounts that
 // existed before sortKey did. The added write doesn't loop: the doc then has one.
+// update(), not set+merge: a doc deleted since the event (account deletion)
+// stays deleted — the write fails with NOT_FOUND, which is fine.
 export const ensureSortKey = onDocumentWritten('users/{uid}', async (event) => {
   const after = event.data?.after
   if (!after?.exists || typeof after.data()?.sortKey === 'number') return
-  await getFirestore().doc(`users/${event.params.uid}`).set({ sortKey: Math.random() }, { merge: true })
+  await getFirestore()
+    .doc(`users/${event.params.uid}`)
+    .update({ sortKey: Math.random() })
+    .catch((err: { code?: unknown }) => {
+      if (err?.code !== 5) throw err // 5 = NOT_FOUND
+    })
 })
