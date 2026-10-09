@@ -12,10 +12,8 @@ import {
   PARENTAL_STATUS_LABELS,
   PERSONALITY_TRAIT_LABELS,
   PLAY_PROMPTS as LEGACY_PLAY_PROMPTS,
-  POLITICAL_VIEW_LABELS,
   RELATIONSHIP_STATUS_LABELS,
   RELATIONSHIP_VALUE_LABELS,
-  RELIGION_LABELS,
   SEEKING_TRAIT_LABELS,
   SPARK_PROMPTS as LEGACY_SPARK_PROMPTS,
   STRESS_RESPONSE_LABELS,
@@ -65,7 +63,8 @@ export function profileGenderLabel(p: DiscoverProfile): string | null {
 export function identityLine(p: DiscoverProfile): string | null {
   const raw: unknown = p.genderIdentity
   const g = Array.isArray(raw) ? raw[0] : raw
-  const label = typeof g === 'string' && g !== 'man' && g !== 'woman' ? profileGenderLabel(p) : null
+  // F-018: "Don't show on my profile" hides it (pronouns are their own choice).
+  const label = typeof g === 'string' && g !== 'man' && g !== 'woman' && p.genderHidden !== true ? profileGenderLabel(p) : null
   // Self-described text is shown as the person wrote it.
   const gender = g === 'self_describe' ? label : (label?.toLowerCase() ?? null)
   const pronouns = p.pronouns?.trim() || null
@@ -127,7 +126,7 @@ export function lifeDetails(p: DiscoverProfile): { label: string; value: string 
       value: labelOf(RELATIONSHIP_STATUS_LABELS, p.relationshipStatus ?? ''),
     },
     kids && { label: 'Kids', value: kids },
-    !skip(p.religion) && { label: 'Religion', value: labelOf(RELIGION_LABELS, p.religion ?? '') },
-    !skip(p.politicalView) && { label: 'Politics', value: labelOf(POLITICAL_VIEW_LABELS, p.politicalView ?? '') },
+    // Religion and politics are never shown to other members (F-018): they're
+    // only used for matching.
   ].filter((r): r is { label: string; value: string } => Boolean(r))
 }

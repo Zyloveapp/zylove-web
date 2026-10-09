@@ -2,16 +2,18 @@
 // the Terms and Privacy pages, with a .N suffix for a second update on the
 // same day). Bump both together; a bump shows existing
 // users the change notice below (components/LegalUpdateNotice.tsx).
-export const LEGAL_VERSIONS = { terms: '2026-10-07.2', privacy: '2026-10-07.6' } as const
+export const LEGAL_VERSIONS = { terms: '2026-10-07.2', privacy: '2026-10-08' } as const
 
 // What the notice says about the current versions. Terms §15: material
 // changes are announced in the app before they take effect; safety, security,
 // fraud-prevention and legal-compliance changes may take effect immediately.
 export const LEGAL_UPDATE = {
-  updated: 'October 7, 2026',
-  effective: 'October 7, 2026',
+  updated: 'October 8, 2026',
+  effective: 'October 8, 2026',
   changes: [
-    'Duplicate-photo checks: we make a fingerprint (not an image) of each profile photo to spot the same photo on another account, or photos from accounts banned for scams. A match goes to a person for review.',
-    'Photo fingerprints are kept while the photo exists — for an account banned for scams, as long as the ban stands.',
+    'Zylove curated profiles: your most recent messages to one (up to 8) go to Anthropic to write its reply, and your name and bio are used for its first message.',
+    'Deleting your account: we keep a recovery record (name, birthday, gender, bio, photo links, moderation status) for 18 months so you can restore it within 90 days — as long as the ban stands for a banned account.',
+    'Religion and political views are now private: never shown to other members, only used for matching. You can also hide your gender identity, and height is optional.',
+    'When you delete your account, the people you were chatting with keep a read-only copy, shown as "Deleted User", for up to 12 months.',
   ],
 }

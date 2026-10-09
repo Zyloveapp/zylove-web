@@ -77,11 +77,14 @@ export interface OnboardingDraft {
   genderSelfDescribe: string
   matchableAs: AttractedTo[]
   pronouns: string
+  // F-018: hide gender on the profile (still used for matching).
+  genderHidden: boolean
   attractedTo: AttractedTo[]
   relationshipStatus: RelationshipStatus | null
   openTo: OpenTo[]
   bodyType: BodyType | null
-  height: HeightFtIn
+  // null = not given (F-018: optional, never defaulted); not shown.
+  height: HeightFtIn | null
   lifestyleTags: LifestyleTag[]
   habitTags: HabitTag[]
   drinkingHabit: DrinkingHabit | null
@@ -133,11 +136,12 @@ export const INITIAL_DRAFT: OnboardingDraft = {
   genderSelfDescribe: '',
   matchableAs: [],
   pronouns: '',
+  genderHidden: false,
   attractedTo: [],
   relationshipStatus: null,
   openTo: [],
   bodyType: null,
-  height: { feet: 5, inches: 6 },
+  height: null,
   lifestyleTags: [],
   habitTags: [],
   drinkingHabit: null,

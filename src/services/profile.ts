@@ -108,6 +108,8 @@ export function profileCompleteness({ profile: p, bio, prompts }: OwnProfile): n
 // The display name isn't here: it changes through updateDisplayName.
 export interface SparkEdits {
   pronouns: string
+  // F-018: hide gender on the profile (it stays locked and used for matching).
+  genderHidden: boolean
   bio: string
   prompts: PromptAnswer[]
 }
@@ -124,6 +126,7 @@ export async function saveSparkEdits(uid: string, e: SparkEdits): Promise<void> 
   const batch = writeBatch(db)
   batch.update(doc(db, 'users', uid), {
     pronouns: pronouns || deleteField(),
+    genderHidden: e.genderHidden || deleteField(),
     bio,
     promptAnswers,
     profileUpdatedAt: serverTimestamp(),
@@ -183,14 +186,15 @@ export async function regenerateBio(p: DiscoverProfile, displayName: string, pro
   const gender: unknown = Array.isArray(raw.genderIdentity) ? raw.genderIdentity[0] : raw.genderIdentity
   const request: SparkBioRequest = {
     displayName: displayName.trim() || p.displayName || '',
-    genderIdentity: str(gender),
+    genderIdentity: p.genderHidden === true ? null : str(gender),
     pronouns: str(p.pronouns),
     age: displayAge(p),
     heightCm: typeof p.heightCm === 'number' && p.heightCm > 0 ? p.heightCm : null,
     bodyType: str(p.bodyType),
     drinkingHabit: str(raw.drinkingHabit),
-    religion: str(p.religion),
-    politicalView: str(p.politicalView),
+    // F-018: never in the (public) bio — see bio.ts.
+    religion: null,
+    politicalView: null,
     relationshipStatus: str(p.relationshipStatus),
     openTo: strings(p.openTo),
     lifestyleTags: strings(p.lifestyleTags),

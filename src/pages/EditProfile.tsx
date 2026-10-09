@@ -103,6 +103,7 @@ export default function EditProfile() {
   const [loadError, setLoadError] = useState(false)
   const [displayName, setDisplayName] = useState('')
   const [pronouns, setPronouns] = useState('')
+  const [genderHidden, setGenderHidden] = useState(false)
   const [bio, setBio] = useState('')
   const [prompts, setPrompts] = useState<PromptAnswer[]>([])
   const [photos, setPhotos] = useState<string[]>([])
@@ -125,6 +126,7 @@ export default function EditProfile() {
         setProfile(own.profile)
         setDisplayName(own.profile.displayName ?? '')
         setPronouns(own.profile.pronouns ?? '')
+        setGenderHidden(own.profile.genderHidden === true)
         setBio(own.bio.slice(0, BIO_LIMIT))
         setPrompts(own.prompts.slice(0, MAX_PROMPTS))
         setPhotos(Array.isArray(own.profile.photoURLs) ? own.profile.photoURLs : [])
@@ -198,7 +200,7 @@ export default function EditProfile() {
           return
         }
       }
-      await saveSparkEdits(uid, { pronouns, bio, prompts })
+      await saveSparkEdits(uid, { pronouns, genderHidden, bio, prompts })
       setSaveState('saved')
       setTimeout(() => navigate('/profile'), 1200)
     } catch {
@@ -272,6 +274,20 @@ export default function EditProfile() {
           </label>
           {profile.birthday && <LockedField label="Birthday" value={profile.birthday} />}
           {gender && <LockedField label="Gender" value={gender} />}
+          {gender && (
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={genderHidden}
+                onChange={(e) => setGenderHidden(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[#1B4FD8]"
+              />
+              <span>
+                Don't show my gender on my profile
+                <span className="block text-xs text-white/40">We still use it to show you to the right people.</span>
+              </span>
+            </label>
+          )}
           {(profile.birthday || gender) && (
             <p className="text-xs text-white/30">Locked after account setup for account security</p>
           )}

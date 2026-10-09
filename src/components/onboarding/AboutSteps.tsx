@@ -93,6 +93,19 @@ export function GenderStep({ draft, update }: StepProps) {
           className={`${textInputClass} mt-3`}
         />
       )}
+      {/* F-018: hide it on the profile; still used for matching. */}
+      <label className="mt-4 flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={draft.genderHidden}
+          onChange={(e) => update({ genderHidden: e.target.checked })}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-[#1B4FD8]"
+        />
+        <span>
+          Don't show on my profile
+          <span className="block text-xs text-white/40">We still use it to show you to the right people.</span>
+        </span>
+      </label>
       {draft.genderIdentity && OFF_MAP_GENDER_IDENTITIES.includes(draft.genderIdentity) && (
         <>
           <FieldLabel hint="Select at least one. This is how you'll be surfaced in Explore.">
@@ -175,27 +188,48 @@ export function BodyTypeStep({ draft, update, onSkip }: StepProps & { onSkip: ()
 const FEET_OPTIONS = [4, 5, 6, 7].map((f) => ({ value: String(f), label: `${f} ft` }))
 const INCH_OPTIONS = Array.from({ length: 12 }, (_, i) => ({ value: String(i), label: `${i} in` }))
 
-export function HeightStep({ draft, update }: StepProps) {
+// F-018: optional, with no default height. Not given = not on the profile.
+export function HeightStep({ draft, update, onSkip }: StepProps & { onSkip: () => void }) {
+  const h = draft.height
   return (
     <div>
-      <StepHeader title="My height" subtitle="Shown on your profile." />
-      <div className="flex gap-2">
-        <StyledSelect
-          ariaLabel="Height feet"
-          value={String(draft.height.feet)}
-          options={FEET_OPTIONS}
-          onChange={(v) => update({ height: { ...draft.height, feet: Number(v) } })}
-          className="flex-1"
-        />
-        <StyledSelect
-          ariaLabel="Height inches"
-          value={String(draft.height.inches)}
-          options={INCH_OPTIONS}
-          onChange={(v) => update({ height: { ...draft.height, inches: Number(v) } })}
-          className="flex-1"
-        />
-      </div>
-      <p className="mt-2 text-sm text-white/50">{feetInchesToCm(draft.height.feet, draft.height.inches)} cm</p>
+      <StepHeader title="My height" subtitle="Optional. Shown on your profile only if you add it." />
+      {h === null ? (
+        <button
+          type="button"
+          onClick={() => update({ height: { feet: 5, inches: 6 } })}
+          className="w-full rounded-xl border border-dashed border-white/20 py-3 text-sm font-medium text-white/70 hover:border-white/40 hover:text-white"
+        >
+          + Add my height
+        </button>
+      ) : (
+        <>
+          <div className="flex gap-2">
+            <StyledSelect
+              ariaLabel="Height feet"
+              value={String(h.feet)}
+              options={FEET_OPTIONS}
+              onChange={(v) => update({ height: { ...h, feet: Number(v) } })}
+              className="flex-1"
+            />
+            <StyledSelect
+              ariaLabel="Height inches"
+              value={String(h.inches)}
+              options={INCH_OPTIONS}
+              onChange={(v) => update({ height: { ...h, inches: Number(v) } })}
+              className="flex-1"
+            />
+          </div>
+          <p className="mt-2 text-sm text-white/50">{feetInchesToCm(h.feet, h.inches)} cm</p>
+        </>
+      )}
+      <SkipLink
+        label={h === null ? 'Skip — leave it off my profile' : 'Remove — leave it off my profile'}
+        onClick={() => {
+          update({ height: null })
+          onSkip()
+        }}
+      />
     </div>
   )
 }
@@ -308,8 +342,11 @@ export function LoveReceiveStep({ draft, update }: StepProps) {
 export function BeliefsStep({ draft, update, onSkip }: StepProps & { onSkip: () => void }) {
   return (
     <div>
-      <StepHeader title="A little more about you" subtitle="Both optional. Skip anything you'd rather keep private." />
-      <FieldLabel>Faith / Religion</FieldLabel>
+      <StepHeader
+        title="A little more about you"
+        subtitle="Both optional. Never shown on your profile — only used to match you with compatible people."
+      />
+      <FieldLabel hint="Private — only used to match you with compatible people.">Faith / Religion</FieldLabel>
       <ChipSelect
         options={RELIGION_OPTIONS}
         value={draft.religion}

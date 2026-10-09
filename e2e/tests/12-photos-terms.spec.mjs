@@ -152,9 +152,9 @@ test('terms (F-024): recorded server-side with versions and IP; incomplete conse
   const a = await seedUser('Ivo')
   await expect(callAs(a.uid, 'recordTermsAcceptance', { consents: ['terms', 'privacy'] })).rejects.toThrow(/invalid-argument|INVALID_ARGUMENT/)
   const r = await callAs(a.uid, 'recordTermsAcceptance', { consents: ['age', 'terms', 'privacy', 'matching', 'conduct', 'safety'] })
-  expect(r.versions).toEqual({ terms: '2026-10-07.2', privacy: '2026-10-07.6' })
+  expect(r.versions).toEqual({ terms: '2026-10-07.2', privacy: '2026-10-08' })
   const main = (await db.doc(`users/${a.uid}/legalAcceptance/main`).get()).data()
-  expect(main).toMatchObject({ uid: a.uid, termsVersion: '2026-10-07.2', privacyVersion: '2026-10-07.6', source: 'web' })
+  expect(main).toMatchObject({ uid: a.uid, termsVersion: '2026-10-07.2', privacyVersion: '2026-10-08', source: 'web' })
   expect(main.acceptedAt).toBeTruthy()
   expect('ip' in main).toBe(true) // null in the emulator (no client address); set in production by Cloud Run's X-Forwarded-For
   expect((await db.collection(`users/${a.uid}/legalAcceptance`).get()).size).toBe(2) // latest + history

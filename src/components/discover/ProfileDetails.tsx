@@ -83,7 +83,7 @@ export default function ProfileDetails({
           {(!anonymous && profile.displayName) || 'Someone'}
           {!anonymous && age !== null && <span className="font-normal text-white/70">, {age}</span>}
         </h2>
-        {identity && <p className="mt-1 text-sm text-white/50">{identity}</p>}
+        {!anonymous && identity && <p className="mt-1 text-sm text-white/50">{identity}</p>}
         {!anonymous && (
           <>
             <div className="mt-2 flex flex-wrap gap-2 empty:hidden">
@@ -196,7 +196,8 @@ export default function ProfileDetails({
             </section>
           )}
 
-          {details.length > 0 && (
+          {/* Gender, kids and relationship status wait until you link, like the name. */}
+          {!anonymous && details.length > 0 && (
             <section>
               <SectionHeading>Life details</SectionHeading>
               <dl className="grid grid-cols-2 gap-x-8 gap-y-5">

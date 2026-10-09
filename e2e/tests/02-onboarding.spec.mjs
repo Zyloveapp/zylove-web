@@ -50,9 +50,10 @@ test('onboarding: new user completes Spark onboarding', async ({ browser }) => {
   await page.getByRole('button', { name: /^Monogamy/ }).click()
   await next()
 
-  // 9. Body type (skip), 10. height (default)
+  // 9. Body type (skip), 10. height (F-018: optional, no default — skipped)
   await page.getByRole('button', { name: 'Skip for now' }).click()
-  await next()
+  await expect(page.getByRole('button', { name: '+ Add my height' })).toBeVisible()
+  await page.getByRole('button', { name: 'Skip — leave it off my profile' }).click()
 
   // 11–17. Lifestyle, habits (optional), personality, values, weekend, love x2
   await page.getByRole('button', { name: /Homebody/ }).first().click()
@@ -101,6 +102,10 @@ test('onboarding: new user completes Spark onboarding', async ({ browser }) => {
   expect(u.onboardingComplete).toBe(true)
   expect(u.displayName).toBe('Riley')
   expect(u.genderIdentity).toBe('man')
+  // F-018: height skipped → none on the profile; gender shown by default.
+  expect(u.heightCm).toBeUndefined()
+  expect((await db.doc(`users/${uid}/sparkProfile/data`).get()).data()?.height).toBeUndefined()
+  expect(u.genderHidden).toBeUndefined()
   // Stage 3: preferences owner-only, suspension server-only.
   expect(u.attractedTo).toBeUndefined()
   expect((await db.doc(`users/${uid}/private/matching`).get()).data()?.attractedTo).toEqual(['women'])

@@ -825,7 +825,7 @@ export default function Onboarding() {
       case 'bodyType':
         return <BodyTypeStep {...props} onSkip={next} />
       case 'height':
-        return <HeightStep {...props} />
+        return <HeightStep {...props} onSkip={next} />
       case 'lifestyle':
         return <LifestyleStep {...props} />
       case 'habits':

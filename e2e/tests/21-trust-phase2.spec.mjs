@@ -381,6 +381,7 @@ test('legal notice: only the Privacy Policy changed since they last saw it → t
   const notice = page.getByRole('dialog', { name: "We've updated our Privacy Policy" })
   await expect(notice).toBeVisible({ timeout: 20000 })
   await expect(notice.getByText(/the updated Privacy Policy applies/)).toBeVisible()
+  await expect(notice.getByText(/Religion and political views are now private/)).toBeVisible()
   await expect(page.getByRole('dialog', { name: /Terms and Privacy/ })).toHaveCount(0)
   await notice.getByRole('button', { name: 'Got it' }).click()
   await expect(notice).toBeHidden()
