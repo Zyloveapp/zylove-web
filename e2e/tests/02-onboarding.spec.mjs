@@ -122,7 +122,7 @@ test('onboarding: new user completes Spark onboarding', async ({ browser }) => {
     return (d.photoURLs?.length ?? 0) + (acct.pendingPhotoURLs?.length ?? 0)
   }, { timeout: 45000 }).toBeGreaterThan(0)
   // F-024: terms acceptance recorded server-side.
-  expect((await db.doc(`users/${uid}/legalAcceptance/main`).get()).data()).toMatchObject({ termsVersion: '2026-10-07.2', source: 'web' })
+  expect((await db.doc(`users/${uid}/legalAcceptance/main`).get()).data()).toMatchObject({ termsVersion: '2026-10-08', source: 'web' })
   // Stage 1a: the birthday is private, nothing private on the public doc.
   expect(u.birthday).toBeUndefined()
   expect(u.lastActive).toBeUndefined()

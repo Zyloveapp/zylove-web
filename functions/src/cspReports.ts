@@ -3,7 +3,7 @@ import { logger } from 'firebase-functions'
 import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { requireAdminAudited } from './audit'
 import { takeRateLimit } from './rateLimits'
-import { callerIp, ipRateKey } from './contactMessages'
+import { clientIp, ipRateKey } from './clientIp'
 
 // F-082: where browsers send Content-Security-Policy violation reports
 // (vercel.json's Report-Only policy: report-uri for older browsers,
@@ -150,7 +150,7 @@ export const cspReport = onRequest(
       return
     }
     try {
-      await takeRateLimit(ipRateKey(callerIp(req as never)), 'cspReport', CSP_PER_IP)
+      await takeRateLimit(ipRateKey(clientIp(req as never)), 'cspReport', CSP_PER_IP)
     } catch (err) {
       if (err instanceof HttpsError && err.code === 'resource-exhausted') {
         res.status(429).send('Too many reports')

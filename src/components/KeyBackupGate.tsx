@@ -227,7 +227,7 @@ function SetPin({ replacing, onSave, onCancel }: { replacing: boolean; onSave: (
       >
         {busy ? 'Encrypting…' : confirm === null ? 'Next' : 'Save PIN'}
       </button>
-      <p className="mt-3 text-xs text-white/40">We never see your PIN, and we can't recover it if you forget it.</p>
+      <p className="mt-3 text-xs text-white/40">We never see your PIN, and we can't recover it if you forget it. A 4-digit PIN is not as strong as end-to-end encryption on its own: someone with access to our database could in principle recover your chat key from the backup.</p>
       <button type="button" onClick={onCancel} disabled={busy} className="mt-2 w-full py-2 text-sm text-white/50 hover:text-white">
         Not now
       </button>

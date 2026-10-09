@@ -26,6 +26,15 @@ export const MIN_COHORT = 30
 // Closed flags (and their history) are kept this long after closing.
 export const FLAG_RETENTION_MS = 2 * 365 * 24 * 60 * 60 * 1000
 
+// F-085: an open flag whose account is deleted or gone can never be acted
+// on (trustAction refuses deleted accounts) and the nightly run no longer
+// scores it, so it would stay open forever. These are closed as
+// "account deleted" and then kept like any closed review (2 years, Privacy
+// §07). Curated profiles are left alone.
+export function orphanedOpenFlags(openFlagUids: string[], liveUids: Set<string>): string[] {
+  return openFlagUids.filter((uid) => !liveUids.has(uid) && !isBot(uid))
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000
 const db = () => getFirestore()
 
@@ -510,10 +519,29 @@ export const computeTrustScores = onSchedule(
       await db().doc(`users/${r.uid}`).update({ replyBand: band ?? FieldValue.delete() })
       bands++
     }
+    // Open flags of deleted accounts close (F-085), then age out like the rest.
+    const open = await db().collection('trustFlags').where('status', '==', 'open').select().get()
+    const orphaned = orphanedOpenFlags(open.docs.map((d) => d.id), new Set(live.map((u) => u.id)))
+    await Promise.all(
+      orphaned.map((uid) =>
+        db().doc(`trustFlags/${uid}`).set(
+          {
+            status: 'dismissed',
+            closedAt: FieldValue.serverTimestamp(),
+            closedBy: 'system',
+            closeReason: 'Account deleted',
+            closeAction: 'account_deleted',
+            expiresAt: Timestamp.fromMillis(now + FLAG_RETENTION_MS),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        ),
+      ),
+    )
     // Closed flags past retention go.
     const old = await db().collection('trustFlags').where('expiresAt', '<=', Timestamp.now()).get()
     await Promise.all(old.docs.map((d) => d.ref.delete()))
-    logger.info('computeTrustScores', { accounts: rows.length, cohorts: cohorts.size, openFlags: flagged, expired: old.size, replyBands: bands })
+    logger.info('computeTrustScores', { accounts: rows.length, cohorts: cohorts.size, openFlags: flagged, closedDeleted: orphaned.length, expired: old.size, replyBands: bands })
   },
 )
 

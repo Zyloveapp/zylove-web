@@ -380,7 +380,7 @@ test('sign-in: the code screen says where to look and offers Resend', async ({ b
 // ─── Legal notice names only what changed ────────────────────────────────────
 
 test('legal notice: only the Privacy Policy changed since they last saw it → the title says so', async ({ browser }) => {
-  const a = await seedUser('Ann', {}, { legal: { terms: '2026-10-07.2', privacy: '2026-10-07.2' } })
+  const a = await seedUser('Ann', {}, { legal: { terms: '2026-10-08', privacy: '2026-10-07.2' } })
   const ctx = await browser.newContext(CONTEXT)
   const page = await ctx.newPage()
   await offline(page)
