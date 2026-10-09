@@ -4,12 +4,17 @@
 //
 // An archetype is a named pattern detected in a pair's facet vectors
 // (Spark) or narrower facet set (Play). Each archetype has a predicate
-// returning a [0, 1] confidence value. The matcher thresholds at 0.7
-// (doc Section 8.5). Priority order in each array = specificity
-// precedence — first predicate that clears 0.7 wins.
+// returning a [0, 1] confidence. The matcher (archetypeMatcher.ts) runs
+// every predicate and the strongest fit wins; array order = specificity,
+// used only to break ties. Nothing at or above MIN_CONFIDENCE → no
+// archetype: the app shows a neutral line instead of a weak label.
 //
 // Facet value convention (from facetProfile.ts): normalized to [0, 1]
-// with 0.5 as neutral/no-data origin. "High" = >= 0.65. "Low" = <= 0.35.
+// with 0.5 as neutral/no-data origin. Measured on production profiles
+// (2026-10-09, scripts/archetype-distribution.mjs) most facets sit well
+// above 0.5 for most people — e.g. self_awareness >= 0.55 for 91%,
+// sensuality >= 0.65 for 96% — so each archetype sets its own bar per
+// facet, high enough that the pattern says something specific.
 
 import type { FacetVector } from './facetProfile'
 
@@ -57,12 +62,19 @@ export interface UnlikelyFitDef {
 const HIGH_THRESHOLD = 0.55 // both users show genuine positive signal (calibrated down from 0.65)
 const LOW_THRESHOLD  = 0.45 // both users show suppression (calibrated up from 0.35)
 
+/** The matcher's floor: below this a pattern isn't clear enough to name. */
+export const MIN_CONFIDENCE = 0.6
+
 // ─── Helpers (private) ────────────────────────────────────────────────
 
 type FKey = keyof FacetVector
 
 const bothHigh = (a: FacetVector, b: FacetVector, k: FKey): boolean =>
   (a[k] ?? 0.5) >= HIGH_THRESHOLD && (b[k] ?? 0.5) >= HIGH_THRESHOLD
+
+/** Both users at or above `t` on every facet in `bars` ({ facet: t }). */
+const bothAtLeast = (a: FacetVector, b: FacetVector, bars: Partial<Record<FKey, number>>): boolean =>
+  (Object.entries(bars) as [FKey, number][]).every(([k, t]) => (a[k] ?? 0.5) >= t && (b[k] ?? 0.5) >= t)
 
 const bothLow = (a: FacetVector, b: FacetVector, k: FKey): boolean =>
   (a[k] ?? 0.5) <= LOW_THRESHOLD && (b[k] ?? 0.5) <= LOW_THRESHOLD
@@ -101,12 +113,17 @@ const avgSignal = (
 }
 
 /**
- * Strength [0, 0.5] → confidence [0, 1]. Minimum-passing case (strength
- * 0.15, both users at 0.65) yields confidence 0.75 — safely above the
- * 0.7 firing threshold. Strong matches (strength 0.20+) clamp to 1.0.
+ * Strength [0, 0.5] → confidence [0.5, 1]: 0.5 + strength. Graded all the
+ * way up (it used to clamp at 1.0 from strength 0.20, so most strong
+ * pairs tied and list order decided). Both users at 0.65 on every facet
+ * → 0.65; both at 0.75 → 0.75; both at 1.0 → 1.0.
  */
 const confidenceFromSignal = (strength: number): number =>
-  Math.min(1, strength / 0.20)
+  Math.min(1, 0.5 + strength)
+
+/** Confidence for a "both high on these facets" archetype, or 0. */
+const signalArchetype = (a: FacetVector, b: FacetVector, bars: Partial<Record<FKey, number>>): number =>
+  bothAtLeast(a, b, bars) ? confidenceFromSignal(avgSignal(a, b, Object.keys(bars) as FKey[], highSignal)) : 0
 
 // Values cluster (doc Section 2, Cluster F)
 const VALUES_CLUSTER: FKey[] = [
@@ -140,16 +157,25 @@ export const SPARK_ARCHETYPES: SparkArchetypeDef[] = [
     id:    'the_builders',
     label: 'The Builders',
     copy:  'Two people who know what they want and how to build it. This is partnership as architecture.',
-    predicate: (a, b) => {
-      const required: FKey[] = [
-        'ambition_drive',
-        'conscientiousness',
-        'family_orientation',
-        'commitment_orientation',
-      ]
-      if (!required.every((k) => bothHigh(a, b, k))) return 0
-      return confidenceFromSignal(avgSignal(a, b, required, highSignal))
-    },
+    predicate: (a, b) =>
+      signalArchetype(a, b, {
+        ambition_drive: 0.65,
+        conscientiousness: 0.65,
+        family_orientation: 0.65,
+        commitment_orientation: 0.65,
+      }),
+  },
+
+  {
+    id:    'family_first',
+    label: 'Family First',
+    copy:  'You both put the people you love at the center, and you mean it when you commit. You picture home the same way.',
+    predicate: (a, b) =>
+      signalArchetype(a, b, {
+        family_orientation: 0.65,
+        commitment_orientation: 0.65,
+        nurturing_impulse: 0.75,
+      }),
   },
 
   {
@@ -194,16 +220,27 @@ export const SPARK_ARCHETYPES: SparkArchetypeDef[] = [
     id:    'kinetic_match',
     label: 'Kinetic Match',
     copy:  "Good luck keeping up with each other. You'll either burn each other out or build something loud and alive.",
-    predicate: (a, b) => {
-      const required: FKey[] = [
-        'extraversion_social',
-        'high_arousal_preference',
-        'openness_to_novelty',
-        'spontaneity',
-      ]
-      if (!required.every((k) => bothHigh(a, b, k))) return 0
-      return confidenceFromSignal(avgSignal(a, b, required, highSignal))
-    },
+    predicate: (a, b) =>
+      // 0.6 (was 0.55): at 0.55 a pair just above average everywhere
+      // was "Kinetic" at the bare minimum confidence.
+      signalArchetype(a, b, {
+        extraversion_social: 0.6,
+        high_arousal_preference: 0.6,
+        openness_to_novelty: 0.6,
+        spontaneity: 0.6,
+      }),
+  },
+
+  {
+    id:    'adventure_partners',
+    label: 'Adventure Partners',
+    copy:  "You both say yes to the unplanned and don't mind a little risk. Expect more stories than routines.",
+    predicate: (a, b) =>
+      signalArchetype(a, b, {
+        openness_to_novelty: 0.65,
+        spontaneity: 0.65,
+        risk_tolerance: HIGH_THRESHOLD,
+      }),
   },
 
   {
@@ -228,18 +265,55 @@ export const SPARK_ARCHETYPES: SparkArchetypeDef[] = [
   },
 
   {
+    id:    'deep_talkers',
+    label: 'Deep Talkers',
+    copy:  'You both say what you feel and want to hear it back. The long conversations will be the good part.',
+    predicate: (a, b) =>
+      signalArchetype(a, b, {
+        verbal_expressiveness: 0.75,
+        emotional_depth: 0.75,
+        conflict_directness: 0.65,
+      }),
+  },
+
+  {
+    id:    'steady_hearts',
+    label: 'Steady Hearts',
+    copy:  "Calm, present and in it for real — both of you. The kind of steady that's easy to build on.",
+    predicate: (a, b) =>
+      signalArchetype(a, b, {
+        commitment_orientation: 0.65,
+        emotional_stability: 0.65,
+        emotional_availability: 0.75,
+      }),
+  },
+
+  {
+    id:    'curious_minds',
+    label: 'Curious Minds',
+    copy:  'You both want to know how things work and why. You won’t run out of things to talk about.',
+    predicate: (a, b) =>
+      signalArchetype(a, b, {
+        intellectual_curiosity: 0.65,
+        openness_to_novelty: 0.65,
+        aesthetic_sensitivity: 0.65,
+      }),
+  },
+
+  {
+    // Tightened 2026-10-09: it needed only three facets almost everyone
+    // scores >= 0.55 on, so it labelled most pairs. Now 0.65 on each, plus
+    // lifestyle_discipline — "a clear path" means someone who acts on it.
     id:    'parallel_paths',
     label: 'Parallel Paths',
     copy:  "Two people on a clear path, moving in the same direction. You'll grow alongside, not around, each other.",
-    predicate: (a, b) => {
-      const required: FKey[] = [
-        'personal_growth_focus',
-        'ambition_drive',
-        'self_awareness',
-      ]
-      if (!required.every((k) => bothHigh(a, b, k))) return 0
-      return confidenceFromSignal(avgSignal(a, b, required, highSignal))
-    },
+    predicate: (a, b) =>
+      signalArchetype(a, b, {
+        personal_growth_focus: 0.65,
+        ambition_drive: 0.65,
+        self_awareness: 0.65,
+        lifestyle_discipline: 0.65,
+      }),
   },
 
   {
@@ -337,27 +411,22 @@ export const PLAY_ARCHETYPES: PlayArchetypeDef[] = [
     id:    'intense_pair',
     label: 'Intense Pair',
     copy:  'Both running hot. High-intensity chemistry from the start.',
-    predicate: (a, b, spiceAligned) => {
-      if (!spiceAligned) return 0
-      const required: FKey[] = ['sensuality', 'physical_expressiveness']
-      if (!required.every((k) => bothHigh(a, b, k))) return 0
-      return confidenceFromSignal(avgSignal(a, b, required, highSignal))
-    },
+    // Tightened 2026-10-09: sensuality and physical_expressiveness are
+    // >= 0.65 for ~90% of profiles, so it fired on most spice-aligned
+    // pairs. Now 0.75 on both (adding high_arousal_preference as well
+    // left it firing on no pair at all).
+    predicate: (a, b, spiceAligned) =>
+      spiceAligned
+        ? signalArchetype(a, b, { sensuality: 0.75, physical_expressiveness: 0.75 })
+        : 0,
   },
 
   {
     id:    'talkers_first',
     label: 'Talkers First',
     copy:  'Both the type to discuss before diving in. Clear expectations, honored agreements.',
-    predicate: (a, b) => {
-      const required: FKey[] = [
-        'conflict_directness',
-        'verbal_expressiveness',
-        'integrity_valued',
-      ]
-      if (!required.every((k) => bothHigh(a, b, k))) return 0
-      return confidenceFromSignal(avgSignal(a, b, required, highSignal))
-    },
+    predicate: (a, b) =>
+      signalArchetype(a, b, { conflict_directness: 0.65, verbal_expressiveness: 0.65, integrity_valued: 0.65 }),
   },
 
   {
@@ -401,9 +470,10 @@ export const PLAY_ARCHETYPES: PlayArchetypeDef[] = [
       }
       const fraction = aligned / playFacets.length
       // Fires for "some alignment" but not "everything aligned" (the
-      // latter would be Same Frequency or Intense Pair).
+      // latter would be Same Frequency or Intense Pair). A fallback: a
+      // fixed, modest confidence, so any clearer pattern wins.
       if (fraction < 0.5 || fraction >= 0.8) return 0
-      return Math.min(1, fraction / 0.7)
+      return MIN_CONFIDENCE
     },
   },
 ]

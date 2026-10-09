@@ -362,6 +362,9 @@ function RevealedScore({
           strengths={tier1.strengths}
           differences={tier1.differences}
           archetype={sparkArchetype}
+          // No clear pattern (enough info, no dealbreaker): an honest line
+          // rather than a weak label.
+          neutral={!sparkArchetype && result.sparkEnoughInfo !== false && dealbreakers.length === 0}
         />
       )}
 
@@ -422,6 +425,12 @@ function RevealedScore({
   )
 }
 
+// Shown in Deep Fit when no archetype clearly fits the pair.
+const NEUTRAL_ARCHETYPE = {
+  label: 'No one pattern',
+  copy: "You two don't fit one of our patterns, and that's not a bad sign. The conversation will tell you more than we can.",
+}
+
 // Elite: Deep Fit in full — how well each of you fits the other, where you
 // line up and differ most, and the pair's archetype.
 function DeepFitDetail({
@@ -430,12 +439,14 @@ function DeepFitDetail({
   strengths,
   differences,
   archetype,
+  neutral,
 }: {
   fitsYou: number | null
   youFit: number | null
   strengths: string[]
   differences: string[]
   archetype: ArchetypeMatch | null
+  neutral: boolean
 }) {
   return (
     <div className="mt-5 space-y-4 rounded-xl border border-[#1B4FD8]/30 bg-[#1B4FD8]/10 p-4">
@@ -444,6 +455,12 @@ function DeepFitDetail({
         <div>
           <p className="text-sm font-semibold text-white">{archetype.label}</p>
           {archetype.copy && <p className="mt-1 text-sm text-white/60">{archetype.copy}</p>}
+        </div>
+      )}
+      {!archetype && neutral && (
+        <div>
+          <p className="text-sm font-semibold text-white/80">{NEUTRAL_ARCHETYPE.label}</p>
+          <p className="mt-1 text-sm text-white/60">{NEUTRAL_ARCHETYPE.copy}</p>
         </div>
       )}
       {fitsYou !== null && youFit !== null && (
