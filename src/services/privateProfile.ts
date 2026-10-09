@@ -1,4 +1,4 @@
-import { doc, getDoc, onSnapshot, setDoc, type DocumentData, type Unsubscribe } from 'firebase/firestore'
+import { doc, getDoc, onSnapshot, type DocumentData, type Unsubscribe } from 'firebase/firestore'
 import { db } from './firebase'
 
 // Profile metadata that would reveal Play use lives in the owner-only
@@ -47,9 +47,3 @@ export function subscribePrivateProfile(uid: string, onChange: (p: PrivateProfil
   return () => offs.forEach((off) => off())
 }
 
-// Merges `patch` into private/profile (allow-listed keys only — the rules
-// check them too).
-export async function savePrivateProfile(uid: string, patch: PrivateProfile): Promise<void> {
-  const clean = Object.fromEntries(Object.entries(patch).filter(([k, v]) => (KEYS as readonly string[]).includes(k) && v !== undefined))
-  await setDoc(privateProfileDoc(uid), clean, { merge: true })
-}

@@ -1,5 +1,6 @@
 import { FirebaseError } from 'firebase/app'
 import { BRAND } from '../brand/zylove'
+import { FieldLockedError } from './fieldLocks'
 
 // Plain-English messages for errors shown to users. Never put a raw Firebase
 // code (storage/unauthorized, permission-denied, auth/…) in front of someone.
@@ -53,6 +54,8 @@ const BY_CODE: Record<string, string> = {
 // code's message, otherwise `fallback`.
 export function friendlyError(err: unknown, fallback = GENERIC): string {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return NETWORK
+  // F-099: a field changed too recently — the date it can change again.
+  if (err instanceof FieldLockedError) return err.message
   if (err instanceof FirebaseError) {
     const mapped = BY_CODE[err.code]
     // Our callables throw HttpsErrors whose message is written for users

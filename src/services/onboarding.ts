@@ -36,6 +36,7 @@ import { changeDisplayName } from './displayNames'
 import { addIdentity, loadIdentity } from './privateIdentity'
 import { loadPrivateProfile, privateProfileDoc } from './privateProfile'
 import { genderFields, matchingDoc } from './privateMatching'
+import { FieldLockedError, explainRefusal, limitedPatch, loadFieldStates, lockedChanges } from './fieldLocks'
 
 // ─── Legal acceptance ────────────────────────────────────────────────────────
 
@@ -229,17 +230,26 @@ export async function saveSparkOnboarding(
     promptAnswers,
     photoURLs,
   } satisfies Partial<RootProfileDoc>
+  // F-099: attraction, drinking, religion, politics and the intent change
+  // once every 30 days — only the ones that really change are written (with
+  // their stamp), and a locked one stops the save with its date.
+  // F-018: religion and politics are never shown — owner-only in
+  // private/matching, not on the public doc (the rules refuse them there).
+  const limited = {
+    attractedTo: d.attractedTo,
+    drinkingHabit: d.drinkingHabit,
+    religion: d.religion,
+    politicalView: d.politicalView,
+  }
+  const fieldStates = await loadFieldStates(uid)
+  const locked = lockedChanges(fieldStates, { ...limited, intent })
+  if (locked.length > 0) throw new FieldLockedError(locked)
   // Matching preferences: owner-only (private/matching, Stage 3).
   const matching = {
-    attractedTo: d.attractedTo,
     radiusMiles: d.radiusMiles,
     ageMin: d.ageMin,
     ageMax: d.ageMax,
-    drinkingHabit: d.drinkingHabit ?? deleteField(),
-    // F-018: religion and politics are never shown — owner-only here, not
-    // on the public doc (the rules refuse them there).
-    religion: d.religion ?? deleteField(),
-    politicalView: d.politicalView ?? deleteField(),
+    ...limitedPatch(fieldStates, limited),
     ...genderFields(d, genderIdentity, identityLocked),
   }
 
@@ -276,7 +286,7 @@ export async function saveSparkOnboarding(
   // the intention answers — the intention ones on the first onboarding only
   // (a refresh leaves the original answers alone).
   const privateMeta = {
-    intent,
+    ...limitedPatch(fieldStates, { intent }),
     mode: intent === 'play' ? 'play' : 'spark',
     ...(d.onboardingPath !== null && { intentionAnswers: d.intentionAnswers, onboardingPath: d.onboardingPath }),
   }
@@ -368,7 +378,9 @@ export async function saveSparkOnboarding(
   // until identity is locked.
   await addIdentity(batch, uid, d.legalName, !identityLocked && birthday ? birthday.iso : null)
 
-  await batch.commit()
+  await batch.commit().catch(async (err) => {
+    throw await explainRefusal(uid, { ...limited, intent }, err)
+  })
 
   // Everything below runs after a successful commit.
 

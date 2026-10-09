@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { DatingIntent } from '../../types/profile'
 import type { OnboardingPath, StepProps } from './types'
 import { StepHeader } from './ui'
+import { lockedMessage } from '../../services/fieldLimits'
 
 export const INTENTION_OPTIONS = [
   { id: 'real_relationship', emoji: '💙', label: 'A real relationship', signal: 'spark' },
@@ -30,7 +31,9 @@ export function intentForPath(path: OnboardingPath): DatingIntent {
   return path === 'spark' || path === 'unsure' ? 'spark' : 'open'
 }
 
-export function IntentionStep({ draft, update }: StepProps) {
+// lockedUntil (F-099): these answers would change the saved intent, which
+// changed in the last 30 days — the date it can change again.
+export function IntentionStep({ draft, update, lockedUntil }: StepProps & { lockedUntil?: number }) {
   function toggle(id: string) {
     const next = draft.intentionAnswers.includes(id)
       ? draft.intentionAnswers.filter((a) => a !== id)
@@ -63,6 +66,11 @@ export function IntentionStep({ draft, update }: StepProps) {
           )
         })}
       </div>
+      {lockedUntil !== undefined && (
+        <p className="mt-4 text-sm text-amber-200" data-testid="field-locked">
+          {lockedMessage([{ field: 'intent', until: lockedUntil }])}
+        </p>
+      )}
     </div>
   )
 }

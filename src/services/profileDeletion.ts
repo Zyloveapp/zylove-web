@@ -1,7 +1,8 @@
-import { deleteField, doc, getDoc, updateDoc, writeBatch } from 'firebase/firestore'
+import { deleteField, doc, getDoc, setDoc, updateDoc, writeBatch } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
-import { loadPrivateProfile, privateProfileDoc, savePrivateProfile } from './privateProfile'
+import { loadPrivateProfile, privateProfileDoc } from './privateProfile'
+import { loadFieldStates, remainingModeIntent } from './fieldLocks'
 
 // Deleting one mode's profile keeps the account and the other mode. Each
 // returns whether the other profile exists, which decides where the user
@@ -35,7 +36,7 @@ async function hasSparkProfile(uid: string): Promise<boolean> {
 // Spark lives on the root doc (plus sparkProfile/data). Identity (name, age,
 // gender, attraction) stays — Play uses it too.
 export async function deleteSparkProfile(uid: string): Promise<{ playRemains: boolean }> {
-  const remainingPlayPhotos = await playPhotos(uid)
+  const [remainingPlayPhotos, fieldStates] = await Promise.all([playPhotos(uid), loadFieldStates(uid)])
   const playRemains = remainingPlayPhotos !== null
   const batch = writeBatch(db)
   batch.update(doc(db, 'users', uid), {
@@ -58,8 +59,11 @@ export async function deleteSparkProfile(uid: string): Promise<{ playRemains: bo
     ...(!playRemains && { onboardingComplete: false }),
   })
   // With Play left they become Play-only (in Play Explore only, launched
-  // straight into Play) — recorded in the owner-only private/profile.
-  if (playRemains) batch.set(privateProfileDoc(uid), { onboardingPath: 'play', intent: 'play', mode: 'play' }, { merge: true })
+  // straight into Play) — recorded in the owner-only private/profile. F-099:
+  // the intent change is stamped (never blocked; remainingModeIntent).
+  if (playRemains) {
+    batch.set(privateProfileDoc(uid), { onboardingPath: 'play', mode: 'play', ...remainingModeIntent(fieldStates, 'play') }, { merge: true })
+  }
   batch.delete(doc(db, `users/${uid}/sparkProfile/data`))
   await batch.commit()
   // Spark photos still in review go with the files (deleteModePhotos), except
@@ -74,7 +78,11 @@ export async function deleteSparkProfile(uid: string): Promise<{ playRemains: bo
 export async function deletePlayProfile(uid: string): Promise<{ sparkRemains: boolean }> {
   const sparkRemains = await hasSparkProfile(uid)
   await httpsCallable(functions, 'deletePlayProfile')()
-  await savePrivateProfile(uid, sparkRemains ? { onboardingPath: 'spark', intent: 'spark', mode: 'spark' } : {})
+  // F-099: the intent change is stamped (never blocked; remainingModeIntent).
+  if (sparkRemains) {
+    const intent = remainingModeIntent(await loadFieldStates(uid), 'spark')
+    await setDoc(privateProfileDoc(uid), { onboardingPath: 'spark', mode: 'spark', ...intent }, { merge: true })
+  }
   if (!sparkRemains) await updateDoc(doc(db, 'users', uid), { onboardingComplete: false })
   await deletePhotoFolder('play')
   return { sparkRemains }

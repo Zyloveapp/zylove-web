@@ -1,4 +1,4 @@
-import { deleteField, doc, getDoc, onSnapshot, type DocumentData, type Unsubscribe, type WriteBatch } from 'firebase/firestore'
+import { deleteField, doc, getDoc, onSnapshot, type DocumentData, type Unsubscribe } from 'firebase/firestore'
 import { db } from './firebase'
 import type { OnboardingDraft } from '../components/onboarding/types'
 
@@ -57,11 +57,6 @@ export function subscribeMatching(uid: string, onChange: (m: Matching) => void, 
 // Only the allow-listed keys (the rules check them too); undefined values skipped.
 export function matchingPatch(patch: Matching): Record<string, unknown> {
   return Object.fromEntries(Object.entries(patch).filter(([k, v]) => (MATCHING_KEYS as readonly string[]).includes(k) && v !== undefined))
-}
-
-export function addMatching(batch: WriteBatch, uid: string, patch: Matching): void {
-  const clean = matchingPatch(patch)
-  if (Object.keys(clean).length) batch.set(matchingDoc(uid), clean, { merge: true })
 }
 
 // §4.A2: gender, its self-description, pronouns and how it's shown — written

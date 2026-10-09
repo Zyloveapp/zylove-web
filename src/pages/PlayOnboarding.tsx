@@ -13,6 +13,8 @@ import { selectPlayPrompts } from '../types/dualProfile'
 import { PLAY_BODY_TYPE_LABELS, type PlayBodyType } from '../types/playDescriptors'
 import { nextNameChange, publicNameOk } from '../services/displayNames'
 import { loadMatching } from '../services/privateMatching'
+import { fieldLocks, loadFieldStates } from '../services/fieldLocks'
+import { formatUnlockDate, sameValue } from '../services/fieldLimits'
 import {
   MIN_PLAY_ANSWERS,
   emptyPlayDraft,
@@ -112,6 +114,23 @@ export default function PlayOnboarding() {
     displayName: '',
     playNameLockedUntil: null,
   })
+
+  // F-099: adding Play changes the intent to 'open', which changes once every
+  // 30 days — when it can change again, if it's locked (edits leave it alone).
+  const [intentLockedUntil, setIntentLockedUntil] = useState<number | null>(null)
+  useEffect(() => {
+    if (!uid) return
+    let cancelled = false
+    loadFieldStates(uid)
+      .then((states) => {
+        const until = fieldLocks(states).intent
+        if (!cancelled) setIntentLockedUntil(until !== undefined && !sameValue(states.intent.value, 'open') ? until : null)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [uid])
 
   const update = (patch: Partial<PlayDraft>) => setDraft((d) => ({ ...d, ...patch }))
 
@@ -227,6 +246,8 @@ export default function PlayOnboarding() {
 
   function canAdvance(id: StepId): boolean {
     switch (id) {
+      case 'welcome':
+        return editing || intentLockedUntil === null
       case 'photos':
         return draft.photos.length >= 1 && draft.photos.length <= MAX_PHOTOS
       case 'playName':
@@ -302,7 +323,16 @@ export default function PlayOnboarding() {
     const props = { play: draft, update }
     switch (step) {
       case 'welcome':
-        return <PlayWelcomeStep />
+        return (
+          <>
+            <PlayWelcomeStep />
+            {!editing && intentLockedUntil !== null && (
+              <p className="mt-6 text-center text-sm text-amber-200" data-testid="field-locked">
+                You can add a Play profile again on {formatUnlockDate(intentLockedUntil)}.
+              </p>
+            )}
+          </>
+        )
       case 'photos':
         return (
           <PhotosStep

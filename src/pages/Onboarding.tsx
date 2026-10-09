@@ -8,6 +8,8 @@ import { friendlyError } from '../services/errors'
 import { useModeStore } from '../store/modeStore'
 import { OFF_MAP_GENDER_IDENTITIES } from '../types/profile'
 import { loadRefreshDraft, recordLegalAcceptance, saveSparkOnboarding } from '../services/onboarding'
+import { fieldLocks, loadFieldStates, type FieldStates } from '../services/fieldLocks'
+import { formatUnlockDate, sameValue } from '../services/fieldLimits'
 import type { PromptAnswer } from '../types/dualProfile'
 import {
   MIN_PLAY_ANSWERS,
@@ -398,6 +400,39 @@ export default function Onboarding() {
     saveDraft(userId, flow, stepIndex, progress)
   }, [userId, flow, restoredKey, stepIndex, draft, play, photoReminder])
 
+  // F-099: religion, politics, drinking, attraction and the intent change
+  // once every 30 days. Their saved values and stamps, for every flow (an
+  // account starting over may have them already).
+  const [fieldStates, setFieldStates] = useState<{ uid: string; states: FieldStates } | null>(null)
+  useEffect(() => {
+    if (!userId) return
+    let cancelled = false
+    loadFieldStates(userId)
+      .then((states) => !cancelled && setFieldStates({ uid: userId, states }))
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [userId])
+  // A locked field shows its saved value (read-only), whatever the draft had.
+  useEffect(() => {
+    if (!userId || fieldStates?.uid !== userId || restoredKey !== `${userId}:${flow}`) return
+    const locked = fieldLocks(fieldStates.states)
+    const saved = (f: 'religion' | 'politicalView' | 'drinkingHabit') => {
+      const v = fieldStates.states[f].value
+      return typeof v === 'string' && v ? v : null
+    }
+    const keep = {
+      ...(locked.attractedTo !== undefined && {
+        attractedTo: (Array.isArray(fieldStates.states.attractedTo.value) ? fieldStates.states.attractedTo.value : []) as OnboardingDraft['attractedTo'],
+      }),
+      ...(locked.religion !== undefined && { religion: saved('religion') as OnboardingDraft['religion'] }),
+      ...(locked.politicalView !== undefined && { politicalView: saved('politicalView') as OnboardingDraft['politicalView'] }),
+      ...(locked.drinkingHabit !== undefined && { drinkingHabit: saved('drinkingHabit') as OnboardingDraft['drinkingHabit'] }),
+    }
+    if (Object.keys(keep).length > 0) setDraft((d) => ({ ...d, ...keep }))
+  }, [userId, flow, restoredKey, fieldStates])
+
   useEffect(() => {
     if (!refresh || !userId) return
     let cancelled = false
@@ -441,6 +476,11 @@ export default function Onboarding() {
           radiusMiles: d.radiusMiles,
           ageMin: d.ageMin,
           ageMax: d.ageMax,
+          // F-099: matching answers (private/matching) carry over too — a
+          // blank one would clear the saved value, which counts as a change.
+          drinkingHabit: d.drinkingHabit,
+          religion: d.religion,
+          politicalView: d.politicalView,
           intent: 'open',
           onboardingPath: 'both',
           intentionAnswers: Array.isArray(answers) ? answers.filter((a): a is string => typeof a === 'string') : [],
@@ -558,6 +598,15 @@ export default function Onboarding() {
   const playPath = !refresh && draft.onboardingPath === 'play'
   const red = playPath && stepIndex > steps.findIndex((s) => s.id === 'recommendation')
   const accent = red ? RED : COBALT
+  // F-099: locked fields (when each can change again).
+  const states = fieldStates?.uid === uid ? fieldStates.states : null
+  const locks = states ? fieldLocks(states) : {}
+  // The intent these answers give, if it would change a locked one.
+  const intentLockedUntil =
+    states && locks.intent !== undefined && draft.intent !== null && !sameValue(states.intent.value, draft.intent) ? locks.intent : undefined
+  // Spark setup changes the intent to 'open' (both profiles).
+  const sparkSetupLockedUntil =
+    sparkSetup && states && locks.intent !== undefined && !sameValue(states.intent.value, 'open') ? locks.intent : undefined
 
   // Explicit exit: the saved draft goes. A first run signs out (there's no
   // app to go back to yet); refresh and Spark setup return to the profile
@@ -768,11 +817,17 @@ export default function Onboarding() {
             <h1 className="text-3xl font-bold text-white">✦ Building your Spark profile</h1>
             <p className="mt-4 text-lg text-white/70">Real compatibility. Intentional connections. Something worth keeping.</p>
             <p className="mt-4 text-white/50">Your Play profile stays completely separate.</p>
+            {sparkSetupLockedUntil !== undefined && (
+              <p className="mt-6 text-sm text-amber-200" data-testid="field-locked">
+                You can add a Spark profile again on {formatUnlockDate(sparkSetupLockedUntil)}.
+              </p>
+            )}
             <button
               type="button"
               onClick={next}
               autoFocus
-              className="mt-10 w-full rounded-xl bg-[#1B4FD8] py-4 font-semibold text-white transition-opacity hover:opacity-90"
+              disabled={sparkSetupLockedUntil !== undefined}
+              className="mt-10 w-full rounded-xl bg-[#1B4FD8] py-4 font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               Let's go →
             </button>
@@ -804,7 +859,7 @@ export default function Onboarding() {
       case 'gender':
         return <GenderStep {...props} />
       case 'intention':
-        return <IntentionStep {...props} />
+        return <IntentionStep {...props} lockedUntil={intentLockedUntil} />
       case 'recommendation':
         return draft.onboardingPath ? (
           <RecommendationScreen
@@ -820,7 +875,7 @@ export default function Onboarding() {
           />
         ) : null
       case 'attractedTo':
-        return <AttractedToStep {...props} />
+        return <AttractedToStep {...props} locks={locks} />
       case 'relationship':
         return <RelationshipStep {...props} />
       case 'bodyType':
@@ -830,7 +885,7 @@ export default function Onboarding() {
       case 'lifestyle':
         return <LifestyleStep {...props} />
       case 'habits':
-        return <HabitsStep {...props} />
+        return <HabitsStep {...props} locks={locks} />
       case 'personality':
         return <PersonalityStep {...props} />
       case 'values':
@@ -842,7 +897,7 @@ export default function Onboarding() {
       case 'loveReceive':
         return <LoveReceiveStep {...props} />
       case 'beliefs':
-        return <BeliefsStep {...props} onSkip={next} />
+        return <BeliefsStep {...props} locks={locks} onSkip={next} />
       case 'kids':
         return <KidsStep {...props} onSkip={next} />
       case 'physicalPrefs':
@@ -976,7 +1031,9 @@ export default function Onboarding() {
     step.id === 'playReview' ||
     step.id === 'recommendation' ||
     step.id === 'sparkWelcome'
-  const canAdvance = isStepValid(step.id, draft, bioGenerating, identityLocked, maxPhotos, play, playBioBusy)
+  const canAdvance =
+    isStepValid(step.id, draft, bioGenerating, identityLocked, maxPhotos, play, playBioBusy) &&
+    !(step.id === 'intention' && intentLockedUntil !== undefined)
 
   return (
     <div className="min-h-screen bg-gray-950 text-white [color-scheme:dark]" style={{ '--zy-accent': accent } as CSSProperties}>

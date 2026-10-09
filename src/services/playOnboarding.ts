@@ -32,7 +32,8 @@ import {
 } from '../types/playDescriptors'
 import { parseBirthday, type OnboardingDraft, type PhotoDraft } from '../components/onboarding/types'
 import { loadPrivateProfile, privateProfileDoc } from './privateProfile'
-import { addMatching, genderFields, matchingDoc } from './privateMatching'
+import { genderFields, matchingDoc, matchingPatch } from './privateMatching'
+import { explainRefusal, limitedPatch, loadFieldStates } from './fieldLocks'
 
 export type PlayTagCategory = 'arrangement' | 'acts' | 'dynamic' | 'vibe' | 'place'
 
@@ -212,7 +213,14 @@ export async function savePlayOnboarding(
   const newPhotos = d.photos.map((p) => p.file).filter((f): f is File => f !== null)
 
   const playRef = doc(db, `users/${uid}/playProfile/data`)
-  const [existing, root] = await Promise.all([getDoc(playRef), getDoc(doc(db, 'users', uid))])
+  const [existing, root, fieldStates] = await Promise.all([
+    getDoc(playRef),
+    getDoc(doc(db, 'users', uid)),
+    keepIntent ? null : loadFieldStates(uid),
+  ])
+  // F-099: the intent changes once every 30 days — adding Play ('open') is
+  // a change unless it already is; a locked one stops here with its date.
+  const intentPatch = fieldStates ? limitedPatch(fieldStates, { intent: 'open' }) : {}
   const now = Date.now()
   // The first Play name is written directly; changing it afterwards goes
   // through updateDisplayName (30-day limit — the rules refuse a direct
@@ -244,8 +252,10 @@ export async function savePlayOnboarding(
     },
     { merge: true },
   )
-  if (!keepIntent) batch.set(privateProfileDoc(uid), { intent: 'open' }, { merge: true })
-  await batch.commit()
+  if (Object.keys(intentPatch).length > 0) batch.set(privateProfileDoc(uid), intentPatch, { merge: true })
+  await batch.commit().catch(async (err) => {
+    throw keepIntent ? err : await explainRefusal(uid, { intent: 'open' }, err)
+  })
 
   const { notices } = await uploadModeratedPhotos(uid, 'play', newPhotos, photoProgress(onProgress))
   // F-062: the Play chat key, now there's a Play profile to put it on.
@@ -286,6 +296,11 @@ export async function savePlayOnlyOnboarding(
   const bio = play.bio.trim()
   const newPhotos = d.photos.map((p) => p.file).filter((f): f is File => f !== null)
   const now = Date.now()
+  // F-099: attraction and the intent change once every 30 days (a returning
+  // account may have them already); a locked one stops here with its date.
+  const limited = { attractedTo: d.attractedTo, intent: 'open' }
+  const fieldStates = await loadFieldStates(uid)
+  limitedPatch(fieldStates, limited)
 
   // Private key goes to IndexedDB now; the public key rides in the batch below.
   await keysReady(uid)
@@ -340,24 +355,32 @@ export async function savePlayOnlyOnboarding(
   )
   batch.set(
     privateProfileDoc(uid),
-    { intent: 'open', intentionAnswers: d.intentionAnswers, onboardingPath: 'play', mode: 'play' },
+    { ...limitedPatch(fieldStates, { intent: limited.intent }), intentionAnswers: d.intentionAnswers, onboardingPath: 'play', mode: 'play' },
     { merge: true },
   )
   // Matching preferences: owner-only (private/matching, Stage 3).
-  addMatching(batch, uid, {
-    attractedTo: d.attractedTo,
-    radiusMiles: d.radiusMiles,
-    ageMin: d.ageMin,
-    ageMax: d.ageMax,
-    ...(!identityLocked && OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) && d.matchableAs.length > 0 && { matchableAs: d.matchableAs }),
-  })
+  batch.set(
+    matchingDoc(uid),
+    {
+      ...matchingPatch({
+        radiusMiles: d.radiusMiles,
+        ageMin: d.ageMin,
+        ageMax: d.ageMax,
+        ...(!identityLocked && OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) && d.matchableAs.length > 0 && { matchableAs: d.matchableAs }),
+      }),
+      ...limitedPatch(fieldStates, { attractedTo: limited.attractedTo }),
+    },
+    { merge: true },
+  )
   // §4.A2: gender and pronouns are owner-only too (the server builds the
   // public genderLine from them).
   batch.set(matchingDoc(uid), genderFields(d, genderIdentity, identityLocked), { merge: true })
   // Owner-only (users/{uid}/private/identity): legal name once, birthday
   // until identity is locked.
   await addIdentity(batch, uid, d.legalName, !identityLocked && birthday ? birthday.iso : null)
-  await batch.commit()
+  await batch.commit().catch(async (err) => {
+    throw await explainRefusal(uid, limited, err)
+  })
 
   // Server sets the trust/trial fields clients can't write (isSuspended,
   // sparkScore, subscriptionTier, trial, sortKey). Awaited so the profile is

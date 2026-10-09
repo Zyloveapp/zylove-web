@@ -29,10 +29,16 @@ import {
   ChipMultiSelect,
   ChipSelect,
   FieldLabel,
+  LockedNote,
   SkipLink,
   StepHeader,
   StyledSelect,
 } from './ui'
+import type { FieldLocks } from '../../services/fieldLocks'
+
+// F-099: steps with a field that changes once every 30 days get the locks;
+// a locked field is read-only with the date it can change again.
+type LockProps = { locks?: FieldLocks }
 
 const GENDER_OPTIONS = toOptions(GENDER_LABELS, (l) => l)
 const ATTRACTED_TO_OPTIONS = toOptions(ATTRACTED_TO_LABELS, (l) => l)
@@ -152,7 +158,7 @@ export function GenderStep({ draft, update }: StepProps) {
   )
 }
 
-export function AttractedToStep({ draft, update }: StepProps) {
+export function AttractedToStep({ draft, update, locks = {} }: StepProps & LockProps) {
   return (
     <div>
       <StepHeader
@@ -164,7 +170,9 @@ export function AttractedToStep({ draft, update }: StepProps) {
         value={draft.attractedTo}
         onChange={(attractedTo) => update({ attractedTo })}
         exclusive="everyone"
+        disabled={locks.attractedTo !== undefined}
       />
+      <LockedNote until={locks.attractedTo} />
     </div>
   )
 }
@@ -269,7 +277,7 @@ export function LifestyleStep({ draft, update }: StepProps) {
   )
 }
 
-export function HabitsStep({ draft, update }: StepProps) {
+export function HabitsStep({ draft, update, locks = {} }: StepProps & LockProps) {
   return (
     <div>
       <StepHeader title="My habits" subtitle="Select as many as feel true." />
@@ -278,7 +286,9 @@ export function HabitsStep({ draft, update }: StepProps) {
       <select
         value={draft.drinkingHabit ?? ''}
         onChange={(e) => update({ drinkingHabit: e.target.value === '' ? null : (e.target.value as DrinkingHabit) })}
-        className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 focus:border-[#1B4FD8] focus:outline-none"
+        disabled={locks.drinkingHabit !== undefined}
+        aria-label="Drinking"
+        className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 focus:border-[#1B4FD8] focus:outline-none disabled:opacity-40"
       >
         <option value="">—</option>
         {DRINKING_OPTIONS.map((o) => (
@@ -287,6 +297,7 @@ export function HabitsStep({ draft, update }: StepProps) {
           </option>
         ))}
       </select>
+      <LockedNote until={locks.drinkingHabit} />
     </div>
   )
 }
@@ -360,7 +371,9 @@ export function LoveReceiveStep({ draft, update }: StepProps) {
   )
 }
 
-export function BeliefsStep({ draft, update, onSkip }: StepProps & { onSkip: () => void }) {
+export function BeliefsStep({ draft, update, onSkip, locks = {} }: StepProps & LockProps & { onSkip: () => void }) {
+  const religionLocked = locks.religion !== undefined
+  const politicsLocked = locks.politicalView !== undefined
   return (
     <div>
       <StepHeader
@@ -373,18 +386,23 @@ export function BeliefsStep({ draft, update, onSkip }: StepProps & { onSkip: () 
         value={draft.religion}
         onChange={(religion) => update({ religion })}
         allowDeselect
+        disabled={religionLocked}
       />
+      <LockedNote until={locks.religion} />
       <FieldLabel hint="Private — only used to match you with compatible people.">Political views</FieldLabel>
       <ChipSelect
         options={POLITICS_OPTIONS}
         value={draft.politicalView}
         onChange={(politicalView) => update({ politicalView })}
         allowDeselect
+        disabled={politicsLocked}
       />
+      <LockedNote until={locks.politicalView} />
       <SkipLink
         label="Skip — keep both private"
         onClick={() => {
-          update({ religion: null, politicalView: null })
+          // A locked answer stays as saved.
+          update({ ...(!religionLocked && { religion: null }), ...(!politicsLocked && { politicalView: null }) })
           onSkip()
         }}
       />

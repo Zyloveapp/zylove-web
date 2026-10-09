@@ -131,7 +131,8 @@ test('rules: no listing users; suspended and deleted profiles unreadable', async
 })
 
 test('rules: private/matching owner-only; matchableAs identity-locked; adminNotice.seenAt only', async () => {
-  const a = await seedUser('Ann')
+  // F-099: no attraction yet, so setting one is free (a change needs its stamp — spec 38).
+  const a = await seedUser('Ann', { attractedTo: [] })
   const b = await seedUser('Bob')
   const path = `users/${a.uid}/private/matching`
   expect(await restGet(a.uid, path)).toBe(200)

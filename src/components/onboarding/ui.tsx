@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { toggleIn, type HeightFtIn, type Option } from './types'
+import { unlockMessage } from '../../services/fieldLimits'
 
 export function StepHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
@@ -30,11 +31,13 @@ export function ChipSelect<T extends string>({
   value,
   onChange,
   allowDeselect = false,
+  disabled = false,
 }: {
   options: Option<T>[]
   value: T | null
   onChange: (value: T | null) => void
   allowDeselect?: boolean
+  disabled?: boolean
 }) {
   return (
     <div className="flex flex-wrap gap-2">
@@ -43,6 +46,7 @@ export function ChipSelect<T extends string>({
           key={o.value}
           type="button"
           aria-pressed={value === o.value}
+          disabled={disabled}
           onClick={() => onChange(allowDeselect && value === o.value ? null : o.value)}
           className={chipClass(value === o.value)}
         >
@@ -59,6 +63,7 @@ export function ChipMultiSelect<T extends string>({
   onChange,
   max,
   exclusive,
+  disabled = false,
 }: {
   options: Option<T>[]
   value: T[]
@@ -66,6 +71,7 @@ export function ChipMultiSelect<T extends string>({
   max?: number
   // An option that can't be combined with the others (e.g. "Everyone").
   exclusive?: T
+  disabled?: boolean
 }) {
   const full = max !== undefined && value.length >= max
 
@@ -86,7 +92,7 @@ export function ChipMultiSelect<T extends string>({
             key={o.value}
             type="button"
             aria-pressed={selected}
-            disabled={full && !selected}
+            disabled={disabled || (full && !selected)}
             onClick={() => toggle(o.value)}
             className={chipClass(selected)}
           >
@@ -295,5 +301,16 @@ export function StyledSelect({
         />
       </svg>
     </div>
+  )
+}
+
+// F-099: a field changed in the last 30 days — shown as saved, read-only,
+// with the date it can change again.
+export function LockedNote({ until }: { until: number | undefined }) {
+  if (until === undefined) return null
+  return (
+    <p className="mt-2 text-sm text-amber-200" data-testid="field-locked">
+      {unlockMessage(until)}
+    </p>
   )
 }
