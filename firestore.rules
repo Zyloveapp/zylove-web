@@ -235,7 +235,9 @@ service cloud.firestore {
     function publicNameOk(d, key) {
       return d.get(key, null) == null
           || (d[key] is string && d[key].size() >= 2 && d[key].size() <= 20
-              && d[key].matches("^[\\p{L}\\p{M}\\p{N}]+(?:[ '’-][\\p{L}\\p{M}\\p{N}]+)*$"));
+              && d[key].matches("^[\\p{L}\\p{M}\\p{N}]+(?:[ '’-][\\p{L}\\p{M}\\p{N}]+)*$")
+              // at most 2 digits: no phone numbers in a public name
+              && !d[key].matches(".*[0-9].*[0-9].*[0-9].*"));
     }
 
     // Published photos (photoURLs) are added only by Cloud Functions after

@@ -26,10 +26,10 @@ export function nextNameChange(updatedAt: unknown, now = Date.now()): Date | nul
 // updateDisplayName (a change) take the same: 2–20 characters, letters (any
 // language), numbers, and single spaces, hyphens or apostrophes between them.
 const NAME_PATTERN = /^[\p{L}\p{M}\p{N}]+(?:[ '’-][\p{L}\p{M}\p{N}]+)*$/u
-export const NAME_RULE = 'Names are 2–20 characters: letters, numbers, spaces, hyphens and apostrophes.'
+export const NAME_RULE = 'Names are 2–20 characters: letters, spaces, hyphens and apostrophes (at most 2 numbers).'
 export function publicNameOk(name: string): boolean {
   const n = name.trim()
-  return n.length >= 2 && n.length <= 20 && NAME_PATTERN.test(n)
+  return n.length >= 2 && n.length <= 20 && NAME_PATTERN.test(n) && (n.match(/[0-9]/g) ?? []).length <= 2
 }
 
 export function formatNameChangeDate(d: Date): string {

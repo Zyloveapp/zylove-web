@@ -14,6 +14,7 @@ const CHANGE_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000
 // Letters (any language), numbers, and single spaces, hyphens or apostrophes
 // between them — O'Brien, Mary-Jane, D’Angelo.
 const NAME_PATTERN = /^[\p{L}\p{M}\p{N}]+(?:[ '’-][\p{L}\p{M}\p{N}]+)*$/u
+export const tooManyDigits = (name: string): boolean => (name.match(/[0-9]/g) ?? []).length > 2
 
 const FIELDS = {
   spark: { name: 'displayName', updatedAt: 'displayNameUpdatedAt', mirror: 'sparkProfile' },
@@ -44,6 +45,11 @@ export const updateDisplayName = onCall(
     }
     if (!NAME_PATTERN.test(name)) {
       throw new HttpsError('invalid-argument', 'Names can use letters, numbers, spaces, hyphens and apostrophes only.')
+    }
+    // F-079: no phone numbers in a public name (at most 2 digits — the rules
+    // check the same on the first name).
+    if (tooManyDigits(name)) {
+      throw new HttpsError('invalid-argument', 'Names can have at most 2 numbers in them.')
     }
 
     const fields = FIELDS[mode]

@@ -5,6 +5,7 @@ import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 import { generationOf } from './matchGeneration'
 import { loadMatch } from './playMatch'
 import { recordScamTrap } from './scamTraps'
+import { isDeletedUid } from './userData'
 
 // T&S Phase 1 — behaviour signals that need no message content.
 //
@@ -28,11 +29,15 @@ const CAP_DAYS_KEPT = 30
 
 const db = () => getFirestore()
 const signalRef = (uid: string) => db().collection(SIGNALS).doc(uid)
-const inc = (uid: string, fields: Record<string, number>) =>
-  signalRef(uid).set(
+// F-096: never for a deleted account (a message counted after the deletion
+// would bring back the behaviorSignals it removed).
+const inc = async (uid: string, fields: Record<string, number>) => {
+  if (await isDeletedUid(uid)) return
+  await signalRef(uid).set(
     { ...Object.fromEntries(Object.entries(fields).map(([k, n]) => [k, FieldValue.increment(n)])), updatedAt: FieldValue.serverTimestamp() },
     { merge: true },
   )
+}
 
 function dayKey(ms = Date.now()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms))
@@ -127,6 +132,7 @@ async function recordOpenerHash(sender: string, recipient: string, hash: string)
     }
   })
   if (stats.recipients24h < 2 && stats.senders24h < 2) return
+  if (await isDeletedUid(sender)) return
   await db().runTransaction(async (tx) => {
     const ref2 = signalRef(sender)
     const cur = ((await tx.get(ref2)).data()?.duplicateOpener ?? {}) as { recipients24h?: number; senders24h?: number; at?: number }

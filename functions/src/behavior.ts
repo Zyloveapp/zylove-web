@@ -314,8 +314,10 @@ async function matchLifecycle(matchId: string, before: DocumentData | undefined,
     // Created (or re-created in place): count it for both people.
     if (after && (!before || replaced) && !isBotMatch(after)) {
       const now = Date.now()
+      // F-096: never for a deleted account.
+      const live = (await Promise.all(ctx.users.map(async (u) => ((await isDeletedUid(u)) ? null : u)))).filter((u): u is string => !!u)
       await Promise.all(
-        ctx.users.map((uid) =>
+        live.map((uid) =>
           db.runTransaction(async (tx) => {
             const ref = db.collection(SIGNALS).doc(uid)
             const recent = ((await tx.get(ref)).data()?.recentMatchAt ?? []) as number[]
