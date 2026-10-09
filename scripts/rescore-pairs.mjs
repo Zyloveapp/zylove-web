@@ -5,12 +5,19 @@
 // sparkEnoughInfo and engineVersion; the plan-gated details sub-docs; and the
 // Play scores sub-doc. Also clears the flat 75s the retired botEngine left.
 //
-//   (cd functions && npm run build)
-//   node scripts/rescore-pairs.mjs --dry-run   old → new for every pair, and the distribution
-//   node scripts/rescore-pairs.mjs --apply
+// Play pass (F-062/F-065): Play pair state lives in playPairData/{pA_pB},
+// keyed by Play IDs — each is re-scored with the live Play engine while both
+// people still have Play access, so stored Play labels (tier1Play) follow
+// the current archetype rules.
 //
-// Prints only — it writes no files (production data never lands in the
-// repo; redirect output to a scratch directory if you need to keep it).
+//   (cd functions && npm run build)
+//   node scripts/rescore-pairs.mjs --dry-run   old → new for every pair, the distribution, and label changes
+//   node scripts/rescore-pairs.mjs --apply --backup <scratch>/rescore-backup.json
+//
+// --apply needs --backup: every doc it will rewrite (pairs/{id}, its
+// modes/spark and modes/deep, playPairData/{id}) is saved there first. That
+// is production data — a scratch path outside the repo, deleted after.
+// Otherwise it prints only.
 //
 // Run --apply after the engine v2 functions are live (or onTap would serve
 // v1 scores to clients that call it in between — harmless, it re-scores
@@ -22,17 +29,24 @@ import { createRequire } from 'node:module'
 const require = createRequire(new URL('../functions/package.json', import.meta.url))
 const { initializeApp, applicationDefault } = require('firebase-admin/app')
 const { getFirestore } = require('firebase-admin/firestore')
+const { writeFileSync } = require('node:fs')
 
 const apply = process.argv.includes('--apply')
 if (!apply && !process.argv.includes('--dry-run')) {
   console.error('Pass --dry-run or --apply.')
   process.exit(1)
 }
+const backupAt = process.argv.includes('--backup') ? process.argv[process.argv.indexOf('--backup') + 1] : null
+if (apply && !backupAt) {
+  console.error('--apply needs --backup <scratch file>.')
+  process.exit(1)
+}
 initializeApp({ credential: applicationDefault(), projectId: 'zylove' })
 const db = getFirestore()
 
 const { rescorePair, scoringDocs } = require('./lib/legacy/onProfileWrite.js')
-const { SCORE_ENGINE_VERSION } = require('./lib/legacy/scoring.js')
+const { SCORE_ENGINE_VERSION, calculatePlayScore } = require('./lib/legacy/scoring.js')
+const { bothHavePlay, playFields, setPlayScores } = require('./lib/pairPlay.js')
 const { isSuspendedUid } = require('./lib/userData.js')
 
 // What the web app shows for a pair (src/services/discover.ts displayScore).
@@ -51,6 +65,23 @@ function shownV2(r) {
 }
 
 const pairs = (await db.collection('pairs').get()).docs
+const playPairs = (await db.collection('playPairData').get()).docs
+const archId = (t) => (t && typeof t === 'object' && t.archetype && typeof t.archetype === 'object' ? t.archetype.id ?? null : null)
+
+// Everything --apply would rewrite, saved before the first write.
+if (apply) {
+  const backup = {}
+  for (const snap of pairs) {
+    backup[snap.ref.path] = snap.data()
+    for (const m of ['spark', 'deep']) {
+      const d = await db.doc(`pairs/${snap.id}/modes/${m}`).get()
+      if (d.exists) backup[d.ref.path] = d.data()
+    }
+  }
+  for (const snap of playPairs) backup[snap.ref.path] = snap.data()
+  writeFileSync(backupAt, JSON.stringify(backup, null, 1))
+  console.log(`Backed up ${Object.keys(backup).length} docs to ${backupAt}`)
+}
 const docs = new Map()
 async function mine(uid) {
   if (!docs.has(uid)) {
@@ -92,6 +123,8 @@ for (const snap of pairs) {
     dealbreakers: r.triggeredDealbreakers.join(','),
     headline: r.score,
     enoughInfo: r.enoughInfo,
+    archBefore: archId(deep),
+    archAfter: r.triggeredDealbreakers.length ? null : archId(r.tier1),
   })
   if (batch && ++inBatch >= 100) {
     await batch.commit()
@@ -124,4 +157,38 @@ dist('before (Free, non-bot)', rows.map((r) => r.before))
 dist('before (Elite)', rows.map((r) => r.beforeElite))
 dist('after (every plan)', rows.map((r) => num(r.after)))
 console.log(`  after: Not enough info ${rows.filter((r) => !r.enoughInfo).length}; dealbreaker pairs ${rows.filter((r) => r.dealbreakers).length} (highest shown ${Math.max(0, ...rows.filter((r) => r.dealbreakers).map((r) => r.headline))})`)
-console.log(apply ? `\nApplied: ${written} pairs written.` : '\nDry run — nothing written.')
+const sparkChanged = rows.filter((r) => !r.bot && r.archBefore !== r.archAfter)
+console.log(`\nSpark Deep Fit labels changed: ${sparkChanged.length} of ${rows.filter((r) => !r.bot).length} (non-bot pairs)`)
+const tally = (xs) => Object.entries(xs.reduce((m, k) => ((m[k] = (m[k] ?? 0) + 1), m), {})).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ')
+console.log(`  ${tally(sparkChanged.map((r) => `${r.archBefore ?? 'none'} → ${r.archAfter ?? 'none'}`))}`)
+
+// ─── Play pass ───────────────────────────────────────────────────────────────
+const playRows = []
+const playSkipped = []
+for (const snap of playPairs) {
+  const p = snap.data()
+  const [a, b] = Array.isArray(p.users) ? p.users : []
+  if (typeof a !== 'string' || typeof b !== 'string') {
+    playSkipped.push(`${snap.id} (no users)`)
+    continue
+  }
+  const [ma, mb] = await Promise.all([mine(a), mine(b)])
+  if (!ma || !mb) {
+    playSkipped.push(`${snap.id} (deleted or suspended)`)
+    continue
+  }
+  if (!(await bothHavePlay(a, b))) {
+    playSkipped.push(`${snap.id} (no Play access)`)
+    continue
+  }
+  const r = calculatePlayScore(ma.full, mb.full)
+  const bot = a.startsWith('zbot-') || b.startsWith('zbot-')
+  playRows.push({ id: snap.id, bot, before: archId(p.tier1Play), after: archId(r.tier1), scoreBefore: p.playScore ?? null, scoreAfter: r.score })
+  if (apply) await setPlayScores(a, b, { ...playFields(r.score, r.breakdown, r.tier1), engineVersion: SCORE_ENGINE_VERSION })
+}
+const playChanged = playRows.filter((r) => r.before !== r.after)
+console.log(`\nPlay pairs: ${playPairs.length}; re-scored ${playRows.length}; skipped ${playSkipped.length}.`)
+for (const s of playSkipped) console.log(`  skipped ${s}`)
+console.log(`Play labels changed: ${playChanged.length} of ${playRows.length}; scores changed: ${playRows.filter((r) => r.scoreBefore !== r.scoreAfter).length}`)
+console.log(`  ${tally(playChanged.map((r) => `${r.before ?? 'none'} → ${r.after ?? 'none'}`))}`)
+console.log(apply ? `\nApplied: ${written} Spark pairs and ${playRows.length} Play pairs written.` : '\nDry run — nothing written.')
