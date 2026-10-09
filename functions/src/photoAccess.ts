@@ -7,6 +7,7 @@ import { takeRateLimit } from './rateLimits'
 import { audit } from './audit'
 import { playStatus } from './playAccess'
 import { uidOfPlayId } from './playIds'
+import { blockedFor, type BlockRecord } from './blockCore'
 
 // Profile photos (F-021). Firestore holds each photo's Storage path
 // ("photos/{uid}/{spark|play}/{file}"), and Storage lets only the owner and
@@ -75,7 +76,7 @@ export const getPhotoUrls = onCall(
 
     // Everything about each owner the checks need, read once.
     const owners = [...new Set(refs.map((r) => ownerOf(r).uid))].filter((u) => u !== viewer)
-    const info = new Map<string, { root?: DocumentData; play?: DocumentData; blocked: boolean }>()
+    const info = new Map<string, { root?: DocumentData; play?: DocumentData; blocks: (BlockRecord | undefined)[] }>()
     if (!admin && owners.length) {
       const [roots, plays, theyBlocked, iBlocked, internals] = await Promise.all([
         db.getAll(...owners.map((u) => db.doc(`users/${u}`))),
@@ -89,7 +90,7 @@ export const getPhotoUrls = onCall(
         info.set(u, {
           root: roots[i].exists ? { ...roots[i].data(), isSuspended: internals[i].data()?.isSuspended ?? roots[i].data()?.isSuspended } : undefined,
           play: plays[i].data(),
-          blocked: theyBlocked[i].exists || iBlocked[i].exists,
+          blocks: [theyBlocked[i].data(), iBlocked[i].data()],
         }),
       )
     }
@@ -106,7 +107,8 @@ export const getPhotoUrls = onCall(
       const { uid, mode } = ownerOf(ref)
       if (admin || uid === viewer) return true
       const o = info.get(uid)
-      if (!o?.root || o.blocked) return false
+      // H3: a block the viewer placed hides only that mode's photos.
+      if (!o?.root || blockedFor(viewer, o.blocks, mode)) return false
       if (o.root.isSuspended === true || o.root.isDeleted === true) return false
       if (mode === 'play') return playOk.get(uid) === true && published(o.play, ref)
       // A Spark photo is published on the root doc. (Play-only accounts used

@@ -9,11 +9,13 @@ import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { isPlayId, modeOfId, requireUidOfPlayId, uidNamedIn, uidOfPlayId } from "../playIds";
-import { endPlayPair, loadMatch } from "../playMatch";
+import { endPlayPair, loadMatch, type MatchCtx } from "../playMatch";
 import { setPlayVisibility } from "../playAccess";
 import { internalRef } from "../userData";
 import { setBlocked } from "../explore";
-import { clearLikes } from "../likes";
+import { clearLikesOnBlock } from "../likes";
+import { blockModes, planBlock, type BlockMode } from "../blockCore";
+import { PRESERVE_REPORTED_MS } from "../behavior";
 import { liftBlock } from "../trust";
 import { queueAdminAlert } from "../adminAlerts";
 
@@ -146,12 +148,19 @@ export const blockUser = onCall(LEGACY_RUNTIME, async (request) => {
 // Stage A: the match must be the two of theirs (anyone's id was accepted);
 // both mirror docs record who blocked (blockedBy), which is what unblocking
 // checks; and their likes go, so liking again can't re-create the match.
+// C1 (review 2026-10-09): a block belongs to whoever placed it. The records
+// are created, never overwritten: blocking someone who already blocked you
+// changes nothing and still answers success — they used to take the block
+// over, lift it and wipe the chat. A match already blocked keeps its blocker.
+// H3: the records name the modes the block was placed in (blockCore.ts).
+// H5: a live chat it ends stays readable to both for the report window.
 export async function blockPair(uid: string, targetUid: string, matchId?: string, idMode?: "spark" | "play"): Promise<void> {
   const db = admin.firestore();
   const now = admin.firestore.Timestamp.now();
-  const batch = db.batch();
 
-  let mode: "spark" | "play" | null = idMode ?? null;
+  // A block without a match or an id's mode (none today) counts as Spark,
+  // as unblocking and the lists read it.
+  let mode: BlockMode = idMode ?? "spark";
   // F-062: a Play match (pm_…) too; its people are in the server-only record.
   const ctx = matchId ? await loadMatch(matchId) : null;
   if (matchId) {
@@ -164,31 +173,75 @@ export async function blockPair(uid: string, targetUid: string, matchId?: string
     }
     mode = ctx.play || ctx.data.mode === "play" ? "play" : "spark";
   }
+  const keys = ctx ? await chatKeysOf(ctx) : {};
 
-  // Mirror block — both directions
-  batch.set(
-    db.collection(`users/${uid}/blockedUsers`).doc(targetUid),
-    { uid: targetUid, blockedAt: now, blockedBy: uid, ...(mode ? { mode } : {}) },
-  );
-  batch.set(
-    db.collection(`users/${targetUid}/blockedUsers`).doc(uid),
-    { uid, blockedAt: now, blockedBy: uid, ...(mode ? { mode } : {}) },
-  );
-
-  // Soft-delete match if provided
-  if (ctx) {
-    batch.update(ctx.ref, {
+  const mineRef = db.doc(`users/${uid}/blockedUsers/${targetUid}`);
+  const theirsRef = db.doc(`users/${targetUid}/blockedUsers/${uid}`);
+  const { plan, modes, matchEnded } = await db.runTransaction(async (tx) => {
+    const [mine, theirs] = await tx.getAll(mineRef, theirsRef);
+    const match = ctx ? (await tx.get(ctx.ref)).data() : undefined;
+    const recs = [mine.data(), theirs.data()];
+    const plan = planBlock(uid, recs, mode);
+    const modes: BlockMode[] = [...new Set([...recs.flatMap((r) => (r ? (blockModes(r) ?? []) : [])), mode])];
+    if (plan === "create") {
+      const rec = { blockedAt: now, blockedBy: uid, mode, modes: [mode] };
+      tx.create(mineRef, { uid: targetUid, ...rec });
+      tx.create(theirsRef, { uid, ...rec });
+    } else if (plan === "extend") {
+      // Their own block, now in this mode too (each record as it stands).
+      for (const [ref, rec, who] of [[mineRef, recs[0], targetUid], [theirsRef, recs[1], uid]] as const) {
+        tx.set(ref, { uid: who, blockedBy: uid, blockedAt: rec?.blockedAt ?? now, modes }, { merge: true });
+      }
+    }
+    // The match ends with this block unless it already has (C1: never
+    // re-attributed). If the other person had blocked first, it ends as
+    // their block — the block between them is theirs.
+    if (!ctx || !match || match.isBlocked === true) return { plan, modes, matchEnded: false };
+    const by: unknown = plan === "noop" ? recs.find((r) => r)?.blockedBy : uid;
+    const blocker = typeof by === "string" && ctx.pair.includes(by) ? by : uid;
+    const live = match.unmatchedAt === undefined || match.unmatchedAt === null;
+    tx.update(ctx.ref, {
       isBlocked: true,
-      blockedBy: ctx.idOf(uid),
+      blockedBy: ctx.idOf(blocker),
       blockedAt: now,
+      // H5: read-only for both (the person blocked keeps what was said to
+      // them, to report it), with both chat keys — the person blocked can't
+      // read the other's profile, where the key is. A chat already kept for
+      // one person (unmatched) stays theirs.
+      ...(live && ctx.users.length === 2
+        ? {
+            preservedFor: ctx.users.map((u) => ctx.idOf(u)).sort(),
+            preservedUntil: admin.firestore.Timestamp.fromMillis(now.toMillis() + PRESERVE_REPORTED_MS),
+            preservedForReport: false,
+          }
+        : {}),
+      ...(Object.keys(keys).length ? { chatKeys: keys } : {}),
     });
-  }
+    return { plan, modes, matchEnded: true };
+  });
 
-  await batch.commit();
-  if (ctx) await endPlayPair(ctx);
-  await clearLikes(uid, targetUid, null);
-  // Explore (Stage 3): neither is shown to the other.
-  await setBlocked(uid, targetUid, true);
+  if (ctx && matchEnded) await endPlayPair(ctx);
+  if (plan === "noop" || plan === "same") return;
+  await clearLikesOnBlock(uid, targetUid, mode);
+  // Explore (Stage 3): neither is shown to the other — the blocker only in
+  // this mode (H3).
+  await setBlocked(uid, targetUid, modes);
+}
+
+// H5: both people's chat public keys as this match names them (the Spark key
+// on the profile, the Play key on the Play profile), for the match doc.
+async function chatKeysOf(ctx: MatchCtx): Promise<Record<string, string>> {
+  const db = admin.firestore();
+  const out: Record<string, string> = {};
+  for (const u of ctx.pair) {
+    const id = ctx.idOf(u);
+    if (!id) continue;
+    const key: unknown = ctx.play
+      ? (await db.doc(`playProfiles/${id}`).get()).get("publicPlayKey")
+      : (await db.doc(`users/${u}`).get()).get("publicKey");
+    if (typeof key === "string" && key.length > 0 && key.length <= 100) out[id] = key;
+  }
+  return out;
 }
 
 // ─── unblockUser ──────────────────────────────────────────────────────────────

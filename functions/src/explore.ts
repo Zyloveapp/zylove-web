@@ -11,6 +11,7 @@ import { isBotUid, playStatus, requirePlayAccess } from './playAccess'
 import { GENDER_FIELDS, genderOf, isSuspendedUid, loadInternal, loadLocation, loadMatching, loadPrivateProfile, userRef } from './userData'
 import { takeRateLimit, takeRateLimitUpTo } from './rateLimits'
 import { signPhotoRefs } from './photoAccess'
+import { hiddenInMode } from './blockCore'
 import { recordCapHit } from './trustSignals'
 import { bucketMiles } from './location'
 import { playIdsOf } from './playIds'
@@ -139,12 +140,16 @@ export async function markActed(uid: string, mode: Mode, target: string): Promis
   })
 }
 
-export async function setBlocked(a: string, b: string, blocked: boolean): Promise<void> {
+// Explore (H3): `blocker` blocked `target` in `modes` ([] once lifted). The
+// person blocked never sees the blocker (exploreState.blocked, both modes);
+// the blocker doesn't see them in those modes only ({mode}.blocked) — never
+// the other, which would say who the block was on.
+export async function setBlocked(blocker: string, target: string, modes: Mode[]): Promise<void> {
   const { FieldValue } = await import('firebase-admin/firestore')
-  const op = blocked ? FieldValue.arrayUnion : FieldValue.arrayRemove
+  const per = (m: Mode) => ({ blocked: modes.includes(m) ? FieldValue.arrayUnion(target) : FieldValue.arrayRemove(target) })
   await Promise.all([
-    stateRef(a).set({ blocked: op(b) }, { merge: true }),
-    stateRef(b).set({ blocked: op(a) }, { merge: true }),
+    stateRef(blocker).set({ blocked: FieldValue.arrayRemove(target), spark: per('spark'), play: per('play') }, { merge: true }),
+    stateRef(target).set({ blocked: modes.length ? FieldValue.arrayUnion(blocker) : FieldValue.arrayRemove(blocker) }, { merge: true }),
   ])
 }
 
@@ -280,7 +285,7 @@ export const getExploreDeck = onCall(
 
     const state = stateSnap.data() ?? {}
     const m = state[mode] ?? {}
-    const excluded = new Set<string>([uid, ...list(m.acted), ...list(state.blocked)])
+    const excluded = new Set<string>([uid, ...list(m.acted), ...hiddenInMode(state, mode)])
     for (const d of matchSnap.docs) for (const u of list(d.get('users'))) excluded.add(u)
 
     // The current deck, minus anyone acted on or no longer there.

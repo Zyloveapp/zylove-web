@@ -35,7 +35,7 @@ test('explore: deck honours attraction, age range, blocks, suspension and deleti
   const blocked = await woman('Bel')
   const susp = await woman('Sue')
   const del = await woman('Dee')
-  await fnLib('explore').setBlocked(me.uid, blocked.uid, true)
+  await fnLib('explore').setBlocked(me.uid, blocked.uid, ['spark'])
   await db.doc(`userInternal/${susp.uid}`).set({ isSuspended: true }, { merge: true })
   await db.doc(`users/${del.uid}`).update({ isDeleted: true })
   for (const u of [susp, del]) await fnLib('explore').refreshEntry(u.uid)

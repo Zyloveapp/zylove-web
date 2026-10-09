@@ -12,7 +12,8 @@ import { requirePlayAccess } from "../playAccess";
 import { markActed } from "../explore";
 import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
 import { scoringDocs } from "./onProfileWrite";
-import { blockedEitherWay, likedInMode, recordLike } from "../likes";
+import { blockRecords, likedInMode, recordLike } from "../likes";
+import { blockedFor } from "../blockCore";
 import { takeQuota } from "../usage";
 import { writeSparkDetails } from "../pairSpark";
 import { ensurePlayId, requireUidOfPlayId } from "../playIds";
@@ -52,9 +53,16 @@ export async function performLike(likerId: string, likedId: string, mode: "spark
     throw new HttpsError("permission-denied", "Account suspended");
   }
   // Stage A: not someone who's gone, suspended or blocked (either way).
-  if (!likedUserSnap.exists || (await isSuspendedUid(likedId, likedUserSnap.data())) || (await blockedEitherWay(likerId, likedId))) {
+  // H3: a block the liker placed in the other mode doesn't refuse (that
+  // would say who it was on) — the like is then quiet below.
+  const blocks = await blockRecords(likerId, likedId);
+  if (!likedUserSnap.exists || (await isSuspendedUid(likedId, likedUserSnap.data())) || blockedFor(likerId, blocks, mode)) {
     throw new HttpsError("failed-precondition", "That profile isn't available.");
   }
+  // H3: any block between them at all — the liker gets the same answer as
+  // any unanswered like, but nothing reaches the other person and no match
+  // can come of it.
+  const quiet = blocks.some((b) => b !== undefined);
   // Stage C: Free has 10 likes a day (usage.ts); Spark+ and Elite, unlimited.
   await takeQuota(likerId, "likes");
   // Stage 2: a Play like needs Play access on both sides.
@@ -116,7 +124,7 @@ export async function performLike(likerId: string, likedId: string, mode: "spark
 
   const likedUser = likedUserSnap.data() as UserDoc;
   // Stage A: a match needs the other person's like in THIS mode.
-  const otherLiked = await likedInMode(likedId, likerId, mode, pair);
+  const otherLiked = !quiet && (await likedInMode(likedId, likerId, mode, pair));
   await recordLike(likerId, likedId, mode, likerId);
   // A live match between them stays as it is (never overwritten). F-062: a
   // Play match is its own doc (playMatches), apart from any Spark one.
@@ -141,7 +149,7 @@ export async function performLike(likerId: string, likedId: string, mode: "spark
 
   // Skip stat write for bot profiles — avoids creating stub docs
   const isBotTarget = likedId.startsWith("seed-");
-  if (!isBotTarget) {
+  if (!isBotTarget && !quiet) {
     await internalRef(likedId).set(
       { likesReceivedCount: admin.firestore.FieldValue.increment(1) },
       { merge: true },
@@ -173,8 +181,8 @@ export async function performLike(likerId: string, likedId: string, mode: "spark
   // breakdown or dealbreakers on it — the liker's own dealbreakers were in
   // there unfiltered; the details stay in pairs/{id}/modes/spark.
   const queueRef = db.doc(`users/${likedId}/likeQueue/${likerPlayId ?? likerId}`);
-  const priorLikeId: unknown = (await queueRef.get()).get("likeId");
-  await queueRef.set({
+  const priorLikeId: unknown = quiet ? null : (await queueRef.get()).get("likeId");
+  if (!quiet) await queueRef.set({
     ...(likerPlayId ? { likerPlayId, ...(likerPublic?.curated ? { curated: true } : {}) } : { likerUid: likerId }),
     likeId:                isLikeId(priorLikeId) ? priorLikeId : newLikeId(),
     likedAt:               Date.now(),
@@ -363,7 +371,7 @@ export async function performLike(likerId: string, likedId: string, mode: "spark
   // A — like push to receiver (only when no match was created). §4.A3: it
   // doesn't name the liker (a Free plan sees a count only; the SMS is
   // anonymous too).
-  if (!matched && likedUser.notifyOnLike) {
+  if (!matched && !quiet && likedUser.notifyOnLike) {
     const receiverToken = await getToken(likedId);
     if (receiverToken) {
       const isPlay = mode === "play";

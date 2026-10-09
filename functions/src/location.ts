@@ -7,6 +7,7 @@ import { marketFor } from './trial'
 import { accountRef, identityRef, internalRef, isDeletedUid, locationRef, userRef, requireActive } from './userData'
 import { takeRateLimit } from './rateLimits'
 import { isPlayId, uidOfPlayId } from './playIds'
+import { hiddenInMode } from './blockCore'
 import {
   SMS_CONSENT_SOURCES,
   SMS_CONSENT_TEXTS,
@@ -195,7 +196,8 @@ async function visibleTo(uid: string, uids: string[], mode: 'spark' | 'play'): P
     ...matches.docs.flatMap((d) => list(d.get('users'))),
     ...likers.filter((u): u is string => !!u),
   ])
-  const blocked = new Set(list(st.blocked))
+  // H3: blocks placed on the caller, and theirs in this mode only.
+  const blocked = new Set(hiddenInMode(st, mode))
   const candidates = uids.filter((u) => known.has(u) && !blocked.has(u))
   if (!candidates.length) return new Set()
   const [internals, roots] = await Promise.all([

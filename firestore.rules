@@ -24,9 +24,18 @@ service cloud.firestore {
     }
 
     // Blocks (Stage A): a blocked match is read-only for the person who
-    // blocked (evidence for a report) and closed to the person blocked.
+    // blocked (evidence for a report). H5 (review 2026-10-09): and for the
+    // person blocked while it's kept for them (preservedFor, until
+    // preservedUntil — 30 days from the block or an unmatch), so whoever
+    // blocks first can't take away the other's evidence. Nobody writes to it.
+    function keptReadable(m, me) {
+      return me in m.get('preservedFor', [])
+          && m.get('preservedUntil', null) is timestamp
+          && m.preservedUntil > request.time;
+    }
     function matchReadable(m) {
-      return m.get('isBlocked', false) != true || m.get('blockedBy', '') == request.auth.uid;
+      return m.get('isBlocked', false) != true || m.get('blockedBy', '') == request.auth.uid
+          || keptReadable(m, request.auth.uid);
     }
     // New messages and match updates only while the match is live: not
     // blocked, not unmatched.
@@ -143,7 +152,8 @@ service cloud.firestore {
           && viewerHasPlay();
     }
     function playMatchReadable(m) {
-      return m.get('isBlocked', false) != true || m.get('blockedBy', '') == myPlayId();
+      return m.get('isBlocked', false) != true || m.get('blockedBy', '') == myPlayId()
+          || keptReadable(m, myPlayId());
     }
 
     // ─── Users ──────────────────────────────────────────────────────────────

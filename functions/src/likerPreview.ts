@@ -8,6 +8,7 @@ import { tierNow } from './entitlements'
 import { takeRateLimit } from './rateLimits'
 import { isPlayId, playIdOf } from './playIds'
 import { storagePath } from './storagePath'
+import { blockedFor } from './blockCore'
 import {
   buildPreview,
   isLikeId,
@@ -132,7 +133,8 @@ async function likerStates(viewer: string, likers: Liker[], mode: LikeMode): Pro
       exists: !!root,
       deleted: root?.isDeleted === true,
       suspended: internal?.isSuspended === true || root?.isSuspended === true,
-      blocked: theirs[i].exists || mine[i].exists,
+      // H3: placed on the viewer, or by them in this mode.
+      blocked: blockedFor(viewer, [theirs[i].data(), mine[i].data()], mode),
       playOk: isBotUid(u) || (playAccessNow(internal, now) && !!playId && playCopy.has(playId)),
     })
   })

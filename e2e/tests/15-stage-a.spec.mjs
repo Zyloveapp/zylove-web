@@ -1,7 +1,7 @@
 // Stage A (2026-10-07): the adversarial audit's emulator proofs, kept as
 // regression tests. Each asserts the secure behaviour.
 import { test, expect } from '@playwright/test'
-import { resetEmulators, seedUser, callAs, likeAs, idTokenFor, db, fnLib, sortedPair, PROJECT, setPlan, likeIdOf } from './helpers.mjs'
+import { resetEmulators, seedUser, callAs, likeAs, idTokenFor, db, fnLib, sortedPair, PROJECT, setPlan, likeIdOf, Timestamp } from './helpers.mjs'
 
 test.beforeEach(resetEmulators)
 
@@ -196,7 +196,7 @@ test('blocks forgery: the blocked person must not unblock themselves via a forge
   expect(still).toBe(true)
 })
 
-test('block: the blocker keeps read-only access to the chat; the blocked person loses it; no new messages either way', async () => {
+test('block: the blocker keeps read-only access to the chat; the blocked person keeps it read-only for the 30-day report window (H5), then loses it; no new messages either way', async () => {
   const x = await seedUser('Xan')
   const v = await seedUser('Vee', { genderIdentity: 'woman', attractedTo: ['men'] })
   const id = await mutualMatch(x, v)
@@ -206,8 +206,14 @@ test('block: the blocker keeps read-only access to the chat; the blocked person 
   const get = async (uid, p) => (await fetch(`${BASE}/${p}`, { headers: await auth(uid) })).status
   expect(await get(v.uid, `matches/${id}`)).toBe(200)
   expect(await get(v.uid, `matches/${id}/messages/m0`)).toBe(200)
+  // H5 (review 2026-10-09): the person blocked keeps their evidence for 30 days…
+  expect(await get(x.uid, `matches/${id}`)).toBe(200)
+  expect(await get(x.uid, `matches/${id}/messages/m0`)).toBe(200)
+  // …and loses it once that's past; the blocker keeps it.
+  await db.doc(`matches/${id}`).update({ preservedUntil: Timestamp.fromMillis(Date.now() - 1000) })
   expect(await get(x.uid, `matches/${id}`)).toBe(403)
   expect(await get(x.uid, `matches/${id}/messages/m0`)).toBe(403)
+  expect(await get(v.uid, `matches/${id}/messages/m0`)).toBe(200)
   for (const u of [x, v]) {
     const r = await fetch(`${BASE}/matches/${id}/messages?documentId=n_${u.name}`, { method: 'POST', headers: await auth(u.uid), body: JSON.stringify({ fields: { senderId: value(u.uid), messageType: value('text'), ciphertext: value('x'), nonce: value('stub'), status: value('sent'), sentAt: { timestampValue: new Date().toISOString() } } }) })
     expect(r.status, u.name).toBe(403)
