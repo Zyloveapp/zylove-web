@@ -273,6 +273,13 @@ export async function likeAs(from, to, mode = 'spark') {
   return callAs(from, 'onLike', { likedUserId: to, mode })
 }
 
+// §4.A3: the opaque like id `owner`'s app knows a like by — read from the
+// server-only queue doc (keyed by the liker's uid, or Play ID in Play), as
+// only tests may. onLike writes it.
+export async function likeIdOf(owner, likerKey) {
+  return (await db.doc(`users/${owner}/likeQueue/${likerKey}`).get()).get('likeId') ?? null
+}
+
 // F-062: someone's Play ID (created if they have none yet) — read from the
 // server-only mapping, as only tests may.
 export async function playIdOf(uid) {

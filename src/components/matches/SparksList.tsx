@@ -4,12 +4,11 @@ import { Link } from 'react-router-dom'
 import { CURIOUS_MAX, type CuriousResult, type SentSpark, type SparkEntry } from '../../services/sparks'
 import { displayAge, type DiscoverProfile } from '../../services/discover'
 import { UserTierBadge } from '../TierBadge'
-import { UserFounderBadge } from '../FounderBadge'
 import DistanceLabel from '../DistanceLabel'
 import { relativeTime } from '../../services/matches'
 import type { Mode } from '../../store/modeStore'
 import { playNameOf } from '../../services/displayNames'
-import { usePlayIdentity } from './usePlayIdentity'
+import { useLikerPreview } from './useLikerPreview'
 import StoredImg from '../StoredImg'
 
 function expiresIn(expiresAt: number): string {
@@ -49,12 +48,14 @@ function Card({
   onSelect,
   children,
   score,
+  hint = 'Tap for full breakdown →',
 }: {
   photo: string | null | undefined
   mode: Mode
   onSelect: () => void
   children: ReactNode
   score: ReactNode
+  hint?: string
 }) {
   return (
     <li>
@@ -69,7 +70,7 @@ function Card({
         <span className="flex min-w-0 flex-1 flex-col justify-between py-1">
           <span className="min-w-0">{children}</span>
           <span className="flex items-end justify-between gap-2">
-            <span className="text-xs text-white/40">Tap for full breakdown →</span>
+            <span className="text-xs text-white/40">{hint}</span>
             {score}
           </span>
         </span>
@@ -96,17 +97,12 @@ function NameLine({ profile, uid, mode, name: known }: { profile: DiscoverProfil
 interface SparksListProps {
   sparks: SparkEntry[]
   mode: Mode
-  // Likers you've already matched with — their name is revealed.
-  matchedUids: Set<string>
   onSelect: (spark: SparkEntry) => void
-  // Real scores (likerUid → %) from onTap: cards whose profile has been
-  // opened, and every bot (whose like carries no trustworthy score).
-  scores?: Map<string, CardScore>
   // Top Picks tab: adds the gold "✦ Top Pick" label to every card.
   topPicks?: boolean
 }
 
-export default function SparksList({ sparks, mode, matchedUids, onSelect, scores, topPicks = false }: SparksListProps) {
+export default function SparksList({ sparks, mode, onSelect, topPicks = false }: SparksListProps) {
   if (sparks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
@@ -119,62 +115,34 @@ export default function SparksList({ sparks, mode, matchedUids, onSelect, scores
   return (
     <ul className="space-y-3">
       {sparks.map((s) => (
-        <SparkCard
-          key={s.likerUid}
-          spark={s}
-          mode={mode}
-          matched={matchedUids.has(s.likerUid)}
-          score={scores?.get(s.likerUid) ?? s.compatibilityScore}
-          onSelect={() => onSelect(s)}
-          topPick={topPicks}
-        />
+        <SparkCard key={s.likeId} spark={s} mode={mode} onSelect={() => onSelect(s)} topPick={topPicks} />
       ))}
     </ul>
   )
 }
 
-function SparkCard({
-  spark: s,
-  mode,
-  matched,
-  score,
-  onSelect,
-  topPick,
-}: {
-  spark: SparkEntry
-  mode: Mode
-  matched: boolean
-  score: CardScore | null
-  onSelect: () => void
-  topPick: boolean
-}) {
+// §4.A3: a like shows its preview only — photo and first name here; no uid,
+// age, place or badges until you link.
+function SparkCard({ spark: s, mode, onSelect, topPick }: { spark: SparkEntry; mode: Mode; onSelect: () => void; topPick: boolean }) {
   const symbol = mode === 'play' ? '🔥' : '✦'
-  // Like snapshots carry the Spark photo and name; Play shows the Play ones.
-  const identity = usePlayIdentity(s.likerUid, mode === 'play')
-  const photo = identity === null ? s.profile.photoURLs?.[0] : identity?.photoURL
-  // Name, age and place show only once you're linked — curated profiles
-  // included; photos are always clear.
-  const revealed = matched
+  const preview = useLikerPreview(s.likeId)
+  const name = preview?.firstName || 'Someone'
   return (
     <Card
-      photo={photo}
+      photo={preview?.photo}
       mode={mode}
       onSelect={onSelect}
-      // Bots' scores arrive from onTap; until then a placeholder.
-      score={score !== null ? <ScorePill score={score} mode={mode} /> : s.isBot ? <ScorePill score={null} mode={mode} /> : null}
+      hint="Tap to see more →"
+      score={s.compatibilityScore !== null ? <ScorePill score={s.compatibilityScore} mode={mode} /> : null}
     >
       {topPick && <span className="block text-xs font-semibold text-[#F59E0B]">{symbol} Top Pick</span>}
       {s.isWeeklySpark && <span className="block text-xs font-semibold text-[#F59E0B]">✦ Weekly Spark</span>}
-      {revealed ? (
-        <NameLine profile={s.profile} uid={s.likerUid} mode={mode} name={identity?.name} />
-      ) : (
-        <span className="block text-base font-semibold text-white">Your compatibility report is ready {symbol}</span>
-      )}
-      {revealed && (
-        <DistanceLabel profile={{ ...s.profile, uid: s.likerUid }} className="mt-0.5 block truncate text-sm text-white/50" />
-      )}
-      {revealed && <UserFounderBadge uid={s.likerUid} />}
-      {matched && <span className="mt-2 block text-[11px] text-emerald-300">You're linked</span>}
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="truncate text-base font-semibold text-white">
+          {mode === 'play' ? `${name} wants to play ${symbol}` : `${name} feels a Spark ${symbol}`}
+        </span>
+        {s.isBot && <CuratedBadge uid="" curated />}
+      </span>
       <span className="mt-1 block text-xs text-white/35">
         {s.likedAt > 0 && relativeTime(s.likedAt)}
         {s.expiresAt !== null && <span className="ml-2 text-amber-400">{expiresIn(s.expiresAt)}</span>}

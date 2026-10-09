@@ -1,7 +1,7 @@
 // Stage A (2026-10-07): the adversarial audit's emulator proofs, kept as
 // regression tests. Each asserts the secure behaviour.
 import { test, expect } from '@playwright/test'
-import { resetEmulators, seedUser, callAs, likeAs, idTokenFor, db, fnLib, sortedPair, PROJECT, setPlan } from './helpers.mjs'
+import { resetEmulators, seedUser, callAs, likeAs, idTokenFor, db, fnLib, sortedPair, PROJECT, setPlan, likeIdOf } from './helpers.mjs'
 
 test.beforeEach(resetEmulators)
 
@@ -235,12 +235,16 @@ test('likeBack: a real like in that mode still matches', async () => {
   await setPlan(a.uid, 'spark_plus') // Stage C: liking back is Spark+
   const b = await seedUser('Bea', { genderIdentity: 'woman', attractedTo: ['men'] })
   await likeAs(b.uid, a.uid)
-  const r = await callAs(a.uid, 'likeBack', { likerUid: b.uid, mode: 'spark' })
+  // §4.A3: by the like's opaque id — a uid is refused.
+  await expect(callAs(a.uid, 'likeBack', { likerUid: b.uid, mode: 'spark' })).rejects.toThrow(/likeId required/)
+  const r = await callAs(a.uid, 'likeBack', { likeId: await likeIdOf(a.uid, b.uid) })
   expect(r.matched).toBe(true)
-  // A queue entry in the other mode doesn't count.
+  // Someone else's like id isn't found in your queue.
   const c = await seedUser('Cat', { genderIdentity: 'woman', attractedTo: ['men'] })
+  const d = await seedUser('Dee', { genderIdentity: 'woman', attractedTo: ['men'] })
+  await setPlan(d.uid, 'spark_plus')
   await likeAs(c.uid, a.uid)
-  await expect(callAs(a.uid, 'likeBack', { likerUid: c.uid, mode: 'play' })).rejects.toThrow()
+  await expect(callAs(d.uid, 'likeBack', { likeId: await likeIdOf(a.uid, c.uid) })).rejects.toThrow(/isn't available/)
 })
 
 test('photos: the server deletes a photo once it is off every list (clients can\'t delete)', async () => {

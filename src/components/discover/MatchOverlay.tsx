@@ -98,7 +98,8 @@ function SparkMatchOverlay({ match, onClose }: MatchOverlayProps) {
   // Cached from the compatibility block, so this is usually instant.
   // Archetypes come from Spark data only.
   useEffect(() => {
-    if (match.mode !== 'spark') return
+    // §4.A3: a like back from Sparks learns who they are once linked.
+    if (match.mode !== 'spark' || !match.theirUid) return
     let cancelled = false
     fetchCompatibility(match.theirUid)
       .then((r) => {
@@ -228,7 +229,7 @@ function PlayMatchOverlay({ match, onClose }: MatchOverlayProps) {
   const [archetype, setArchetype] = useState<ArchetypeMatch | null>(null)
 
   useEffect(() => {
-    if (!uid) return
+    if (!uid || !match.theirUid) return
     let cancelled = false
     fetchPlayArchetype(uid, match.theirUid).then((a) => {
       if (!cancelled) setArchetype(a)

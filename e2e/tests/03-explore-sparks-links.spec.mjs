@@ -78,7 +78,7 @@ test('sparks: incoming like → like back → match', async ({ browser }) => {
   const { ctx, page, net } = await open(browser, me)
   await page.getByRole('link', { name: 'Sparks' }).click()
   await expect(page.getByText('✦ Sparks ✦')).toBeVisible()
-  await page.getByRole('button', { name: /compatibility report is ready/ }).first().click()
+  await page.getByRole('button', { name: /Gray feels a Spark/ }).first().click()
   await page.getByRole('button', { name: "It's a Spark" }).click()
   await expect(page.getByRole('dialog', { name: 'Sparks are flying' })).toBeVisible({ timeout: 30000 })
   await expect.poll(async () => (await db.collection('matches').where('users', 'array-contains', me.uid).get()).size, { timeout: 20000 }).toBe(1)

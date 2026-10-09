@@ -45,6 +45,7 @@ test('F-018: Explore shows relationship status but never religion or politics', 
   await ctx.close()
 })
 
+// §4.A3: the preview is photo, first name, bio and prompts only.
 test('F-018: an anonymous Spark liker shows no gender, pronouns or life details', async ({ browser }) => {
   const me = await seedUser('Finley', { genderIdentity: 'woman', attractedTo: ['men'] })
   const liker = await seedUser('Gray', {
@@ -53,10 +54,11 @@ test('F-018: an anonymous Spark liker shows no gender, pronouns or life details'
   await likeAs(liker.uid, me.uid)
   const { ctx, page, net } = await open(browser, me)
   await page.getByRole('link', { name: 'Sparks' }).click()
-  await page.getByRole('button', { name: /compatibility report is ready/ }).first().click()
-  await expect(page.getByText(/feels a Spark/)).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Someone' })).toBeVisible()
-  for (const t of ['Gray', 'he/him', 'trans man', 'Life details', 'Relationship status', 'Kids', 'Religion']) {
+  await page.getByRole('button', { name: /feels a Spark/ }).first().click()
+  await expect(page.getByText(/Gray feels a Spark\. Do you\?/)).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Gray' })).toBeVisible()
+  await expect(page.getByText("Hi, I'm Gray.")).toBeVisible()
+  for (const t of ['30', 'Austin, TX', 'he/him', 'trans man', 'Life details', 'Relationship status', 'Kids', 'Religion']) {
     await expect(page.getByText(t, { exact: true })).toHaveCount(0)
   }
   await shots(page, 'anonymous-liker')

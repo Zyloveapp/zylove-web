@@ -14,16 +14,16 @@ import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pair
 import { scoringDocs } from "./onProfileWrite";
 import { blockedEitherWay, likedInMode, recordLike } from "../likes";
 import { takeQuota } from "../usage";
-import { loadSparkDetails, writeSparkDetails } from "../pairSpark";
+import { writeSparkDetails } from "../pairSpark";
 import { ensurePlayId, requireUidOfPlayId } from "../playIds";
 import { createPlayMatch, livePlayMatchOf, matchRefOf } from "../playMatch";
 import { publicPlayProfile } from "../playProfiles";
 import { keptForReport } from "../behavior";
+import { isLikeId, newLikeId } from "../likerPreviewCore";
 
 export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
 
-  const db      = admin.firestore();
   const likerId = request.auth.uid;
   const mode: "spark" | "play" = request.data?.mode === "play" ? "play" : "spark";
   // F-062: in Play the liked person is known by their Play ID.
@@ -31,7 +31,14 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   if (typeof likedId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(likedId) || likedId === likerId) {
     throw new HttpsError("invalid-argument", "likedUserId required");
   }
+  return performLike(likerId, likedId, mode);
+});
 
+// §4.A3: the like itself, by uid — onLike (above) and likeBack (index.ts,
+// which resolves an opaque like id to the liker server-side) both run it, so
+// a like-back records, scores, matches and notifies exactly as a like does.
+export async function performLike(likerId: string, likedId: string, mode: "spark" | "play") {
+  const db       = admin.firestore();
   const pid      = pairId(likerId, likedId);
   const pairRef  = db.collection("pairs").doc(pid);
   const likedRef = db.collection("users").doc(likedId);
@@ -144,9 +151,8 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   // Write the receiver's likeQueue inbox entry. Mirrors the shape used
   // by botEngine.createLikeAndMatch so the client read path (LikeIntelligenceModal,
   // Sparks tab) treats human-originated and bot-originated likes
-  // identically. compatibilityScore + breakdown + dealbreakers populated
-  // from the pair doc (richer than bot's empty placeholders since we
-  // have the data here). Play-side profile fields aren't snapshotted —
+  // identically. compatibilityScore populated from the pair doc (richer
+  // than bot's placeholder since we have the data here). Play-side profile fields aren't snapshotted —
   // LikeIntelligenceModal fetches the liker's playProfile/data subdoc
   // when needed. istopPicks stays false; Monday onDailySchedule is the
   // sole authoritative promoter. If matched is true, the batch in the
@@ -154,8 +160,6 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   // says "consume on match," and writing unconditionally keeps the
   // logic symmetric with the not-matched path.
   const likerDataForQueue = (likerSnap.data() ?? {}) as any;
-  // Stage C: the report's details live in pairs/{id}/modes/spark.
-  const sparkDetails = mode === "spark" ? await loadSparkDetails(pid, pair) : null;
   // A Play like shows the liker's Play profile — never their Spark one.
   const likerPlay = mode === "play"
     ? (await db.doc(`users/${likerId}/playProfile/data`).get()).data() ?? {}
@@ -164,15 +168,18 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   // public Play profile (and age) — no uid.
   const likerPlayId = mode === "play" ? await ensurePlayId(likerId) : null;
   const likerPublic = likerPlay && likerPlayId ? publicPlayProfile(likerId, likerPlayId, likerPlay, likerDataForQueue) : null;
-  await db.doc(`users/${likedId}/likeQueue/${likerPlayId ?? likerId}`).set({
+  // §4.A3: the queue doc is server-only; the liked person's app knows the
+  // like only by its opaque id (likeId, kept across a repeat like). F-098: no
+  // breakdown or dealbreakers on it — the liker's own dealbreakers were in
+  // there unfiltered; the details stay in pairs/{id}/modes/spark.
+  const queueRef = db.doc(`users/${likedId}/likeQueue/${likerPlayId ?? likerId}`);
+  const priorLikeId: unknown = (await queueRef.get()).get("likeId");
+  await queueRef.set({
     ...(likerPlayId ? { likerPlayId, ...(likerPublic?.curated ? { curated: true } : {}) } : { likerUid: likerId }),
+    likeId:                isLikeId(priorLikeId) ? priorLikeId : newLikeId(),
     likedAt:               Date.now(),
     compatibilityScore:    mode === "play" ? (playScores?.playScore ?? 0) : (pair?.sparkScore ?? 0),
-    dealbreakersTriggered: sparkDetails ? sparkDetails.triggeredDealbreakers : [],
     istopPicks:            false,
-    breakdown:             mode === "play"
-      ? (playScores?.playBreakdown ?? {})
-      : sparkDetails?.sparkBreakdown ?? {},
     dismissed:             false,
     isExpired:             false,
     action:                "like",
@@ -353,19 +360,17 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
     }
   }
 
-  // A — like push to receiver (only when no match was created). F-062: a
-  // Play like names the Play profile, never the Spark one.
+  // A — like push to receiver (only when no match was created). §4.A3: it
+  // doesn't name the liker (a Free plan sees a count only; the SMS is
+  // anonymous too).
   if (!matched && likedUser.notifyOnLike) {
     const receiverToken = await getToken(likedId);
     if (receiverToken) {
-      const senderName = mode === "play"
-        ? (likerPublic?.playDisplayName || "Someone")
-        : ((likerSnap.data() as any)?.displayName ?? "Someone");
       const isPlay = mode === "play";
       await sendPush(
         [receiverToken],
-        isPlay ? `🔥 ${senderName} wants to play` : `✦ ${senderName} sent you a Spark`,
-        isPlay ? `${senderName} wants to play` : `${senderName} sent you a Spark`,
+        isPlay ? "🔥 Someone wants to play" : "✦ Someone sent you a Spark",
+        isPlay ? "Someone wants to play" : "Someone sent you a Spark",
         { screen: "likes" },
       ).catch(() => {});
     }
@@ -380,4 +385,4 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
     pairId:  pid,
     matchId: matched ? `${[likerId, likedId].sort().join("_")}` : null,
   };
-});
+}
