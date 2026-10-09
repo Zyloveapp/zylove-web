@@ -381,6 +381,11 @@ service cloud.firestore {
             && (!('ageMax' in d) || d.ageMax is int)
             // Stage C: the viewer's own distance, 1–100 miles (no "no limit").
             && (!('radiusMiles' in d) || (d.radiusMiles is number && d.radiusMiles >= 1 && d.radiusMiles <= 100))
+            // What they look for: lists of keys, heights in cm (null: unset).
+            && (!('seekingBodyTypes' in d) || d.seekingBodyTypes == null || (d.seekingBodyTypes is list && d.seekingBodyTypes.size() <= 10))
+            && (!('seekingTraits' in d) || d.seekingTraits == null || (d.seekingTraits is list && d.seekingTraits.size() <= 20))
+            && (!('seekingHeightMinCm' in d) || d.seekingHeightMinCm == null || d.seekingHeightMinCm is number)
+            && (!('seekingHeightMaxCm' in d) || d.seekingHeightMaxCm == null || d.seekingHeightMaxCm is number)
             && (!('religion' in d) || d.religion == null || (d.religion is string && d.religion.size() <= 40))
             && (!('politicalView' in d) || d.politicalView == null || (d.politicalView is string && d.politicalView.size() <= 40))
             && validGender(d);
@@ -552,12 +557,15 @@ service cloud.firestore {
         allow write: if false;
       }
 
-      // Seeking preferences — own only. Never the dealbreakers: scoring reads
-      // them from private/matching (30-day limit, F-099), so a copy here
-      // would only mislead.
+      // Seeking preferences — own only. Never the dealbreakers, body types,
+      // traits or height range: scoring reads them from private/matching
+      // (dealbreakers under F-099's 30-day limit), so a copy here would only
+      // mislead.
       match /seekingPreferences/{doc} {
         allow read, delete: if isUser(uid) && isSignedIn();
-        allow create, update: if isUser(uid) && isSignedIn() && !('dealbreakers' in request.resource.data);
+        allow create, update: if isUser(uid) && isSignedIn()
+                              && !request.resource.data.keys().hasAny(['dealbreakers', 'seekingBodyTypes', 'seekingTraits',
+                                                                       'seekingHeightMinCm', 'seekingHeightMaxCm']);
       }
 
       // Like queue — who liked you. Written only by Cloud Functions (onLike,
