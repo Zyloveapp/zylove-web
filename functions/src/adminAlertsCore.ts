@@ -22,6 +22,7 @@ export type AdminEvent =
   | 'profileCompleted'
   | 'deletionRequest'
   | 'founderMessage'
+  | 'contactMessage'
   | 'paymentDispute'
 
 // Trust flags have one toggle per reason family, not per reason.
@@ -71,6 +72,7 @@ export const TOGGLE_KEYS = [
   'profileCompleted',
   'deletionRequest',
   'founderMessage',
+  'contactMessage',
   'paymentDispute',
 ] as const
 export type ToggleKey = (typeof TOGGLE_KEYS)[number]
@@ -186,6 +188,12 @@ export const EVENTS: Record<AdminEvent, EventDef> = {
     text: (n) => `Zylove admin: ${plural(n, 'new founder message')}. ${ADMIN}/messages`,
     phrase: (n) => plural(n, 'founder message'),
   },
+  contactMessage: {
+    urgent: false,
+    windowMs: WINDOW_MS,
+    text: (n) => `Zylove admin: ${plural(n, 'new contact message')}. ${ADMIN}/contact`,
+    phrase: (n) => plural(n, 'contact message'),
+  },
   paymentDispute: {
     urgent: false,
     windowMs: WINDOW_MS,
@@ -204,6 +212,7 @@ const SUMMARY_ORDER: AdminEvent[] = [
   'paymentDispute',
   'deletionRequest',
   'founderMessage',
+  'contactMessage',
   'newAccount',
   'profileCompleted',
 ]

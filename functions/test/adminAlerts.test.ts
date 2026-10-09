@@ -352,6 +352,21 @@ test('texts sent through the pipeline also pass the scan', () => {
   }
 })
 
+test('a new contact message: non-urgent, batched, a count and the inbox link only', () => {
+  assert.equal(EVENTS.contactMessage.urgent, false)
+  assert.equal(EVENTS.contactMessage.text(1, {}, null), 'Zylove admin: 1 new contact message. zylove.app/admin/contact')
+  assert.equal(EVENTS.contactMessage.text(2, {}, null), 'Zylove admin: 2 new contact messages. zylove.app/admin/contact')
+  // An admin settings doc saved before this event existed gets it on.
+  const s = normalizeSettings({ smsConsent: { at: 1, version: 'test' }, sms: { all: true, events: { founderMessage: false } } })
+  assert.equal(s.sms.events.contactMessage, true)
+  assert.ok(smsEventFor(s, { type: 'contactMessage', n: 1, detail: {} }))
+  const { texts } = run([
+    ['contactMessage', NOON],
+    ['contactMessage', NOON + 1 * MIN],
+  ])
+  assert.deepEqual(texts, ['Zylove admin: 1 new contact message. zylove.app/admin/contact'])
+})
+
 test('a long summary is trimmed with "+ more"', () => {
   const t = summaryText('overnight', (Object.keys(EVENTS) as AdminEvent[]).map((x) => [x, 9999]))
   assert.ok(t.includes('+ more'), t)
