@@ -259,7 +259,12 @@ async function deleteAndReturn(who) {
 }
 const restore = (uid) => callAs(uid, 'restoreAccount', { birthday: '1995-03-14' })
 const blockDoc = async (owner, other) => (await db.doc(`users/${owner}/blockedUsers/${other}`).get()).data() ?? null
-const blockedList = async (uid) => (await db.doc(`exploreState/${uid}`).get()).data()?.blocked ?? []
+// Who `uid`'s deck hides in `mode` (F-105: their own blocks in that mode,
+// and everyone who blocked them, in every mode) — blockCore.hiddenInMode.
+const hiddenFor = async (uid, mode = 'spark') => {
+  const s = (await db.doc(`exploreState/${uid}`).get()).data() ?? {}
+  return [...new Set([...(s.blocked ?? []), ...(s[mode]?.blocked ?? [])])]
+}
 
 test('H6: delete then restore keeps every block, both ways — the victim\'s on the harasser, and the harasser\'s own', async () => {
   const harry = await seedUser('Harry')
@@ -280,9 +285,10 @@ test('H6: delete then restore keeps every block, both ways — the victim\'s on 
   expect(await blockDoc(vic.uid, harry.uid)).toBe(null)
   expect(await blockDoc(xan.uid, harry.uid)).toBe(null)
   // Explore's lists follow.
-  expect(await blockedList(vic.uid)).toContain(back)
-  expect(await blockedList(vic.uid)).not.toContain(harry.uid)
-  expect(await blockedList(back)).toEqual(expect.arrayContaining([vic.uid, xan.uid]))
+  expect(await hiddenFor(vic.uid)).toContain(back)
+  expect(await hiddenFor(vic.uid)).not.toContain(harry.uid)
+  expect(await hiddenFor(back)).toEqual(expect.arrayContaining([vic.uid, xan.uid]))
+  expect(await hiddenFor(xan.uid, 'play')).toContain(back) // blocked by him: kept away in every mode
   // In force: neither can act on the other, and he can't lift her block.
   expect(await errOf(callAs(back, 'onTap', { tappedUserId: vic.uid }))).toMatch(/isn't available/)
   expect(await errOf(callAs(vic.uid, 'onTap', { tappedUserId: back }))).toMatch(/isn't available/)

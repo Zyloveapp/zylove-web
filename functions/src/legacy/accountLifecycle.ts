@@ -10,6 +10,7 @@ import { buildGenderLine } from "../genderLine";
 import { normalizeGender } from "../gender";
 import { rekeyBlocks, reportPending, type BlockEntry } from "../restoreCheck";
 import { setBlocked, stateRef } from "../explore";
+import { blockModes } from "../blockCore";
 import { STRIPE_SECRETS, cancelSubscriptionsForDeletion } from "../stripe";
 import { ROOT_SCRUB, clearPrivateData, identityRef, internalRef, isSuspendedUid, matchingRef, moderationCarry, profileRef, recoveryRecord } from "../userData";
 
@@ -356,9 +357,23 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
     for (const w of writes.slice(i, i + 400)) w(b);
     await b.commit();
   }
+  // Explore's lists follow each re-keyed block (F-105: the one who placed it
+  // hides the other only in its modes; the one blocked is kept away in all).
+  // A record with no blocker (older mobile ones) hides both ways.
+  const recordOf = (other: string) =>
+    rekeyed.set.find((w) => w.path === `users/${newUid}/blockedUsers/${other}`)?.data ??
+    rekeyed.set.find((w) => w.path === `users/${other}/blockedUsers/${newUid}`)?.data;
   for (const other of rekeyed.others) {
-    await setBlocked(newUid, other, true);
-    await stateRef(other).set({ blocked: admin.firestore.FieldValue.arrayRemove(previousUid) }, { merge: true });
+    const rec = recordOf(other);
+    const modes = blockModes(rec) ?? ["spark", "play"];
+    if (rec?.blockedBy === other) await setBlocked(other, newUid, modes);
+    else if (rec?.blockedBy === newUid) await setBlocked(newUid, other, modes);
+    else {
+      await setBlocked(newUid, other, modes);
+      await setBlocked(other, newUid, modes);
+    }
+    const gone = admin.firestore.FieldValue.arrayRemove(previousUid);
+    await stateRef(other).set({ blocked: gone, spark: { blocked: gone }, play: { blocked: gone } }, { merge: true });
   }
   // NOTE: previousUid's user doc may have been purged by onNightlyPurge
   // if the account was deleted >12 months ago. This batch.delete is a no-op
