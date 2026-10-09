@@ -175,7 +175,7 @@ async function deliver(to: string, body: string): Promise<Delivery> {
       try {
         code = (JSON.parse(detail) as { code?: unknown }).code
       } catch {
-        // Not JSON; logged below.
+        // Not JSON; only the status is logged.
       }
       if (code === TWILIO_UNSUBSCRIBED) {
         // Replied STOP before the inbound webhook existed, or it missed it.
@@ -183,7 +183,11 @@ async function deliver(to: string, body: string): Promise<Delivery> {
         logger.info('sendSMS: Twilio reports the number unsubscribed; recorded the opt-out')
         return 'opted_out'
       }
-      logger.error('sendSMS: Twilio rejected the message', { status: response.status, detail: detail.slice(0, 300) })
+      // F-088: only Twilio's code and the HTTP status — the error text can quote the destination number.
+      logger.error('sendSMS: Twilio rejected the message', {
+        status: response.status,
+        code: typeof code === 'number' || typeof code === 'string' ? code : null,
+      })
       return 'failed'
     }
     logger.info('sendSMS: sent')
@@ -329,6 +333,36 @@ export async function claimSparkSmsSlot(uid: string): Promise<boolean> {
     logger.error('claimSparkSmsSlot failed', { message: err instanceof Error ? err.message : String(err) })
     return false
   }
+}
+
+// F-089: message texts per recipient, across all their matches — at most one
+// every 30 minutes and 10 a day (on top of the 5-minute per-match throttle).
+// State lives in userInternal/{uid}.messageSms = { lastAt, windowStart, count },
+// all in milliseconds; the day is a 24-hour window from its first text.
+export const MESSAGE_SMS_RECIPIENT_GAP_MS = 30 * 60 * 1000
+export const MESSAGE_SMS_RECIPIENT_DAILY = 10
+const DAY_MS = 24 * 60 * 60 * 1000
+
+export interface MessageSmsState {
+  lastAt: number
+  windowStart: number
+  count: number
+}
+
+// Whether another message text may go to this recipient now, and the state to
+// store if it does. Malformed state counts as none.
+export function decideMessageSms(state: unknown, now: number): { send: boolean; next: MessageSmsState | null } {
+  const s = typeof state === 'object' && state !== null ? (state as Record<string, unknown>) : {}
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  const lastAt = num(s.lastAt)
+  const windowStart = num(s.windowStart)
+  const count = num(s.count) ?? 0
+  if (lastAt !== null && now - lastAt < MESSAGE_SMS_RECIPIENT_GAP_MS) return { send: false, next: null }
+  if (windowStart === null || now - windowStart >= DAY_MS || now < windowStart) {
+    return { send: true, next: { lastAt: now, windowStart: now, count: 1 } }
+  }
+  if (count >= MESSAGE_SMS_RECIPIENT_DAILY) return { send: false, next: null }
+  return { send: true, next: { lastAt: now, windowStart, count: count + 1 } }
 }
 
 // Display name for texts: the match's participant snapshot, then the user

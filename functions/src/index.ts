@@ -34,7 +34,7 @@ import {
   parsePlayGoDeeperRequest,
 } from './playGoDeeperPrompt'
 import { SPARK_GO_DEEPER_FOCUS, buildSparkGoDeeperPrompt, parseSparkGoDeeperRequest } from './sparkGoDeeperPrompt'
-import { LOOKUP_SECRETS, SMS_SECRETS, claimSparkSmsSlot, lookupLineType, nameFor, sendSMS, smsTarget } from './sms'
+import { LOOKUP_SECRETS, SMS_SECRETS, claimSparkSmsSlot, decideMessageSms, lookupLineType, nameFor, sendSMS, smsTarget } from './sms'
 
 export { assignFounderBadge, onLaunchConfigUpdated } from './founders'
 export { checkFounderActivity, founderHeartbeat } from './founderActivity'
@@ -54,6 +54,8 @@ import { cityIsOpen, launchCityOf, requireTier, tierNow } from './entitlements'
 import { accountRef, internalRef, isAdminAuth, isSuspendedUid, loadInternal, loadMatching, loadSettings, requireActive } from './userData'
 import { blockedEitherWay, likedInMode, likersInMode, pairIdOf, recordLike } from './likes'
 import { takeRateLimit } from './rateLimits'
+import { logId } from './logSafe'
+import { PROFILE_DATA_RULE, hasLinkOrNumber, profileBlock, safeBio, safeStarters } from './aiOutput'
 import { takeQuota } from './usage'
 import { loadSparkDetails } from './pairSpark'
 import { clientIp, ipRateKey } from './clientIp'
@@ -146,7 +148,8 @@ export const generateSparkBio = onCall(
         return { bio: '' }
       }
 
-      const bio = truncateAtWord(extractText(await response.json()), MAX_BIO_LENGTH)
+      // F-095: a bio with a link, handle or number is dropped (aiOutput.ts).
+      const bio = safeBio(truncateAtWord(extractText(await response.json()), MAX_BIO_LENGTH))
       if (!bio) await refund()
       return { bio }
     } catch (err) {
@@ -195,7 +198,8 @@ export const generatePlayBio = onCall(
         return { bio: '' }
       }
 
-      const bio = truncateAtWord(extractText(await response.json()), MAX_BIO_LENGTH)
+      // F-095: a bio with a link, handle or number is dropped (aiOutput.ts).
+      const bio = safeBio(truncateAtWord(extractText(await response.json()), MAX_BIO_LENGTH))
       // Only successful generations count.
       if (!bio) await refund()
       return { bio }
@@ -232,7 +236,10 @@ async function askGoDeeper(prompt: string, temperature: number): Promise<string>
     logger.error('generatePlayGoDeeper: Anthropic API error', { status: response.status })
     return ''
   }
-  return cleanGoDeeperQuestion(extractText(await response.json()))
+  // F-095: a question naming a link, handle or number counts as no question
+  // (Go Deeper questions can end up on the profile).
+  const question = cleanGoDeeperQuestion(extractText(await response.json()))
+  return hasLinkOrNumber(question) ? '' : question
 }
 
 const sameQuestion = (a: string, b: string) => a.toLowerCase().replace(/\W/g, '') === b.toLowerCase().replace(/\W/g, '')
@@ -640,7 +647,7 @@ export const likeBack = onCall(
       logger.warn('likeBack: liker queue cleanup failed', { message: err instanceof Error ? err.message : String(err) }),
     )
 
-    logger.info(created ? 'likeBack: match created' : 'likeBack: match already existed', { matchId, mode })
+    logger.info(created ? 'likeBack: match created' : 'likeBack: match already existed', { matchId: logId(matchId), mode })
     return { matched: true, matchId }
   },
 )
@@ -746,17 +753,17 @@ export const recordVibeRating = onCall(
       batch.set(internalRef(callerId), { zyloveScore: { participationPoints: FieldValue.increment(1) } }, { merge: true })
     }
     await batch.commit()
-    if (adminRepeat) logger.info('recordVibeRating: admin test repeat, no score change', { matchId })
+    if (adminRepeat) logger.info('recordVibeRating: admin test repeat, no score change', { matchId: logId(matchId) })
     if (!adminRepeat && !BOT_PREFIXES.some((p) => otherUid.startsWith(p))) {
       await recordVibeSignal(otherUid, vibe === 'loving_it').catch((err: unknown) =>
-        logger.error('recordVibeRating: vibe signal failed', { matchId, message: err instanceof Error ? err.message : String(err) }),
+        logger.error('recordVibeRating: vibe signal failed', { matchId: logId(matchId), message: err instanceof Error ? err.message : String(err) }),
       )
     }
 
     const mutual =
       vibe === 'loving_it' &&
       (await markMutualVibe(matchId, ctx.idOf(otherUid)).catch((err: unknown) => {
-        logger.error('recordVibeRating: mutual check failed', { matchId, message: err instanceof Error ? err.message : String(err) })
+        logger.error('recordVibeRating: mutual check failed', { matchId: logId(matchId), message: err instanceof Error ? err.message : String(err) })
         return false
       }))
 
@@ -772,7 +779,7 @@ export const recordVibeRating = onCall(
         ),
     )
 
-    logger.info('recordVibeRating', { matchId, rating: vibe, mutual })
+    logger.info('recordVibeRating', { matchId: logId(matchId), rating: vibe, mutual })
     return { success: true }
   },
 )
@@ -1204,7 +1211,7 @@ export const submitReview = onCall(
     // not fail a saved review, but it is a safety gap, so log it loudly.
     await checkModeration(reviewedUid, callerId, matchId, categories).catch((err: unknown) =>
       logger.error('submitReview: moderation check failed', {
-        matchId,
+        matchId: logId(matchId),
         message: err instanceof Error ? err.message : String(err),
       }),
     )
@@ -1213,13 +1220,13 @@ export const submitReview = onCall(
     if (categories.some((c) => c === 'felt_unsafe' || c === 'aggressive')) {
       await recomputeBehaviorRisk(reviewedUid).catch((err: unknown) =>
         logger.error('submitReview: behavior risk recompute failed', {
-          matchId,
+          matchId: logId(matchId),
           message: err instanceof Error ? err.message : String(err),
         }),
       )
     }
 
-    logger.info('submitReview', { matchId, positive: positive.length, neutral: neutral.length, negative: negative.length, ended })
+    logger.info('submitReview', { matchId: logId(matchId), positive: positive.length, neutral: neutral.length, negative: negative.length, ended })
     return { success: true, ...result }
   },
 )
@@ -1287,7 +1294,7 @@ async function applyHeldReviewsOnEnd(matchId: string, before: DocumentData | und
       return r.negativePending === true && (typeof r.generation !== 'number' || r.generation === generation)
     })
     for (const d of pending) await applyPendingNegative(d.ref)
-    if (pending.length > 0) logger.info('processMatchEnd: applied held negative reviews', { matchId, count: pending.length })
+    if (pending.length > 0) logger.info('processMatchEnd: applied held negative reviews', { matchId: logId(matchId), count: pending.length })
 }
 
 export const processMatchEnd = onDocumentWritten({ document: 'matches/{matchId}', timeoutSeconds: 60, memory: '256MiB' }, async (event) =>
@@ -1332,8 +1339,9 @@ function personLine(user: DocumentData | undefined): string {
 
 function buildStarterPrompt(me: DocumentData | undefined, them: DocumentData | undefined): string {
   return `Generate 3 short, natural conversation starters for two people who just matched on a dating app.
-Person A: ${personLine(me)}
-Person B: ${personLine(them)}
+${profileBlock('person_a', personLine(me))}
+${profileBlock('person_b', personLine(them))}
+${PROFILE_DATA_RULE}
 Rules: under 15 words each, conversational not formal, based on something specific from their profiles, no generic openers like 'hey' or 'how are you'
 Return as JSON array of 3 strings.`
 }
@@ -1356,8 +1364,9 @@ function playPersonLine(root: DocumentData | undefined, play: DocumentData | und
 
 function buildPlayStarterPrompt(lines: [string, string]): string {
   return `Generate 3 short, natural opening messages for two adults who just matched in the casual, flirty "Play" side of a dating app.
-Person A: ${lines[0]}
-Person B: ${lines[1]}
+${profileBlock('person_a', lines[0])}
+${profileBlock('person_b', lines[1])}
+${PROFILE_DATA_RULE}
 Rules: under 15 words each, playful and confident, flirty but tasteful and respectful — nothing explicit or graphic, consent-minded, based on something specific from their Play profiles, no generic openers like 'hey' or 'how are you'
 Return as JSON array of 3 strings.`
 }
@@ -1429,7 +1438,8 @@ export const generateConversationStarter = onCall(
         logger.error('generateConversationStarter: Anthropic API error', { status: response.status, play })
         return { starters: fallback }
       }
-      return { starters: parseStarters(extractText(await response.json())) ?? fallback }
+      // F-095: openers naming a link, handle, number or another app are dropped.
+      return { starters: safeStarters(parseStarters(extractText(await response.json())), fallback) }
     } catch (err) {
       logger.error('generateConversationStarter failed', { play, message: err instanceof Error ? err.message : String(err) })
       return { starters: fallback }
@@ -2124,8 +2134,9 @@ export const smsOnSpark = onDocumentCreated(
 )
 
 // New message: texts the other participant, at most once per match every
-// 5 minutes. Protocol and system messages don't count, and neither do bot
-// chats — a bot reply never texts anyone. F-062: Play messages (under
+// 5 minutes and, across all their matches, once per recipient every 30
+// minutes and 10 a day (F-089). Protocol and system messages don't count,
+// and neither do bot chats — a bot reply never texts anyone. F-062: Play messages (under
 // playMatches, sender = Play ID) the same way, through loadMatch.
 async function textOnMessage(matchId: string, msg: DocumentData | undefined): Promise<void> {
   if (!msg) return
@@ -2155,12 +2166,20 @@ async function textOnMessage(matchId: string, msg: DocumentData | undefined): Pr
   const target = await smsTarget(recipientUid, 'newMessage', play ? 'play' : 'spark')
   if (!target) return
 
-  // Claim the cooldown slot before sending, so a burst of messages sends one text.
+  // Claim the cooldown slots before sending, so a burst of messages sends one
+  // text: the match's (5 minutes) and the recipient's across all matches
+  // (F-089: one per 30 minutes, 10 a day — decideMessageSms).
   const db = getFirestore()
+  const recipientRef = internalRef(recipientUid)
   const claimed = await db.runTransaction(async (tx) => {
-    const last = millis((await tx.get(ctx.ref)).data()?.lastMessageSmsAt)
-    if (last !== null && Date.now() - last < MESSAGE_SMS_COOLDOWN_MS) return false
+    const [matchSnap, recipientSnap] = await Promise.all([tx.get(ctx.ref), tx.get(recipientRef)])
+    const now = Date.now()
+    const last = millis(matchSnap.data()?.lastMessageSmsAt)
+    if (last !== null && now - last < MESSAGE_SMS_COOLDOWN_MS) return false
+    const cap = decideMessageSms(recipientSnap.data()?.messageSms, now)
+    if (!cap.send || !cap.next) return false
     tx.update(ctx.ref, { lastMessageSmsAt: FieldValue.serverTimestamp() })
+    tx.set(recipientRef, { messageSms: cap.next }, { merge: true })
     return true
   })
   if (!claimed) return

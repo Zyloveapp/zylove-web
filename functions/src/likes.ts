@@ -1,6 +1,8 @@
 import { FieldValue, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 import { playPairDataRef, playPairUsers } from './pairPlay'
 import { playIdOf } from './playIds'
+import { HttpsError } from 'firebase-functions/v2/https'
+import { isSuspendedUid } from './userData'
 
 // Likes per mode (Stage A): who liked whom in which mode, server-only. A
 // match needs a like from each side IN THE SAME MODE — a Spark like never
@@ -77,4 +79,13 @@ export async function clearLikes(a: string, b: string, mode: LikeMode | null): P
 export async function blockedEitherWay(a: string, b: string): Promise<boolean> {
   const [x, y] = await db().getAll(db().doc(`users/${a}/blockedUsers/${b}`), db().doc(`users/${b}/blockedUsers/${a}`))
   return x.exists || y.exists
+}
+
+// F-090: someone the viewer may act on (tap, swipe) — not gone, suspended or
+// blocked either way. Same refusal as onLike.
+export async function requireAvailableTarget(viewer: string, target: string): Promise<void> {
+  const root = (await db().doc(`users/${target}`).get()).data()
+  if (!root || (await isSuspendedUid(target, root)) || (await blockedEitherWay(viewer, target))) {
+    throw new HttpsError('failed-precondition', "That profile isn't available.")
+  }
 }

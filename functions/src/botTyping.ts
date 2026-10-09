@@ -2,6 +2,7 @@ import { onDocumentCreated } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { FieldValue, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { loadMatch, matchPath } from './playMatch'
+import { logId } from './logSafe'
 
 // "Bot is typing…" for bot chats. Bot replies come from the mobile codebase's
 // onBotMessage (Claude call, then a 2–6s pause), which the web can't change,
@@ -61,7 +62,7 @@ async function startTyping(matchId: string, msg: DocumentData | undefined): Prom
       }
     }
     await typingRef.delete().catch(() => {})
-    logger.info('botTypingStart: no reply within the cap, cleared typing', { matchId })
+    logger.info('botTypingStart: no reply within the cap, cleared typing', { matchId: logId(matchId) })
 }
 
 async function stopTyping(matchId: string, msg: DocumentData | undefined): Promise<void> {

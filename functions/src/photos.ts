@@ -5,6 +5,7 @@ import { logger } from 'firebase-functions'
 import { getStorage } from 'firebase-admin/storage'
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 import { messagesPath, requireParticipant } from './playMatch'
+import { logId } from './logSafe'
 
 // Encrypted chat photos sent from the web (messageType 'photo' with
 // encryptedKeyForRecipient). The mobile codebase already deploys
@@ -87,14 +88,14 @@ export const sweepChatPhotos = onSchedule(
         // Stage A: only ever a file in this match's chat-photos folder — the
         // sender wrote storageRef, and this runs with admin rights.
         if (typeof msg.storageRef === 'string' && msg.storageRef && !isChatPhotoOf(matchId, msg.storageRef)) {
-          logger.warn('sweepChatPhotos: storageRef outside the match folder, not deleted', { matchId, messageId })
+          logger.warn('sweepChatPhotos: storageRef outside the match folder, not deleted', { matchId: logId(matchId), messageId })
         } else if (typeof msg.storageRef === 'string' && msg.storageRef) {
           try {
             await bucket.file(msg.storageRef).delete({ ignoreNotFound: true })
           } catch (err) {
             // Leave the expiry record so the next run retries the delete.
             logger.error('sweepChatPhotos: storage delete failed', {
-              matchId,
+              matchId: logId(matchId),
               messageId,
               message: err instanceof Error ? err.message : String(err),
             })

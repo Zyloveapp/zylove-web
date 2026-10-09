@@ -28,6 +28,7 @@ import { accountRef, internalRef } from '../userData'
 import { recordPhotoSignal, webMatches } from '../photoChecks'
 import { checkPhoto } from '../photoHashes'
 import { photoHoldRef } from '../photoHolds'
+import { photoPathForLog, redactPlayPaths } from '../logSafe'
 import { isPlayPhotoRef } from '../storagePath'
 import { uidOfPlayId } from '../playIds'
 
@@ -89,7 +90,7 @@ export const onPhotoUpload = onObjectFinalized(
     // finished onboarding — which saves the profile before any photo): the
     // upload is removed and logged, never queued as a "moderation error".
     if (!(await admin.firestore().doc(`users/${uid}`).get()).exists) {
-      console.warn(`[moderation] No profile for uid ${uid}; removed ${filePath}`)
+      console.warn(`[moderation] No profile for uid ${uid}; removed ${photoPathForLog(filePath)}`)
       await admin.storage().bucket(event.data.bucket).file(filePath).delete({ ignoreNotFound: true })
       return
     }
@@ -100,7 +101,7 @@ export const onPhotoUpload = onObjectFinalized(
     const overLimit = await takeRateLimit(uid, 'photoUploads', { max: 30, windowMs: 24 * 60 * 60 * 1000 }).then(() => false, () => true)
     const waiting = ((await accountRef(uid).get()).data()?.pendingPhotoURLs ?? []) as unknown[]
     if (overLimit || (Array.isArray(waiting) && waiting.length >= 10)) {
-      console.warn(`[moderation] Upload limit reached for uid ${uid}; removed ${filePath}`)
+      console.warn(`[moderation] Upload limit reached for uid ${uid}; removed ${photoPathForLog(filePath)}`)
       await admin.storage().bucket(event.data.bucket).file(filePath).delete({ ignoreNotFound: true })
       return
     }
@@ -152,7 +153,7 @@ export const onPhotoUpload = onObjectFinalized(
       const [raw] = await file.download()
       const clean = stripPhotoMetadata(raw)
       if (!clean) {
-        console.warn(`[moderation] Unsupported or malformed photo removed for uid ${uid}: ${filePath}`)
+        console.warn(`[moderation] Unsupported or malformed photo removed for uid ${uid}: ${photoPathForLog(filePath)}`)
         await file.delete({ ignoreNotFound: true })
         return
       }
@@ -162,7 +163,7 @@ export const onPhotoUpload = onObjectFinalized(
       // T&S Phase 5: its perceptual hash — duplicates on other accounts flag
       // both for review; a match with a banned scammer's photo holds it back.
       const hashed = await checkPhoto(uid, filePath, isPlayPhoto ? 'play' : 'spark', Buffer.from(clean.bytes)).catch((err: unknown) => {
-        console.warn(`[photoHash] failed for uid ${uid}: ${err instanceof Error ? err.message : err}`)
+        console.warn(`[photoHash] failed for uid ${uid}: ${redactPlayPaths(err instanceof Error ? err.message : String(err))}`)
         return null
       })
       if (hashed?.blocklisted) {
@@ -222,7 +223,7 @@ export const onPhotoUpload = onObjectFinalized(
         const ai = typeof result.type?.ai_generated === 'number' ? result.type.ai_generated : null
         const deepfake = typeof result.type?.deepfake === 'number' ? result.type.deepfake : null
         await recordPhotoSignal(uid, { path: photoRef, ai, deepfake, web })
-      })().catch((err: unknown) => console.warn(`[photoChecks] failed for uid ${uid}: ${err instanceof Error ? err.message : err}`))
+      })().catch((err: unknown) => console.warn(`[photoChecks] failed for uid ${uid}: ${redactPlayPaths(err instanceof Error ? err.message : String(err))}`))
 
       // First-photo face gate — first photo must clearly show a face
       const existingDoc = await photoDocRef.get()
@@ -274,7 +275,7 @@ export const onPhotoUpload = onObjectFinalized(
           approved: false,
         })
         await notifyAdmins()
-        console.warn(`[moderation] Photo flagged for uid ${uid}: ${filePath}`)
+        console.warn(`[moderation] Photo flagged for uid ${uid}: ${photoPathForLog(filePath)}`)
       } else {
         // Clean — add to photoURLs, visible immediately
         await photoDocRef.update({
@@ -294,7 +295,7 @@ export const onPhotoUpload = onObjectFinalized(
       })
       await notifyAdmins()
       console.warn(
-        `[moderation] Sightengine error for uid ${uid}: ${e?.message ?? e}`,
+        `[moderation] Sightengine error for uid ${uid}: ${redactPlayPaths(String(e?.message ?? e))}`,
       )
     }
   },

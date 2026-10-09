@@ -9,6 +9,7 @@ import { purgeMatchContent } from './matchCleanup'
 import { clearLikes } from './likes'
 import { contextOf, endPlayPair, loadMatch, type MatchCtx } from './playMatch'
 import { isPlayMatchId, playIdOf } from './playIds'
+import { logId } from './logSafe'
 
 // Behavioral safety signals feeding behaviorRiskScore.
 //
@@ -167,7 +168,7 @@ export const unmatchConnection = onCall(
     // F-069: a match the other person blocked is theirs — kept as evidence for
     // as long as they want it; the person they blocked can't take it away.
     if (match.isBlocked === true && match.blockedBy && match.blockedBy !== ctx.idOf(uid)) {
-      logger.info('unmatchConnection: blocked by the other person — kept', { matchId })
+      logger.info('unmatchConnection: blocked by the other person — kept', { matchId: logId(matchId) })
       return { success: true }
     }
     if (!isBotMatch(match) && !match.unmatchedAt) await recordPastConnection(ctx, match, Date.now(), null, uid)
@@ -199,11 +200,11 @@ export const unmatchConnection = onCall(
         // just by default (a mutual re-match starts a new chat over it).
         preservedForReport: reporters.length > 0,
       })
-      logger.info('unmatchConnection: kept read-only', { matchId, kept: keepFor.length, reported: reporters.length > 0 })
+      logger.info('unmatchConnection: kept read-only', { matchId: logId(matchId), kept: keepFor.length, reported: reporters.length > 0 })
       return { success: true }
     }
     await ref.delete()
-    logger.info('unmatchConnection', { matchId })
+    logger.info('unmatchConnection', { matchId: logId(matchId) })
     return { success: true }
   },
 )
@@ -244,7 +245,7 @@ async function matchLifecycle(matchId: string, before: DocumentData | undefined,
     if (after && typeof after.matchGeneration !== 'number' && afterGen > 0) {
       await ctx.ref.update({ matchGeneration: afterGen }).catch((err: unknown) =>
         logger.warn('onMatchBehaviorUpdate: matchGeneration stamp failed', {
-          matchId,
+          matchId: logId(matchId),
           message: err instanceof Error ? err.message : String(err),
         }),
       )
