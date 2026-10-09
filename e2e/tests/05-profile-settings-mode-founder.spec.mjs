@@ -69,6 +69,8 @@ test('mode: Spark → Play with a new Play PIN, then back to Spark', async ({ br
 
 test('founder: Austin member claims a founder spot from Settings', async ({ browser }) => {
   const me = await seedUser('Parker', { smsConsent: { grantedAt: new Date() } })
+  // F-114: founder spots need an account at least a day old.
+  await db.doc(`userInternal/${me.uid}`).set({ accountCreatedAt: Date.now() - 2 * 864e5 }, { merge: true })
   const { ctx, page, net } = await open(browser, me)
   await page.goto('/settings')
   await page.getByRole('button', { name: /Become a founder/ }).click()

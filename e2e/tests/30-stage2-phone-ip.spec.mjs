@@ -49,18 +49,20 @@ test('F-072: over the per-address limit, an existing and a new number get the sa
   for (let i = 0; i < 29; i++) await checkPhone(freshNumber(i))
   const forExisting = await checkPhone(existing.phone)
   const forNew = await checkPhone(freshNumber(50))
-  expect(forExisting).toEqual({ allowed: false, reason: 'rate_limited' })
+  // F-120/F-121: over a limit there's no Lookup and no refusal — the same
+  // allowed: true for every number (onBeforeCreate checks at sign-up).
+  expect(forExisting).toEqual({ allowed: true })
   expect(forNew).toEqual(forExisting)
   // Keyed by a hash of the address, never the address.
   const limits = await db.collection('rateLimits').get()
   expect(limits.docs.some((d) => /^ip_[0-9a-f]{32}$/.test(d.id) && Array.isArray(d.data().phoneLookup))).toBe(true)
 })
 
-test('F-072: once the daily Lookup budget is spent, new numbers are refused and existing accounts still get in', async () => {
+test('F-072/F-120: once the daily Lookup budget is spent, every number gets the same answer (no Lookup)', async () => {
   const existing = await seedUser('Eve')
   const day = new Date().toISOString().slice(0, 10)
   await db.doc(`rateLimits/_phoneLookup_${day}`).set({ count: 1000 })
-  expect(await checkPhone(freshNumber(1))).toEqual({ allowed: false, reason: 'rate_limited' })
+  expect(await checkPhone(freshNumber(1))).toEqual({ allowed: true })
   expect(await checkPhone(existing.phone)).toEqual({ allowed: true })
   // The budget isn't taken past its cap.
   expect((await db.doc(`rateLimits/_phoneLookup_${day}`).get()).data().count).toBe(1000)

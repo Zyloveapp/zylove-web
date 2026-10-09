@@ -201,7 +201,9 @@ test('H2: an account Explore matches as a man never gets identity Elite or a wom
     expect(cats, JSON.stringify(g)).toBeDefined()
     if (e.source === 'identity') expect(cats.every((c) => c === 'women' || c === 'nonbinary_people'), JSON.stringify(g)).toBe(true)
     if (cats.includes('men')) expect(e.source, JSON.stringify(g)).not.toBe('identity')
-    // Founders: the same half Explore and the entitlement say.
+    // Founders: the same half Explore and the entitlement say (F-114: a
+    // day-old account).
+    await db.doc(`userInternal/${m.uid}`).set({ accountCreatedAt: Date.now() - 2 * 864e5 }, { merge: true })
     const r = await callAs(m.uid, 'assignFounderBadge')
     const bucket = (await db.doc(`founderRecords/${m.uid}`).get()).data()?.bucket
     if (r.eligible !== false) expect(bucket, JSON.stringify(g)).toBe(e.source === 'identity' ? 'women' : 'men')
