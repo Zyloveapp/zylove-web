@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
-  SCORE_ENGINE_VERSION,
   displayScore,
   fetchCompatibility,
   fetchMyProfile,
   fetchPlayArchetype,
+  isCalibratedEngine,
   recordReveal,
   type ArchetypeMatch,
   type CompatibilityResult,
@@ -316,7 +316,7 @@ function RevealedScore({
   const tier1 = isPlay ? null : (result.tier1 ?? null)
   const sparkArchetype = tier1?.archetype && tier1.archetype.confidence > 0.4 ? tier1.archetype : null
   // Engine v2: the Spark archetype is part of Elite's Deep Fit card below.
-  const v2 = !isPlay && result.engineVersion === SCORE_ENGINE_VERSION
+  const v2 = !isPlay && isCalibratedEngine(result.engineVersion)
   const archetype = isPlay ? playArchetype : v2 ? null : sparkArchetype
   // Play "Why this works" is built from both Play profiles once they load.
   const playLines = isPlay && fullReport && playFacts ? playWhyLines(playFacts) : null

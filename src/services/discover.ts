@@ -349,10 +349,12 @@ export function actionErrorMessage(err: unknown): string {
 // ─── Displayed score ─────────────────────────────────────────────────────────
 
 // The server's scoring engine (functions/src/legacy/scoring.ts
-// SCORE_ENGINE_VERSION). Engine v2 scores are calibrated, capped and come
-// with a "Not enough info" flag; older ones keep the old display rules
-// until they're re-scored.
-export const SCORE_ENGINE_VERSION = 2
+// SCORE_ENGINE_VERSION). Engine v2 and later scores are calibrated, capped
+// and come with a "Not enough info" flag; older ones keep the old display
+// rules until they're re-scored. F-100: v3 (intent no longer scored) reads
+// the same as v2 — any later version does, so the app can ship first.
+export const CALIBRATED_ENGINE_VERSION = 2
+export const isCalibratedEngine = (v: number | undefined): boolean => typeof v === 'number' && v >= CALIBRATED_ENGINE_VERSION
 
 export type ScoreLabel = 'Strong fit' | 'Good fit' | 'Some differences' | 'Not enough info'
 
@@ -382,7 +384,7 @@ export function displayScore(result: CompatibilityResult, mode: Mode): DisplaySc
     return typeof result.playScore === 'number' ? { value: clampScore(result.playScore), deep: false, label: null } : null
   }
   const t = result.tier1
-  if (result.engineVersion === SCORE_ENGINE_VERSION) {
+  if (isCalibratedEngine(result.engineVersion)) {
     if (result.sparkEnoughInfo === false) return { value: null, deep: true, label: 'Not enough info' }
     if (typeof result.sparkScore !== 'number') return null
     const value = clampScore(result.sparkScore)

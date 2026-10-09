@@ -211,12 +211,6 @@ function validateFacetVector(vector: FacetVector, name: string): void {
 
 // ─── Intent / attraction helpers (copied from legacy compatibility.ts) ────
 
-// null when either side is unknown — excluded, not a half match.
-function exactMatch(a: unknown, b: unknown): number | null {
-  if (a == null || b == null || a === '' || b === '') return null
-  return a === b ? 1 : 0
-}
-
 function ageCompatibility(a: any, b: any): number {
   const aMin = a?.ageMin ?? 18
   const aMax = a?.ageMax ?? 99
@@ -302,13 +296,15 @@ export function attractionCompatibility(a: any, b: any): number {
   return 0
 }
 
-// intentScore blends the three similarity-required signals: declared intent
-// agreement, mutual age range fit, and mutual attraction. Symmetric by
-// construction — arguments commute.
+// intentScore blends the similarity-required signals: mutual age range fit
+// and mutual attraction. Symmetric by construction — arguments commute.
+// F-100: the declared intent (spark / play / open) is left out. It's owner-
+// only (it says whether someone uses Play), and agreement moved every
+// headline by ~10 points — switching your own intent once showed each
+// tapped person's. Every pair scored here is a Spark pair, so it adds
+// nothing worth that.
 function intentScore(a: DatingProfile, b: DatingProfile, attractionValue: number): number {
-  const parts = [exactMatch((a as any).intent, (b as any).intent), ageCompatibility(a, b), attractionValue]
-    .filter((x): x is number => x !== null)
-  return parts.reduce((x, y) => x + y, 0) / parts.length
+  return (ageCompatibility(a, b) + attractionValue) / 2
 }
 
 // ─── Physical scoring with Option C amplification ─────────────────────────
@@ -606,7 +602,7 @@ export function computePairScore(
 
   // Symmetric components — computed once, used in both directions.
   // Facet similarity/complementarity is commutative: facetScore(a, b) == facetScore(b, a).
-  // Same for exactMatch(intent), ageCompatibility, attractionCompatibility.
+  // Same for ageCompatibility and attractionCompatibility.
   const { baseScore, coverage, facetScores } = computeBaseAndFacetScores(analysisA, analysisB)
   const intent                               = intentScore(userA, userB, attraction)
 

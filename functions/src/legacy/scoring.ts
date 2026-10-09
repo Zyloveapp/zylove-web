@@ -17,7 +17,10 @@ import type { DatingProfile } from "./types";
 //   1 — original Tier 0 / Tier 1 (missing data = neutral match, 3× physical)
 //   2 — 2026-10 overhaul: missing data excluded, caps, dealbreakers lower
 //       the score, 27 web answers mapped, calibrated, "Not enough info"
-export const SCORE_ENGINE_VERSION = 2;
+//   3 — F-100 / F-098 (2026-10-09): intent no longer scored; Deep Fit
+//       records trimmed (no raw floats), labels without dealbreaker shadow
+//       facets, the physical bar per viewer
+export const SCORE_ENGINE_VERSION = 3;
 
 // Tier 0 category weights. Categories with no data on one side are left out
 // and the rest renormalized. A triggered dealbreaker halves the score per
@@ -212,11 +215,6 @@ function overlapOrNull(a: unknown, b: unknown): number | null {
   return arrayOverlap(a, b);
 }
 
-function exactOrNull(a: unknown, b: unknown): number | null {
-  if (a == null || b == null || a === "" || b === "") return null;
-  return a === b ? 1 : 0;
-}
-
 function mean(xs: (number | null)[]): number | null {
   const known = xs.filter((x): x is number => x !== null);
   return known.length ? known.reduce((x, y) => x + y, 0) / known.length : null;
@@ -271,7 +269,9 @@ export function calculateSparkScore(
   const attraction = attractionCompatibility(a, b);
 
   const breakdown: SparkBreakdown = {
-    coreFit: Math.round((mean([exactOrNull(a.intent, b.intent), ageCompatibility(a, b), attraction]) ?? 0) * 100),
+    // F-100: intent left out (as Deep Fit's intentScore) — the bar moved
+    // 100/83 vs 67/50 when you switched your own, showing theirs.
+    coreFit: Math.round(((ageCompatibility(a, b) + attraction) / 2) * 100),
     dealbreakers: dealbreakerResult.clean * 100,
     valuesIntentions: pct(overlapOrNull(a.relationshipValues, b.relationshipValues)),
     physicalPrefs: pct(mean([physicalOrNull(a, b), physicalOrNull(b, a)])),

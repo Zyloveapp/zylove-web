@@ -50,7 +50,7 @@ const NIGHT_OWL: Profile = {
 test('engine version and pair fields', () => {
   const r = score(man(HOMEBODY), woman(HOMEBODY))
   assert.deepEqual(sparkPairFields(r), { sparkScore: r.score, sparkEnoughInfo: r.enoughInfo, engineVersion: SCORE_ENGINE_VERSION })
-  assert.equal(SCORE_ENGINE_VERSION, 2)
+  assert.equal(SCORE_ENGINE_VERSION, 3)
 })
 
 test('the headline is the Deep Fit score, with both directions and reasons', () => {
@@ -69,11 +69,28 @@ test('no reasons without enough info', () => {
   assert.deepEqual([r.tier1!.strengths, r.tier1!.differences], [[], []])
 })
 
-test('opposite profiles score low (< 40) in both engines', () => {
+// F-100: intent is no longer scored, so the opposites no longer get the
+// extra drop a different intent gave (spark vs open: 20 before, now the 54
+// a same-intent pair of opposites already scored).
+test('opposite profiles score low (Tier 0 < 40, Deep Fit "Some differences")', () => {
   const r = score(man({ ...HOMEBODY, intent: 'spark' }), woman({ ...NIGHT_OWL, intent: 'open' }))
   assert.equal(r.enoughInfo, true)
   assert.ok(r.tier0Score < 40, `Tier 0 ${r.tier0Score}`)
-  assert.ok(deep(r) < 40, `Deep Fit ${deep(r)}`)
+  assert.ok(deep(r) < 60, `Deep Fit ${deep(r)}`)
+})
+
+test('F-100: intent changes neither the headline nor the core fit bar', () => {
+  const base = score(man(HOMEBODY), woman({ ...HOMEBODY, intent: 'spark' }))
+  for (const intent of ['open', 'play', undefined]) {
+    const r = score(man(HOMEBODY), woman({ ...HOMEBODY, intent }))
+    assert.equal(r.score, base.score, `headline with ${intent}`)
+    assert.equal(r.tier0Score, base.tier0Score, `Tier 0 with ${intent}`)
+    assert.equal(r.breakdown.coreFit, base.breakdown.coreFit, `coreFit with ${intent}`)
+    assert.deepEqual(r.tier1!.directions, base.tier1!.directions, `directions with ${intent}`)
+  }
+  // Age range and attraction still count: 100 mutual, 50 one-way.
+  assert.equal(base.breakdown.coreFit, 100)
+  assert.equal(score(man({ ...HOMEBODY, ageMax: 30 }), woman(HOMEBODY)).breakdown.coreFit, 75)
 })
 
 test('identical profiles score high (> 85) in both engines', () => {

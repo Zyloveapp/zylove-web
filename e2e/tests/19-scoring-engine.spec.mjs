@@ -4,7 +4,7 @@ import { resetEmulators, seedUser, db, callAs, sortedPair } from './helpers.mjs'
 
 test.beforeEach(resetEmulators)
 
-test('onLike: new pair has engineVersion 2, sparkEnoughInfo and a uid-keyed Deep Fit', async () => {
+test('onLike: new pair has engineVersion 3, sparkEnoughInfo and a uid-keyed Deep Fit', async () => {
   const a = await seedUser('Lou', { subscriptionTier: 'elite' })
   const b = await seedUser('Mae', { genderIdentity: 'woman', attractedTo: ['men'] })
   const id = sortedPair(a.uid, b.uid)
@@ -12,7 +12,7 @@ test('onLike: new pair has engineVersion 2, sparkEnoughInfo and a uid-keyed Deep
   expect((await db.doc(`pairs/${id}`).get()).exists).toBe(false)
   await callAs(a.uid, 'onLike', { likedUserId: b.uid, mode: 'spark' })
   const pair = (await db.doc(`pairs/${id}`).get()).data()
-  expect(pair.engineVersion).toBe(2)
+  expect(pair.engineVersion).toBe(3) // F-100 / F-098
   expect(typeof pair.sparkEnoughInfo).toBe('boolean')
   expect(pair.sparkScore).toBeGreaterThanOrEqual(0)
   expect(pair.sparkScore).toBeLessThanOrEqual(100)
