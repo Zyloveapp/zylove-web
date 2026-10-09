@@ -13,8 +13,9 @@ import {
   type Option,
   type StepProps,
 } from './types'
-import { CardSelect, ChipMultiSelect, FieldLabel, HeightPicker, StepHeader } from './ui'
+import { CardSelect, ChipMultiSelect, FieldLabel, HeightPicker, LockedNote, StepHeader } from './ui'
 import AgeRangeSlider from '../AgeRangeSlider'
+import type { FieldLocks } from '../../services/fieldLocks'
 
 const SEEKING_BODY_OPTIONS = toOptions(BODY_TYPE_LABELS, (l) => `${l.emoji} ${l.label}`).filter(
   (o) => o.value !== 'prefer_not_to_say',
@@ -103,7 +104,9 @@ export function PhysicalPrefsStep({ draft, update }: StepProps) {
   )
 }
 
-export function NeedsStep({ draft, update }: StepProps) {
+// F-099: the dealbreakers change once every 30 days (read-only with the date
+// while locked), like the limited fields in AboutSteps.
+export function NeedsStep({ draft, update, locks = {} }: StepProps & { locks?: FieldLocks }) {
   return (
     <div>
       <StepHeader title="What do you need?" subtitle="Optional. Traits you want — and dealbreakers you won't compromise on." />
@@ -119,7 +122,9 @@ export function NeedsStep({ draft, update }: StepProps) {
         options={DEALBREAKER_OPTIONS}
         value={draft.dealbreakers}
         onChange={(dealbreakers) => update({ dealbreakers })}
+        disabled={locks.dealbreakers !== undefined}
       />
+      <LockedNote until={locks.dealbreakers} />
     </div>
   )
 }

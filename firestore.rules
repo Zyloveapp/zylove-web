@@ -552,9 +552,12 @@ service cloud.firestore {
         allow write: if false;
       }
 
-      // Seeking preferences — own only
+      // Seeking preferences — own only. Never the dealbreakers: scoring reads
+      // them from private/matching (30-day limit, F-099), so a copy here
+      // would only mislead.
       match /seekingPreferences/{doc} {
-        allow read, write: if isUser(uid) && isSignedIn();
+        allow read, delete: if isUser(uid) && isSignedIn();
+        allow create, update: if isUser(uid) && isSignedIn() && !('dealbreakers' in request.resource.data);
       }
 
       // Like queue — who liked you. Written only by Cloud Functions (onLike,

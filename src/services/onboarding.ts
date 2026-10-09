@@ -15,7 +15,6 @@ import {
   feetInchesToCm,
   type BodyType,
   type DatingProfile,
-  type Dealbreaker,
   type SeekingTrait,
 } from '../types/profile'
 import type { PromptAnswer, SparkProfile } from '../types/dualProfile'
@@ -124,12 +123,13 @@ const OPTIONAL_ROOT_FIELDS: OptionalRootField[] = [
   'stressResponse',
 ]
 
-// Private, owner-only doc at users/{uid}/seekingPreferences/prefs.
+// Private, owner-only doc at users/{uid}/seekingPreferences/prefs. The
+// dealbreakers aren't here: scoring reads them from private/matching (the
+// rules refuse them here).
 export interface SeekingPreferencesDoc {
   uid: string
   seekingBodyTypes: BodyType[]
   seekingTraits: SeekingTrait[]
-  dealbreakers: Dealbreaker[]
   seekingHeightNoPreference: boolean
   seekingBodyNoPreference?: boolean
   // null = "Doesn't matter" (no body-type filter in matching).
@@ -230,16 +230,18 @@ export async function saveSparkOnboarding(
     promptAnswers,
     photoURLs,
   } satisfies Partial<RootProfileDoc>
-  // F-099: attraction, drinking, religion, politics and the intent change
-  // once every 30 days — only the ones that really change are written (with
-  // their stamp), and a locked one stops the save with its date.
+  // F-099: attraction, drinking, religion, politics, dealbreakers and the
+  // intent change once every 30 days — only the ones that really change are
+  // written (with their stamp), and a locked one stops the save with its date.
   // F-018: religion and politics are never shown — owner-only in
   // private/matching, not on the public doc (the rules refuse them there).
+  // Dealbreakers too: private/matching is what scoring reads.
   const limited = {
     attractedTo: d.attractedTo,
     drinkingHabit: d.drinkingHabit,
     religion: d.religion,
     politicalView: d.politicalView,
+    dealbreakers: d.dealbreakers,
   }
   const fieldStates = await loadFieldStates(uid)
   const locked = lockedChanges(fieldStates, { ...limited, intent })
@@ -365,7 +367,6 @@ export async function saveSparkOnboarding(
     seekingBodyNoPreference: d.seekingBodyNoPreference,
     ...(d.seekingBodyNoPreference && { bodyTypePreference: null }),
     seekingTraits: d.seekingTraits,
-    dealbreakers: d.dealbreakers,
     seekingHeightNoPreference: d.seekingHeightNoPreference,
     ...(!d.seekingHeightNoPreference && {
       seekingHeightMinCm: feetInchesToCm(d.seekingHeightMin.feet, d.seekingHeightMin.inches),
@@ -499,7 +500,7 @@ export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null
     seekingHeightMax: cmToHeight(maxCm, INITIAL_DRAFT.seekingHeightMax),
     seekingBodyTypes: arr(s.seekingBodyTypes),
     seekingTraits: arr(s.seekingTraits),
-    // Root dealbreakers (mobile) plus the private prefs (web).
+    // private/matching's (see loadOwnProfile).
     dealbreakers: arr(own.dealbreakers),
     intent: str((await loadPrivateProfile(uid, p)).intent),
     // Stage C: 1–100 miles; an old "no limit" becomes 100.
