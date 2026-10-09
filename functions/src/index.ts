@@ -2369,6 +2369,8 @@ export { requestContactExchange, respondContactExchange, revokeContactExchange }
 export { frankOnMessage, frankOnPlayMessage } from './franking'
 export { adminLockerDecide, adminLockerDetail, adminLockerHold, adminLockerList, getEvidencePdf, purgeEvidence, submitEvidence } from './evidence'
 export { adminDecideAppeal, adminListAppeals, submitAppeal } from './appeals'
+// Privacy-policy retention (dry run until config/retention.enabled).
+export { purgeRetention } from './retention'
 export {
   adminAlertOnAccountCreated,
   adminAlertOnPlayProfile,

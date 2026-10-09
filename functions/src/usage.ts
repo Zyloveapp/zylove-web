@@ -1,5 +1,5 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
-import { getFirestore } from 'firebase-admin/firestore'
+import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { recordCapHit } from './trustSignals'
 import { tierNow, type Tier } from './entitlements'
 import { probationOf } from './probation'
@@ -10,7 +10,8 @@ import { probationOf } from './probation'
 // ('life': Free's one-at-onboarding AI tools — uses made earlier, during a
 // trial or pre-launch, count too). null: unlimited. 0: not in this tier.
 //
-// usage/{uid} (server-only): { [feature]: { [periodKey]: count, life: count } }
+// usage/{uid} (server-only): { [feature]: { [periodKey]: count, life: count },
+//   updatedAt } — updatedAt (last use) is what retention.ts purges by.
 
 export type Period = 'day' | 'week' | 'month' | 'life'
 export interface Allowance {
@@ -94,7 +95,7 @@ export async function takeQuota(uid: string, feature: Feature, tier?: Tier): Pro
     const next: Record<string, number> = { life: (cur.life ?? 0) + 1 }
     if (key !== 'life') next[key] = used + 1
     // The whole field is replaced: old periods drop off.
-    tx.set(usageRef(uid), { [feature]: next }, { mergeFields: [feature] })
+    tx.set(usageRef(uid), { [feature]: next, updatedAt: FieldValue.serverTimestamp() }, { mergeFields: [feature, 'updatedAt'] })
   })
   return async () => {
     await db()
@@ -102,7 +103,7 @@ export async function takeQuota(uid: string, feature: Feature, tier?: Tier): Pro
         const cur = ((await tx.get(usageRef(uid))).get(feature) ?? {}) as Record<string, number>
         const next: Record<string, number> = { life: Math.max(0, (cur.life ?? 1) - 1) }
         if (key !== 'life') next[key] = Math.max(0, (cur[key] ?? 1) - 1)
-        tx.set(usageRef(uid), { [feature]: next }, { mergeFields: [feature] })
+        tx.set(usageRef(uid), { [feature]: next, updatedAt: FieldValue.serverTimestamp() }, { mergeFields: [feature, 'updatedAt'] })
       })
       .catch(() => {})
   }

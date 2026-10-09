@@ -88,7 +88,8 @@ export async function incrementMessageCap(uid: string): Promise<void> {
   const today = new Date().toISOString().split('T')[0]
   const capRef = db().doc(`notificationCaps/${uid}_${today}`)
   await capRef.set(
-    { messageCount: admin.firestore.FieldValue.increment(1) },
+    // updatedAt: what retention.ts purges by.
+    { messageCount: admin.firestore.FieldValue.increment(1), updatedAt: admin.firestore.FieldValue.serverTimestamp() },
     { merge: true }
   )
 }
