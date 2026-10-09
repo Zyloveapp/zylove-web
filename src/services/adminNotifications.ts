@@ -43,6 +43,7 @@ export const ADMIN_ALERT_GROUPS: { title: string; items: { key: AdminToggle; lab
       { key: 'profileCompleted', label: 'Profile completed (Spark / Play)' },
       { key: 'deletionRequest', label: 'Account deletion requested' },
       { key: 'founderMessage', label: 'Founder message' },
+      { key: 'contactMessage', label: 'Contact form message' },
       { key: 'paymentDispute', label: 'Payment dispute / refund' },
     ],
   },
@@ -66,6 +67,7 @@ export type AdminToggle =
   | 'profileCompleted'
   | 'deletionRequest'
   | 'founderMessage'
+  | 'contactMessage'
   | 'paymentDispute'
 
 export interface AdminNotificationSettings {

@@ -1,9 +1,10 @@
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
-import { FirebaseError } from 'firebase/app'
-import { db } from './firebase'
+import { httpsCallable } from 'firebase/functions'
+import { functions } from './firebase'
 
-// Public (signed-out) form submissions, written straight to Firestore.
-// contactMessages is create-only for clients in firestore.rules (no reads).
+// Public (signed-out) form submissions. The contact form goes through the
+// submitContactMessage callable (functions/src/contactMessages.ts), which
+// checks the fields and limits how often one address can send;
+// contactMessages is server-only in firestore.rules.
 
 const EMAIL = /^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/
 export const MAX_SHORT = 100
@@ -15,16 +16,7 @@ export function normalizeEmail(raw: string): string | null {
   return EMAIL.test(email) && email.length <= 254 ? email : null
 }
 
-export type SubmitResult = 'ok' | 'duplicate-or-denied' | 'failed'
-
-async function submit(write: () => Promise<unknown>): Promise<SubmitResult> {
-  try {
-    await write()
-    return 'ok'
-  } catch (err) {
-    return err instanceof FirebaseError && err.code === 'permission-denied' ? 'duplicate-or-denied' : 'failed'
-  }
-}
+export type SubmitResult = 'ok' | 'failed'
 
 export interface ContactMessage {
   name: string
@@ -33,14 +25,16 @@ export interface ContactMessage {
   message: string
 }
 
-export function sendContactMessage(m: ContactMessage): Promise<SubmitResult> {
-  return submit(() =>
-    addDoc(collection(db, 'contactMessages'), {
+export async function sendContactMessage(m: ContactMessage): Promise<SubmitResult> {
+  try {
+    await httpsCallable<ContactMessage, { ok: true }>(functions, 'submitContactMessage')({
       name: m.name.trim().slice(0, MAX_SHORT),
       email: m.email,
       topic: m.topic.slice(0, MAX_SHORT),
       message: m.message.trim().slice(0, MAX_LONG),
-      createdAt: serverTimestamp(),
-    }),
-  )
+    })
+    return 'ok'
+  } catch {
+    return 'failed'
+  }
 }

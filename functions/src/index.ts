@@ -2379,6 +2379,8 @@ export {
   flushAdminAlerts,
   warnExpiringEvidence,
 } from './adminAlerts'
+// The /contact form (server-side, rate limited) and the admin inbox.
+export { adminDeleteContactMessage, adminListContactMessages, adminSetContactHandled, submitContactMessage } from './contactMessages'
 // T&S Phase 5: duplicate photos.
 export { photoHashOnDelete } from './photoHashTrigger'
 // F-062: private Play IDs — the public Play profile and the Play chat key.

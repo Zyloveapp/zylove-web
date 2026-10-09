@@ -982,33 +982,25 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // ─── Public web forms (zylove-web /join and /contact) ────────────────────
-    // Signed-out visitors may create entries only: fixed fields, size limits,
-    // server timestamp. No client reads, edits or deletes; an existing
-    // waitlist/application doc can't be overwritten.
+    // ─── Public web forms (retired) ──────────────────────────────────────────
+    // The old /join waitlist and founding-application forms are gone: nothing
+    // may create these any more. /contact goes through the submitContactMessage
+    // callable (functions/src/contactMessages.ts: validation, per-IP and daily
+    // limits), and admins read it through callables, so contactMessages is
+    // server-only too.
 
     match /waitlist/{email} {
-      allow create: if request.resource.data.keys().hasOnly(['email', 'source', 'createdAt'])
-                    && request.resource.data.email == email && email.size() <= 254
-                    && request.resource.data.createdAt == request.time;
+      allow create: if false;
       allow read, update, delete: if false;
     }
 
     match /foundingApplications/{email} {
-      allow create: if request.resource.data.keys().hasOnly(['name', 'email', 'instagram', 'why', 'createdAt'])
-                    && request.resource.data.email == email
-                    && request.resource.data.name is string && request.resource.data.name.size() <= 100
-                    && request.resource.data.instagram.size() <= 100
-                    && request.resource.data.why.size() <= 1000
-                    && request.resource.data.createdAt == request.time;
+      allow create: if false;
       allow read, update, delete: if false;
     }
 
     match /contactMessages/{id} {
-      allow create: if request.resource.data.keys().hasOnly(['name', 'email', 'topic', 'message', 'createdAt'])
-                    && request.resource.data.name.size() <= 100 && request.resource.data.topic.size() <= 100
-                    && request.resource.data.message.size() <= 1000
-                    && request.resource.data.createdAt == request.time;
+      allow create: if false;
       allow read, update, delete: if false;
     }
 

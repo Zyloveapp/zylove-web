@@ -55,6 +55,7 @@ import AdminReports from './pages/admin/AdminReports'
 import AdminTrust from './pages/admin/AdminTrust'
 import AdminLocker from './pages/admin/AdminLocker'
 import AdminNotifications from './pages/admin/AdminNotifications'
+import AdminContact from './pages/admin/AdminContact'
 import AdminNotice from './components/AdminNotice'
 import LegalUpdateNotice from './components/LegalUpdateNotice'
 import { touchLastActive } from './services/adminActivity'
@@ -225,6 +226,7 @@ export default function App() {
                 <Route path="/admin/trust" element={<AdminTrust />} />
                 <Route path="/admin/locker" element={<AdminLocker />} />
                 <Route path="/admin/notifications" element={<AdminNotifications />} />
+                <Route path="/admin/contact" element={<AdminContact />} />
                 {/* Summary texts link to zylove.app/admin: the Admin section in Settings. */}
                 <Route path="/admin" element={<Navigate to="/settings" replace />} />
               </Route>
