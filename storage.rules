@@ -136,9 +136,13 @@ service firebase.storage {
         && request.auth.uid in sparkMatch(matchId).users;
     }
     // Firestore's matchReadable: not blocked, or blocked by the reader (a
-    // Play match records the blocker's Play ID).
+    // Play match records the blocker's Play ID), or (H5) kept read-only for
+    // the reader until preservedUntil.
     function readable(m, me) {
-      return m.get('isBlocked', false) != true || m.get('blockedBy', '') == me;
+      return m.get('isBlocked', false) != true || m.get('blockedBy', '') == me
+        || (me in m.get('preservedFor', [])
+            && m.get('preservedUntil', null) is timestamp
+            && m.preservedUntil > request.time);
     }
     // Firestore's matchLive: not blocked, not unmatched.
     function live(m) {

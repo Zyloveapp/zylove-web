@@ -264,9 +264,14 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
           // is pointed out.
           if (key && rememberPartnerKey(uid, partnerUid, key) === 'changed') setKeyChangedFor(partnerUid)
         },
-        () => setPartnerKeyState({ partnerUid, key: '', error: true }),
+        // H5: a blocked chat kept for you — their profile is closed to you,
+        // so the key recorded when it was blocked.
+        () =>
+          setPartnerKeyState(
+            entry.partnerKeyAtBlock ? { partnerUid, key: entry.partnerKeyAtBlock, error: false } : { partnerUid, key: '', error: true },
+          ),
       ),
-    [partnerUid, uid],
+    [partnerUid, uid, entry.partnerKeyAtBlock],
   )
 
   // This device's chat key status; a PIN unlock or reset (KeyBackupGate)
@@ -1016,7 +1021,8 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
           <p className="py-2 text-center text-sm text-white/40">
             This connection has ended.
             {match.preservedUntil !== null &&
-              ` You reported it, so this chat stays here, read-only and still encrypted, until ${new Date(match.preservedUntil).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}.`}
+              !match.blockedByMe &&
+              ` This chat stays here, read-only and still encrypted, until ${new Date(match.preservedUntil).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}, so you can still report it.`}
           </p>
         ) : partnerUnavailable ? (
           <p className="py-2 text-center text-sm text-white/40">This connection isn't available right now.</p>

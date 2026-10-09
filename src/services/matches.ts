@@ -38,8 +38,14 @@ export interface MatchEntry {
   mode: Mode
   // Blocked or unmatched; mobile's unmatch deletes the doc instead.
   ended: boolean
-  // A reported chat kept read-only for its reporter until then (ms), else null.
+  // A chat kept read-only (reported, unmatched, or blocked — H5) until then
+  // (ms), else null.
   preservedUntil: number | null
+  // You blocked it: kept read-only for you past preservedUntil too.
+  blockedByMe: boolean
+  // H5: the partner's chat public key as the server recorded it when the
+  // chat was blocked — the person blocked can't read the other's profile.
+  partnerKeyAtBlock: string | null
   // A curated profile's chat (server-set). In Play the partner's id doesn't
   // say so (F-062), so this is what tells.
   isBot: boolean
@@ -97,6 +103,8 @@ export function toEntry(matchId: string, data: DocumentData, selfId: string): Ma
     mode: play || data.mode === 'play' ? 'play' : 'spark',
     ended: data.isBlocked === true || (data.unmatchedAt !== undefined && data.unmatchedAt !== null),
     preservedUntil: toMillis(data.preservedUntil) || null,
+    blockedByMe: data.isBlocked === true && data.blockedBy === selfId,
+    partnerKeyAtBlock: str(data.chatKeys?.[partnerUid]),
     isBot: data.isBot === true || /^(zbot|seed)-/.test(partnerUid),
   }
 }
