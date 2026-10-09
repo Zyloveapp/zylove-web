@@ -144,8 +144,7 @@ async function rescoreUser(userId: string): Promise<void> {
 // The root doc's fields scoring reads (scoring.ts and tier1/). H8: the
 // re-score follows these, not the client's profileUpdatedAt (now
 // server-only in the rules — a client could loop it); a change of
-// profileUpdatedAt itself (scripts, seeded bots) still counts. Older docs'
-// copies of the private matching fields count too.
+// profileUpdatedAt itself (scripts, seeded bots) still counts.
 const SCORED_ROOT_FIELDS = [
   "profileUpdatedAt",
   "age", "heightCm", "bodyType", "parentalStatus", "parentalCurrent", "parentalIntent",
@@ -164,7 +163,7 @@ export const onProfileWrite = onDocumentUpdated({ document: "users/{userId}", ..
   const before = event.data?.before.data();
   const after  = event.data?.after.data();
   if (!before || !after) return;
-  if (!changedAny(before, after, [...SCORED_ROOT_FIELDS, ...SCORED_PRIVATE_FIELDS])) return;
+  if (!changedAny(before, after, SCORED_ROOT_FIELDS)) return;
   await requestRescore(event.params.userId, rescoreUser);
 });
 

@@ -40,8 +40,22 @@ if (realFetch && !globalThis.__anthropicStub) {
       return new Response(JSON.stringify({ responses: [{ webDetection }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
     if (url.startsWith('https://api.anthropic.com/')) {
+      // Every prompt is logged for the specs (spec 43: how big a prompt got),
+      // to .cache/anthropic-requests.jsonl. A prompt naming E2E-ANTHROPIC-500
+      // is answered 500 (a failed call); E2E-ANTHROPIC-LINK, with a reply the
+      // output filters drop.
+      let prompt = ''
+      try {
+        const content = JSON.parse(String(init?.body ?? '{}')).messages?.[0]?.content
+        prompt = typeof content === 'string' ? content : (content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('\n')
+      } catch {}
+      try {
+        require('node:fs').appendFileSync(require('node:path').join(__dirname, '.cache', 'anthropic-requests.jsonl'), `${JSON.stringify({ length: prompt.length, head: prompt.slice(0, 4000) })}\n`)
+      } catch {}
+      if (prompt.includes('E2E-ANTHROPIC-500')) return new Response(JSON.stringify({ type: 'error', error: { type: 'api_error' } }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+      const text = prompt.includes('E2E-ANTHROPIC-LINK') ? 'Find me at acme.io or 512 555 0123' : 'E2E stub reply 👋'
       const body = { id: 'stub', type: 'message', role: 'assistant', model: 'stub', stop_reason: 'end_turn',
-        content: [{ type: 'text', text: 'E2E stub reply 👋' }], usage: { input_tokens: 1, output_tokens: 1 } }
+        content: [{ type: 'text', text }], usage: { input_tokens: 1, output_tokens: 1 } }
       return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
     return realFetch(input, init)
