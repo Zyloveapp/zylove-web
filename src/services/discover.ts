@@ -189,7 +189,7 @@ export interface ArchetypeMatch {
   id: string
   label: string
   copy: string
-  confidence: number // 0–1; the server only emits matches at ≥ 0.7
+  confidence: number // 0–1; the server only emits clear matches (≥ 0.6, tier1/archetypes.ts MIN_CONFIDENCE)
 }
 
 export interface Tier1Result {

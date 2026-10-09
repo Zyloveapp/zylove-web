@@ -9,15 +9,36 @@ import {
   SPARK_ARCHETYPES,
   PLAY_ARCHETYPES,
   UNLIKELY_FIT,
+  MIN_CONFIDENCE,
   type ArchetypeMatch,
 } from './archetypes'
 
-const CONFIDENCE_THRESHOLD = 0.4
+// Below this a pattern isn't clear enough to name (was 0.4; the header
+// said 0.7). The app shows a neutral line instead.
+const CONFIDENCE_THRESHOLD = MIN_CONFIDENCE
 
 /**
- * Returns the best-matching Spark archetype per design doc Section 8.4,
- * or null if no archetype clears the 0.7 confidence threshold. Priority
- * order = specificity precedence (see SPARK_ARCHETYPES declaration order).
+ * The strongest fit wins. Each predicate returns a confidence in [0, 1]; the
+ * highest at or above CONFIDENCE_THRESHOLD wins, and a tie goes to the
+ * earlier (more specific) entry in `defs`. Null when nothing is clear.
+ */
+export function pickStrongest<D extends { id: string; label: string; copy: string }>(
+  defs: D[],
+  confidenceOf: (def: D) => number,
+): ArchetypeMatch | null {
+  let best: ArchetypeMatch | null = null
+  for (const def of defs) {
+    const confidence = confidenceOf(def)
+    if (confidence >= CONFIDENCE_THRESHOLD && (!best || confidence > best.confidence)) {
+      best = { id: def.id, label: def.label, copy: def.copy, confidence }
+    }
+  }
+  return best
+}
+
+/**
+ * Returns the strongest Spark archetype per design doc Section 8.4, or
+ * null if none is clear (see pickStrongest).
  *
  * Unlikely Fit is evaluated separately via matchUnlikelyFit since it
  * depends on final score and dealbreaker state, not just facets.
@@ -26,19 +47,7 @@ export function matchSparkArchetype(
   a: FacetVector,
   b: FacetVector,
 ): ArchetypeMatch | null {
-  let best: ArchetypeMatch | null = null
-  for (const arch of SPARK_ARCHETYPES) {
-    const confidence = arch.predicate(a, b)
-    if (confidence >= CONFIDENCE_THRESHOLD && (!best || confidence > best.confidence)) {
-      best = {
-        id:         arch.id,
-        label:      arch.label,
-        copy:       arch.copy,
-        confidence,
-      }
-    }
-  }
-  return best
+  return pickStrongest(SPARK_ARCHETYPES, (arch) => arch.predicate(a, b))
 }
 
 /**
@@ -74,6 +83,7 @@ export function matchUnlikelyFit(
 
 /**
  * Play archetype matching per design doc Section 9. Narrower facet set.
+ * Strongest fit wins, like Spark (it was first-match-wins).
  * `spiceAligned` comes from existing Play scoring in scorePlayPair —
  * passed in rather than recomputed.
  */
@@ -82,16 +92,5 @@ export function matchPlayArchetype(
   b: FacetVector,
   spiceAligned: boolean,
 ): ArchetypeMatch | null {
-  for (const arch of PLAY_ARCHETYPES) {
-    const confidence = arch.predicate(a, b, spiceAligned)
-    if (confidence >= CONFIDENCE_THRESHOLD) {
-      return {
-        id:         arch.id,
-        label:      arch.label,
-        copy:       arch.copy,
-        confidence,
-      }
-    }
-  }
-  return null
+  return pickStrongest(PLAY_ARCHETYPES, (arch) => arch.predicate(a, b, spiceAligned))
 }
