@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { logger } from 'firebase-functions'
 import { FieldValue, getFirestore, type DocumentData } from 'firebase-admin/firestore'
+import { takeRateLimit } from './rateLimits'
 
 // T&S Phase 2 — AI-generated and stolen photos. FLAG FOR REVIEW ONLY: these
 // checks never reject or hide a photo (moderation in onPhotoUpload decides
@@ -17,6 +18,15 @@ import { FieldValue, getFirestore, type DocumentData } from 'firebase-admin/fire
 export const AI_FLAG_AT = 0.9
 export const DEEPFAKE_FLAG_AT = 0.8
 export const VISION_MONTHLY_BUDGET = 950 // Web Detection: first 1,000 a month are free
+// F-124 (M13): one account's share of it — 30 uploads a day each used to
+// spend the project's monthly budget in about 32 account-days, turning the
+// stolen-photo check off for everyone.
+export const VISION_PER_ACCOUNT = 6
+export const VISION_PER_ACCOUNT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+// F-124: Sightengine (6 models a photo) had no project-wide limit. Past
+// this many photos a day, an upload is held for a person to review — the
+// fail-closed path — rather than published unchecked.
+export const SIGHTENGINE_DAILY_BUDGET = 2000
 const db = () => getFirestore()
 const keyOf = (path: string) => createHash('sha256').update(path).digest('hex').slice(0, 16)
 
@@ -85,9 +95,28 @@ async function takeVisionBudget(): Promise<boolean> {
     .catch(() => false)
 }
 
-// Where else this image appears on the web (null: not checked — budget
-// spent or the call failed; a failure never blocks anything).
-export async function webMatches(bucket: string, path: string): Promise<PhotoSignal['web']> {
+// One Sightengine check from today's budget, or false when it's spent.
+export async function takeSightengineBudget(): Promise<boolean> {
+  const ref = db().doc(`rateLimits/_sightengine_${new Date().toISOString().slice(0, 10)}`)
+  return db()
+    .runTransaction(async (tx) => {
+      const n = ((await tx.get(ref)).get('count') as number | undefined) ?? 0
+      if (n >= SIGHTENGINE_DAILY_BUDGET) return false
+      tx.set(ref, { count: n + 1 }, { merge: true })
+      return true
+    })
+    .catch(() => true)
+}
+
+// Where else this image appears on the web (null: not checked — this
+// account's share or the month's budget spent, or the call failed; a
+// failure never blocks anything).
+export async function webMatches(bucket: string, path: string, uid: string): Promise<PhotoSignal['web']> {
+  const ownShare = await takeRateLimit(uid, 'visionWeb', { max: VISION_PER_ACCOUNT, windowMs: VISION_PER_ACCOUNT_WINDOW_MS }).then(() => true, () => false)
+  if (!ownShare) {
+    logger.info('webMatches: this account used its share — not checked')
+    return null
+  }
   if (!(await takeVisionBudget())) {
     logger.warn('webMatches: monthly Vision budget reached — not checked')
     return null

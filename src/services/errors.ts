@@ -1,6 +1,7 @@
 import { FirebaseError } from 'firebase/app'
 import { BRAND } from '../brand/zylove'
 import { FieldLockedError } from './fieldLocks'
+import { ProfileTextError } from './profileText'
 
 // Plain-English messages for errors shown to users. Never put a raw Firebase
 // code (storage/unauthorized, permission-denied, auth/…) in front of someone.
@@ -56,6 +57,8 @@ export function friendlyError(err: unknown, fallback = GENERIC): string {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return NETWORK
   // F-099: a field changed too recently — the date it can change again.
   if (err instanceof FieldLockedError) return err.message
+  // F-112: contact details in profile text, refused before saving.
+  if (err instanceof ProfileTextError) return err.message
   if (err instanceof FirebaseError) {
     // A refusal from our sign-in / sign-up checks (functions onBeforeSignIn,
     // onBeforeCreate) arrives as auth/internal-error with our message inside:

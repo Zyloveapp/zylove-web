@@ -8,6 +8,7 @@ import { displayAge, type DiscoverProfile } from './discover'
 import type { SparkBioRequest } from './bio'
 import type { PromptAnswer } from '../types/dualProfile'
 import { isUnset } from './fieldLimits'
+import { checkProfileText } from './profileText'
 
 export const MAX_PROFILE_PHOTOS = 9
 export const MAX_PROMPTS = 5
@@ -148,6 +149,7 @@ export async function saveSparkEdits(uid: string, e: SparkEdits): Promise<void> 
   const promptAnswers = e.prompts
     .map((p) => ({ promptId: p.promptId, answer: p.answer.trim() }))
     .filter((p) => p.answer)
+  checkProfileText(bio, ...promptAnswers.map((p) => p.answer))
   const pronouns = e.pronouns.trim()
   const batch = writeBatch(db)
   batch.set(
@@ -297,6 +299,7 @@ export async function saveDynamicPrompt(
   question: string,
   answer: string,
 ): Promise<PromptAnswer[]> {
+  checkProfileText(answer)
   const promptAnswers = [
     ...prompts.filter((p) => p.promptId !== DYNAMIC_PROMPT_ID && p.answer.trim()),
     { promptId: DYNAMIC_PROMPT_ID, answer: answer.trim() },

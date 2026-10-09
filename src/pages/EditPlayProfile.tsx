@@ -32,6 +32,7 @@ import {
 } from '../components/onboarding/PlaySteps'
 import StoredImg from '../components/StoredImg'
 import { loadMatching } from '../services/privateMatching'
+import { friendlyError } from '../services/errors'
 
 type SectionId =
   | 'photos'
@@ -239,8 +240,8 @@ export default function EditPlayProfile() {
       }
       await savePlayEdits(uid, info.original, draft)
       navigate('/profile', { replace: true, state: { flash: '✦ Play profile updated.' } })
-    } catch {
-      setSaveError("Couldn't save your changes. Try again.")
+    } catch (err) {
+      setSaveError(friendlyError(err, "Couldn't save your changes. Try again."))
       setSaving(false)
     }
   }

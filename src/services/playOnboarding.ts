@@ -34,6 +34,7 @@ import { parseBirthday, type OnboardingDraft, type PhotoDraft } from '../compone
 import { loadPrivateProfile, privateProfileDoc } from './privateProfile'
 import { genderFields, matchingDoc, matchingPatch } from './privateMatching'
 import { explainRefusal, limitedPatch, loadFieldStates } from './fieldLocks'
+import { checkProfileText } from './profileText'
 
 export type PlayTagCategory = 'arrangement' | 'acts' | 'dynamic' | 'vibe' | 'place'
 
@@ -208,6 +209,7 @@ export async function savePlayOnboarding(
   onProgress?.('Saving your Play profile…')
   const prompts = answeredPrompts(d)
   const bio = d.bio.trim()
+  checkProfileText(bio, ...prompts.map((p) => p.answer))
   // Only already-published photos (editing) are written here.
   const photoURLs = d.photos.filter((p) => p.file === null).map((p) => p.previewUrl)
   const newPhotos = d.photos.map((p) => p.file).filter((f): f is File => f !== null)
@@ -294,6 +296,7 @@ export async function savePlayOnlyOnboarding(
 
   const prompts = answeredPrompts(play)
   const bio = play.bio.trim()
+  checkProfileText(bio, ...prompts.map((p) => p.answer))
   const newPhotos = d.photos.map((p) => p.file).filter((f): f is File => f !== null)
   const now = Date.now()
   // F-099: attraction and the intent change once every 30 days (a returning
@@ -327,7 +330,7 @@ export async function savePlayOnlyOnboarding(
       onboardingComplete: true,
       sparkVisibility: 'hidden',
       ...((keys.changed || !existing.exists()) && { publicKey: keys.publicKey }),
-      ...(!existing.exists() && { photoURLs: [], locationLabel: '', phoneVerified: false, createdAt: now }),
+      ...(!existing.exists() && { photoURLs: [], phoneVerified: false, createdAt: now }),
     },
     { merge: true },
   )

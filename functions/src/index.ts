@@ -34,6 +34,7 @@ import {
   parsePlayGoDeeperRequest,
 } from './playGoDeeperPrompt'
 import { SPARK_GO_DEEPER_FOCUS, buildSparkGoDeeperPrompt, parseSparkGoDeeperRequest } from './sparkGoDeeperPrompt'
+import { sparkScoreFor } from './legacy/scoring'
 import { BLOCKED_LINE_TYPES } from './signupGuard'
 import { LOOKUP_SECRETS, SMS_SECRETS, claimSparkSmsSlot, decideMessageSms, lookupLineType, nameFor, sendSMS, smsTarget } from './sms'
 
@@ -1569,7 +1570,7 @@ export const getSentSparks = onCall(
           uid: otherUid,
           ...modeIdentity(user, null),
           age: typeof user.age === 'number' && user.age > 0 ? user.age : null,
-          sparkScore: typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
+          sparkScore: sparkScoreFor(pair, uid),
           sparkEnoughInfo: typeof pair.sparkEnoughInfo === 'boolean' ? pair.sparkEnoughInfo : null,
           engineVersion: typeof pair.engineVersion === 'number' ? pair.engineVersion : null,
           playScore: null,
@@ -1722,7 +1723,7 @@ export const getCuriousVisitors = onCall(
         age: typeof user.age === 'number' && user.age > 0 ? user.age : null,
         locationLabel: typeof user.locationLabel === 'string' && user.locationLabel ? user.locationLabel : null,
         intent: mode,
-        sparkScore: typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
+        sparkScore: sparkScoreFor(pair, uid),
         sparkEnoughInfo: typeof pair.sparkEnoughInfo === 'boolean' ? pair.sparkEnoughInfo : null,
         engineVersion: typeof pair.engineVersion === 'number' ? pair.engineVersion : null,
         playScore: null,
@@ -1861,6 +1862,7 @@ export {
 } from './founderMessages'
 export { acceptPhotoConsent, getBlockedUsers, onBeforeSignIn, unblockMember } from './trust'
 export { onBeforeCreate } from './signupGuard'
+export { maskProfileTextOnPlayProfile, maskProfileTextOnUser } from './profileText'
 export { adminGetReports, adminModerate, liftExpiredSuspensions, reportAndBan, submitReport } from './reports'
 
 // ─── SMS notifications ───────────────────────────────────────────────────────

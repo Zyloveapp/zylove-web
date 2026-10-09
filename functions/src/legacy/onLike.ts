@@ -3,7 +3,7 @@
 // settings (legacyOptions.ts) are new.
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkBreakdownRecord, sparkPairFields } from "./scoring";
+import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkBreakdownRecord, sparkPairFields, sparkScoreFor, sparkViews } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { getToken, sendPush } from "./notifications";
 import { LEGACY_RUNTIME } from "./legacyOptions";
@@ -103,6 +103,8 @@ export async function performLike(likerId: string, likedId: string, mode: "spark
 
     const spark = calculateSparkScore(likerDoc, likedDoc);
     const { triggeredDealbreakers } = spark;
+    // F-119: each person's own score, dealbreaker bar and Deep Fit.
+    const views = sparkViews(likerDoc, likedDoc, likerId, likedId);
 
     const [userA, userB] = [likerId, likedId].sort();
 
@@ -111,14 +113,14 @@ export async function performLike(likerId: string, likedId: string, mode: "spark
       userB,
       createdAt:         admin.firestore.Timestamp.now(),
       // Engine v2: the headline, its "Not enough info" flag and the engine version.
-      ...sparkPairFields(spark),
+      ...sparkPairFields(spark, views),
       scoreCalculatedAt: admin.firestore.Timestamp.now(),
       scoreVersion:      1,
     };
 
     const pairBatch = db.batch();
     pairBatch.set(pairRef, pair);
-    writeSparkDetails(pairBatch, pid, { breakdown: sparkBreakdownRecord(spark, likerId, likedId), dealbreakers: triggeredDealbreakers, tier1: deepFitRecord(spark.tier1, likerId, likedId) }, false);
+    writeSparkDetails(pairBatch, pid, { breakdown: sparkBreakdownRecord(spark, likerId, likedId), dealbreakers: triggeredDealbreakers, tier1: deepFitRecord(spark.tier1, likerId, likedId), views }, false);
     await pairBatch.commit();
   }
 
@@ -186,7 +188,8 @@ export async function performLike(likerId: string, likedId: string, mode: "spark
     ...(likerPlayId ? { likerPlayId, ...(likerPublic?.curated ? { curated: true } : {}) } : { likerUid: likerId }),
     likeId:                isLikeId(priorLikeId) ? priorLikeId : newLikeId(),
     likedAt:               Date.now(),
-    compatibilityScore:    mode === "play" ? (playScores?.playScore ?? 0) : (pair?.sparkScore ?? 0),
+    // F-119: the score as the liked person sees it.
+    compatibilityScore:    mode === "play" ? (playScores?.playScore ?? 0) : (sparkScoreFor(pair, likedId) ?? 0),
     istopPicks:            false,
     dismissed:             false,
     isExpired:             false,

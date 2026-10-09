@@ -1,5 +1,5 @@
 import { FieldValue, getFirestore, type DocumentData, type WriteBatch } from 'firebase-admin/firestore'
-import { publicDeepFit, sparkBreakdownFor } from './legacy/scoring'
+import { publicDeepFit, sparkBreakdownFor, type SparkView } from './legacy/scoring'
 
 // Stage C: what a Spark compatibility report shows beyond the score, kept
 // off the pair doc (both people can read that) in sub-docs the rules gate by
@@ -20,10 +20,23 @@ export interface SparkDetails {
 
 // Writes (into a batch) the details for a pair, and clears any old copies
 // from the pair doc itself.
-export function writeSparkDetails(batch: WriteBatch, pairId: string, d: { breakdown: unknown; dealbreakers: string[]; tier1?: unknown }, clearPair = true): void {
-  batch.set(sparkDetailsRef(pairId), { sparkBreakdown: d.breakdown ?? {}, triggeredDealbreakers: d.dealbreakers ?? [] })
-  if (d.tier1) batch.set(deepFitRef(pairId), { tier1Spark: d.tier1 })
-  else batch.delete(deepFitRef(pairId))
+export function writeSparkDetails(
+  batch: WriteBatch,
+  pairId: string,
+  d: { breakdown: unknown; dealbreakers: string[]; tier1?: unknown; views?: Record<string, SparkView> },
+  clearPair = true,
+): void {
+  // F-119: each person's own dealbreaker bar and Deep Fit.
+  const views = d.views ? Object.entries(d.views) : []
+  batch.set(sparkDetailsRef(pairId), {
+    sparkBreakdown: d.breakdown ?? {},
+    triggeredDealbreakers: d.dealbreakers ?? [],
+    ...(views.length && { dealbreakersFor: Object.fromEntries(views.map(([u, v]) => [u, v.dealbreakers])) }),
+  })
+  const tier1For = Object.fromEntries(views.filter(([, v]) => v.tier1).map(([u, v]) => [u, v.tier1]))
+  if (d.tier1 || Object.keys(tier1For).length) {
+    batch.set(deepFitRef(pairId), { tier1Spark: d.tier1 ?? null, ...(Object.keys(tier1For).length && { tier1For }) })
+  } else batch.delete(deepFitRef(pairId))
   if (clearPair) {
     batch.set(
       db().doc(`pairs/${pairId}`),
@@ -42,9 +55,15 @@ export function writeSparkDetails(batch: WriteBatch, pairId: string, d: { breakd
 // getCuriousVisitors).
 export async function loadSparkDetails(pairId: string, viewerUid: string, pair?: DocumentData): Promise<SparkDetails> {
   const [s, d] = await db().getAll(sparkDetailsRef(pairId), deepFitRef(pairId))
+  const breakdown = sparkBreakdownFor(s.get('sparkBreakdown') ?? pair?.sparkBreakdown ?? {}, viewerUid)
+  // F-119: the viewer's own dealbreaker bar and Deep Fit, when scored per viewer.
+  const ownBar: unknown = (s.get('dealbreakersFor') as Record<string, unknown> | undefined)?.[viewerUid]
+  if (typeof ownBar === 'number') breakdown.dealbreakers = ownBar
+  const tier1For = d.get('tier1For') as Record<string, unknown> | undefined
+  const scored = tier1For ? (tier1For[viewerUid] ?? null) : (d.get('tier1Spark') ?? pair?.tier1Spark ?? null)
   return {
-    sparkBreakdown: sparkBreakdownFor(s.get('sparkBreakdown') ?? pair?.sparkBreakdown ?? {}, viewerUid),
+    sparkBreakdown: breakdown,
     triggeredDealbreakers: (s.get('triggeredDealbreakers') ?? pair?.triggeredDealbreakers ?? []) as string[],
-    tier1Spark: publicDeepFit(d.get('tier1Spark') ?? pair?.tier1Spark ?? null),
+    tier1Spark: publicDeepFit(scored),
   }
 }

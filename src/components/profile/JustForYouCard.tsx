@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { MAX_PROMPTS, PROMPT_ANSWER_LIMIT, DYNAMIC_PROMPT_ID, fetchProfileQuestion, saveDynamicPrompt } from '../../services/profile'
 import type { PromptAnswer } from '../../types/dualProfile'
+import { friendlyError } from '../../services/errors'
 
 interface JustForYouCardProps {
   uid: string
@@ -17,7 +18,7 @@ export default function JustForYouCard({ uid, prompts, dynamicPrompt, onSaved }:
   const [answer, setAnswer] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [error, setError] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -39,13 +40,13 @@ export default function JustForYouCard({ uid, prompts, dynamicPrompt, onSaved }:
   async function save() {
     if (typeof question !== 'string' || !answer.trim() || saving) return
     setSaving(true)
-    setError(false)
+    setError(null)
     try {
       const next = await saveDynamicPrompt(uid, prompts, question, answer)
       setSaved(true)
       onSaved(next, question)
-    } catch {
-      setError(true)
+    } catch (err) {
+      setError(friendlyError(err, "Couldn't save. Try again."))
     } finally {
       setSaving(false)
     }
@@ -90,7 +91,7 @@ export default function JustForYouCard({ uid, prompts, dynamicPrompt, onSaved }:
                   {saving ? 'Saving…' : 'Add to my profile ✦'}
                 </button>
               </div>
-              {error && <p className="mt-2 text-sm text-red-400">Couldn't save. Try again.</p>}
+              {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
             </>
           )}
         </>
