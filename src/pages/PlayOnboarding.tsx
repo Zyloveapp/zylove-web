@@ -192,8 +192,10 @@ export default function PlayOnboarding() {
     getDoc(doc(db, 'users', uid))
       .then(async (snap) => {
         const data = snap.data()
-        // attractedTo is a matching preference (owner-only, private/matching).
-        setIdentity({ genderIdentity: data?.genderIdentity, attractedTo: (await loadMatching(uid, data)).attractedTo })
+        // attractedTo is a matching preference and (§4.A2) gender is owner-only
+        // too: both in private/matching.
+        const matching = await loadMatching(uid, data)
+        setIdentity({ genderIdentity: matching.genderIdentity, attractedTo: matching.attractedTo })
         setNames({
           displayName: typeof data?.displayName === 'string' ? data.displayName : '',
           playNameLockedUntil: wantsEdit ? nextNameChange(data?.playDisplayNameUpdatedAt) : null,

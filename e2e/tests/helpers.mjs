@@ -8,6 +8,7 @@ import { expect } from '@playwright/test'
 import { migrateUser } from '../../scripts/lib/stage1a.mjs'
 import { migrateUserStage2 } from '../../scripts/lib/stage2.mjs'
 import { migrateUserStage3 } from '../../scripts/lib/stage3.mjs'
+import { migrateUserA2 } from '../../scripts/lib/a2gender.mjs'
 
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8390'
 process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9409'
@@ -111,6 +112,9 @@ export async function seedUser(name, overrides = {}, { play = null, legacy = LEG
     smsNotificationsEnabled: { spark: false, play: false },
     ...overrides,
   }
+  // §4.A2: the line the server would build, at once (saves the suite a
+  // trigger round-trip and a second public-doc write per seeded user).
+  if (!legacy && process.env.SEED_A2_LEGACY !== "1") doc.genderLine = fnLib('genderLine').buildGenderLine(doc)
   await db.doc(`users/${uid}`).set(doc)
   if (!legacy) await migrateUser({ db, auth: adminAuth, FieldValue, Timestamp }, uid, doc)
   await db.doc(`users/${uid}/sparkProfile/data`).set({
@@ -121,6 +125,9 @@ export async function seedUser(name, overrides = {}, { play = null, legacy = LEG
   if (!legacy && process.env.SEED_STAGE2_LEGACY !== "1") await migrateUserStage2({ db, FieldValue }, uid)
   // Stage 3: preferences and account state off the public doc; then the Explore index entry.
   if (!legacy && process.env.SEED_STAGE3_LEGACY !== "1") await migrateUserStage3({ db, FieldValue }, uid)
+  // §4.A2: gender off the public doc (Stage 3 already moved it with the
+  // other matching fields); the public genderLine at once.
+  if (!legacy && process.env.SEED_A2_LEGACY !== "1") await migrateUserA2({ db, FieldValue }, uid)
   await fnLib('explore').refreshEntry(uid)
   // F-062: the public Play profile (playProfiles/{playId}) at once, rather
   // than waiting on its trigger.

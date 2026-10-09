@@ -233,7 +233,8 @@ const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v)
 const toMs = (v: unknown): number => (v instanceof Timestamp ? v.toMillis() : num(v))
 
 export function cohortOf(root: DocumentData | undefined, profile: DocumentData | undefined, matching: DocumentData | undefined): string {
-  const cat = categoriesOf(root?.genderIdentity, matching?.matchableAs ?? root?.matchableAs)[0] ?? 'everyone'
+  // §4.A2: gender from private/matching (the root's old copy until migrated).
+  const cat = categoriesOf(matching?.genderIdentity ?? root?.genderIdentity, matching?.matchableAs ?? root?.matchableAs)[0] ?? 'everyone'
   const intent = profile?.intent ?? root?.intent
   return `${cat}|${intent === 'play' ? 'play' : 'spark'}`
 }

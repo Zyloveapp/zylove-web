@@ -18,7 +18,7 @@ import { changeDisplayName, formatNameChangeDate, nextNameChange } from '../serv
 import type { DiscoverProfile } from '../services/discover'
 import { SPARK_PROMPT_BANK, type PromptAnswer } from '../types/dualProfile'
 import { InspirationPills } from '../components/onboarding/Inspirations'
-import { profileGenderLabel, promptQuestion } from '../components/discover/labels'
+import { impliedGender, profileGenderLabel, promptQuestion } from '../components/discover/labels'
 import { goDeeperAnswerRows, goDeeperAnswers, goDeeperComplete } from '../components/profile/goDeeper'
 import StoredImg from '../components/StoredImg'
 
@@ -104,6 +104,7 @@ export default function EditProfile() {
   const [displayName, setDisplayName] = useState('')
   const [pronouns, setPronouns] = useState('')
   const [genderHidden, setGenderHidden] = useState(false)
+  const [showGender, setShowGender] = useState(false)
   const [bio, setBio] = useState('')
   const [prompts, setPrompts] = useState<PromptAnswer[]>([])
   const [photos, setPhotos] = useState<string[]>([])
@@ -127,6 +128,7 @@ export default function EditProfile() {
         setDisplayName(own.profile.displayName ?? '')
         setPronouns(own.profile.pronouns ?? '')
         setGenderHidden(own.profile.genderHidden === true)
+        setShowGender(own.profile.showGender === true)
         setBio(own.bio.slice(0, BIO_LIMIT))
         setPrompts(own.prompts.slice(0, MAX_PROMPTS))
         setPhotos(Array.isArray(own.profile.photoURLs) ? own.profile.photoURLs : [])
@@ -200,7 +202,7 @@ export default function EditProfile() {
           return
         }
       }
-      await saveSparkEdits(uid, { pronouns, genderHidden, bio, prompts })
+      await saveSparkEdits(uid, { pronouns, genderHidden, showGender, bio, prompts })
       setSaveState('saved')
       setTimeout(() => navigate('/profile'), 1200)
     } catch {
@@ -274,7 +276,23 @@ export default function EditProfile() {
           </label>
           {profile.birthday && <LockedField label="Birthday" value={profile.birthday} />}
           {gender && <LockedField label="Gender" value={gender} />}
-          {gender && (
+          {/* §4.A2: man / woman is left off unless shown; anything else is
+              shown unless hidden (hiding takes the pronouns off too). */}
+          {gender && impliedGender(profile.genderIdentity) && (
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={showGender}
+                onChange={(e) => setShowGender(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[#1B4FD8]"
+              />
+              <span>
+                Show my gender on my profile
+                <span className="block text-xs text-white/40">Otherwise only your pronouns show, if you add them.</span>
+              </span>
+            </label>
+          )}
+          {gender && !impliedGender(profile.genderIdentity) && (
             <label className="flex items-start gap-2 text-sm">
               <input
                 type="checkbox"
@@ -283,8 +301,8 @@ export default function EditProfile() {
                 className="mt-0.5 h-4 w-4 shrink-0 accent-[#1B4FD8]"
               />
               <span>
-                Don't show my gender on my profile
-                <span className="block text-xs text-white/40">We still use it to show you to the right people.</span>
+                Don't show my gender or pronouns on my profile
+                <span className="block text-xs text-white/40">We still use your gender to show you to the right people.</span>
               </span>
             </label>
           )}

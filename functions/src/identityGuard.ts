@@ -2,7 +2,8 @@ import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { ageFrom } from './location'
-import { identityRef, internalRef, userRef } from './userData'
+import { genderOf, identityRef, internalRef, loadMatching, matchingRef, userRef } from './userData'
+import { buildGenderLine } from './genderLine'
 import { suspendAccount } from './reports'
 import { queueAdminAlert } from './adminAlerts'
 import { isBotUid } from './playAccess'
@@ -17,6 +18,10 @@ import { isBotUid } from './playAccess'
 // - 18+: the rules refuse an under-18 birthday or age; anyone who got past
 //   them (older accounts, a missing birthday with an under-18 age) is
 //   suspended pending review here, and the admins are alerted.
+// - §4.A2: gender lives in the owner-only private/matching, so a gender
+//   written there locks identity too (identityGuardOnMatching), and the
+//   public doc gets the server-built genderLine (genderLine.ts) — the only
+//   gender anyone else can read.
 
 export const MIN_AGE = 18
 
@@ -59,22 +64,59 @@ async function checkAge(uid: string, root?: DocumentData): Promise<void> {
   if (isUnderage(effectiveAge(identity, r))) await suspendUnderage(uid)
 }
 
+// Sets identityLockedAt once a gender is known (private/matching, or an old
+// copy on the public doc) — in a transaction, so it's set once.
+async function lockIdentity(uid: string): Promise<void> {
+  // A plain read first: the transaction (which holds both docs) only when
+  // there's a lock to set.
+  const [r, m] = await Promise.all([userRef(uid).get(), matchingRef(uid).get()])
+  if (!r.exists || r.get('isDeleted') === true || r.get('identityLockedAt') != null || genderOf(m.data(), r.data()) == null) return
+  await getFirestore().runTransaction(async (tx) => {
+    const [now, matching] = await Promise.all([tx.get(userRef(uid)), tx.get(matchingRef(uid))])
+    const root = now.data()
+    if (!root || root.isDeleted === true || root.identityLockedAt != null || genderOf(matching.data(), root) == null) return
+    tx.update(userRef(uid), { identityLockedAt: FieldValue.serverTimestamp() })
+  })
+}
+
+// §4.A2: the public genderLine, from private/matching as it is NOW (a
+// late-running trigger for an older write mustn't put back a stale line).
+// Only written when it changed; never to a missing or deleted profile.
+export async function refreshGenderLine(uid: string): Promise<void> {
+  const root = (await userRef(uid).get()).data()
+  if (!root || root.isDeleted === true) return
+  const line = buildGenderLine(await loadMatching(uid, root))
+  if (root.genderLine !== line) await userRef(uid).update({ genderLine: line })
+}
+
 export const identityGuardOnUser = onDocumentWritten({ document: 'users/{uid}', memory: '256MiB' }, async (event) => {
   const uid = event.params.uid
   if (isBotUid(uid)) return
   const after = event.data?.after.data()
   if (!after || after.isDeleted === true) return
   const before = event.data?.before.data()
-  if (after.genderIdentity != null && after.identityLockedAt == null) {
-    await getFirestore()
-      .runTransaction(async (tx) => {
-        const now = (await tx.get(userRef(uid))).data()
-        if (!now || now.identityLockedAt != null || now.genderIdentity == null) return
-        tx.update(userRef(uid), { identityLockedAt: FieldValue.serverTimestamp() })
-      })
-  }
+  // The profile may be created after private/matching (or carry an old
+  // gender copy): lock then, and give it its genderLine.
+  if (after.identityLockedAt == null) await lockIdentity(uid)
+  if (after.genderLine === undefined) await refreshGenderLine(uid)
   const touched = ['age', 'genderIdentity', 'onboardingComplete'].some((k) => JSON.stringify(before?.[k] ?? null) !== JSON.stringify(after[k] ?? null))
   if (touched) await checkAge(uid, after)
+})
+
+// §4.A2: a gender written to private/matching (onboarding) locks identity,
+// as it did on the public doc; any change to what the line shows rewrites it.
+const LINE_FIELDS = ['genderIdentity', 'genderSelfDescribe', 'pronouns', 'genderHidden', 'showGender']
+export const identityGuardOnMatching = onDocumentWritten({ document: 'users/{uid}/private/matching', memory: '256MiB' }, async (event) => {
+  const uid = event.params.uid
+  if (isBotUid(uid)) return
+  const after = event.data?.after.data()
+  if (!after) return
+  const before = event.data?.before.data()
+  const changed = (k: string) => JSON.stringify(before?.[k] ?? null) !== JSON.stringify(after[k] ?? null)
+  // Only when the gender is new (a profile created later locks from
+  // identityGuardOnUser) — not a transaction on every preference edit.
+  if (after.genderIdentity != null && changed('genderIdentity')) await lockIdentity(uid)
+  if (LINE_FIELDS.some(changed)) await refreshGenderLine(uid)
 })
 
 export const identityGuardOnIdentity = onDocumentWritten({ document: 'users/{uid}/private/identity', memory: '256MiB' }, async (event) => {

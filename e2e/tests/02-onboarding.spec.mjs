@@ -101,8 +101,12 @@ test('onboarding: new user completes Spark onboarding', async ({ browser }) => {
   const u = await userDoc(uid)
   expect(u.onboardingComplete).toBe(true)
   expect(u.displayName).toBe('Riley')
-  expect(u.genderIdentity).toBe('man')
-  // F-018: height skipped → none on the profile; gender shown by default.
+  // §4.A2: gender owner-only in private/matching; the public doc has only
+  // the server-built line (empty for a man who didn't choose to show it).
+  expect(u.genderIdentity).toBeUndefined()
+  expect((await db.doc(`users/${uid}/private/matching`).get()).data()?.genderIdentity).toBe('man')
+  await expect.poll(async () => (await userDoc(uid)).genderLine, { timeout: 20000 }).toBe('')
+  // F-018: height skipped → none on the profile.
   expect(u.heightCm).toBeUndefined()
   expect((await db.doc(`users/${uid}/sparkProfile/data`).get()).data()?.height).toBeUndefined()
   expect(u.genderHidden).toBeUndefined()

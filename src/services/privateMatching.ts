@@ -1,5 +1,6 @@
-import { doc, getDoc, onSnapshot, type DocumentData, type Unsubscribe, type WriteBatch } from 'firebase/firestore'
+import { deleteField, doc, getDoc, onSnapshot, type DocumentData, type Unsubscribe, type WriteBatch } from 'firebase/firestore'
 import { db } from './firebase'
+import type { OnboardingDraft } from '../components/onboarding/types'
 
 // Matching preferences live in the owner-only users/{uid}/private/matching
 // (Stage 3, F-013): who they want to see and how. Explore and scoring read
@@ -11,6 +12,10 @@ export const MATCHING_KEYS = [
   'dealbreakers', 'seekingBodyTypes', 'seekingTraits', 'seekingHeightMinCm', 'seekingHeightMaxCm',
   // F-018: never shown to anyone — matching only.
   'religion', 'politicalView',
+  // §4.A2: gender, its self-description and pronouns (gender identity-locked
+  // like matchableAs), and how it's shown. Others see only the public
+  // genderLine the server builds from these.
+  'genderIdentity', 'genderSelfDescribe', 'pronouns', 'genderHidden', 'showGender',
 ] as const
 export type Matching = Partial<Record<(typeof MATCHING_KEYS)[number], unknown>>
 
@@ -57,4 +62,26 @@ export function matchingPatch(patch: Matching): Record<string, unknown> {
 export function addMatching(batch: WriteBatch, uid: string, patch: Matching): void {
   const clean = matchingPatch(patch)
   if (Object.keys(clean).length) batch.set(matchingDoc(uid), clean, { merge: true })
+}
+
+// §4.A2: gender, its self-description, pronouns and how it's shown — written
+// to the owner-only private/matching, never the public doc (the server builds
+// the public genderLine from them). The gender and self-description are
+// identity-locked like matchableAs: once locked they're left out, and the
+// rules would refuse a change. Pronouns and the display choices stay editable.
+export function genderFields(
+  d: Pick<OnboardingDraft, 'genderSelfDescribe' | 'pronouns' | 'genderHidden' | 'showGender'>,
+  genderIdentity: string,
+  identityLocked: boolean,
+): Record<string, unknown> {
+  const selfDescribe = d.genderSelfDescribe.trim()
+  return {
+    ...(!identityLocked && {
+      genderIdentity,
+      genderSelfDescribe: genderIdentity === 'self_describe' && selfDescribe ? selfDescribe : deleteField(),
+    }),
+    pronouns: d.pronouns.trim() || deleteField(),
+    genderHidden: d.genderHidden || deleteField(),
+    showGender: d.showGender || deleteField(),
+  }
 }

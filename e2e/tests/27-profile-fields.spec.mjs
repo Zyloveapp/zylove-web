@@ -58,7 +58,7 @@ test('F-018: an anonymous Spark liker shows no gender, pronouns or life details'
   await expect(page.getByText(/Gray feels a Spark\. Do you\?/)).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Gray' })).toBeVisible()
   await expect(page.getByText("Hi, I'm Gray.")).toBeVisible()
-  for (const t of ['30', 'Austin, TX', 'he/him', 'trans man', 'Life details', 'Relationship status', 'Kids', 'Religion']) {
+  for (const t of ['30', 'Austin, TX', 'he/him', 'trans man', 'Trans man · he/him', 'Life details', 'Relationship status', 'Kids', 'Religion']) {
     await expect(page.getByText(t, { exact: true })).toHaveCount(0)
   }
   await shots(page, 'anonymous-liker')
@@ -73,15 +73,19 @@ test('F-018: "Don\'t show my gender" in Edit profile hides it on the profile; de
   await expect(page.getByText(/trans woman/i).first()).toBeVisible()
 
   await page.goto('/profile/edit')
-  const box = page.getByRole('checkbox', { name: /Don't show my gender on my profile/ })
+  const box = page.getByRole('checkbox', { name: /Don't show my gender or pronouns on my profile/ })
   await expect(box).not.toBeChecked()
   await box.check()
   await box.scrollIntoViewIfNeeded()
   await shots(page, 'edit-profile-gender')
   await page.setViewportSize(LAPTOP)
   await page.getByRole('button', { name: /^Save/ }).first().click()
-  await expect.poll(async () => (await userDoc(me.uid)).genderHidden, { timeout: 20000 }).toBe(true)
-  expect((await userDoc(me.uid)).genderIdentity).toBe('trans_woman') // still there, still locked
+  // §4.A2: the choice and the gender are owner-only (private/matching); the
+  // public line goes empty.
+  const matching = async () => (await db.doc(`users/${me.uid}/private/matching`).get()).data()
+  await expect.poll(async () => (await matching())?.genderHidden, { timeout: 20000 }).toBe(true)
+  expect((await matching())?.genderIdentity).toBe('trans_woman') // still there, still locked
+  await expect.poll(async () => (await userDoc(me.uid)).genderLine, { timeout: 20000 }).toBe('')
   await page.goto('/profile')
   await expect(page.getByRole('heading', { name: /^Cleo/ }).first()).toBeVisible()
   await expect(page.getByText(/trans woman/i)).toHaveCount(0)
@@ -122,7 +126,8 @@ test('F-018: onboarding — gender can be hidden, height is optional, beliefs ar
 
   // Gender: the hide option.
   await page.getByRole('button', { name: 'Non-binary', exact: true }).click()
-  await page.getByRole('checkbox', { name: /Don't show on my profile/ }).check()
+  // §4.A2: hiding takes the pronouns off too; man / woman get "Show on my profile".
+  await page.getByRole('checkbox', { name: /Don't show my gender or pronouns on my profile/ }).check()
   await shots(page, 'onboarding-gender')
   await page.setViewportSize(LAPTOP)
   await next()

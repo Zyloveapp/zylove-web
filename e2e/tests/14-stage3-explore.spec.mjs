@@ -146,6 +146,9 @@ test('rules: private/matching owner-only; matchableAs identity-locked; adminNoti
   expect(await restPatch(a.uid, path, { ageMin: 'x' })).toBe(403)
   expect(await restPatch(a.uid, path, { isSuspended: false })).toBe(403) // unknown key
   expect(await restPatch(a.uid, path, { matchableAs: ['women'] })).toBe(403) // identity locked
+  // Unlocked: no gender yet (§4.A2: a gender in private/matching locks
+  // identity again at once — identityGuard).
+  await db.doc(path).update({ genderIdentity: FieldValue.delete() })
   await db.doc(`users/${a.uid}`).update({ identityLockedAt: FieldValue.delete() })
   expect(await restPatch(a.uid, path, { matchableAs: ['women'] })).toBe(200)
   // The preference change reaches the index.

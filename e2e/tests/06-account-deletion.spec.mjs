@@ -46,9 +46,13 @@ test('deletion: delete account from Settings → soft-deleted, recovery doc, aut
   expect(restored.phoneNumber).toBeUndefined()
   expect(restored.birthday).toBeUndefined()
   expect((await db.doc(`users/${newUid}/private/identity`).get()).data()?.birthday).toBe('1995-03-14')
+  // §4.A2: gender comes back owner-only; the public doc has only the line.
+  expect(restored.genderIdentity).toBeUndefined()
+  expect(restored.genderLine).toBe('')
+  expect((await db.doc(`users/${newUid}/private/matching`).get()).data()?.genderIdentity).toBe('man')
   // F-029: the deleted account's public doc kept nothing private.
   const old = await userDoc(me.uid)
-  for (const f of ['birthday', 'locationLat', 'subscriptionTier', 'reportCount', 'smsNotificationsEnabled']) expect(old?.[f]).toBeUndefined()
+  for (const f of ['birthday', 'locationLat', 'subscriptionTier', 'reportCount', 'smsNotificationsEnabled', 'genderIdentity', 'genderLine']) expect(old?.[f]).toBeUndefined()
   expect((await db.doc(`deletedAccounts/${me.phone}`).get()).exists).toBe(false)
   expect(net.errors).toEqual([])
   await ctx.close()

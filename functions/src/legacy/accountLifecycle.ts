@@ -6,6 +6,7 @@ import { normalizeE164 } from "./utils/phone";
 import { priorTrial } from "../trial";
 import { takeRateLimit } from "../rateLimits";
 import { restoreBirthdayMatches } from "../restoreCheck";
+import { buildGenderLine } from "../genderLine";
 import { STRIPE_SECRETS, cancelSubscriptionsForDeletion } from "../stripe";
 import { ROOT_SCRUB, clearPrivateData, identityRef, internalRef, isSuspendedUid, matchingRef, moderationCarry, profileRef, recoveryRecord } from "../userData";
 
@@ -207,16 +208,26 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
   const priorTrialDoc = await priorTrial(phoneNumber);
   const previousUid = recovery.previousUid;
 
+  // §4.A2: gender, its self-description, pronouns and the display choices
+  // (a gender they'd hidden stays hidden).
+  const restoredGender = {
+    genderIdentity:     recovery.genderIdentity ?? null,
+    genderSelfDescribe: recovery.genderSelfDescribe ?? null,
+    pronouns:           recovery.pronouns ?? null,
+    genderHidden:       recovery.genderHidden === true,
+    showGender:         recovery.showGender === true,
+  };
+
   // The phone number stays in Auth; birthday goes to private/identity and
   // the plan to userInternal — none of it on the public doc.
   const restoredUser: Record<string, any> = {
     uid: newUid,
 
-    // Identity — restored and locked (immutability contract)
-    genderIdentity:     recovery.genderIdentity,
+    // Identity — restored and locked (immutability contract). §4.A2: the
+    // gender itself goes to private/matching (below); the public doc gets
+    // only the line others see, built as the trigger would.
     identityLockedAt:   recovery.identityLockedAt ?? now,
-    pronouns:           recovery.pronouns,
-    genderSelfDescribe: recovery.genderSelfDescribe,
+    genderLine:         buildGenderLine(restoredGender),
 
     // Profile content — restored
     displayName: recovery.displayName ?? "",
@@ -254,7 +265,7 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
   // The mode is owner-only (Stage 2), never on the public doc.
   batch.set(profileRef(newUid), { mode: recovery.mode === "play" ? "play" : "spark" }, { merge: true });
   // Matching preferences are owner-only (Stage 3).
-  batch.set(matchingRef(newUid), { matchableAs: recovery.matchableAs ?? [] }, { merge: true });
+  batch.set(matchingRef(newUid), { matchableAs: recovery.matchableAs ?? [], ...restoredGender }, { merge: true });
   // Stage A: a suspension in force when they deleted comes back with them,
   // and so does their report count.
   const until = recovery.suspension?.suspendedUntil as admin.firestore.Timestamp | null | undefined;

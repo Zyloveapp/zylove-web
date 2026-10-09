@@ -58,18 +58,19 @@ export function profileGenderLabel(p: DiscoverProfile): string | null {
   return g === 'self_describe' ? p.genderSelfDescribe?.trim() || null : genderLabel(g)
 }
 
-// Shown under the name: gender only when it isn't man/woman (implied), then
-// pronouns — e.g. "non-binary · they/them", or just "she/her".
+// Shown under the name. §4.A2: the server-built genderLine — the only gender
+// anyone else can read (functions/src/genderLine.ts): e.g. "Trans woman ·
+// she/her", just "she/her" (man / woman are implied unless the owner shows
+// them), nothing when hidden. The owner's own preview shows the same line.
 export function identityLine(p: DiscoverProfile): string | null {
-  const raw: unknown = p.genderIdentity
-  const g = Array.isArray(raw) ? raw[0] : raw
-  // F-018: "Don't show on my profile" hides it (pronouns are their own choice).
-  const label = typeof g === 'string' && g !== 'man' && g !== 'woman' && p.genderHidden !== true ? profileGenderLabel(p) : null
-  // Self-described text is shown as the person wrote it.
-  const gender = g === 'self_describe' ? label : (label?.toLowerCase() ?? null)
-  const pronouns = p.pronouns?.trim() || null
-  const parts = [gender, pronouns].filter((x): x is string => Boolean(x))
-  return parts.length > 0 ? parts.join(' · ') : null
+  return typeof p.genderLine === 'string' && p.genderLine.trim() ? p.genderLine.trim() : null
+}
+
+// §4.A2: man / woman are left off the profile unless the owner shows them;
+// other identities are shown unless the owner hides them.
+export function impliedGender(genderIdentity: unknown): boolean {
+  const g = Array.isArray(genderIdentity) ? genderIdentity[0] : genderIdentity
+  return g === 'man' || g === 'woman'
 }
 
 export const relationshipStatusLabel = (k: string) => labelOf(RELATIONSHIP_STATUS_LABELS, k)

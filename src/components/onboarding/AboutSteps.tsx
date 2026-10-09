@@ -22,6 +22,7 @@ import {
   type ParentalIntent,
 } from '../../types/profile'
 import { toOptions, type StepProps } from './types'
+import { impliedGender } from '../discover/labels'
 import {
   CardMultiSelect,
   CardSelect,
@@ -80,6 +81,8 @@ export function GenderStep({ draft, update }: StepProps) {
             genderIdentity,
             // matchableAs only applies to off-map identities.
             ...(genderIdentity && !OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) && { matchableAs: [] }),
+            // §4.A2: only the choice shown for this gender counts.
+            ...(impliedGender(genderIdentity) ? { genderHidden: false } : { showGender: false }),
           })
         }
       />
@@ -93,19 +96,37 @@ export function GenderStep({ draft, update }: StepProps) {
           className={`${textInputClass} mt-3`}
         />
       )}
-      {/* F-018: hide it on the profile; still used for matching. */}
-      <label className="mt-4 flex items-start gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={draft.genderHidden}
-          onChange={(e) => update({ genderHidden: e.target.checked })}
-          className="mt-0.5 h-4 w-4 shrink-0 accent-[#1B4FD8]"
-        />
-        <span>
-          Don't show on my profile
-          <span className="block text-xs text-white/40">We still use it to show you to the right people.</span>
-        </span>
-      </label>
+      {/* F-018 / §4.A2: man / woman is left off the profile unless shown;
+          anything else is shown unless hidden (with the pronouns). Either
+          way it's still used for matching. */}
+      {draft.genderIdentity && impliedGender(draft.genderIdentity) && (
+        <label className="mt-4 flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={draft.showGender}
+            onChange={(e) => update({ showGender: e.target.checked })}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-[#1B4FD8]"
+          />
+          <span>
+            Show on my profile
+            <span className="block text-xs text-white/40">Otherwise only your pronouns show, if you add them.</span>
+          </span>
+        </label>
+      )}
+      {draft.genderIdentity && !impliedGender(draft.genderIdentity) && (
+        <label className="mt-4 flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={draft.genderHidden}
+            onChange={(e) => update({ genderHidden: e.target.checked })}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-[#1B4FD8]"
+          />
+          <span>
+            Don't show my gender or pronouns on my profile
+            <span className="block text-xs text-white/40">We still use your gender to show you to the right people.</span>
+          </span>
+        </label>
+      )}
       {draft.genderIdentity && OFF_MAP_GENDER_IDENTITIES.includes(draft.genderIdentity) && (
         <>
           <FieldLabel hint="Select at least one. This is how you'll be surfaced in Explore.">

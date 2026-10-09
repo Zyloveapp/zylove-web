@@ -3,6 +3,7 @@ import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { requestLocation, saveUserLocation } from './location'
 import { loadAccountView, marketOf } from './subscription'
+import { loadMatching } from './privateMatching'
 import { loadSettingsView } from './privateSettings'
 import { cityConfigPath, type ZyloveCity } from '../config/cities'
 
@@ -88,7 +89,8 @@ export async function founderOffer(uid: string, { ask }: { ask: boolean }): Prom
     }
     const city = marketOf(user)
     if (!city) return null
-    const bucket = bucketFor(user.genderIdentity)
+    // §4.A2: the gender is owner-only (private/matching).
+    const bucket = bucketFor((await loadMatching(uid, user)).genderIdentity)
     if (!(await spotOpen(city.id, bucket))) return null
     const { smsConsent } = await loadSettingsView(uid)
     return { city, bucket, smsConsented: typeof smsConsent === 'object' && smsConsent !== null }

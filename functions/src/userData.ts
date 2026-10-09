@@ -82,6 +82,14 @@ export const PLAY_ROOT_FIELDS = [
 ] as const
 export const PRIVATE_PROFILE_FIELDS = ['intent', 'onboardingPath', 'mode', 'intentionAnswers'] as const
 
+// §4.A2: off the public doc, into private/matching.
+export const GENDER_FIELDS = ['genderIdentity', 'genderSelfDescribe', 'pronouns', 'genderHidden', 'showGender'] as const
+
+// The gender a profile is matched by: private/matching's, else (accounts not
+// migrated yet) the public doc's old copy.
+export const genderOf = (matching: DocumentData | undefined, root: DocumentData | undefined): unknown =>
+  matching?.genderIdentity ?? root?.genderIdentity
+
 // Stage 3 (F-013): who someone wants to see and how — used only server-side
 // (Explore, scoring), so it lives in the owner-only private/matching.
 export const MATCHING_FIELDS = [
@@ -89,6 +97,10 @@ export const MATCHING_FIELDS = [
   'dealbreakers', 'seekingBodyTypes', 'seekingTraits', 'seekingHeightMinCm', 'seekingHeightMaxCm',
   // F-018 / §4.A1: never shown to anyone — matching only.
   'religion', 'politicalView',
+  // §4.A2: gender (identity-locked like matchableAs), its self-description,
+  // pronouns and the two display choices. Others see only the server-built
+  // users/{uid}.genderLine (genderLine.ts).
+  ...GENDER_FIELDS,
 ] as const
 
 export async function loadMatching(uid: string, root?: DocumentData): Promise<DocumentData> {
@@ -206,7 +218,8 @@ export function isAdminAuth(auth: { token?: Record<string, unknown> } | undefine
 // Every moved or dropped field, as deletes — so an anonymised root doc keeps
 // none of them (older docs may still carry copies).
 export const ROOT_SCRUB: Record<string, FieldValue> = Object.fromEntries(
-  [...INTERNAL_FIELDS, ...ACCOUNT_FIELDS, ...SETTINGS_FIELDS, ...IDENTITY_FIELDS, ...LOCATION_FIELDS, ...DROPPED_FIELDS, ...PLAY_ROOT_FIELDS, ...PRIVATE_PROFILE_FIELDS, ...MATCHING_FIELDS].map((f) => [f, FieldValue.delete()]),
+  // §4.A2: and the public gender line.
+  [...INTERNAL_FIELDS, ...ACCOUNT_FIELDS, ...SETTINGS_FIELDS, ...IDENTITY_FIELDS, ...LOCATION_FIELDS, ...DROPPED_FIELDS, ...PLAY_ROOT_FIELDS, ...PRIVATE_PROFILE_FIELDS, ...MATCHING_FIELDS, 'genderLine'].map((f) => [f, FieldValue.delete()]),
 )
 
 // The private values a deleted account's 90-day recovery record keeps.
@@ -263,11 +276,15 @@ export async function recoveryRecord(uid: string, root: DocumentData, phoneNumbe
     previousUid: uid,
     deletedAt: Timestamp.now(),
     birthday: priv.birthday,
-    genderIdentity: root.genderIdentity ?? null,
+    // §4.A2: from private/matching (root copies until migrated), with the
+    // display choices, so a restore doesn't show a gender they had hidden.
+    genderIdentity: matching.genderIdentity ?? null,
     matchableAs: matching.matchableAs ?? [],
     identityLockedAt: root.identityLockedAt ?? null,
-    pronouns: root.pronouns ?? null,
-    genderSelfDescribe: root.genderSelfDescribe ?? null,
+    pronouns: matching.pronouns ?? null,
+    genderSelfDescribe: matching.genderSelfDescribe ?? null,
+    genderHidden: matching.genderHidden === true,
+    showGender: matching.showGender === true,
     displayName: root.displayName ?? '',
     photoURLs: root.photoURLs ?? [],
     bio: root.bio ?? '',

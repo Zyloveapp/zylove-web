@@ -89,7 +89,8 @@ export async function refreshPlayAccess(uid: string): Promise<PlayFlags> {
     const ent = computeEntitlement({
       root: root.data(),
       plan: internal.data(),
-      matching: matching.data() ?? { matchableAs: root.data()?.matchableAs },
+      // §4.A2: gender is in private/matching too; root copies until migrated.
+      matching: { matchableAs: root.data()?.matchableAs, genderIdentity: root.data()?.genderIdentity, ...matching.data() },
       loc: loc.data(),
       linkedCityOpen: linkedCfg ? cityIsOpen(linkedCfg.data()) : false,
     })
@@ -173,7 +174,8 @@ export const playAccessOnPlayProfile = onDocumentWritten({ document: 'users/{uid
 })
 
 // Stage C: how someone is matched (matchableAs) and their launch city also
-// decide the tier.
+// decide the tier. §4.A2: the gender lives here now too, but identity-based
+// Elite needs the lock, and the lock (playAccessOnProfile) comes after it.
 export const entitlementOnMatching = onDocumentWritten({ document: 'users/{uid}/private/matching', memory: '256MiB' }, async (event) => {
   if (isBotUid(event.params.uid)) return
   if (event.data?.before.exists && !changed(event.data.before.data(), event.data?.after.data(), ['matchableAs'])) return

@@ -64,7 +64,8 @@ export function computeEntitlement(
   if (!root || root.isDeleted === true) return e('free', 'free')
   // F-066: only once identity is locked (server-set on the first gender
   // write) — before that, gender could still be switched to get Elite.
-  if (root.identityLockedAt != null && eliteByMatching(root.genderIdentity, matching.matchableAs)) return e('elite', 'identity')
+  // §4.A2: the gender is in private/matching (the root's old copy until migrated).
+  if (root.identityLockedAt != null && eliteByMatching(matching.genderIdentity ?? root.genderIdentity, matching.matchableAs)) return e('elite', 'identity')
   if (root.isFounder === true) return e('elite', 'founder')
   if (plan.subscriptionTier === 'elite') return e('elite', 'paid')
   if (plan.subscriptionTier === 'spark_plus') return e('spark_plus', 'paid')

@@ -3,6 +3,7 @@ import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { cityById, type ZyloveCity } from '../config/cities'
 import { loadAccountView, marketOf } from '../services/subscription'
+import { loadMatching } from '../services/privateMatching'
 import { bucketFor, claimFounderBadge, spotOpen } from '../services/founders'
 import { clearAfterLogin } from '../services/afterLogin'
 import { FounderBenefits } from '../components/FounderInvite'
@@ -55,7 +56,8 @@ export default function ClaimFounder() {
         if (typeof user?.locationLat === 'number' && market?.id !== city.id) {
           return setView({ kind: 'elsewhere', city })
         }
-        const open = await spotOpen(city.id, bucketFor(user?.genderIdentity))
+        // §4.A2: the gender is owner-only (private/matching).
+        const open = await spotOpen(city.id, bucketFor((await loadMatching(uid, user)).genderIdentity))
         if (!cancelled) setView({ kind: open ? 'available' : 'taken', city })
       } catch {
         if (!cancelled) setView({ kind: 'taken', city })
