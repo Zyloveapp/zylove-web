@@ -89,7 +89,8 @@ export const onPhotoUpload = onObjectFinalized(
     // No profile to attach it to (a deleted account, or one that never
     // finished onboarding — which saves the profile before any photo): the
     // upload is removed and logged, never queued as a "moderation error".
-    if (!(await admin.firestore().doc(`users/${uid}`).get()).exists) {
+    const profile = await admin.firestore().doc(`users/${uid}`).get()
+    if (!profile.exists || profile.get('isDeleted') === true) {
       console.warn(`[moderation] No profile for uid ${uid}; removed ${photoPathForLog(filePath)}`)
       await admin.storage().bucket(event.data.bucket).file(filePath).delete({ ignoreNotFound: true })
       return

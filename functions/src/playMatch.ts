@@ -32,8 +32,12 @@ export interface MatchCtx {
   ref: DocumentReference
   play: boolean
   data: DocumentData
-  // The two accounts (real uids — internal only).
+  // The two accounts (real uids — internal only). A Spark chat kept
+  // read-only lists only who keeps it; a Play one still names both.
   users: string[]
+  // Both people the match was between, even once it's kept for one of them
+  // (pairUsers on a kept Spark chat) — for "is the other person this one".
+  pair: string[]
   pairId: string
   // The id a participant is known by in this match: their Play ID in Play,
   // their uid in Spark.
@@ -55,13 +59,15 @@ const keptFor = (data: DocumentData): string[] | null =>
 function sparkCtx(id: string, ref: DocumentReference, data: DocumentData): MatchCtx {
   const raw: unknown = data.users ?? data.participants
   const users = Array.isArray(raw) ? raw.filter((u): u is string => typeof u === 'string') : []
+  const pair = Array.isArray(data.pairUsers) ? data.pairUsers.filter((u: unknown): u is string => typeof u === 'string') : users
   return {
     id,
     ref,
     play: false,
     data,
     users,
-    pairId: typeof data.pairId === 'string' ? data.pairId : [...users].sort().join('_'),
+    pair,
+    pairId: typeof data.pairId === 'string' ? data.pairId : [...pair].sort().join('_'),
     idOf: (uid) => uid,
     uidOf: (x) => (users.includes(x) ? x : null),
     otherOf: (uid) => users.find((u) => u !== uid) ?? null,
@@ -79,6 +85,7 @@ function playCtx(id: string, ref: DocumentReference, data: DocumentData, members
     play: true,
     data,
     users,
+    pair: users,
     pairId: typeof members.pairId === 'string' ? members.pairId : [...users].sort().join('_'),
     idOf: (uid) => ids[uid] ?? '',
     uidOf: (x) => owners.get(x) ?? null,

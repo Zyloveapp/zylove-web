@@ -10,7 +10,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { onRequest } from 'firebase-functions/v2/https'
 import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
-import { FieldValue, getFirestore } from 'firebase-admin/firestore'
+import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 import { TWILIO_AUTH_TOKEN, optOutRef, recordOptOut } from './sms'
 import { accountRef, loadAccount, loadSettings, settingsRef } from './userData'
 
@@ -106,6 +106,18 @@ async function handleStart(phone: string): Promise<void> {
   await batch.commit()
 }
 
+// F-097: each message is handled once. A captured, correctly signed request
+// replayed later (say, an old STOP after the person texted START) is
+// ignored: twilioInboundSeen/{MessageSid} (server-only) is written once a
+// message has been handled — not before, so Twilio's own retry after a 500
+// still goes through — and kept SEEN_KEEP_MS (expiresAt, for a Firestore
+// TTL policy). Twilio always sends a MessageSid; a request without one
+// can't be checked and is handled as before.
+const SEEN_KEEP_MS = 30 * 24 * 60 * 60 * 1000
+export const messageSidOf = (params: Record<string, unknown>): string | null =>
+  typeof params.MessageSid === 'string' && /^[A-Za-z0-9]{2,64}$/.test(params.MessageSid) ? params.MessageSid : null
+const seenRef = (sid: string) => getFirestore().doc(`twilioInboundSeen/${sid}`)
+
 export const twilioInbound = onRequest(
   { timeoutSeconds: 30, memory: '256MiB', secrets: [TWILIO_AUTH_TOKEN], invoker: 'public' },
   async (req, res) => {
@@ -128,11 +140,18 @@ export const twilioInbound = onRequest(
 
     const from = typeof params.From === 'string' ? params.From : ''
     const kind = kindOf(params.OptOutType, params.Body)
+    const sid = messageSidOf(params)
     try {
+      if (sid && (await seenRef(sid).get()).exists) {
+        logger.warn('twilioInbound: message already handled — ignored', { kind })
+        res.type('text/xml').send(EMPTY_TWIML)
+        return
+      }
       if (/^\+[1-9]\d{6,14}$/.test(from)) {
         if (kind === 'stop') await handleStop(from, typeof params.Body === 'string' ? params.Body.trim().slice(0, 20) : 'STOP')
         else if (kind === 'start') await handleStart(from)
       }
+      if (sid) await seenRef(sid).set({ at: FieldValue.serverTimestamp(), expiresAt: Timestamp.fromMillis(Date.now() + SEEN_KEEP_MS) })
       logger.info('twilioInbound', { kind })
     } catch (err) {
       // 500 makes Twilio retry; the registry write is idempotent.

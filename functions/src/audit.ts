@@ -3,6 +3,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 import { isAdminAuth } from './userData'
+import { takeRateLimit } from './rateLimits'
 
 // T&S Phase 1: one audit log for everything admins see, download and do.
 //   adminAudit/{auto} (server-only): { actor, action, target, reason,
@@ -36,15 +37,36 @@ export async function audit(e: AuditEntry): Promise<void> {
     })
 }
 
+// F-094: a signed-in non-admin calling an admin callable is logged too —
+// admin.denied, with only the caller's uid and which call — at most
+// DENIED_LOGS a day per caller, so the log can't be flooded.
+const DENIED_LOGS = { max: 5, windowMs: 24 * 60 * 60 * 1000 }
+async function auditDenied(uid: string, call: string): Promise<void> {
+  const logged = await takeRateLimit(uid, 'adminDenied', DENIED_LOGS).then(() => true, () => false)
+  if (logged) await audit({ actor: uid, action: 'admin.denied', detail: { call } }).catch(() => {})
+}
+
+// Admins only (the `admin` auth claim); `call` names the callable for the
+// denied log. F-097: a claim taken away keeps working until that admin's ID
+// token refreshes (up to an hour). Nothing in the functions removes the
+// claim today; whatever does should also call auth.revokeRefreshTokens(uid).
+export async function requireAdmin(auth: { uid: string; token?: Record<string, unknown> } | undefined, call: string): Promise<string> {
+  if (!auth) throw new HttpsError('unauthenticated', 'Login required')
+  if (!isAdminAuth(auth)) {
+    await auditDenied(auth.uid, call)
+    throw new HttpsError('permission-denied', 'Admins only.')
+  }
+  return auth.uid
+}
+
 // Admins only — and every admin call is logged before it returns anything.
 export async function requireAdminAudited(
   auth: { uid: string; token?: Record<string, unknown> } | undefined,
   entry: Omit<AuditEntry, 'actor'>,
 ): Promise<string> {
-  if (!auth) throw new HttpsError('unauthenticated', 'Login required')
-  if (!isAdminAuth(auth)) throw new HttpsError('permission-denied', 'Admins only.')
-  await audit({ ...entry, actor: auth.uid })
-  return auth.uid
+  const uid = await requireAdmin(auth, entry.action)
+  await audit({ ...entry, actor: uid })
+  return uid
 }
 
 export const purgeAdminAudit = onSchedule(

@@ -4,7 +4,7 @@ import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { distanceMiles, getLinkedCity, getNearestCity } from './cities'
 import { marketFor } from './trial'
-import { accountRef, identityRef, internalRef, locationRef, userRef, requireActive } from './userData'
+import { accountRef, identityRef, internalRef, isDeletedUid, locationRef, userRef, requireActive } from './userData'
 import { takeRateLimit } from './rateLimits'
 import { isPlayId, uidOfPlayId } from './playIds'
 import {
@@ -310,6 +310,10 @@ export const recordActivity = onCall(
   { timeoutSeconds: 20, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ ok: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    // F-096: a deleted account's sign-in can outlive it by up to an hour —
+    // no server record is made for it again (nor for one with no profile yet;
+    // the activity stats only list profiles).
+    if (await isDeletedUid(request.auth.uid)) return { ok: true }
     const ref = internalRef(request.auth.uid)
     const last: unknown = (await ref.get()).data()?.lastActive
     const now = Date.now()

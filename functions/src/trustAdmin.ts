@@ -1,7 +1,7 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
-import { audit, requireAdminAudited } from './audit'
+import { audit, requireAdmin, requireAdminAudited } from './audit'
 import { linkedAccounts } from './devices'
 import { refreshEntry } from './explore'
 import { FLAG_RETENTION_MS, type Features, type Reason } from './trustScore'
@@ -315,6 +315,8 @@ export const adminTrustAction = onCall({ timeoutSeconds: 60, memory: '256MiB', i
 // The admin directory: by user id, phone number or name (prefix). Flagged
 // accounts first. The query itself isn't logged — only its kind.
 export const adminSearchUsers = onCall({ timeoutSeconds: 30, memory: '256MiB', invoker: 'public' }, async (request) => {
+  // F-094: the admin check comes before anything is read.
+  await requireAdmin(request.auth, 'adminSearchUsers')
   const q = str((request.data as Record<string, unknown> | null)?.q).trim()
   if (q.length < 2) throw new HttpsError('invalid-argument', 'Type at least 2 characters.')
   const digits = q.replace(/[^\d+]/g, '')
@@ -332,8 +334,10 @@ export const adminSearchUsers = onCall({ timeoutSeconds: 30, memory: '256MiB', i
     const user = await getAuth().getUserByPhoneNumber(e164).catch(() => null)
     if (user) uids.add(user.uid)
   } else {
+    // A prefix: from the name up to the name followed by the highest
+    // character (written as an escape — the bare character is invisible).
     const lower = q.toLowerCase()
-    const snap = await db().collection('userInternal').where('searchName', '>=', lower).where('searchName', '<', `${lower}`).limit(25).get()
+    const snap = await db().collection('userInternal').where('searchName', '>=', lower).where('searchName', '<', `${lower}\uf8ff`).limit(25).get()
     snap.docs.forEach((d) => uids.add(d.id))
   }
   const list = [...uids].filter((u) => !isBot(u)).slice(0, 25)

@@ -253,17 +253,22 @@ async function onCheckoutCompleted(session: Stripe.Checkout.Session): Promise<vo
     return void logger.error('Checkout session missing uid, tier or subscription', { session: session.id })
   }
   if (await accountGone(uid)) return void logger.info('Checkout for a deleted account — skipped', { session: session.id })
-  await billingRef(uid).set(
-    {
-      subscriptionTier: tier,
-      stripeSubscriptionId: subscriptionId,
-      subscriptionStatus: 'active',
-      subscriptionUpdatedAt: FieldValue.serverTimestamp(),
-      trialExpired: false,
-      hadPaidPlan: true,
-    },
-    { merge: true },
-  )
+  // F-097: the event can arrive late (after a cancel, a refund or a plan
+  // switch), so it isn't taken at its word: the subscription is read from
+  // Stripe and applied like any subscription event (applySubscription). A
+  // checkout that's still live makes its subscription the one on file
+  // first (createCheckoutSession refuses a second live one, so whatever was
+  // on file before has ended); one that has since ended changes nothing
+  // unless it's the one on file.
+  const sub = await stripe().subscriptions.retrieve(subscriptionId)
+  if (idOf(sub.customer) === null || (await uidForCustomer(idOf(sub.customer)!)) !== uid) {
+    return void logger.error('Checkout subscription belongs to another customer', { session: session.id })
+  }
+  // (The tier as bought, in case the price isn't one tierForPrice knows;
+  // applySubscription then writes the price's tier and the status.)
+  if (LIVE_STATUSES.has(sub.status)) await billingRef(uid).set({ stripeSubscriptionId: sub.id, subscriptionTier: tierForPrice(sub.items.data[0]?.price?.id) ?? tier }, { merge: true })
+  await applySubscription(sub, false)
+  if (!LIVE_STATUSES.has(sub.status)) return void logger.info('Checkout completed for a subscription that has since ended', { session: session.id, status: sub.status })
   // Stage C: on record by phone too (trialHistory), so deleting the account
   // and starting again doesn't bring pre-launch or a trial back.
   const { getAuth } = await import('firebase-admin/auth')

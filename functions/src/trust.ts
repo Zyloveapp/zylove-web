@@ -56,7 +56,7 @@ export async function matchGenerations(matchId: string, a: string, b: string): P
   const out = new Set<number>()
   // F-062: a live Play match's people are in its server-only record.
   const live = await loadMatch(matchId)
-  if (live && live.users.includes(a) && live.users.includes(b)) out.add(generationOf(live.data))
+  if (live && live.pair.includes(a) && live.pair.includes(b)) out.add(generationOf(live.data))
   const legacy = (await db.collection('pastConnections').doc(matchId).get()).data()
   if (both(legacy)) out.add(0)
   const past = await db.collection('pastConnections').where('matchId', '==', matchId).get()

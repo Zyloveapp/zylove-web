@@ -36,11 +36,15 @@ export const isPlayId = (v: unknown): v is string => typeof v === 'string' && PL
 export const isPlayMatchId = (v: unknown): v is string => typeof v === 'string' && PLAY_MATCH_ID_RE.test(v)
 
 // The account's Play ID, created on first use (transaction: one per account).
+// F-096: never for a deleted account (or one with no profile) — account
+// deletion removes the mapping, and nothing may put it back.
 export async function ensurePlayId(uid: string): Promise<string> {
   const ref = db().doc(`playIds/${uid}`)
   const playId = await db().runTransaction(async (tx) => {
     const cur: unknown = (await tx.get(ref)).get('playId')
     if (isPlayId(cur)) return cur
+    const root = (await tx.get(db().doc(`users/${uid}`))).data()
+    if (!root || root.isDeleted === true) throw new HttpsError('failed-precondition', "That profile isn't available.")
     const fresh = randomId('p_')
     tx.create(db().doc(`playIdOwners/${fresh}`), { uid })
     tx.set(ref, { playId: fresh, createdAt: Date.now() })

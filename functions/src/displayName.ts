@@ -1,5 +1,6 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { updateSearchName } from './searchName'
+import { requireActive } from './userData'
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 
 // Changing a public name after it's first set goes through here: the
@@ -33,6 +34,7 @@ export const updateDisplayName = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid) // F-097: not while suspended
     const data = (request.data ?? {}) as Record<string, unknown>
     const mode = data.mode
     if (mode !== 'spark' && mode !== 'play') throw new HttpsError('invalid-argument', 'mode must be spark or play')

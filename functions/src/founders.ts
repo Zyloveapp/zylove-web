@@ -26,7 +26,7 @@ import { logger } from 'firebase-functions'
 import { FieldPath, FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, getNearestCity } from './cities'
 import { textAccount } from './sms'
-import { accountRef, internalRef, loadLocation } from './userData'
+import { accountRef, internalRef, loadLocation, requireActive } from './userData'
 import { eliteByMatching } from './identity'
 
 // Per half (women / men); a city's circle is twice this.
@@ -73,6 +73,7 @@ export const assignFounderBadge = onCall(
   { timeoutSeconds: 60, memory: '256MiB', invoker: 'public' },
   async (request): Promise<FounderResult> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+    await requireActive(request.auth.uid) // F-097: not while suspended
     const loc = await loadLocation(request.auth.uid)
     if (!loc) return { eligible: false, reason: 'outside_coverage' }
     return claimFounderSpot(request.auth.uid, loc.lat, loc.lng, 'assignFounderBadge')

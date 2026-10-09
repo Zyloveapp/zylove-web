@@ -31,13 +31,13 @@ import { STRIPE_SECRETS } from './stripe'
 import { phoneHash, reportGeneration } from './trust'
 import { takeRateLimit } from './rateLimits'
 import { softDeleteAccount } from './adminActivity'
-import { audit, requireAdminAudited } from './audit'
+import { audit, requireAdmin, requireAdminAudited } from './audit'
 import { markBannedDevices } from './devices'
 import { blocklistPhotosOf, unblockPhotosOf } from './photoHashes'
 import { reportCounts } from './blocklistContext'
 import { decideEvidenceFor } from './evidence'
 import { isPlayMatchId, uidNamedIn } from './playIds'
-import { accountRef, adminUids, internalRef, isAdminAuth, isAdminUid, isSuspendedUid, loadInternal } from './userData'
+import { accountRef, adminUids, internalRef, isAdminUid, isSuspendedUid, loadInternal } from './userData'
 
 const BOT_PREFIXES = ['zbot-', 'seed-']
 const URGENT = new Set(['felt_unsafe', 'aggressive', 'child_safety'])
@@ -247,12 +247,6 @@ export const reportAndBan = onCall(
 )
 
 // ─── Admin ───────────────────────────────────────────────────────────────────
-
-function requireAdmin(auth: { uid: string; token?: Record<string, unknown> } | undefined): string {
-  if (!auth) throw new HttpsError('unauthenticated', 'Login required')
-  if (!isAdminAuth(auth)) throw new HttpsError('permission-denied', 'Admins only.')
-  return auth.uid
-}
 
 export type AccountStatus = 'active' | 'suspended' | 'banned' | 'deleted'
 
@@ -525,7 +519,7 @@ export async function liftSuspension(uid: string): Promise<void> {
 export const adminModerate = onCall(
   { timeoutSeconds: 120, memory: '256MiB', invoker: 'public', secrets: [...SMS_SECRETS, ...STRIPE_SECRETS] },
   async (request): Promise<{ ok: true; resolved?: number; texted?: boolean; phoneBanned?: boolean }> => {
-    const adminUid = requireAdmin(request.auth)
+    const adminUid = await requireAdmin(request.auth, 'adminModerate')
     const data = (request.data ?? {}) as Record<string, unknown>
     const uid = str(data, 'uid')
     const action = data.action as ModerateAction
@@ -546,6 +540,12 @@ export const adminModerate = onCall(
     // The audit keeps the action and its outcome, never the warning text itself.
     const log = (detail: Record<string, unknown> = {}) =>
       audit({ actor: adminUid, action: `report.${action}`, target: uid, reason, detail: { ...detail, ...(message ? { messageChars: message.length } : {}) } })
+    // F-094: the account-changing actions are logged as an attempt before
+    // anything changes (the outcome follows) — a failure partway still
+    // leaves a record.
+    if (action === 'suspend' || action === 'unsuspend' || action === 'ban' || action === 'unban') {
+      await audit({ actor: adminUid, action: `report.${action}.attempt`, target: uid, reason })
+    }
 
     switch (action) {
       case 'warn': {
