@@ -39,14 +39,14 @@ async function setAsOwner(uid, path, data) {
 test('rules: seekingPreferences refuses dealbreakers; its other fields still save, and a set without them replaces an old list', async () => {
   const u = await seedUser('Rae')
   const path = `users/${u.uid}/seekingPreferences/prefs`
-  const prefs = { uid: u.uid, seekingTraits: ['kind'], seekingBodyTypes: [], seekingHeightNoPreference: true }
+  const prefs = { uid: u.uid, seekingBodyNoPreference: false, seekingHeightNoPreference: true }
   expect(await setAsOwner(u.uid, path, { ...prefs, dealbreakers: ['vaper'] })).toBe(403)
   expect(await setAsOwner(u.uid, path, { ...prefs, dealbreakers: [] })).toBe(403)
   expect(await setAsOwner(u.uid, path, prefs)).toBe(200)
   // An old doc with a list (before the migration): a save without one goes through.
   await db.doc(path).set({ dealbreakers: ['vaper'] }, { merge: true })
-  expect(await setAsOwner(u.uid, path, { ...prefs, seekingTraits: ['funny'] })).toBe(200)
-  expect(await prefsOf(u.uid)).toEqual({ ...prefs, seekingTraits: ['funny'] })
+  expect(await setAsOwner(u.uid, path, { ...prefs, seekingHeightNoPreference: false })).toBe(200)
+  expect(await prefsOf(u.uid)).toEqual({ ...prefs, seekingHeightNoPreference: false })
   // Someone else's: no.
   const other = await seedUser('Sam')
   expect(await setAsOwner(other.uid, path, prefs)).toBe(403)
@@ -162,7 +162,9 @@ test('app: an old seekingPreferences list shows until migrated, and the next sav
   expect(m.fieldChangedAt?.dealbreakers).toBeUndefined()
   const prefs = await prefsOf(u.uid)
   expect(prefs.dealbreakers).toBeUndefined()
-  expect(prefs.seekingTraits).toEqual(['kind'])
+  // The traits moved too (spec 44).
+  expect(prefs.seekingTraits).toBeUndefined()
+  expect(m.seekingTraits).toEqual(['kind'])
   expect(net.errors).toEqual([])
   await ctx.close()
 })
