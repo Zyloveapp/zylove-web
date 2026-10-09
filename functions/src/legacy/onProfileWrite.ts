@@ -143,6 +143,8 @@ const SCORED_PRIVATE_FIELDS = [
   "attractedTo", "matchableAs", "ageMin", "ageMax", "drinkingHabit",
   "dealbreakers", "seekingBodyTypes", "seekingHeightMinCm", "seekingHeightMaxCm",
   "religion", "politicalView",
+  // §4.A2: gender is matched on (prefMatchesGender) and lives here now.
+  "genderIdentity",
 ] as const;
 
 async function rescoreOnPrivateChange(

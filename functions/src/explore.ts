@@ -5,7 +5,7 @@ import { getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { distanceMiles } from './cities'
 import { marketFor } from './trial'
 import { isBotUid, playStatus, requirePlayAccess } from './playAccess'
-import { isSuspendedUid, loadInternal, loadLocation, loadMatching, loadPrivateProfile, userRef } from './userData'
+import { GENDER_FIELDS, genderOf, isSuspendedUid, loadInternal, loadLocation, loadMatching, loadPrivateProfile, userRef } from './userData'
 import { takeRateLimit, takeRateLimitUpTo } from './rateLimits'
 import { signPhotoRefs } from './photoAccess'
 import { recordCapHit } from './trustSignals'
@@ -98,7 +98,7 @@ export async function buildEntry(uid: string): Promise<DocumentData | null> {
     sortKey: num(root.sortKey) ?? Math.random(),
     sparkActive,
     playActive,
-    cats: categoriesOf(root.genderIdentity, matching.matchableAs),
+    cats: categoriesOf(genderOf(matching, root), matching.matchableAs),
     attractedTo: list(matching.attractedTo),
     age: num(root.age),
     ageMin: num(matching.ageMin),
@@ -176,14 +176,14 @@ interface Card {
 
 // What a Spark card carries of the public profile. F-018 / §4.A1: never
 // religion or politics (owner-only in private/matching now; older docs may
-// still hold a copy until migrated), and with "Don't show on my profile"
-// (genderHidden) not the gender identity or its self-description either.
-const NEVER_ON_CARDS = ['religion', 'politicalView']
-const HIDDEN_GENDER = ['genderIdentity', 'genderSelfDescribe']
+// still hold a copy until migrated). §4.A2: never the gender fields either
+// (owner-only in private/matching; older docs' copies are dropped here until
+// migrated) — the card shows the server-built genderLine, which is already
+// empty when "Don't show on my profile" is set.
+const NEVER_ON_CARDS = ['religion', 'politicalView', ...GENDER_FIELDS]
 export function sparkCardProfile(profile: DocumentData): DocumentData {
   const out: DocumentData = { ...profile }
   for (const k of NEVER_ON_CARDS) delete out[k]
-  if (profile.genderHidden === true) for (const k of HIDDEN_GENDER) delete out[k]
   return out
 }
 
@@ -196,12 +196,21 @@ function shuffle<T>(items: T[]): T[] {
   return a
 }
 
+// §4.A2 / F-098: "Trans men" / "Trans women" attraction (and matchableAs)
+// count as men / women — the categories trans men and women are matched in
+// (categoriesOf). On their own they matched nobody here, and scoring kept
+// them apart; together that told hidden genders apart. No trans filter.
+const ATTRACTION_FOLD: Record<string, string> = { trans_men: 'men', trans_women: 'women' }
+export const foldAttraction = (v: unknown): string[] => list(v).map((a) => ATTRACTION_FOLD[a] ?? a)
+
 function mutuallyAttracted(me: DocumentData, them: DocumentData): boolean {
-  const theyWantMe = list(them.attractedTo)
-  const iWantThem = list(me.attractedTo)
+  const theyWantMe = foldAttraction(them.attractedTo)
+  const iWantThem = foldAttraction(me.attractedTo)
+  const myCats = foldAttraction(me.cats)
+  const theirCats = foldAttraction(them.cats)
   return (
-    (theyWantMe.includes('everyone') || theyWantMe.some((a) => list(me.cats).includes(a))) &&
-    (iWantThem.includes('everyone') || iWantThem.some((a) => list(them.cats).includes(a)))
+    (theyWantMe.includes('everyone') || theyWantMe.some((a) => myCats.includes(a))) &&
+    (iWantThem.includes('everyone') || iWantThem.some((a) => theirCats.includes(a)))
   )
 }
 
@@ -267,7 +276,7 @@ export const getExploreDeck = onCall(
     const matching = await loadMatching(uid, root)
     const me: DocumentData = {
       uid,
-      cats: categoriesOf(root.genderIdentity, matching.matchableAs),
+      cats: categoriesOf(genderOf(matching, root), matching.matchableAs),
       attractedTo: list(matching.attractedTo),
       ageMin: num(matching.ageMin),
       ageMax: num(matching.ageMax),

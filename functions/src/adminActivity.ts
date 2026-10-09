@@ -126,7 +126,7 @@ export const adminGetActivity = onCall(
     const db = getFirestore()
     const now = Date.now()
 
-    const [users, internals, locations, sparkDocs, playDocs, messages, matches, signals] = await Promise.all([
+    const [users, internals, locations, sparkDocs, playDocs, messages, matches, signals, privateDocs] = await Promise.all([
       db.collection('users').get(),
       db.collection('userInternal').get(),
       db.collection('userLocations').get(),
@@ -135,6 +135,8 @@ export const adminGetActivity = onCall(
       db.collectionGroup('messages').select('senderId', 'sentAt', 'messageType', 'nonce').get(),
       db.collection('matches').select('users').get(),
       db.collection('behaviorSignals').select('matchCount').get(),
+      // §4.A2: gender (and matchableAs) live in the owner-only private/matching.
+      db.collectionGroup('private').select('genderIdentity', 'matchableAs').get(),
     ])
     // F-062: Play chats name senders by Play ID; their matches' people are
     // in the server-only records.
@@ -185,16 +187,21 @@ export const adminGetActivity = onCall(
     const signupsByDay = new Map<string, number>()
     const geo = new Map<string, { users: number; founders: number; sparkPlus: number; lastSignupAt: number | null }>()
 
-    // Root doc + userInternal (plan, lastActive) + userLocations (coordinates),
-    // in the shape the helpers above read. Root copies still count for
-    // accounts not yet migrated.
+    // Root doc + private/matching (gender, §4.A2) + userInternal (plan,
+    // lastActive) + userLocations (coordinates), in the shape the helpers
+    // above read. Root copies still count for accounts not yet migrated.
     const internalOf = new Map(internals.docs.map((d) => [d.id, d.data()]))
     const locationOf = new Map(locations.docs.map((d) => [d.id, d.data()]))
+    const matchingOf = new Map(
+      privateDocs.docs.filter((d) => d.id === 'matching').map((d) => [d.ref.parent.parent?.id ?? '', d.data()]),
+    )
     for (const doc of users.docs) {
       if (doc.id.startsWith(BOT_PREFIX)) continue
       const loc = locationOf.get(doc.id)
+      const m = matchingOf.get(doc.id)
       const u: DocumentData = {
         ...doc.data(),
+        ...(m?.genderIdentity !== undefined && { genderIdentity: m.genderIdentity }),
         ...internalOf.get(doc.id),
         ...(typeof loc?.lat === 'number' && { locationLat: loc.lat, locationLng: loc.lng }),
       }

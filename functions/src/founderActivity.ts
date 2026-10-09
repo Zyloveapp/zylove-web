@@ -20,7 +20,7 @@ import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 import { SMS_SECRETS } from './sms'
 import { bucketFor, num, refreshCityMembers, textFounder, type Bucket, type FounderStatus } from './founders'
 import { CLEAR_TRIAL, cityOpen, hasEliteIdentity, hasPaidSubscription, newTrial, planView } from './trial'
-import { accountRef, internalRef, loadInternal } from './userData'
+import { accountRef, internalRef, loadInternal, matchingRef } from './userData'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const LAUNCH_WINDOW_DAYS = 90
@@ -97,14 +97,19 @@ export async function revokeFounderStatus(uid: string): Promise<{ cityId: string
     if (!record || (record.status !== 'active' && record.status !== 'pending_revocation')) return null
     const cityRef = db.doc(`config/city_${record.cityId}`)
     const isAustin = record.cityId === 'austin'
-    const [userSnap, planSnap, citySnap, launchSnap] = await Promise.all([
+    const [userSnap, planSnap, citySnap, launchSnap, matchingSnap] = await Promise.all([
       tx.get(userRef),
       tx.get(planRef),
       tx.get(cityRef),
       isAustin ? tx.get(launchRef) : Promise.resolve(null),
+      tx.get(matchingRef(uid)),
     ])
-    const user = userSnap.data()
-    const bucket = record.bucket ?? bucketFor(user?.genderIdentity)
+    // §4.A2: how they're matched (gender, matchableAs) is in private/matching;
+    // the public doc's old copies count until migrated.
+    const root = userSnap.data()
+    const m = matchingSnap.data()
+    const user = root ? { ...root, genderIdentity: m?.genderIdentity ?? root.genderIdentity, matchableAs: m?.matchableAs ?? root.matchableAs } : undefined
+    const bucket = record.bucket ?? bucketFor(user?.genderIdentity, user?.matchableAs)
     const countKey = bucket === 'women' ? 'womenCount' : 'menCount'
     const down = (v: unknown) => Math.max(0, num(v, 0) - 1)
 

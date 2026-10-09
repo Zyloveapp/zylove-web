@@ -121,7 +121,8 @@ export async function claimFounderSpot(uid: string, lat: number, lng: number, so
     const women = Math.max(num(config.womenCount, 0), isAustin ? num(launch.womenCount, 0) : 0)
     const men = Math.max(num(config.menCount, 0), isAustin ? num(launch.menCount, 0) : 0)
 
-    const bucket = bucketFor(user.genderIdentity, matchingSnap.get('matchableAs') ?? user.matchableAs)
+    // §4.A2: gender from private/matching (the root's old copy until migrated).
+    const bucket = bucketFor(matchingSnap.get('genderIdentity') ?? user.genderIdentity, matchingSnap.get('matchableAs') ?? user.matchableAs)
     if ((bucket === 'women' ? women : men) >= target) return { eligible: false, reason: 'cohort_full' }
 
     const nextWomen = bucket === 'women' ? women + 1 : women

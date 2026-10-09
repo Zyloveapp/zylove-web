@@ -369,14 +369,15 @@ export const initUserDefaults = onCall(
     if (internal.subscriptionTier === undefined) missingInternal.subscriptionTier = 'free'
     // Gender (and age) are locked once onboarding is done (rules then refuse
     // changes to them) — Elite comes from gender, so it can't be switched
-    // later. Mobile locks at its onboarding step 2.
-    if (data.identityLockedAt == null && data.genderIdentity != null) {
+    // later. Mobile locks at its onboarding step 2. §4.A2: the gender is in
+    // private/matching (the public doc's old copy until migrated).
+    const matchingNow = await loadMatching(uid, data)
+    if (data.identityLockedAt == null && matchingNow.genderIdentity != null) {
       missing.identityLockedAt = FieldValue.serverTimestamp()
     }
     // The trial: once per phone number (trialHistory, Stage C), never after a
     // paid plan, and only in a launch city that's open.
-    const matchingNow = await loadMatching(uid, data)
-    if (internal.trialStartedAt === undefined && internal.hadPaidPlan !== true && !trialExempt({ ...planView(data, internal), matchableAs: matchingNow.matchableAs })) {
+    if (internal.trialStartedAt === undefined && internal.hadPaidPlan !== true && !trialExempt({ ...planView(data, internal), genderIdentity: matchingNow.genderIdentity, matchableAs: matchingNow.matchableAs })) {
       // The verified number: from the token, else the Auth record (sign-ins
       // that don't carry it on the token).
       const phone =
@@ -1606,11 +1607,12 @@ Return only the question text, nothing else.`
 function profileForReview(root: DocumentData, spark: DocumentData): string {
   const photoCount = strings(root.photoURLs).length
   const answers = ownPromptAnswers(root, spark)
-  const gender = Array.isArray(root.genderIdentity) ? root.genderIdentity[0] : root.genderIdentity
+  // §4.A2: what a match sees of gender and pronouns is the server-built line.
+  const genderLine = typeof root.genderLine === 'string' ? root.genderLine : ''
   return [
     `Name: ${typeof root.displayName === 'string' ? root.displayName : 'Unknown'}`,
     typeof root.age === 'number' ? `Age: ${root.age}` : '',
-    typeof gender === 'string' ? `Gender: ${humanizeKey(gender)}` : '',
+    genderLine ? `Gender and pronouns shown: ${genderLine}` : '',
     `Photos: ${photoCount}`,
     `Bio: ${ownBio(root, spark) || 'none'}`,
     `Open to: ${humanList(root.openTo)}`,
@@ -2095,7 +2097,7 @@ export const getLikeCount = onCall({ timeoutSeconds: 15, invoker: 'public' }, as
   }
 })
 export { playAccessOnPlan, playAccessOnPlayProfile, playAccessOnProfile } from './playAccess'
-export { identityGuardOnIdentity, identityGuardOnUser } from './identityGuard'
+export { identityGuardOnIdentity, identityGuardOnMatching, identityGuardOnUser } from './identityGuard'
 export { actOnPlayConnection, listLockedPlayConnections } from './lockedPlay'
 export { getDistances, grantSmsConsent, recordActivity, refreshAges, setLocation } from './location'
 export { createCheckoutSession, createPortalSession, stripeWebhook } from './stripe'

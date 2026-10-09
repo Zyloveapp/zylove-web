@@ -194,6 +194,10 @@ service cloud.firestore {
         'dealbreakers', 'seekingBodyTypes', 'seekingTraits', 'seekingHeightMinCm', 'seekingHeightMaxCm',
         // F-018 / §4.A1: never shown — owner-only in private/matching
         'religion', 'politicalView',
+        // §4.A2: gender, its self-description, pronouns and the display
+        // choices — owner-only in private/matching; others see only the
+        // server-built genderLine (identityGuardOnMatching)
+        'genderIdentity', 'genderSelfDescribe', 'pronouns', 'genderHidden', 'showGender', 'genderLine',
         'suspendedAt', 'suspendedUntil', 'suspendedBy', 'suspendSource', 'suspendReason', 'suspendedPendingReview',
         'bannedAt', 'bannedBy', 'deletionRequestedAt', 'deletionScheduledFor', 'deletionReason',
         'adminNotice', 'lastWarnedAt', 'lastThankedAt',
@@ -265,7 +269,8 @@ service cloud.firestore {
                     && adultAge(request.resource.data)
                     && publicNameOk(request.resource.data, 'displayName');
       // Identity-lock fields (age, genderIdentity, matchableAs,
-      // identityLockedAt): blocked AFTER identityLockedAt is set. First
+      // identityLockedAt): blocked AFTER identityLockedAt is set (§4.A2:
+      // genderIdentity is server-only here now — private/matching). First
       // write (when field is still null) is permitted — that's the slide-2
       // confirm or the retroactive ensureIdentityLock write. Age then
       // follows the private birthday server-side (refreshAges).
@@ -307,7 +312,21 @@ service cloud.firestore {
         return ['attractedTo', 'matchableAs', 'ageMin', 'ageMax', 'radiusMiles', 'drinkingHabit', 'showOrientation',
                 'dealbreakers', 'seekingBodyTypes', 'seekingTraits', 'seekingHeightMinCm', 'seekingHeightMaxCm',
                 // F-018 / §4.A1: never shown — matching only
-                'religion', 'politicalView'];
+                'religion', 'politicalView',
+                // §4.A2: gender (off the public doc) and how it's shown
+                'genderIdentity', 'genderSelfDescribe', 'pronouns', 'genderHidden', 'showGender'];
+      }
+      // §4.A2: a key from the app's list (a string), or a list from older
+      // mobile Play builds; null when unset. Self-description and pronouns go
+      // on the public genderLine (sanitised server-side), so short strings.
+      function validGender(d) {
+        return (!('genderIdentity' in d) || d.genderIdentity == null
+                || (d.genderIdentity is string && d.genderIdentity.size() <= 40)
+                || (d.genderIdentity is list && d.genderIdentity.size() <= 8))
+            && (!('genderSelfDescribe' in d) || d.genderSelfDescribe == null || (d.genderSelfDescribe is string && d.genderSelfDescribe.size() <= 40))
+            && (!('pronouns' in d) || d.pronouns == null || (d.pronouns is string && d.pronouns.size() <= 40))
+            && (!('genderHidden' in d) || d.genderHidden is bool)
+            && (!('showGender' in d) || d.showGender is bool);
       }
       function validMatching(d) {
         return d.keys().hasOnly(matchingKeys())
@@ -318,16 +337,23 @@ service cloud.firestore {
             // Stage C: the viewer's own distance, 1–100 miles (no "no limit").
             && (!('radiusMiles' in d) || (d.radiusMiles is number && d.radiusMiles >= 1 && d.radiusMiles <= 100))
             && (!('religion' in d) || d.religion == null || (d.religion is string && d.religion.size() <= 40))
-            && (!('politicalView' in d) || d.politicalView == null || (d.politicalView is string && d.politicalView.size() <= 40));
+            && (!('politicalView' in d) || d.politicalView == null || (d.politicalView is string && d.politicalView.size() <= 40))
+            && validGender(d);
       }
       // matchableAs (how off-map identities are matched) stays identity-locked,
-      // as it was on the public doc.
+      // as it was on the public doc — and (§4.A2) so do the gender and its
+      // self-description: set freely until users/{uid}.identityLockedAt is
+      // set (the server sets it on the first gender written here), then
+      // fixed. Pronouns and the two display choices stay editable.
+      function identityLockedKeys() {
+        return ['matchableAs', 'genderIdentity', 'genderSelfDescribe'];
+      }
       match /private/matching {
         allow read: if isSignedIn() && isUser(uid);
         allow create: if callerActive() && isSignedIn() && isUser(uid) && validMatching(request.resource.data)
-                      && (!('matchableAs' in request.resource.data) || identityUnlocked());
+                      && (!request.resource.data.keys().hasAny(identityLockedKeys()) || identityUnlocked());
         allow update: if callerActive() && isSignedIn() && isUser(uid) && validMatching(request.resource.data)
-                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['matchableAs']) || identityUnlocked());
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(identityLockedKeys()) || identityUnlocked());
         allow delete: if false;
       }
 

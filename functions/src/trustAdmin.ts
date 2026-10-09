@@ -226,7 +226,8 @@ export const adminViewProfile = onCall({ timeoutSeconds: 30, memory: '256MiB', i
   return {
     uid,
     profile: pick([
-      'displayName', 'age', 'genderIdentity', 'bio', 'promptAnswers', 'photoURLs', 'locationLabel', 'memberSince', 'verificationStatus',
+      // §4.A2: gender and pronouns as people see them (the server-built line).
+      'displayName', 'age', 'genderLine', 'bio', 'promptAnswers', 'photoURLs', 'locationLabel', 'memberSince', 'verificationStatus',
       'personalityTraits', 'relationshipValues', 'lifestyleTags', 'weekendVibes', 'habitTags', 'isFounder', 'founderBadge', 'zyloveScoreTier',
     ]),
     sparkBio: str(spark.data()?.bio) || null,

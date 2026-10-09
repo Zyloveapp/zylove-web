@@ -123,7 +123,8 @@ export const onMarketOpened = onDocumentWritten(
     const everyone = [...new Set([...inMarket.docs, ...linked.docs].map((d) => d.id))].filter((id) => !isBotUid(id))
     for (const id of everyone) {
       const [root, internal, matching] = await Promise.all([db.doc(`users/${id}`).get(), db.doc(`userInternal/${id}`).get(), db.doc(`users/${id}/private/matching`).get()])
-      const u: DocumentData = { ...planView(root.data(), internal.data()), matchableAs: matching.get('matchableAs') }
+      // §4.A2: gender from private/matching (the root's old copy until migrated).
+      const u: DocumentData = { ...planView(root.data(), internal.data()), genderIdentity: matching.get('genderIdentity') ?? root.get('genderIdentity'), matchableAs: matching.get('matchableAs') }
       if (root.data()?.onboardingComplete === true && u.trialStartedAt === undefined && u.hadPaidPlan !== true && !trialExempt(u)) starting.push(id)
     }
     const trial = newTrial()
@@ -158,7 +159,10 @@ export const checkTrialStatus = onSchedule(
     const ended = await db.collection('userInternal').where('trialEndsAt', '<', Timestamp.now()).get()
     const expiring = []
     for (const d of ended.docs) {
-      const u = planView((await db.doc(`users/${d.id}`).get()).data(), d.data())
+      // How they're matched decides an exempt identity (§4.A2: gender and
+      // matchableAs live in private/matching).
+      const [root, matching] = await Promise.all([db.doc(`users/${d.id}`).get(), db.doc(`users/${d.id}/private/matching`).get()])
+      const u: DocumentData = { ...planView(root.data(), d.data()), genderIdentity: matching.get('genderIdentity') ?? root.get('genderIdentity'), matchableAs: matching.get('matchableAs') }
       const paidTier = u.subscriptionTier === 'spark_plus' || u.subscriptionTier === 'elite'
       if (u.trialStartedAt != null && u.trialExpired !== true && !trialExempt(u) && !paidTier) expiring.push(d)
     }

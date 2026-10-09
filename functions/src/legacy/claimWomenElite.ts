@@ -42,8 +42,10 @@ export const claimWomenElite = onCall(LEGACY_RUNTIME, async (request) => {
     throw new HttpsError('failed-precondition', 'User doc not found.')
   }
 
+  // §4.A2: the gender is in the owner-only private/matching (the public
+  // doc's old copy until migrated).
   const data = snap.data() ?? {}
-  const gender = data.genderIdentity
+  const gender = (await userRef.collection('private').doc('matching').get()).get('genderIdentity') ?? data.genderIdentity
 
   if (!isWomanIdentity(gender)) {
     return { success: false, error: 'not_eligible' }
