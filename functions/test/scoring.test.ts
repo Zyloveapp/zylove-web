@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { calculateSparkScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkPairFields } from '../src/legacy/scoring'
+import { calculatePlayScore, calculateSparkScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkPairFields } from '../src/legacy/scoring'
 import { DEALBREAKER_CAP } from '../src/legacy/tier1/scorePair'
 import type { UserDoc } from '../src/legacy/types'
 import { person, quantile, rng, type Profile } from './population'
@@ -218,4 +218,55 @@ test('realistic dealbreaker pairs never score above the cap', () => {
   const triggered = REAL.filter((r) => r.triggeredDealbreakers.length > 0)
   assert.ok(triggered.length > 30, `only ${triggered.length}`)
   for (const r of triggered) assert.ok(r.score <= DEALBREAKER_CAP && r.tier0Score <= DEALBREAKER_CAP && deep(r) <= DEALBREAKER_CAP, `${r.score} / ${r.tier0Score} / ${deep(r)}`)
+})
+
+// ─── F-098: displayed labels without dealbreaker shadow facets ──────────────
+
+// Dealbreakers neither triggers (same politics, exclusive, never drinks) —
+// only their shadow facets differ.
+const SHADOWS = ['different_politics', 'non_exclusive', 'heavy_drinker', 'different_religion', 'doesnt_want_kids']
+const shown = (r: ReturnType<typeof score>) => ({
+  archetype: (r.tier1!.archetype as { id?: string } | null)?.id ?? null,
+  strengths: r.tier1!.strengths,
+  differences: r.tier1!.differences,
+})
+
+test('F-098: a dealbreaker does not change the displayed archetype, strengths or differences', () => {
+  const him = man({ ...HOMEBODY, personalityTraits: ['caring', 'romantic', 'funny'], habitTags: ['night_owl', 'gamer'] })
+  const her = woman(HOMEBODY)
+  const plain = score(him, her)
+  const withDealbreakers = score(him, woman({ ...HOMEBODY, dealbreakers: SHADOWS }))
+  assert.deepEqual(withDealbreakers.triggeredDealbreakers, [])
+  assert.equal(plain.enoughInfo, true)
+  assert.deepEqual(shown(withDealbreakers), shown(plain))
+  // Either side's: his too.
+  assert.deepEqual(shown(score(man({ ...him, dealbreakers: SHADOWS }), her)), shown(plain))
+})
+
+test('F-098: across the population, labels never depend on untriggered dealbreakers', () => {
+  const rnd = rng(23)
+  let compared = 0
+  for (let i = 0; i < 1500; i++) {
+    const a = person(rnd, 'man', { blankShare: 0.05, dealbreakers: true })
+    const b = person(rnd, 'woman', { blankShare: 0.05, dealbreakers: true })
+    const r = score(a, b)
+    if (r.triggeredDealbreakers.length || !r.tier1) continue
+    const bare = score({ ...a, dealbreakers: [] }, { ...b, dealbreakers: [] })
+    // "Enough info" (like the score) still counts shadow evidence: the
+    // rare pair it tips is compared on the labels only where both show them.
+    if (r.enoughInfo !== bare.enoughInfo) continue
+    assert.deepEqual(shown(r), shown(bare))
+    compared++
+  }
+  assert.ok(compared > 300, `only ${compared} pairs`)
+})
+
+test('F-098: the Play label does not depend on dealbreakers', () => {
+  const rnd = rng(29)
+  for (let i = 0; i < 500; i++) {
+    const a = person(rnd, 'man', { blankShare: 0.05, dealbreakers: true })
+    const b = person(rnd, 'woman', { blankShare: 0.05, dealbreakers: true })
+    const play = (x: Profile, y: Profile) => calculatePlayScore(x as unknown as UserDoc, y as unknown as UserDoc).tier1?.archetype?.id ?? null
+    assert.equal(play(a, b), play({ ...a, dealbreakers: [] }, { ...b, dealbreakers: [] }))
+  }
 })

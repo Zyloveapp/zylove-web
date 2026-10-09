@@ -183,8 +183,15 @@ export function computeFacetProfile(user: DatingProfile): FacetVector {
   return analyzeFacets(user).vector
 }
 
-/** The facet vector plus the evidence behind it (see FacetAnalysis). */
-export function analyzeFacets(user: DatingProfile): FacetAnalysis {
+/**
+ * The facet vector plus the evidence behind it (see FacetAnalysis).
+ * `shadows: false` leaves out the dealbreaker shadow facets: F-098 — what's
+ * DISPLAYED (archetypes, where you line up / differ) is computed without
+ * them, since a shadow-only facet named the person's private dealbreakers
+ * (and, through different_religion's branch, whether they're secular). The
+ * score keeps them.
+ */
+export function analyzeFacets(user: DatingProfile, { shadows = true }: { shadows?: boolean } = {}): FacetAnalysis {
   const acc: Accumulator = { raw: {}, evidence: {}, recognized: 0 }
   for (const facetId of ALL_FACET_IDS) {
     acc.raw[facetId] = 0
@@ -210,7 +217,7 @@ export function analyzeFacets(user: DatingProfile): FacetAnalysis {
   // Conditional shadows (wants_kids, different_religion) are resolved against
   // the user's own context here; see traitToFacetMap.ts for the branching.
   const dealbreakers = (user as any).dealbreakers
-  if (Array.isArray(dealbreakers) && dealbreakers.length > 0) {
+  if (shadows && Array.isArray(dealbreakers) && dealbreakers.length > 0) {
     const ctx = buildShadowContext(user)
     for (const dealbreaker of dealbreakers) {
       const shadow = DEALBREAKER_SHADOW_FACETS[dealbreaker as keyof typeof DEALBREAKER_SHADOW_FACETS]

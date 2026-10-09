@@ -47,7 +47,7 @@ import {
   DEALBREAKER_REPULSION_MAP,
   type DealbreakerRepulsion,
 } from './traitToFacetMap'
-import type { FacetAnalysis, FacetVector } from './facetProfile'
+import { analyzeFacets, type FacetAnalysis, type FacetVector } from './facetProfile'
 import { calibrateTier1 } from './calibration'
 import type { DatingProfile, Dealbreaker } from '../types'
 import { matchSparkArchetype, matchUnlikelyFit } from './archetypeMatcher'
@@ -86,7 +86,8 @@ export interface PairScoreResult {
   displayAB:               number
   displayBA:               number
   // Deep Fit's reasons: the facets (display names) where the two line up
-  // most, and where they differ most. Only facets both gave evidence for.
+  // most, and where they differ most. Only facets both gave evidence for,
+  // without dealbreaker shadows (F-098).
   strengths:               string[]
   differences:             string[]
   // Both people answered enough recognized questions, and the shared
@@ -627,6 +628,14 @@ export function computePairScore(
   const combined = toDisplay(combinedRaw)
   const enoughInfo = hasEnoughInfo(coverage, analysisA.recognized, analysisB.recognized)
 
+  // F-098: what's displayed — the archetype and the reasons — comes from
+  // the facets without dealbreaker shadows (analyzeFacets shadows: false),
+  // so a label never rests on someone's private dealbreakers. The score
+  // above keeps them (unchanged).
+  const shownA = analyzeFacets(userA, { shadows: false })
+  const shownB = analyzeFacets(userB, { shadows: false })
+  const shownFacetScores = computeBaseAndFacetScores(shownA, shownB).facetScores
+
   // Archetype classification — facet-based matchers run first, Unlikely
   // Fit runs post-score as fallback. Unlikely Fit is stubbed (always
   // null) until Phase 6 calibrates its band against production score
@@ -635,8 +644,8 @@ export function computePairScore(
   // No archetype without enough to go on — it would describe the gaps.
   const archetype: ArchetypeMatch | null = !enoughInfo
     ? null
-    : matchSparkArchetype(vectorA, vectorB) ??
-      matchUnlikelyFit(vectorA, vectorB, combined, hasDealbreakerPenalty)
+    : matchSparkArchetype(shownA.vector, shownB.vector) ??
+      matchUnlikelyFit(shownA.vector, shownB.vector, combined, hasDealbreakerPenalty)
 
   return {
     scoreAB,
@@ -660,7 +669,7 @@ export function computePairScore(
     coverage,
     displayAB:               toDisplay(scoreAB),
     displayBA:               toDisplay(scoreBA),
-    ...(enoughInfo ? reasons(facetScores) : { strengths: [], differences: [] }),
+    ...(enoughInfo ? reasons(shownFacetScores) : { strengths: [], differences: [] }),
     enoughInfo,
 
     asymmetryData: {

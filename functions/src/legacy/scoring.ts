@@ -4,7 +4,7 @@
 // Field names corrected to match actual Firestore data from onboarding.
 
 import { UserDoc, SparkBreakdown, PlayBreakdown } from "./types";
-import { analyzeFacets, computeFacetProfile } from "./tier1/facetProfile";
+import { analyzeFacets } from "./tier1/facetProfile";
 import { computePairScore, DEALBREAKER_CAP, hasEnoughInfo, shrinkToPrior } from "./tier1/scorePair";
 import { calibrateTier0 } from "./tier1/calibration";
 import { matchPlayArchetype } from "./tier1/archetypeMatcher";
@@ -472,8 +472,10 @@ export function calculatePlayScore(
 
   // Compute Play archetype, wrapped to match Spark's tier1 shape so the UI
   // can read tier1.archetype.label uniformly across both modes.
-  const facetA = computeFacetProfile(userA as any);
-  const facetB = computeFacetProfile(userB as any);
+  // F-098: the label is displayed, so it's from the facets without
+  // dealbreaker shadows (they'd show the private dealbreakers).
+  const facetA = analyzeFacets(userA as any, { shadows: false }).vector;
+  const facetB = analyzeFacets(userB as any, { shadows: false }).vector;
   const spiceAligned = isSpiceAligned(a.spiceLevel ?? '', b.spiceLevel ?? '');
   const archetype = matchPlayArchetype(facetA, facetB, spiceAligned) ?? null;
 
