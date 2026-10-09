@@ -83,7 +83,7 @@ export interface Features {
   contactRequests24h: number // "Share contact" requests in the last day
   contactFastAfterUnlock7d: number // requests within 5 minutes of the chat unlocking, last 7 days
   // T&S Phase 5
-  duplicatePhotoAccounts: number // other accounts sharing the same or a near-same photo
+  duplicatePhotoAccounts: number // other accounts that had the same or a near-same photo first (F-087)
   blocklistPhoto: boolean // a photo matched one from an account banned for scams
 }
 
@@ -194,8 +194,10 @@ export function scoreFeatures(f: Features, baseline: Baseline | null): { score: 
   if (f.contactRequests24h >= 5) add('contact_rush', 20, `Asked ${f.contactRequests24h} matches for contact details within a day`)
   // T&S Phase 5 — duplicate photos.
   if (f.blocklistPhoto) add('blocklist_photo', 60, 'A photo matches one from an account banned for scams')
+  // F-087: below FLAG_AT on its own (a copied public photo shouldn't open a
+  // flag by itself); it still adds up with other signals.
   if (f.duplicatePhotoAccounts > 0) {
-    add('duplicate_photo', 40, `Same or near-same photo as ${plural(f.duplicatePhotoAccounts, 'other account')}`)
+    add('duplicate_photo', 25, `Same or near-same photo as ${plural(f.duplicatePhotoAccounts, 'other account')} that had it first`)
   }
   if (f.contactFastAfterUnlock7d >= 3) add('contact_fast', 15, `Asked for contact details the moment a chat unlocked, ${f.contactFastAfterUnlock7d} times this week`)
 

@@ -45,7 +45,7 @@ export { adminCityStats, adminListDeletions, adminPurgeAccount } from './adminTo
 export { adminGetActivity, adminUserAction } from './adminActivity'
 export { deleteKeyBackup, getKeyBackupInfo, restoreKeyBackup, saveKeyBackup } from './keyBackup'
 export { deleteModePhotos } from './profilePhotos'
-export { updateDisplayName } from './displayName'
+export { deletePlayProfile, updateDisplayName } from './displayName'
 export { processBotLikeBacks, queueBotLikeBack } from './botLikeBack'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { keptForReport, recomputeBehaviorRisk, recordVibeSignal } from './behavior'

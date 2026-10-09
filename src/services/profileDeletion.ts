@@ -1,4 +1,4 @@
-import { deleteDoc, deleteField, doc, getDoc, setDoc, updateDoc, writeBatch } from 'firebase/firestore'
+import { deleteField, doc, getDoc, updateDoc, writeBatch } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { loadPrivateProfile, privateProfileDoc, savePrivateProfile } from './privateProfile'
@@ -62,17 +62,18 @@ export async function deleteSparkProfile(uid: string): Promise<{ playRemains: bo
   if (playRemains) batch.set(privateProfileDoc(uid), { onboardingPath: 'play', intent: 'play', mode: 'play' }, { merge: true })
   batch.delete(doc(db, `users/${uid}/sparkProfile/data`))
   await batch.commit()
-  // Spark photos still in review go too (the rules let the owner only empty
-  // this list). Best effort: the profile is already gone either way.
-  await setDoc(doc(db, 'users', uid, 'private', 'account'), { pendingPhotoURLs: [] }, { merge: true }).catch(() => {})
+  // Spark photos still in review go with the files (deleteModePhotos), except
+  // ones held for their content, which stay for review (F-081).
   await deletePhotoFolder('spark')
   return { playRemains }
 }
 
 // Play lives in playProfile/data alone (Stage 2); deleting it removes it.
+// Server-side (deletePlayProfile callable, F-079), which keeps the Play
+// name's 30-day lock.
 export async function deletePlayProfile(uid: string): Promise<{ sparkRemains: boolean }> {
   const sparkRemains = await hasSparkProfile(uid)
-  await deleteDoc(doc(db, `users/${uid}/playProfile/data`))
+  await httpsCallable(functions, 'deletePlayProfile')()
   await savePrivateProfile(uid, sparkRemains ? { onboardingPath: 'spark', intent: 'spark', mode: 'spark' } : {})
   if (!sparkRemains) await updateDoc(doc(db, 'users', uid), { onboardingComplete: false })
   await deletePhotoFolder('play')

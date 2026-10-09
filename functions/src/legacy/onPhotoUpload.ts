@@ -160,8 +160,9 @@ export const onPhotoUpload = onObjectFinalized(
       if (clean.bytes.length !== raw.length) {
         await file.save(clean.bytes, { contentType: clean.contentType, resumable: false, metadata: { metadata: { zyloveCopy: '1' } } })
       }
-      // T&S Phase 5: its perceptual hash — duplicates on other accounts flag
-      // both for review; a match with a banned scammer's photo holds it back.
+      // T&S Phase 5: its perceptual hash — a duplicate on another account
+      // counts against whichever had it later (F-087); a match with a banned
+      // scammer's photo holds it back.
       const hashed = await checkPhoto(uid, filePath, isPlayPhoto ? 'play' : 'spark', Buffer.from(clean.bytes)).catch((err: unknown) => {
         console.warn(`[photoHash] failed for uid ${uid}: ${redactPlayPaths(err instanceof Error ? err.message : String(err))}`)
         return null
@@ -172,6 +173,8 @@ export const onPhotoUpload = onObjectFinalized(
         await photoHoldRef(uid, photoRef).set({
           uid,
           url: photoRef,
+          mode: isPlayPhoto ? 'play' : 'spark',
+          kind: 'blocklist',
           match: hashed.blocklisted,
           more: hashed.blocklistMore,
           distance: hashed.blocklisted.distance,
@@ -266,11 +269,22 @@ export const onPhotoUpload = onObjectFinalized(
       const flagged = exceeded.length > 0
 
       if (flagged) {
-        // Add to pendingPhotoURLs — hidden from Discover until approved
+        // Add to pendingPhotoURLs — hidden from Discover until approved.
+        // F-081: kept server-side too (photoHolds), so it stays in review
+        // whatever happens to the owner's list.
+        const flaggedAt = admin.firestore.Timestamp.now()
+        await photoHoldRef(uid, photoRef).set({
+          uid,
+          url: photoRef,
+          mode: isPlayPhoto ? 'play' : 'spark',
+          kind: 'content',
+          reason: { ...scores, exceeded },
+          heldAt: flaggedAt,
+        })
         await flagPending({
           url: photoRef,
           mode: isPlayPhoto ? 'play' : 'spark',
-          flaggedAt: admin.firestore.Timestamp.now(),
+          flaggedAt,
           reason: { ...scores, exceeded },
           approved: false,
         })

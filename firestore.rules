@@ -227,6 +227,17 @@ service cloud.firestore {
                 : timestamp.date(int(b[0:4]) + 18, int(b[5:7]), int(b[8:10]))) <= request.time;
     }
 
+    // F-079: a public name written directly (the first displayName or
+    // playDisplayName) follows updateDisplayName's rule: 2–20 characters,
+    // letters (any language), numbers, and single spaces, hyphens or
+    // apostrophes between them. Names go into texts, so no links or handles.
+    // Absent or null is no name yet.
+    function publicNameOk(d, key) {
+      return d.get(key, null) == null
+          || (d[key] is string && d[key].size() >= 2 && d[key].size() <= 20
+              && d[key].matches("^[\\p{L}\\p{M}\\p{N}]+(?:[ '’-][\\p{L}\\p{M}\\p{N}]+)*$"));
+    }
+
     // Published photos (photoURLs) are added only by Cloud Functions after
     // moderation (onPhotoUpload, reviewPendingPhoto): clients may remove or
     // reorder them, never add (getPhotoUrls hands a photo out to others only
@@ -249,14 +260,16 @@ service cloud.firestore {
       allow create: if callerActive() && isUser(uid) && isSignedIn()
                     && !request.resource.data.keys().hasAny(serverOnlyUserFields())
                     && request.resource.data.get('photoURLs', []).size() == 0
-                    && adultAge(request.resource.data);
+                    && adultAge(request.resource.data)
+                    && publicNameOk(request.resource.data, 'displayName');
       // Identity-lock fields (age, genderIdentity, matchableAs,
       // identityLockedAt): blocked AFTER identityLockedAt is set. First
       // write (when field is still null) is permitted — that's the slide-2
       // confirm or the retroactive ensureIdentityLock write. Age then
       // follows the private birthday server-side (refreshAges).
       // Public names (displayName, playDisplayName): the first one is set
-      // directly by onboarding; after that only updateDisplayName changes them.
+      // directly by onboarding (F-079: in the same form updateDisplayName
+      // takes); after that only updateDisplayName changes them.
       allow update: if callerActive() && isUser(uid) && isSignedIn()
                     && !request.resource.data.diff(resource.data).affectedKeys().hasAny(serverOnlyUserFields())
                     && photosOnlyShrink(resource.data, request.resource.data)
@@ -265,24 +278,24 @@ service cloud.firestore {
                         || !request.resource.data.diff(resource.data).affectedKeys()
                             .hasAny(['age', 'genderIdentity', 'matchableAs', 'identityLockedAt']))
                     && (resource.data.get('displayName', null) == null
-                        || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['displayName']));
+                        ? publicNameOk(request.resource.data, 'displayName')
+                        : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['displayName']));
       // Never deleted by the client: recreating it would reset the identity
       // lock (Stage A). Account deletion is server-side.
       allow delete: if false;
 
       // Plan mirror, SMS consent (with the verified phone), Spark photos in
-      // review and the saved-location summary. Written by Cloud Functions;
-      // the owner may only empty their Spark photo-review queue.
+      // review and the saved-location summary. Written by Cloud Functions.
       match /private/account {
         allow read: if isSignedIn() && isUser(uid);
-        // The owner may empty their Spark photo-review queue, or mark the
-        // moderation team's notice as seen (adminNotice.seenAt, F-040).
+        // The owner may only mark the moderation team's notice as seen
+        // (adminNotice.seenAt, F-040). F-081: the photo-review queue is the
+        // server's alone — emptying it hid photos flagged for their content
+        // before review; deleting a profile drops that mode's other holds
+        // server-side (deleteModePhotos).
         allow update: if isSignedIn() && isUser(uid)
-                      && ((request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pendingPhotoURLs'])
-                           && request.resource.data.pendingPhotoURLs is list
-                           && request.resource.data.pendingPhotoURLs.size() == 0)
-                          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['adminNotice'])
-                              && request.resource.data.adminNotice.diff(resource.data.adminNotice).affectedKeys().hasOnly(['seenAt'])));
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['adminNotice'])
+                      && request.resource.data.adminNotice.diff(resource.data.adminNotice).affectedKeys().hasOnly(['seenAt']);
         allow create, delete: if false;
       }
 
@@ -402,19 +415,36 @@ service cloud.firestore {
       function playServerFields() {
         return ['pendingPhotoURLs', 'playVisibility', 'playDisplayNameUpdatedAt'];
       }
+      // F-079: the first Play name follows publicNameOk, and a deleted Play
+      // profile's name lock (userInternal/{uid}.playNameLock, kept by
+      // deletePlayProfile and updateDisplayName) still holds: the same name
+      // again, or a new one 30 days after the last change.
+      function playNameLockOpen(lock, name) {
+        return lock == null || lock.get('name', null) == name || request.time >= lock.at + duration.value(30, 'd');
+      }
+      function playNameOk(d) {
+        return publicNameOk(d, 'playDisplayName')
+            && (d.get('playDisplayName', null) == null
+                || !exists(/databases/$(database)/documents/userInternal/$(uid))
+                || playNameLockOpen(get(/databases/$(database)/documents/userInternal/$(uid)).data.get('playNameLock', null), d.playDisplayName));
+      }
       // F-062: owner-only — others see the server-kept copy, playProfiles/
       // {playId}, which carries no uid.
       match /playProfile/{doc} {
         allow read: if isSignedIn() && isUser(uid);
         allow create: if callerActive() && isUser(uid) && isSignedIn()
                       && request.resource.data.get('photoURLs', []).size() == 0
-                      && !request.resource.data.keys().hasAny(playServerFields());
+                      && !request.resource.data.keys().hasAny(playServerFields())
+                      && playNameOk(request.resource.data);
         allow update: if callerActive() && isUser(uid) && isSignedIn()
                       && photosOnlyShrink(resource.data, request.resource.data)
                       && !request.resource.data.diff(resource.data).affectedKeys().hasAny(playServerFields())
                       && (resource.data.get('playDisplayName', null) == null
-                          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['playDisplayName']));
-        allow delete: if isUser(uid) && isSignedIn();
+                          ? playNameOk(request.resource.data)
+                          : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['playDisplayName']));
+        // F-079: deletePlayProfile only — a client delete dropped the name's
+        // last-change time with the doc, resetting the 30-day limit.
+        allow delete: if false;
       }
 
       // Visibility settings — own only

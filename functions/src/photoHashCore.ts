@@ -65,3 +65,25 @@ export function probeKeys(hash: string): string[] {
   }
   return out
 }
+
+// F-087: a duplicate counts against the account that had the photo later —
+// re-uploading someone's public photo mustn't flag the person it came from.
+// Each side's time is its first upload of the photo; a side with no time
+// (older records) counts as the earlier one; a tie goes to `mine` (the
+// account uploading now).
+export function newerUploader(mine: { uid: string; at: number | null }, theirs: { uid: string; at: number | null }): string {
+  if (mine.at === null) return theirs.at === null ? mine.uid : theirs.uid
+  if (theirs.at === null) return mine.uid
+  return theirs.at > mine.at ? theirs.uid : mine.uid
+}
+
+// Each account's first upload time among the near-matches of one photo.
+export function firstUploads(matches: { uid: string; at: unknown }[]): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const m of matches) {
+    if (typeof m.at !== 'number' || !Number.isFinite(m.at)) continue
+    const cur = out.get(m.uid)
+    if (cur === undefined || m.at < cur) out.set(m.uid, m.at)
+  }
+  return out
+}

@@ -32,7 +32,7 @@ import {
 } from '../../services/playOnboarding'
 import { HeightPicker } from './ui'
 import { InspirationPills, InspirationToggle } from './Inspirations'
-import { MAX_PLAY_NAME, formatNameChangeDate } from '../../services/displayNames'
+import { MAX_PLAY_NAME, NAME_RULE, formatNameChangeDate, publicNameOk } from '../../services/displayNames'
 import StoredImg from '../StoredImg'
 
 // The Play steps, shared by the Play-only path in /onboarding and by
@@ -161,6 +161,9 @@ export function PlayNameStep({
           {play.playDisplayName.length}/{MAX_PLAY_NAME}
         </span>
       </div>
+      {lockedUntil === null && play.playDisplayName.trim() !== '' && !publicNameOk(play.playDisplayName) && (
+        <p className="mt-2 text-xs text-red-400">{NAME_RULE}</p>
+      )}
     </>
   )
 }

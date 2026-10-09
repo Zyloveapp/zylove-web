@@ -2,7 +2,7 @@
 // and the band probes find every pair within the distance.
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { MAX_DISTANCE, bandKeys, dHash, hamming, probeKeys } from '../src/photoHashCore'
+import { MAX_DISTANCE, bandKeys, dHash, firstUploads, hamming, newerUploader, probeKeys } from '../src/photoHashCore'
 import { FLAG_AT, featuresOf, scoreFeatures } from '../src/trustScore'
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const sharp = require('sharp')
@@ -61,12 +61,35 @@ test('band probes find every hash within distance 8 (and band keys are positiona
   }
 })
 
-test('risk score: a duplicate photo flags; a blocklist match flags strongly', () => {
+test('risk score: a duplicate photo alone stays under the flag (F-087) but adds up; a blocklist match flags strongly', () => {
   const dup = scoreFeatures(featuresOf({ signals: { duplicatePhotos: { accounts: 1 } } }), null)
-  assert.ok(dup.score >= FLAG_AT)
+  assert.ok(dup.score < FLAG_AT)
   assert.equal(dup.reasons[0].key, 'duplicate_photo')
-  assert.match(dup.reasons[0].text, /near-same photo as 1 other account/)
+  assert.equal(dup.reasons[0].points, 25)
+  assert.match(dup.reasons[0].text, /near-same photo as 1 other account that had it first/)
+  const withDevice = scoreFeatures({ ...featuresOf({ signals: { duplicatePhotos: { accounts: 1 } } }), sharedDeviceAccounts: 1 }, null)
+  assert.ok(withDevice.score >= FLAG_AT)
   const bl = scoreFeatures(featuresOf({ signals: { blocklistPhoto: { at: 1 } } }), null)
   assert.equal(bl.reasons[0].key, 'blocklist_photo')
   assert.ok(bl.score >= FLAG_AT)
+})
+
+test('duplicates count against the newer uploader only (F-087)', () => {
+  // The copier uploads now; the owner had it earlier.
+  assert.equal(newerUploader({ uid: 'copier', at: 2000 }, { uid: 'owner', at: 1000 }), 'copier')
+  // The owner re-uploads their own photo after someone copied it: their
+  // first copy still decides.
+  const first = firstUploads([
+    { uid: 'owner', at: 1000 },
+    { uid: 'copier', at: 2000 },
+    { uid: 'owner', at: 3000 },
+    { uid: 'old', at: undefined },
+  ])
+  assert.equal(first.get('owner'), 1000)
+  assert.equal(first.has('old'), false)
+  assert.equal(newerUploader({ uid: 'owner', at: first.get('owner') ?? null }, { uid: 'copier', at: first.get('copier') ?? null }), 'copier')
+  // A record from before upload times counts as the earlier; a tie is the uploader's.
+  assert.equal(newerUploader({ uid: 'me', at: 5 }, { uid: 'them', at: null }), 'me')
+  assert.equal(newerUploader({ uid: 'me', at: null }, { uid: 'them', at: 5 }), 'them')
+  assert.equal(newerUploader({ uid: 'me', at: 5 }, { uid: 'them', at: 5 }), 'me')
 })

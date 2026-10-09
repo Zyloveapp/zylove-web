@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { logger } from 'firebase-functions'
 import { FieldValue, getFirestore, type DocumentData, type QueryDocumentSnapshot } from 'firebase-admin/firestore'
-import { MAX_DISTANCE, bandKeys, dHash, hamming, probeKeys } from './photoHashCore'
+import { MAX_DISTANCE, bandKeys, dHash, firstUploads, hamming, newerUploader, probeKeys } from './photoHashCore'
 import type { BanContext, StoredMatch } from './blocklistContext'
 
 // T&S Phase 5 — duplicate photos. Server-only; hashes are not images.
@@ -9,11 +9,12 @@ import type { BanContext, StoredMatch } from './blocklistContext'
 //   photoBlocklist/{id}  { uid, path, hash, bands, bannedAt, by, name, adminMarkedScam,
 //                        reports } photos of accounts banned for scams/fraud, with
 //                        the ban's context — kept while the ban stands
-//   photoDuplicates/{a__b} { uids: [a, b], photos: { [a]: path, [b]: path }[], distance,
-//                        status, at } — the same or near-same photo on two accounts,
-//                        for side-by-side review
-// A near-match on another account flags BOTH accounts (risk score) — never
-// rejects. A match on the blocklist holds the photo from publishing (pending
+//   photoDuplicates/{a__b} { uids: [a, b], photos: { [a]: path, [b]: path, newer }[],
+//                        distance, status, at } — the same or near-same photo on two
+//                        accounts, for side-by-side review (both are shown)
+// A near-match on another account counts against the account that had the
+// photo later (risk score; F-087 — it used to count against both, so copying
+// someone's photo flagged them) — never rejects. A match on the blocklist holds the photo from publishing (pending
 // review) — never deletes it. The same account reusing its own photo (say in
 // Spark and Play) is not a match.
 
@@ -67,14 +68,19 @@ export async function checkPhoto(
 ): Promise<{ hash: string; blocklisted: StoredMatch | null; blocklistMore: number; duplicates: NearMatch[] }> {
   const hash = await dHash(bytes)
   const blocked = (await nearMatches('photoBlocklist', hash)).filter((m) => m.uid !== uid)
-  await db().doc(`photoHashes/${idOf(path)}`).set({ uid, path, mode, hash, bands: bandKeys(hash), at: Date.now() })
-  const duplicates = (await nearMatches('photoHashes', hash)).filter((m) => m.uid !== uid)
+  const now = Date.now()
+  await db().doc(`photoHashes/${idOf(path)}`).set({ uid, path, mode, hash, bands: bandKeys(hash), at: now })
+  const all = await nearMatches('photoHashes', hash)
+  const duplicates = all.filter((m) => m.uid !== uid)
+  // F-087: who had the photo first (each account's earliest copy of it).
+  const first = firstUploads(all.map((m) => ({ uid: m.uid, at: m.data.at })))
   for (const d of duplicates) {
     const ref = db().doc(`photoDuplicates/${pairId(uid, d.uid)}`)
+    const newer = newerUploader({ uid, at: first.get(uid) ?? now }, { uid: d.uid, at: first.get(d.uid) ?? null })
     await db().runTransaction(async (tx) => {
       const cur = (await tx.get(ref)).data()
       const photos = ((cur?.photos ?? []) as Record<string, string>[]).filter((p) => !(p[uid] === path && p[d.uid] === d.path))
-      photos.push({ [uid]: path, [d.uid]: d.path })
+      photos.push({ [uid]: path, [d.uid]: d.path, newer })
       tx.set(ref, { uids: [uid, d.uid].sort(), photos: photos.slice(-20), distance: Math.min(d.distance, cur?.distance ?? 64), status: 'open', at: Date.now() })
     })
   }
@@ -85,13 +91,30 @@ export async function checkPhoto(
   return { hash, blocklisted: blocked.length ? storedMatch(blocked[0]) : null, blocklistMore: Math.max(0, blocked.length - 1), duplicates }
 }
 
-// behaviorSignals/{uid}.duplicatePhotos { accounts, at } — other accounts that
-// share a photo with this one (open pairs).
+// behaviorSignals/{uid}.duplicatePhotos { accounts, at } — other accounts
+// that had a photo before this one did (open pairs where this account is the
+// newer uploader of at least one shared photo — F-087).
 async function refreshDuplicateSignal(uid: string): Promise<void> {
   const open = await db().collection('photoDuplicates').where('uids', 'array-contains', uid).where('status', '==', 'open').get()
+  let against = 0
+  for (const p of open.docs) {
+    const photos = (p.get('photos') ?? []) as Record<string, string>[]
+    if ((await Promise.all(photos.map(newerOf))).includes(uid)) against++
+  }
   await db()
     .doc(`behaviorSignals/${uid}`)
-    .set({ duplicatePhotos: open.empty ? FieldValue.delete() : { accounts: open.size, at: Date.now() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true })
+    .set({ duplicatePhotos: against === 0 ? FieldValue.delete() : { accounts: against, at: Date.now() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true })
+}
+
+// The newer uploader of one shared photo: recorded since F-087; for an older
+// entry, from the two photos' hash records.
+async function newerOf(entry: Record<string, string>): Promise<string | null> {
+  if (typeof entry.newer === 'string') return entry.newer
+  const sides = Object.entries(entry)
+  if (sides.length !== 2) return null
+  const at = await Promise.all(sides.map(async ([, path]) => (await db().doc(`photoHashes/${idOf(path)}`).get()).get('at')))
+  const time = (v: unknown) => (typeof v === 'number' ? v : null)
+  return newerUploader({ uid: sides[0][0], at: time(at[0]) }, { uid: sides[1][0], at: time(at[1]) })
 }
 
 // A photo's file is gone (photoHashTrigger.ts): its hash goes, and it
