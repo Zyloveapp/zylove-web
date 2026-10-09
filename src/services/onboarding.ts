@@ -13,9 +13,7 @@ import { keysReady, resolveKeypair } from './keys'
 import {
   OFF_MAP_GENDER_IDENTITIES,
   feetInchesToCm,
-  type BodyType,
   type DatingProfile,
-  type SeekingTrait,
 } from '../types/profile'
 import type { PromptAnswer, SparkProfile } from '../types/dualProfile'
 import { computeSparkCompleteness } from '../types/scorecard'
@@ -123,19 +121,16 @@ const OPTIONAL_ROOT_FIELDS: OptionalRootField[] = [
   'stressResponse',
 ]
 
-// Private, owner-only doc at users/{uid}/seekingPreferences/prefs. The
-// dealbreakers aren't here: scoring reads them from private/matching (the
-// rules refuse them here).
+// Private, owner-only doc at users/{uid}/seekingPreferences/prefs: only the
+// editor's "Doesn't matter" choices now. The dealbreakers, body types, traits
+// and height range aren't here: scoring reads them from private/matching
+// (the rules refuse them here).
 export interface SeekingPreferencesDoc {
   uid: string
-  seekingBodyTypes: BodyType[]
-  seekingTraits: SeekingTrait[]
   seekingHeightNoPreference: boolean
   seekingBodyNoPreference?: boolean
   // null = "Doesn't matter" (no body-type filter in matching).
   bodyTypePreference?: null
-  seekingHeightMinCm?: number
-  seekingHeightMaxCm?: number
   _lastUpdated: number
 }
 
@@ -246,11 +241,17 @@ export async function saveSparkOnboarding(
   const fieldStates = await loadFieldStates(uid)
   const locked = lockedChanges(fieldStates, { ...limited, intent })
   if (locked.length > 0) throw new FieldLockedError(locked)
-  // Matching preferences: owner-only (private/matching, Stage 3).
+  // Matching preferences: owner-only (private/matching, Stage 3). The body
+  // types, traits and height range too: scoring reads them there (older web
+  // saves put them in seekingPreferences, where they never took effect).
   const matching = {
     radiusMiles: d.radiusMiles,
     ageMin: d.ageMin,
     ageMax: d.ageMax,
+    seekingBodyTypes: d.seekingBodyNoPreference ? [] : d.seekingBodyTypes,
+    seekingTraits: d.seekingTraits,
+    seekingHeightMinCm: d.seekingHeightNoPreference ? deleteField() : feetInchesToCm(d.seekingHeightMin.feet, d.seekingHeightMin.inches),
+    seekingHeightMaxCm: d.seekingHeightNoPreference ? deleteField() : feetInchesToCm(d.seekingHeightMax.feet, d.seekingHeightMax.inches),
     ...limitedPatch(fieldStates, limited),
     ...genderFields(d, genderIdentity, identityLocked),
   }
@@ -361,17 +362,13 @@ export async function saveSparkOnboarding(
   // sparkPromptAnswers (which loadOwnProfile prefers). Replace the map whole.
   batch.update(sparkRef, { sparkPromptAnswers, ...goDeeper })
 
+  // A full set: it also drops values older saves left here (shown until then
+  // as a fallback, see loadOwnProfile).
   const seeking: SeekingPreferencesDoc = {
     uid,
-    seekingBodyTypes: d.seekingBodyNoPreference ? [] : d.seekingBodyTypes,
     seekingBodyNoPreference: d.seekingBodyNoPreference,
     ...(d.seekingBodyNoPreference && { bodyTypePreference: null }),
-    seekingTraits: d.seekingTraits,
     seekingHeightNoPreference: d.seekingHeightNoPreference,
-    ...(!d.seekingHeightNoPreference && {
-      seekingHeightMinCm: feetInchesToCm(d.seekingHeightMin.feet, d.seekingHeightMin.inches),
-      seekingHeightMaxCm: feetInchesToCm(d.seekingHeightMax.feet, d.seekingHeightMax.inches),
-    }),
     _lastUpdated: now,
   }
   batch.set(doc(db, `users/${uid}/seekingPreferences/prefs`), seeking)
@@ -444,19 +441,16 @@ export interface RefreshDraft {
 // Rebuilds an onboarding draft from the saved profile for "Reimagine my
 // profile". Terms count as accepted; photos are kept as their stored URLs.
 export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null> {
-  const [own, seekingSnap] = await Promise.all([
-    loadOwnProfile(uid),
-    getDoc(doc(db, `users/${uid}/seekingPreferences/prefs`)).catch(() => null),
-  ])
+  const own = await loadOwnProfile(uid)
   if (!own) return null
   const p = own.profile as Record<string, unknown>
   const { legalName, birthday } = await loadIdentity(uid, p.birthday)
-  const s = seekingSnap?.data() ?? {}
   const prompts = own.prompts.slice(0, PROMPT_COUNT)
   const rawGender: unknown = Array.isArray(p.genderIdentity) ? p.genderIdentity[0] : p.genderIdentity
   const weekend = arr<OnboardingDraft['weekendVibes'][number]>(p.weekendVibes)
-  const minCm: unknown = s.seekingHeightMinCm
-  const maxCm: unknown = s.seekingHeightMaxCm
+  // The body types, traits and height range scoring uses (see loadOwnProfile).
+  const range = own.seekingHeightCm
+  const bodyTypes = arr<OnboardingDraft['seekingBodyTypes'][number]>(own.seekingBodyTypes)
 
   const draft: OnboardingDraft = {
     ...INITIAL_DRAFT,
@@ -489,17 +483,17 @@ export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null
     politicalView: str(p.politicalView),
     parentalCurrent: str(p.parentalCurrent),
     parentalIntent: str(p.parentalIntent),
-    seekingHeightNoPreference: s.seekingHeightNoPreference !== false,
-    seekingBodyNoPreference: s.seekingBodyNoPreference === true,
+    seekingHeightNoPreference: range === null,
+    seekingBodyNoPreference: bodyTypes.length === 0 && own.seekingBodyNoPreference,
     sparkGoDeeper: Array.isArray(p.goDeeper)
       ? (p.goDeeper as { question?: unknown; answer?: unknown }[])
           .filter((g) => typeof g?.question === 'string' && typeof g?.answer === 'string')
           .map((g) => ({ question: g.question as string, answer: g.answer as string }))
       : [],
-    seekingHeightMin: cmToHeight(minCm, INITIAL_DRAFT.seekingHeightMin),
-    seekingHeightMax: cmToHeight(maxCm, INITIAL_DRAFT.seekingHeightMax),
-    seekingBodyTypes: arr(s.seekingBodyTypes),
-    seekingTraits: arr(s.seekingTraits),
+    seekingHeightMin: cmToHeight(range?.min, INITIAL_DRAFT.seekingHeightMin),
+    seekingHeightMax: cmToHeight(range?.max, INITIAL_DRAFT.seekingHeightMax),
+    seekingBodyTypes: bodyTypes,
+    seekingTraits: arr(own.seekingTraits),
     // private/matching's (see loadOwnProfile).
     dealbreakers: arr(own.dealbreakers),
     intent: str((await loadPrivateProfile(uid, p)).intent),
