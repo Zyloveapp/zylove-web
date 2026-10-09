@@ -404,7 +404,9 @@ function build(p) {
   const seeking = attractedTo.length > 1 ? ['everyone'] : attractedTo
   const root = {
     uid, displayName: name, age, birthday: birthday(age, mmdd),
-    genderIdentity: isWoman ? 'woman' : 'man', attractedTo: seeking, showOrientation: false,
+    // §4.A2: gender is owner-only (private/matching, below); others see the
+    // server-built genderLine — empty for a man or woman with no pronouns.
+    genderLine: '', attractedTo: seeking, showOrientation: false,
     relationshipStatus: 'single', openTo,
     bodyType, heightCm,
     lifestyleTags: a.lifestyleTags, habitTags: a.habitTags, drinkingHabit, religion, politicalView,
@@ -426,8 +428,9 @@ function build(p) {
   // Stage 2: nothing Play on the public doc — the intent/mode go to the
   // owner-only private/profile, Play fields to playProfile/data.
   const meta = { intent: 'open', mode: 'spark' }
+  const matching = { genderIdentity: isWoman ? 'woman' : 'man' }
   const play = {
-    uid, displayName: name, genderIdentity: root.genderIdentity, attractedTo: seeking,
+    uid, displayName: name, attractedTo: seeking,
     spiceLevel: a.spiceLevel, playInterestTags: a.playInterestTags, playNonNegotiables, playStyle, playBio,
     promptAnswers: a.playPrompts.map(([promptId, answer]) => ({ promptId, answer })),
     ageMin, ageMax, radiusMiles: 25, orientation: seeking, intent: 'open',
@@ -436,7 +439,7 @@ function build(p) {
   // Austin bot whose photos this one borrows by default.
   const n = Number(id.slice(-3))
   const photoSource = `zbot-${isWoman ? 'w' : 'm'}-${String(id.startsWith('hou') ? n + 10 : n).padStart(3, '0')}`
-  return { uid, root, play, meta, photoSource }
+  return { uid, root, play, meta, matching, photoSource }
 }
 
 // ─── Run ─────────────────────────────────────────────────────────────────────
@@ -465,7 +468,7 @@ for (const bot of bots) {
   const photos = Array.isArray(photoMap[bot.uid])
     ? photoMap[bot.uid]
     : ((await db.doc(`users/${bot.photoSource}`).get()).data()?.photoURLs ?? [])
-  const key = `${bot.root.locationLabel} ${bot.root.genderIdentity}`
+  const key = `${bot.root.locationLabel} ${bot.matching.genderIdentity}`
   summary[key] = (summary[key] ?? 0) + 1
   console.log(
     `${apply ? 'create' : 'would create'} ${bot.uid}: ${bot.root.displayName}, ${bot.root.age} (${bot.root.birthday}) · ` +
@@ -482,6 +485,7 @@ for (const bot of bots) {
   batch.set(ref, { ...bot.root, photoURLs: photos, identityLockedAt: now, createdAt: now, lastActive: now, profileUpdatedAt: now })
   batch.set(ref.collection('playProfile').doc('data'), { ...bot.play, photoURLs: photos, createdAt: now, lastUpdated: now })
   batch.set(ref.collection('private').doc('profile'), bot.meta)
+  batch.set(ref.collection('private').doc('matching'), bot.matching, { merge: true })
   await batch.commit()
   created++
 }

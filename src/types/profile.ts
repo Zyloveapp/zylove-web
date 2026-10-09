@@ -30,11 +30,14 @@ export const OFF_MAP_GENDER_IDENTITIES: GenderIdentity[] = ['genderfluid', 'agen
 
 // ─── Orientation ──────────────────────────────────────────────────────────────
 
-export type AttractedTo = 'men' | 'women' | 'nonbinary_people' | 'trans_men' | 'trans_women' | 'everyone'
+// The "Trans men" / "Trans women" choices were retired (2026-10-09, F-098):
+// scoring and Explore read them as men / women, and the A2 migration moved
+// stored picks there.
+export type AttractedTo = 'men' | 'women' | 'nonbinary_people' | 'everyone'
 
 export const ATTRACTED_TO_LABELS: Record<AttractedTo, string> = {
   men: 'Men', women: 'Women', nonbinary_people: 'Non-binary people',
-  trans_men: 'Trans men', trans_women: 'Trans women', everyone: 'Everyone',
+  everyone: 'Everyone',
 }
 
 // ─── Relationship Status ──────────────────────────────────────────────────────

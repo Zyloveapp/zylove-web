@@ -119,8 +119,10 @@ test('§4.A2 / F-098: Explore still matches by matchableAs; cards carry only the
   for (const c of r.cards) for (const k of GENDER_KEYS) expect(c.profile[k], k).toBeUndefined()
   expect(r.cards.find((c) => c.uid === ag.uid).profile.genderLine).toBe('Agender')
 
-  // Attracted only to trans women: cis and trans women alike, in Explore and the score.
+  // Attracted only to trans women (a retired choice): seeding runs the A2
+  // migration, which maps it to women — cis and trans women alike.
   const seeker = await seedUser('Sol', { attractedTo: ['trans_women'] })
+  expect((await matchingOf(seeker.uid)).attractedTo).toEqual(['women'])
   const t = await tara()
   const deck = (await callAs(seeker.uid, 'getExploreDeck', { mode: 'spark' })).cards.map((c) => c.uid)
   expect(deck).toEqual(expect.arrayContaining([w.uid, t.uid]))
@@ -135,6 +137,8 @@ test('§4.A2: the migration moves gender off the public doc (private value wins)
   await db.doc(`users/${a.uid}/sparkProfile/data`).set({ genderIdentity: 'trans_woman', pronouns: 'she/her' }, { merge: true })
   // A conflict: the public copy differs from the private one, which wins.
   await db.doc(`users/${b.uid}`).update({ genderIdentity: 'man', pronouns: 'they/them' })
+  // A retired attraction choice (2026-10-09): mapped to men, no duplicate.
+  await db.doc(`users/${b.uid}/private/matching`).update({ attractedTo: ['trans_men', 'men', 'women'] })
   // Let the triggers from those admin writes settle first.
   await expect.poll(async () => (await userDoc(a.uid)).genderLine !== undefined, { timeout: 20000 }).toBe(true)
 
@@ -146,6 +150,7 @@ test('§4.A2: the migration moves gender off the public doc (private value wins)
   expect(s['pronouns: moved']).toBe(2)
   expect(s['genderHidden: moved']).toBe(1)
   expect(s['sparkProfile copies scrubbed']).toBe(1)
+  expect(s['attractedTo: retired trans choices → men/women (private/matching)']).toBe(1)
   expect(Object.keys(plan.backup)).toEqual(expect.arrayContaining([`users/${a.uid}`, `users/${b.uid}`, `users/${a.uid}/sparkProfile/data`]))
   await applyA2({ db, FieldValue }, plan)
 
@@ -155,6 +160,7 @@ test('§4.A2: the migration moves gender off the public doc (private value wins)
   expect(await matchingOf(a.uid)).toMatchObject({ genderIdentity: 'trans_woman', pronouns: 'she/her', genderHidden: true })
   expect((await db.doc(`users/${a.uid}/sparkProfile/data`).get()).data().genderIdentity).toBeUndefined()
   expect((await matchingOf(b.uid)).genderIdentity).toBe('nonbinary')
+  expect((await matchingOf(b.uid)).attractedTo).toEqual(['men', 'women'])
   expect((await userDoc(b.uid)).genderLine).toBe('Non-binary · they/them')
   const again = summaryA2(await planA2({ db }))
   for (const [k, n] of Object.entries(again)) if (!k.startsWith('report')) expect(n, k).toBe(0)

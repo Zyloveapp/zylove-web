@@ -16,6 +16,10 @@
 //   playProfile/data,        first two are owner-only now; playProfiles is
 //   playProfiles/{playId}    the public Play copy and should have none)
 //
+//   attractedTo              the retired "Trans men" / "Trans women" choices
+//                            (2026-10-09, F-098) become men / women, in
+//                            private/matching and in any old public-doc copy.
+//
 // Reported, not changed: accounts with a gender and no identity lock. The
 // move itself sets their lock: identityGuardOnMatching locks identity on the
 // first gender written to private/matching.
@@ -34,6 +38,10 @@ const { GENDER_FIELDS } = lib('userData')
 const SUBDOC_FIELDS = ['genderIdentity', 'genderSelfDescribe', 'pronouns', 'genderHidden', 'showGender']
 const isBot = (uid) => /^(zbot|seed)-/.test(uid)
 const genderOfDocs = (m, root) => m.genderIdentity ?? root.genderIdentity
+// Retired attraction choices → what scoring and Explore already read them as.
+const RETIRED_ATTRACTION = { trans_men: 'men', trans_women: 'women' }
+const foldAttraction = (v) =>
+  Array.isArray(v) && v.some((x) => x in RETIRED_ATTRACTION) ? [...new Set(v.map((x) => RETIRED_ATTRACTION[x] ?? x))] : null
 
 // ─── Plan ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +50,7 @@ export async function planA2({ db }, { onlyUid = null } = {}) {
   const plan = { users: [], subdocs: [], unlocked: 0, backup: {}, counts: {} }
   const count = (k, n = 1) => (plan.counts[k] = (plan.counts[k] ?? 0) + n)
   for (const f of GENDER_FIELDS) for (const k of ['on public doc', 'moved', 'conflict (private value kept)']) plan.counts[`${f}: ${k}`] = 0
+  for (const k of ['private/matching', 'public doc (old layout)']) plan.counts[`attractedTo: retired trans choices → men/women (${k})`] = 0
   const keep = (snap) => {
     if (snap.exists) plan.backup[snap.ref.path] = snap.data()
   }
@@ -64,16 +73,23 @@ export async function planA2({ db }, { onlyUid = null } = {}) {
         } else count(`${f}: conflict (private value kept)`)
       }
     }
+    const attractionPrivate = deleted ? null : foldAttraction(m.attractedTo)
+    const attractionRoot = deleted ? null : foldAttraction(root.attractedTo)
+    if (attractionPrivate) {
+      toMatching.attractedTo = attractionPrivate
+      count('attractedTo: retired trans choices → men/women (private/matching)')
+    }
+    if (attractionRoot) count('attractedTo: retired trans choices → men/women (public doc, old layout)')
     const line = deleted ? undefined : buildGenderLine({ ...m, ...toMatching })
     const writeLine = !deleted && root.genderLine !== line
     const scrubLine = deleted && root.genderLine !== undefined
-    if (!onRoot.length && !writeLine && !scrubLine) continue
+    if (!onRoot.length && !writeLine && !scrubLine && !attractionPrivate && !attractionRoot) continue
     keep(u)
     if (Object.keys(toMatching).length) keep(matchingSnap)
-    plan.users.push({ uid, toMatching, scrub: onRoot, genderLine: writeLine ? line : scrubLine ? null : undefined })
+    plan.users.push({ uid, toMatching, scrub: onRoot, attractedTo: attractionRoot, genderLine: writeLine ? line : scrubLine ? null : undefined })
     if (deleted) count('deleted accounts: gender fields deleted')
     else if (onRoot.length) count(isBot(uid) ? 'curated profiles moved' : 'accounts moved off the public doc')
-    if (Object.keys(toMatching).length) count('private/matching docs written')
+    if (Object.keys(toMatching).length && Object.keys(toMatching).some((k) => k !== 'attractedTo')) count('private/matching docs written')
     if (writeLine) count(line ? 'genderLine written (non-empty)' : 'genderLine written (empty)')
     if (!deleted && genderOfDocs(m, root) != null && root.identityLockedAt == null && !isBot(uid)) plan.unlocked++
   }
@@ -114,6 +130,7 @@ export async function applyA2({ db, FieldValue }, plan) {
   for (const u of plan.users) {
     if (Object.keys(u.toMatching).length) writes.push((b) => b.set(db.doc(`users/${u.uid}/private/matching`), u.toMatching, { merge: true }))
     const patch = Object.fromEntries(u.scrub.map((f) => [f, FieldValue.delete()]))
+    if (u.attractedTo) patch.attractedTo = u.attractedTo
     if (u.genderLine === null) patch.genderLine = FieldValue.delete()
     else if (u.genderLine !== undefined) patch.genderLine = u.genderLine
     if (Object.keys(patch).length) writes.push((b) => b.update(db.doc(`users/${u.uid}`), patch))

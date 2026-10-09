@@ -44,6 +44,9 @@ test('onboarding: new user completes Spark onboarding', async ({ browser }) => {
   await page.getByRole('button', { name: /Build my Spark profile/ }).click()
 
   // 7–8. Attracted to, relationship
+  // The "Trans men" / "Trans women" choices are retired (2026-10-09).
+  await expect(page.getByRole('button', { name: 'Women', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Trans (men|women)$/ })).toHaveCount(0)
   await page.getByRole('button', { name: 'Women', exact: true }).click()
   await next()
   await page.getByRole('button', { name: /^Single/ }).click()
