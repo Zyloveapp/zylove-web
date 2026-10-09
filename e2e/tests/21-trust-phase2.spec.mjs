@@ -1,8 +1,8 @@
 // Trust & Safety Phase 2 (2026-10): anti-scam — bot scam traps, the
 // on-device scam banner and code shield, links held back for new accounts,
-// "Report scam" auto-suspension pending review, probation, signup country,
-// AI-generated / stolen photo flags, "Member since" + reply band, the
-// first-match safety card and the sign-in code screen's Resend.
+// "Report scam" hiding pending review (F-074: was a suspension), probation,
+// signup country, AI-generated / stolen photo flags, "Member since" + reply
+// band, the first-match safety card and the sign-in code screen's Resend.
 import { test, expect } from '@playwright/test'
 import {
   resetEmulators, seedUser, callAs, likeAs, idTokenFor, db, adminAuth, fnLib, sortedPair, signIn, offline, quietFirstRun,
@@ -108,14 +108,19 @@ test('scam traps: a scam-like message to a curated profile keeps an excerpt and 
 
 // ─── Report scam ─────────────────────────────────────────────────────────────
 
-test('report scam: 2 unlinked 48h+ reporters suspend pending review; linked or new reporters don\'t; an admin lifts it', async () => {
+test('report scam: 2 unlinked week-old reporters who talked with them hide them pending review; linked or new reporters don\'t; an admin clears it', async () => {
   const admin = await seedUser('Kim', { isAdmin: true })
   const t = await woman('Tess')
   const [r1, r2, r3, r4] = await Promise.all(['Rob', 'Ray', 'Rex', 'Roy'].map((n) => seedUser(n)))
   const matches = {}
-  for (const r of [r1, r2, r3, r4]) matches[r.uid] = await matchOf(r, t)
+  for (const r of [r1, r2, r3, r4]) {
+    matches[r.uid] = await matchOf(r, t)
+    // F-074: a reporter counts only if they and Tess talked in the match.
+    await adminMessage(matches[r.uid], r.uid)
+    await adminMessage(matches[r.uid], t.uid)
+  }
   for (const r of [r1, r2, r3]) await setCreated(r.uid, Date.now() - 10 * DAY)
-  await setCreated(r4.uid, Date.now() - 3600_000) // an hour old
+  await setCreated(r4.uid, Date.now() - 3 * DAY) // past the old 48h bar, under a week
   // Rex shares Rob's device: they count as one.
   const dev = 'dev_' + 'q'.repeat(20)
   await callAs(r1.uid, 'recordDevice', { deviceId: dev })
@@ -126,23 +131,26 @@ test('report scam: 2 unlinked 48h+ reporters suspend pending review; linked or n
   await report(r1)
   await report(r3) // linked to Rob
   await report(r4) // too new
-  expect((await internalDoc(t.uid)).isSuspended).not.toBe(true)
+  expect((await internalDoc(t.uid)).hiddenPendingReview).toBeUndefined()
   await report(r2)
+  // Hidden from new people, not suspended: she can still sign in and chat.
   const n = await internalDoc(t.uid)
-  expect(n).toMatchObject({ isSuspended: true, suspendedPendingReview: true, suspendSource: 'auto_scam', suspendedUntil: null })
-  // T&S Phase 4: sign-in is refused (with an appeal) rather than the Auth account disabled.
-  expect(await fnLib('appeals').suspensionRefusal(t.uid)).toMatch(/^ZYLOVE_SUSPENDED:[^:]+:none:review:0$/)
+  expect(n.hiddenPendingReview).toMatchObject({ source: 'scam_reports', reporters: 2 })
+  expect(n.isSuspended).not.toBe(true)
+  expect(await fnLib('appeals').suspensionRefusal(t.uid)).toBeNull()
+  expect((await db.doc(`exploreIndex/${t.uid}`).get()).exists).toBe(false)
   expect((await flag(t.uid)).status).toBe('open')
   expect((await flag(t.uid)).reasons.map((r) => r.key)).toContain('scam_reports')
-  const audits = (await db.collection('adminAudit').where('action', '==', 'trust.auto_suspend').get()).docs.map((d) => d.data())
+  const audits = (await db.collection('adminAudit').where('action', '==', 'trust.auto_hide').get()).docs.map((d) => d.data())
   expect(audits).toHaveLength(1)
   expect(audits[0]).toMatchObject({ actor: 'system', target: t.uid })
-  // The dashboard shows it as pending review; the admin lifts it.
+  expect((await db.collection('adminAudit').where('action', '==', 'trust.auto_suspend').get()).size).toBe(0)
+  // The dashboard shows the hold; dismissing the flag ends it and she's back in Explore.
   const detail = await callAs(admin.uid, 'adminTrustDetail', { uid: t.uid })
-  expect(detail).toMatchObject({ suspended: true, suspendedPendingReview: true, suspendSource: 'auto_scam' })
-  await callAs(admin.uid, 'adminTrustAction', { uid: t.uid, action: 'lift_suspension', reason: 'Reviewed: not a scam' })
-  expect((await internalDoc(t.uid)).isSuspended).toBe(false)
-  expect(await fnLib('appeals').suspensionRefusal(t.uid)).toBeNull()
+  expect(detail).toMatchObject({ suspended: false, hiddenPendingReview: { reporters: 2 } })
+  await callAs(admin.uid, 'adminTrustAction', { uid: t.uid, action: 'dismiss', reason: 'Reviewed: not a scam' })
+  expect((await internalDoc(t.uid)).hiddenPendingReview).toBeUndefined()
+  expect((await db.doc(`exploreIndex/${t.uid}`).get()).exists).toBe(true)
   expect((await flag(t.uid)).status).toBe('dismissed')
 })
 

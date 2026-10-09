@@ -142,7 +142,7 @@ function SignInCard() {
       if (!check.allowed) {
         setError(
           check.reason === 'rate_limited'
-            ? 'Too many attempts for this number. Try again in an hour.'
+            ? 'Too many attempts right now. Try again later.'
             : "This number type isn't supported. Please use a mobile phone number to sign up for Zylove.",
         )
         return false

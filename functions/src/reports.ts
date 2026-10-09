@@ -24,7 +24,7 @@ import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { REPORT_ONLY_IDS, REVIEW_TONE } from './shared/reviewCategories'
-import { checkScamSuspension } from './scamReports'
+import { checkScamReports } from './scamReports'
 import { queueAdminAlert } from './adminAlerts'
 import { SMS_SECRETS, textAccount } from './sms'
 import { STRIPE_SECRETS } from './stripe'
@@ -177,8 +177,8 @@ export async function recordReport(input: {
       { subjectUid: reporterUid, aboutUid: reportedUid },
     )
   }
-  // T&S Phase 2: enough independent scam reports suspend pending review.
-  if (categories.includes('scam')) await checkScamSuspension(reportedUid)
+  // T&S Phase 2: enough independent scam reports hide the account pending review (F-074).
+  if (categories.includes('scam')) await checkScamReports(reportedUid)
 
 }
 

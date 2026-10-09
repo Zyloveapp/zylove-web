@@ -1,10 +1,10 @@
-import { createHash } from 'node:crypto'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type Query } from 'firebase-admin/firestore'
 import { requireAdminAudited } from './audit'
 import { takeRateLimit } from './rateLimits'
 import { queueAdminAlert } from './adminAlerts'
+import { clientIp, ipRateKey } from './clientIp'
 
 // The /contact form and the admin inbox (/admin/contact).
 //   contactMessages/{auto} (server-only)  { name, email, topic, message,
@@ -26,28 +26,6 @@ const EMAIL = /^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/
 
 const db = () => getFirestore()
 const ms = (v: unknown): number | null => (v instanceof Timestamp ? v.toMillis() : null)
-
-type RawRequest = { headers?: Record<string, string | string[] | undefined>; ip?: string; socket?: { remoteAddress?: string } } | undefined
-
-// The caller's address as our own front end saw it: the LAST X-Forwarded-For
-// entry (the hop Google appended; anything before it is whatever the client
-// sent). Not legal.ts clientIp, which takes the first, client-controlled hop
-// — and not req.ip first either, since Express with "trust proxy" on also
-// returns that first hop. req.ip / the socket only when there's no header
-// (the emulator, direct calls).
-export function callerIp(raw: RawRequest): string | null {
-  const fwd = raw?.headers?.['x-forwarded-for']
-  const hops = (Array.isArray(fwd) ? fwd.join(',') : fwd ?? '')
-    .split(',')
-    .map((h) => h.trim())
-    .filter(Boolean)
-  return (hops[hops.length - 1] || raw?.ip || raw?.socket?.remoteAddress || null)?.slice(0, 64) ?? null
-}
-
-// rateLimits/{key} for an address: hashed, the same shape validatePhoneNumber uses.
-export function ipRateKey(ip: string | null): string {
-  return `ip_${createHash('sha256').update(ip ?? 'unknown').digest('hex').slice(0, 32)}`
-}
 
 export interface ContactInput {
   name: string
@@ -80,7 +58,7 @@ export const submitContactMessage = onCall({ timeoutSeconds: 20, memory: '256MiB
   } catch (err) {
     throw new HttpsError('invalid-argument', err instanceof Error ? err.message : 'Bad message')
   }
-  await takeRateLimit(ipRateKey(callerIp(request.rawRequest as never)), 'contactMessage', CONTACT_PER_IP)
+  await takeRateLimit(ipRateKey(clientIp(request.rawRequest as never)), 'contactMessage', CONTACT_PER_IP)
   await takeRateLimit(DAILY_KEY, 'daily', CONTACT_DAILY)
   await db()
     .collection('contactMessages')

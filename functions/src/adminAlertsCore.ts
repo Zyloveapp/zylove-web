@@ -118,8 +118,8 @@ export const EVENTS: Record<AdminEvent, EventDef> = {
   scamSuspend: {
     urgent: true,
     windowMs: 0,
-    text: (n) => `Zylove admin URGENT: ${plural(n, 'account')} auto-suspended for scam reports. ${ADMIN}/trust`,
-    phrase: (n) => plural(n, 'scam suspension'),
+    text: (n) => `Zylove admin URGENT: ${plural(n, 'account')} hidden pending review for scam reports. ${ADMIN}/trust`,
+    phrase: (n) => plural(n, 'scam hold'),
   },
   reportUrgent: {
     urgent: true,

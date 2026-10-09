@@ -4,7 +4,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
 import { FieldValue, getFirestore, type DocumentData } from 'firebase-admin/firestore'
-import { clientIp } from './legal'
+import { clientIp } from './clientIp'
 import { recordCountryCheck } from './geo'
 const isBotUid = (uid: string): boolean => /^(zbot|seed)-/.test(uid)
 
@@ -62,8 +62,8 @@ export const recordDevice = onCall(
     const uid = request.auth.uid
     const deviceId = (request.data as Record<string, unknown> | null)?.deviceId
     if (typeof deviceId !== 'string' || !/^[A-Za-z0-9_-]{16,64}$/.test(deviceId)) throw new HttpsError('invalid-argument', 'deviceId required')
-    const raw = request.rawRequest as unknown as Parameters<typeof clientIp>[0]
-    const ip = clientIp(raw)
+    // F-073: the hop Google appended, not one the client sent.
+    const ip = clientIp(request.rawRequest as never)
     const uaHeader = request.rawRequest?.headers?.['user-agent']
     const ua = uaFamily(typeof uaHeader === 'string' ? uaHeader : '')
     const values: [SightingKind, string][] = [['device', deviceId]]
@@ -118,23 +118,25 @@ export async function recordSightings(uid: string, sightings: { kind: SightingKi
 }
 
 // Other accounts seen on this account's devices and addresses (last 90 days).
+// With networks: on its /24 (/48) networks too — a weaker link, used where a
+// false "unlinked" costs more than a false "linked" (scam reporters, F-074).
 export interface LinkedAccount {
   uid: string
   via: SightingKind[]
 }
 const SHARED_NETWORK_AT = 10 // more accounts than this on one address: a shared network
 
-export async function linkedAccounts(uid: string): Promise<LinkedAccount[]> {
+export async function linkedAccounts(uid: string, { networks = false } = {}): Promise<LinkedAccount[]> {
   const now = Date.now()
   const seen = ((await db().doc(`userDevices/${uid}`).get()).data()?.seen ?? {}) as Record<string, { kind: SightingKind; lastSeen: number }>
-  const hashes = Object.entries(seen).filter(([, s]) => now - s.lastSeen < SIGHTING_KEEP_MS && s.kind !== 'net')
+  const hashes = Object.entries(seen).filter(([, s]) => now - s.lastSeen < SIGHTING_KEEP_MS && (networks || s.kind !== 'net'))
   if (!hashes.length) return []
   const docs = await db().getAll(...hashes.map(([h]) => db().doc(`deviceSightings/${h}`)))
   const out = new Map<string, Set<SightingKind>>()
   docs.forEach((d, i) => {
     const kind = hashes[i][1].kind
     const uids = Object.entries((d.data()?.uids ?? {}) as Record<string, number>).filter(([, at]) => now - at < SIGHTING_KEEP_MS).map(([u]) => u)
-    if (kind === 'ip' && uids.length > SHARED_NETWORK_AT) return
+    if (kind !== 'device' && uids.length > SHARED_NETWORK_AT) return
     for (const other of uids) {
       if (other === uid || isBotUid(other)) continue
       if (!out.has(other)) out.set(other, new Set())

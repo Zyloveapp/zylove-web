@@ -1,6 +1,7 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { logger } from 'firebase-functions'
 import { FieldValue, getFirestore } from 'firebase-admin/firestore'
+import { clientIp } from './clientIp'
 
 // Terms acceptance, recorded server-side (F-024). Onboarding's Terms step
 // calls recordTermsAcceptance; the server stamps the time, the request's IP
@@ -21,16 +22,6 @@ export const LEGAL_VERSIONS = { terms: '2026-10-07.2', privacy: '2026-10-08' } a
 // Mirrors CONSENT_IDS in src/services/onboarding.ts: every box on the Terms
 // step must be ticked.
 export const REQUIRED_CONSENTS = ['age', 'terms', 'privacy', 'matching', 'conduct', 'safety'] as const
-
-// The caller's address: the first X-Forwarded-For hop (Cloud Run's proxy
-// sets it), else the connection's own.
-export function clientIp(
-  raw: { headers: Record<string, string | string[] | undefined>; ip?: string; socket?: { remoteAddress?: string } } | undefined,
-): string | null {
-  const fwd = raw?.headers['x-forwarded-for']
-  const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(',')[0]?.trim()
-  return (first || raw?.ip || raw?.socket?.remoteAddress || null)?.slice(0, 64) ?? null
-}
 
 export const recordTermsAcceptance = onCall(
   { timeoutSeconds: 20, memory: '256MiB', invoker: 'public' },

@@ -254,7 +254,7 @@ test('urgent texts go through past the daily cap', () => {
   const s = optedIn()
   const state = normalizeState({ day: { date: '2026-10-08', sent: DAILY_CAP }, pausedUntil: at(8, 0, 9) })
   const out = onEvent(state, s, 'scamSuspend', 1, {}, at(15))
-  assert.deepEqual(out.texts, ['Zylove admin URGENT: 1 account auto-suspended for scam reports. zylove.app/admin/trust'])
+  assert.deepEqual(out.texts, ['Zylove admin URGENT: 1 account hidden pending review for scam reports. zylove.app/admin/trust'])
 })
 
 // ─── Quiet hours ─────────────────────────────────────────────────────────────
