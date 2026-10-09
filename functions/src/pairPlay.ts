@@ -38,17 +38,27 @@ export function playFields(score: number, breakdown: unknown, tier1: unknown): D
   return { playScore: score, playBreakdown: breakdown, ...(tier1Play ? { tier1Play } : {}) }
 }
 
-// The merge write for a pair's Play scores. A result with no archetype
-// deletes the stored tier1Play — merging without it kept the old label.
+// The write for a pair's Play scores. A result with no archetype deletes the
+// stored tier1Play — merging without it kept the old label.
 export function playScoresWrite(a: string, b: string, fields: DocumentData): DocumentData {
   return { users: playPairUsers(a, b), ...fields, tier1Play: fields.tier1Play ?? FieldValue.delete(), scoredAt: FieldValue.serverTimestamp() }
+}
+
+// Each field of the write replaces the stored one whole (mergeFields: the
+// write's own top-level keys) — { merge: true } merged the maps key by key,
+// so tier1Play and playBreakdown kept keys the new value no longer has
+// (F-098's confidence, asymmetryGap, dataConfidence). Fields the write
+// doesn't name (likedBy) are left alone.
+export function playScoresMergeFields(write: DocumentData): string[] {
+  return Object.keys(write)
 }
 
 // Stores the pair's Play scores, or with null removes them (the likes stay).
 export async function setPlayScores(a: string, b: string, fields: DocumentData | null): Promise<void> {
   const ref = await playPairDataRef(a, b)
   if (fields) {
-    await ref.set(playScoresWrite(a, b, fields), { merge: true })
+    const write = playScoresWrite(a, b, fields)
+    await ref.set(write, { mergeFields: playScoresMergeFields(write) })
     return
   }
   const gone = Object.fromEntries([...PLAY_PAIR_FIELDS, 'scoredAt'].map((k) => [k, FieldValue.delete()]))

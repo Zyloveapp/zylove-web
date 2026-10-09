@@ -4,18 +4,33 @@
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { FieldValue, type DocumentData } from 'firebase-admin/firestore'
-import { playFields, playScoresWrite, playTapAnswer } from '../src/pairPlay'
+import { playFields, playScoresMergeFields, playScoresWrite, playTapAnswer } from '../src/pairPlay'
 
-// What a { merge: true } set leaves: the write's fields over the stored ones,
-// FieldValue.delete() removing its field (server timestamps don't matter here).
-function merged(stored: DocumentData, write: DocumentData): DocumentData {
+// What Firestore's set leaves (server timestamps don't matter here):
+// - { merge: true }: maps merge key by key, all the way down;
+// - { mergeFields }: each listed top-level field replaced whole;
+// FieldValue.delete() removes its field either way.
+const isDelete = (v: unknown) => v instanceof FieldValue && v.isEqual(FieldValue.delete())
+const isMap = (v: unknown): v is DocumentData => typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof FieldValue)
+function deepMerged(stored: DocumentData, write: DocumentData): DocumentData {
   const out: DocumentData = { ...stored }
   for (const [k, v] of Object.entries(write)) {
-    if (v instanceof FieldValue && v.isEqual(FieldValue.delete())) delete out[k]
+    if (isDelete(v)) delete out[k]
+    else if (isMap(v) && isMap(out[k])) out[k] = deepMerged(out[k], v)
     else out[k] = v
   }
   return out
 }
+function fieldsMerged(stored: DocumentData, write: DocumentData, fields: string[]): DocumentData {
+  const out: DocumentData = { ...stored }
+  for (const k of fields) {
+    if (!(k in write) || isDelete(write[k])) delete out[k]
+    else out[k] = write[k]
+  }
+  return out
+}
+// What setPlayScores leaves.
+const merged = (stored: DocumentData, write: DocumentData) => fieldsMerged(stored, write, playScoresMergeFields(write))
 
 const label = { archetype: { id: 'intense_pair', label: 'Intense Pair', copy: 'x', confidence: 0.8 }, combinedScore: 70, asymmetryGap: 0, dataConfidence: 1 }
 
@@ -56,4 +71,31 @@ test('F-098: a Play tap answer by plan', () => {
   assert.deepEqual(elite.playArchetype, { id: 'intense_pair', label: 'Intense Pair', copy: 'x' })
   assert.ok(!JSON.stringify(elite).includes('confidence'))
   assert.equal('playArchetype' in playTapAnswer({ playScore: 50, playBreakdown: {} }, { full: true, deep: true }), false)
+})
+
+// The 2026-10-09 deploy: setPlayScores merged with { merge: true }, so the
+// stored tier1Play (and playBreakdown) kept keys the trimmed value no longer
+// had. The model above was top-level only and missed it.
+test('a re-score replaces tier1Play and playBreakdown whole — no old keys left; likedBy kept', () => {
+  const stored = {
+    users: ['a', 'b'], likedBy: ['a'], playScore: 70,
+    playBreakdown: { nonNegotiables: 80, oldCategory: 5 },
+    tier1Play: { archetype: { id: 'intense_pair', label: 'Intense Pair', copy: 'x', confidence: 0.8 }, combinedScore: 70.3, asymmetryGap: 3, dataConfidence: 0.9 },
+  }
+  const next = { archetype: { id: 'same_frequency', label: 'Same Frequency', copy: 'y', confidence: 0.7 }, combinedScore: 80.4, asymmetryGap: 0, dataConfidence: 1 }
+  const write = playScoresWrite('a', 'b', { ...playFields(80, { nonNegotiables: 90 }, next), engineVersion: 3 })
+  // The old write mode leaves the raw keys behind…
+  const before = deepMerged(stored, write)
+  assert.equal(before.tier1Play.asymmetryGap, 3)
+  assert.equal(before.tier1Play.archetype.confidence, 0.8)
+  assert.equal(before.playBreakdown.oldCategory, 5)
+  // …what setPlayScores writes now doesn't.
+  const after = merged(stored, write)
+  assert.deepEqual(after.tier1Play, { archetype: { id: 'same_frequency', label: 'Same Frequency', copy: 'y' }, combinedScore: 80 })
+  assert.deepEqual(after.playBreakdown, { nonNegotiables: 90 })
+  assert.deepEqual(after.likedBy, ['a'])
+  assert.equal(after.engineVersion, 3)
+  // And no archetype now: tier1Play goes.
+  assert.equal('tier1Play' in merged(stored, playScoresWrite('a', 'b', playFields(60, {}, null))), false)
+  assert.ok(playScoresMergeFields(write).includes('tier1Play') && !playScoresMergeFields(write).includes('likedBy'))
 })
