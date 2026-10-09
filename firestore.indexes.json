@@ -404,6 +404,12 @@
       "indexes": []
     },
     {
+      "collectionGroup": "twilioInboundSeen",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
       "collectionGroup": "likes",
       "fieldPath": "likedBy",
       "indexes": [
