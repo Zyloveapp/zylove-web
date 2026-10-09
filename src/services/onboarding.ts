@@ -231,8 +231,8 @@ export async function saveSparkOnboarding(
     photoURLs,
   } satisfies Partial<RootProfileDoc>
   // F-099: attraction, drinking, religion, politics, dealbreakers and the
-  // intent change once every 30 days — only the ones that really change are written (with
-  // their stamp), and a locked one stops the save with its date.
+  // intent change once every 30 days — only the ones that really change are
+  // written (with their stamp), and a locked one stops the save with its date.
   // F-018: religion and politics are never shown — owner-only in
   // private/matching, not on the public doc (the rules refuse them there).
   // Dealbreakers too: private/matching is what scoring reads.
