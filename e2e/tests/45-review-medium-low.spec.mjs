@@ -127,9 +127,10 @@ test('M6: no distance after an unmatch, or to a hidden profile that isn\'t a liv
 // ─── M7 (F-118) ──────────────────────────────────────────────────────────────
 
 test('M7: a free account gets no distance for a liker, and passing on one doesn\'t change the count', async () => {
-  const me = await woman('Fin')
+  // A man (women get Elite by identity), on an expired trial: Free.
+  const me = await seedUser('Fin')
   await setPlan(me.uid, 'free')
-  const liker = await seedUser('Gus')
+  const liker = await woman('Gia')
   await likeAs(liker.uid, me.uid)
   expect((await callAs(me.uid, 'getDistances', { uids: [liker.uid] })).distances[liker.uid]).toBeUndefined()
   const before = (await callAs(me.uid, 'getLikes', { mode: 'spark' })).count
@@ -138,7 +139,7 @@ test('M7: a free account gets no distance for a liker, and passing on one doesn\
   expect((await callAs(me.uid, 'getLikes', { mode: 'spark' })).count).toBe(before)
   // Paid: likers are named anyway, so the distance is there.
   await setPlan(me.uid, 'spark_plus')
-  const other = await seedUser('Hal')
+  const other = await woman('Hal')
   await likeAs(other.uid, me.uid)
   expect((await callAs(me.uid, 'getDistances', { uids: [other.uid] })).distances[other.uid]).toBeTruthy()
 })

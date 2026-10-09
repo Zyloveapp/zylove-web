@@ -125,6 +125,8 @@ export async function seedUser(name, overrides = {}, { play = null, legacy = LEG
   // trigger round-trip and a second public-doc write per seeded user).
   if (!legacy && process.env.SEED_A2_LEGACY !== "1") doc.genderLine = fnLib('genderLine').buildGenderLine(doc)
   await db.doc(`users/${uid}`).set(doc)
+  // F-126: the migration makes isAdmin a claim only for uids in ADMIN_UIDS.
+  if (overrides.isAdmin === true) process.env.ADMIN_UIDS = [...(process.env.ADMIN_UIDS ?? '').split(',').filter(Boolean), uid].join(',')
   if (!legacy) await migrateUser({ db, auth: adminAuth, FieldValue, Timestamp }, uid, doc)
   await db.doc(`users/${uid}/sparkProfile/data`).set({
     uid, displayName: name, age: doc.age, bio: doc.bio, isActive: true, completeness: 90, promptAnswers: doc.promptAnswers,
