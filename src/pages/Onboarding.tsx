@@ -429,6 +429,9 @@ export default function Onboarding() {
       ...(locked.religion !== undefined && { religion: saved('religion') as OnboardingDraft['religion'] }),
       ...(locked.politicalView !== undefined && { politicalView: saved('politicalView') as OnboardingDraft['politicalView'] }),
       ...(locked.drinkingHabit !== undefined && { drinkingHabit: saved('drinkingHabit') as OnboardingDraft['drinkingHabit'] }),
+      ...(locked.dealbreakers !== undefined && {
+        dealbreakers: (Array.isArray(fieldStates.states.dealbreakers.value) ? fieldStates.states.dealbreakers.value : []) as OnboardingDraft['dealbreakers'],
+      }),
     }
     if (Object.keys(keep).length > 0) setDraft((d) => ({ ...d, ...keep }))
   }, [userId, flow, restoredKey, fieldStates])
@@ -903,7 +906,7 @@ export default function Onboarding() {
       case 'physicalPrefs':
         return <PhysicalPrefsStep {...props} />
       case 'needs':
-        return <NeedsStep {...props} />
+        return <NeedsStep {...props} locks={locks} />
       case 'discovery':
         return <DiscoveryStep {...props} />
       case 'prompts':

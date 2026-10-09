@@ -7,6 +7,7 @@ import { loadMatching, matchingDoc } from './privateMatching'
 import { displayAge, type DiscoverProfile } from './discover'
 import type { SparkBioRequest } from './bio'
 import type { PromptAnswer } from '../types/dualProfile'
+import { isUnset } from './fieldLimits'
 
 export const MAX_PROFILE_PHOTOS = 9
 export const MAX_PROMPTS = 5
@@ -18,9 +19,12 @@ export interface OwnProfile {
   profile: DiscoverProfile
   bio: string
   prompts: PromptAnswer[]
-  // Root dealbreakers (mobile) plus the private seeking prefs (web onboarding).
+  // The ones scoring uses: private/matching's (the public doc's old copy until
+  // migrated). Older web saves put them in seekingPreferences/prefs, where
+  // scoring never read them; those show until migrated, and the next save
+  // moves them to private/matching (a first value).
   dealbreakers: string[]
-  // Traits they want in a partner; same two sources as dealbreakers.
+  // Traits they want in a partner: the public doc's plus the private seeking prefs.
   seekingTraits: string[]
   // Question text for the AI-written prompt, stored under promptId 'dynamic'
   // (mobile's convention for its Play "just for you" question).
@@ -80,7 +84,7 @@ export async function loadOwnProfile(uid: string): Promise<OwnProfile | null> {
     profile,
     bio,
     prompts: prompts.length > 0 ? prompts : promptList(profile.promptAnswers),
-    dealbreakers: [...new Set([...strings(profile.dealbreakers), ...strings(seeking?.data()?.dealbreakers)])],
+    dealbreakers: isUnset(profile.dealbreakers) ? strings(seeking?.data()?.dealbreakers) : strings(profile.dealbreakers),
     seekingTraits: [...new Set([...strings(profile.seekingTraits), ...strings(seeking?.data()?.seekingTraits)])],
     dynamicPrompt: str(sp.dynamicPrompt) ?? str((profile as Record<string, unknown>).dynamicPrompt),
   }
