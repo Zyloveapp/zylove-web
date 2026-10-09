@@ -1,156 +1,146 @@
-import { collection, doc, getDoc, onSnapshot, orderBy, query, updateDoc, where, type DocumentData, type Unsubscribe } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
-import { db, functions } from './firebase'
+import { functions } from './firebase'
 import { displayScore, likeProfile, parseTier1, passProfile, type DiscoverProfile, type DisplayScore } from './discover'
 import type { Mode } from '../store/modeStore'
-import { isPlayId } from './playId'
 
-// users/{uid}/likeQueue/{likerUid} — people who liked this user. Written by
-// the mobile app and botEngine: { likerUid, likedAt (epoch ms), mode,
-// dismissed, isExpired, compatibilityScore, likerProfile: {...snapshot} }.
+// §4.A3 — who liked you, without who: the server names each like by an
+// opaque like id (getLikes) and never sends the liker's uid or Play ID until
+// you're linked. Spark+ and Elite see a preview (getLikerPreview: photo,
+// first name, bio, prompts); Free sees how many people, and curated
+// profiles' likes (no paid feature involves a bot).
 export interface SparkEntry {
-  likerUid: string
+  likeId: string
   likedAt: number
   mode: Mode
-  // Snapshot of the liker taken at like time, shaped like a profile doc.
-  profile: DiscoverProfile
-  // Score saved with the like. Null for bots: their seeded likes carry a
-  // random placeholder, so their real score comes from onTap instead.
+  dismissed: boolean
+  // The pair's score saved with the like. Null for curated profiles (their
+  // seeded likes carry a placeholder).
   compatibilityScore: number | null
   expiresAt: number | null // epoch ms
   isWeeklySpark: boolean
-  // Curated profiles (uid prefix 'zbot-'). Shown exactly like other likers.
+  // A Zylove curated profile.
   isBot: boolean
 }
 
-// F-062: a Play like is keyed by the liker's Play ID (likerPlayId) — likerUid
-// then holds that Play ID; a curated one says so (curated).
-function toSpark(id: string, data: DocumentData): SparkEntry {
-  const likerUid =
-    typeof data.likerPlayId === 'string' && data.likerPlayId ? data.likerPlayId : typeof data.likerUid === 'string' && data.likerUid ? data.likerUid : id
-  const snap: Record<string, unknown> =
-    typeof data.likerProfile === 'object' && data.likerProfile !== null ? data.likerProfile : {}
-  const photoURLs = Array.isArray(snap.photoURLs)
-    ? snap.photoURLs.filter((u): u is string => typeof u === 'string' && u !== '')
-    : []
-  if (photoURLs.length === 0 && typeof snap.photoURL === 'string' && snap.photoURL) photoURLs.push(snap.photoURL)
-  const isBot = likerUid.startsWith('zbot-') || data.curated === true
+interface LikeRaw {
+  likeId: string
+  mode: Mode
+  likedAt: number
+  dismissed: boolean
+  isWeeklySpark: boolean
+  expiresAt: number | null
+  compatibilityScore: number | null
+  curated: boolean
+}
+
+function toSpark(r: LikeRaw): SparkEntry {
   return {
-    likerUid,
-    likedAt: typeof data.likedAt === 'number' ? data.likedAt : 0,
-    mode: data.mode === 'play' ? 'play' : 'spark',
-    profile: { ...(snap as Partial<DiscoverProfile>), uid: likerUid, photoURLs, ...(isPlayId(likerUid) ? { curated: isBot } : {}) },
-    compatibilityScore:
-      !isBot && typeof data.compatibilityScore === 'number' && data.compatibilityScore > 0 ? data.compatibilityScore : null,
-    expiresAt: typeof data.expiresAt === 'number' ? data.expiresAt : null,
-    isWeeklySpark: data.isWeeklySpark === true,
-    isBot,
+    likeId: r.likeId,
+    likedAt: r.likedAt,
+    mode: r.mode === 'play' ? 'play' : 'spark',
+    dismissed: r.dismissed,
+    compatibilityScore: r.compatibilityScore,
+    expiresAt: r.expiresAt,
+    isWeeklySpark: r.isWeeklySpark,
+    isBot: r.curated,
   }
 }
 
-// Live queue for one mode: Weekly Spark first, then newest first.
-// Dismissed/expired entries (including ones past expiresAt) are
-// filtered here rather than in the query (same as mobile's getLikeQueue):
-// older docs lack the flags, and an inequality filter would drop them and
-// conflict with ordering by likedAt.
-export function subscribeSparks(
-  uid: string,
-  mode: Mode,
-  onChange: (sparks: SparkEntry[]) => void,
-  onError: (err: Error) => void,
-): Unsubscribe {
-  // Filtered by mode in the query: Play likes are readable only with Play
-  // access (Stage 2 rules), and a query must not reach ones it can't read.
-  const q = query(collection(db, `users/${uid}/likeQueue`), where('mode', '==', mode), orderBy('likedAt', 'desc'))
-  return onSnapshot(
-    q,
-    (snap) => {
-      const now = Date.now()
-      const sparks = snap.docs
-        .filter((d) => {
-          const data = d.data()
-          return data.dismissed !== true && data.isExpired !== true
-        })
-        .map((d) => toSpark(d.id, d.data()))
-        .filter((s) => s.mode === mode && (s.expiresAt === null || s.expiresAt > now))
-        // Stable sort keeps the likedAt order within each group.
-        .sort((a, b) => Number(b.isWeeklySpark) - Number(a.isWeeklySpark))
-      onChange(sparks)
-    },
-    onError,
-  )
+export interface SparkQueue {
+  // Real people waiting (live — not passed on), on every plan.
+  count: number
+  live: SparkEntry[]
+  viewed: SparkEntry[]
 }
 
-// Live queue plus the entries the user passed on ("Viewed"), for one mode.
-// Same client-side filtering as subscribeSparks; expired entries are dropped
-// from both.
-// Free (Stage C): how many real people liked you, and curated profiles'
-// likes in full — the list itself is Spark+ (the rules refuse it).
-export async function fetchFreeSparks(mode: Mode): Promise<{ count: number; live: SparkEntry[]; viewed: SparkEntry[] }> {
-  const { data } = await httpsCallable<{ mode: Mode }, { count: number; bots: { id: string; data: DocumentData }[] }>(functions, 'getLikeCount')({ mode })
+// The queue for one mode: Weekly Spark first, then newest first; the ones
+// you passed on ("Viewed") apart. Free: `live`/`viewed` hold curated likes only.
+export async function fetchSparkQueue(mode: Mode): Promise<SparkQueue> {
+  const { data } = await httpsCallable<{ mode: Mode }, { count: number; likes: LikeRaw[] }>(functions, 'getLikes')({ mode })
   const live: SparkEntry[] = []
   const viewed: SparkEntry[] = []
-  for (const b of data.bots) (b.data.dismissed === true ? viewed : live).push(toSpark(b.id, b.data))
+  for (const r of data.likes) {
+    const s = toSpark(r)
+    ;(s.dismissed ? viewed : live).push(s)
+  }
+  // Stable sort keeps the newest-first order within each group.
+  live.sort((a, b) => Number(b.isWeeklySpark) - Number(a.isWeeklySpark) || b.likedAt - a.likedAt)
+  viewed.sort((a, b) => b.likedAt - a.likedAt)
   return { count: data.count, live, viewed }
 }
 
-export function subscribeSparkQueue(
-  uid: string,
+// For the nav dot: the queue polled while the app is open (the queue itself
+// is server-only, so there's no listener to attach).
+const POLL_MS = 2 * 60 * 1000
+export function subscribeSparks(
+  _uid: string,
   mode: Mode,
-  onChange: (queue: { live: SparkEntry[]; viewed: SparkEntry[] }) => void,
+  onChange: (sparks: SparkEntry[], count: number) => void,
   onError: (err: Error) => void,
-): Unsubscribe {
-  // Filtered by mode in the query: Play likes are readable only with Play
-  // access (Stage 2 rules), and a query must not reach ones it can't read.
-  const q = query(collection(db, `users/${uid}/likeQueue`), where('mode', '==', mode), orderBy('likedAt', 'desc'))
-  return onSnapshot(
-    q,
-    (snap) => {
-      const now = Date.now()
-      const live: SparkEntry[] = []
-      const viewed: SparkEntry[] = []
-      for (const d of snap.docs) {
-        const data = d.data()
-        if (data.isExpired === true) continue
-        const s = toSpark(d.id, data)
-        if (s.mode !== mode || (s.expiresAt !== null && s.expiresAt <= now)) continue
-        ;(data.dismissed === true ? viewed : live).push(s)
-      }
-      // Stable sort keeps the likedAt order within each group.
-      live.sort((a, b) => Number(b.isWeeklySpark) - Number(a.isWeeklySpark))
-      onChange({ live, viewed })
-    },
-    onError,
-  )
+): () => void {
+  let stopped = false
+  const load = () =>
+    fetchSparkQueue(mode).then(
+      (q) => !stopped && onChange(q.live, q.count),
+      (err: Error) => !stopped && onError(err),
+    )
+  void load()
+  const timer = setInterval(load, POLL_MS)
+  const onFocus = () => document.visibilityState === 'visible' && void load()
+  document.addEventListener('visibilitychange', onFocus)
+  return () => {
+    stopped = true
+    clearInterval(timer)
+    document.removeEventListener('visibilitychange', onFocus)
+  }
 }
 
-// Same fields mobile's dismissLike writes.
-export async function dismissSpark(uid: string, likerUid: string): Promise<void> {
-  await updateDoc(doc(db, `users/${uid}/likeQueue/${likerUid}`), { dismissed: true, dismissedAt: Date.now() })
+export interface LikerPrompt {
+  promptId: string
+  answer: string
+  question?: string
 }
 
-// Full, current profile for the detail view; falls back to the snapshot.
-// F-062: a Play liker's is their public Play profile (by Play ID), never the
-// account doc.
-export async function loadSparkProfile(spark: SparkEntry): Promise<DiscoverProfile> {
-  if (isPlayId(spark.likerUid)) return spark.profile
-  const snap = await getDoc(doc(db, 'users', spark.likerUid))
-  if (!snap.exists()) return spark.profile
-  return { ...spark.profile, ...(snap.data() as DiscoverProfile), uid: spark.likerUid }
+// What a like shows before you link — nothing that says who they are beyond
+// it (no uid, no age, no place).
+export interface LikerPreview {
+  mode: Mode
+  firstName: string
+  // The image itself (a data: URL) or a plain web address.
+  photo: string | null
+  bio: string
+  prompts: LikerPrompt[]
+  curated: boolean
 }
 
-// Liking back someone in your queue is mutual by definition, but onLike only
-// knows about likes recorded in pairs/{a_b} (mobile and bot likes never write
-// there). onLike still runs to keep pairs in sync; the likeBack callable then
-// creates the match if onLike didn't and consumes both queue entries — writes
-// the client's Firestore rules don't allow.
-export async function likeBackSpark(uid: string, spark: SparkEntry, profile: DiscoverProfile): Promise<string> {
-  await likeProfile(uid, spark.mode, profile)
-  const { data } = await httpsCallable<{ likerUid: string; mode: Mode }, { matched: true; matchId: string }>(
+// One preview per like for the session (the card and the detail view share it).
+const previews = new Map<string, Promise<LikerPreview>>()
+export function fetchLikerPreview(likeId: string): Promise<LikerPreview> {
+  let p = previews.get(likeId)
+  if (!p) {
+    p = httpsCallable<{ likeId: string }, { preview: LikerPreview }>(functions, 'getLikerPreview')({ likeId }).then((r) => r.data.preview)
+    p.catch(() => previews.delete(likeId))
+    previews.set(likeId, p)
+  }
+  return p
+}
+
+// "Not for me": the like moves to Viewed.
+export async function dismissSpark(likeId: string): Promise<void> {
+  await httpsCallable<{ likeId: string }, { success: true }>(functions, 'dismissLike')({ likeId })
+}
+
+// Liking back someone in your queue is mutual by definition. The server
+// resolves the like id, records your like (the same path as onLike) and
+// creates the match; only then does it say who they are (partnerId: their
+// uid in Spark, Play ID in Play).
+export async function likeBackSpark(spark: SparkEntry): Promise<{ matchId: string; partnerId: string }> {
+  const { data } = await httpsCallable<{ likeId: string }, { matched: true; matchId: string; partnerId: string }>(
     functions,
     'likeBack',
-  )({ likerUid: spark.likerUid, mode: spark.mode })
-  return data.matchId
+  )({ likeId: spark.likeId })
+  previews.delete(spark.likeId)
+  return { matchId: data.matchId, partnerId: data.partnerId }
 }
 
 // ─── Sent ────────────────────────────────────────────────────────────────────
@@ -205,19 +195,14 @@ export async function fetchSentSparks(mode: Mode): Promise<SentSpark[]> {
 
 // ─── From a profile page ─────────────────────────────────────────────────────
 
-// Sends a spark from outside Explore and Sparks (/profile/:uid). If they're
-// already in your queue the like is mutual, so it links through likeBack the
-// way the Sparks page does; otherwise it's an ordinary Explore like.
+// Sends a spark from outside Explore and Sparks (/profile/:uid). If they
+// already liked you, onLike makes it a match (§4.A3: the app can't look
+// them up in your queue any more).
 export async function sparkFromProfile(
   uid: string,
   mode: Mode,
   profile: DiscoverProfile,
 ): Promise<{ matched: boolean; matchId: string | null }> {
-  const queued = await getDoc(doc(db, `users/${uid}/likeQueue/${profile.uid}`)).catch(() => null)
-  if (queued?.exists()) {
-    const matchId = await likeBackSpark(uid, toSpark(queued.id, queued.data()), profile)
-    return { matched: true, matchId }
-  }
   const result = await likeProfile(uid, mode, profile)
   return {
     matched: result.matched,
@@ -227,11 +212,9 @@ export async function sparkFromProfile(
   }
 }
 
-// Passing also clears them from your Sparks queue if they were in it.
+// Passing also moves their like (if any) to Viewed — server-side, in recordSwipe.
 export async function passFromProfile(uid: string, mode: Mode, targetUid: string): Promise<void> {
   await passProfile(uid, mode, targetUid)
-  const queued = await getDoc(doc(db, `users/${uid}/likeQueue/${targetUid}`)).catch(() => null)
-  if (queued?.exists()) await dismissSpark(uid, targetUid).catch(() => {})
 }
 
 // ─── Curious ─────────────────────────────────────────────────────────────────

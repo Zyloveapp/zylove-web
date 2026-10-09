@@ -71,7 +71,8 @@ function navLinks(mode: Mode): { to: string; label: string; icon: ReactNode }[] 
 
 // Live dot flags for the current mode, using the same listeners as the
 // Matches and Sparks pages.
-//   Sparks/Flames: any live (not dismissed or expired) like in the queue.
+//   Sparks/Flames: any live (not dismissed or expired) like in the queue
+//                  (polled — the queue is server-only, §4.A3).
 //   Links/Chats:   any unread conversation, or a link from the last 7 days
 //                  that nobody has written to yet.
 function useBadges(uid: string, mode: Mode): { sparks: boolean; matches: boolean } {
@@ -85,7 +86,8 @@ function useBadges(uid: string, mode: Mode): { sparks: boolean; matches: boolean
     return subscribeSparks(
       uid,
       mode,
-      (list) => setSparks({ key, any: list.length > 0 }),
+      // §4.A3: Free gets the count of real people (no list).
+      (list, count) => setSparks({ key, any: list.length > 0 || count > 0 }),
       () => setSparks({ key, any: false }),
     )
   }, [uid, mode, key])
