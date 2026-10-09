@@ -102,7 +102,8 @@ export interface PlayGoDeeperRequest {
 function tags(d: Json, field: string, category: string): PlayInterestTag[] {
   const v = d[field]
   if (!Array.isArray(v)) return []
-  return v.filter((t): t is PlayInterestTag => has(PLAY_TAG_LABELS, t) && PLAY_TAG_LABELS[t].category === category)
+  // Each tag once (H7: a list of one tag repeated was a prompt of any size).
+  return [...new Set(v.filter((t): t is PlayInterestTag => has(PLAY_TAG_LABELS, t) && PLAY_TAG_LABELS[t].category === category))]
 }
 
 // Labels and descriptions come from the server's own tables, so the
@@ -116,7 +117,7 @@ export function parsePlayGoDeeperRequest(raw: unknown): PlayGoDeeperRequest {
     dynamic: tags(d, 'dynamicTags', 'dynamic'),
     vibe: tags(d, 'vibeTags', 'vibe'),
     acts: tags(d, 'actsTags', 'acts'),
-    nonNegotiables: nonNegotiables.filter((k): k is PlayNonNegotiable => has(PLAY_NON_NEGOTIABLE_LABELS, k)),
+    nonNegotiables: [...new Set(nonNegotiables.filter((k): k is PlayNonNegotiable => has(PLAY_NON_NEGOTIABLE_LABELS, k)))],
     about: parsePlayAbout(d),
     existingPromptAnswers: parseQuestionAnswers(d.existingPromptAnswers),
   }
