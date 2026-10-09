@@ -17,7 +17,7 @@ import { revokeFounderStatus } from './founderActivity'
 import { SMS_SECRETS } from './sms'
 import { liftSuspension, setAuthDisabled } from './reports'
 import { audit, requireAdminAudited } from './audit'
-import { ROOT_SCRUB, clearPrivateData, deletionView, internalRef, isAdminAuth, loadLocation, loadMatching, loadPrivateProfile } from './userData'
+import { ROOT_SCRUB, clearPrivateData, internalRef, isAdminAuth, loadLocation, moderationCarry, recoveryRecord } from './userData'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const PAGE_SIZE = 25
@@ -391,31 +391,14 @@ export async function softDeleteAccount(
     .then((a) => a.phoneNumber ?? null)
     .catch(() => null)
   const now = Timestamp.now()
-  const priv = await deletionView(uid, user)
+  // The recovery record every delete path writes (F-067: with any
+  // suspension in force and the report count).
+  const carry = await moderationCarry(uid)
   if (phone) {
-    const [asA, asB] = await Promise.all([
-      db.collection('pairs').where('userA', '==', uid).get(),
-      db.collection('pairs').where('userB', '==', uid).get(),
-    ])
     await db.collection('deletedAccounts').doc(phone).set({
-      phoneNumber: phone,
-      previousUid: uid,
-      deletedAt: now,
-      birthday: priv.birthday,
-      genderIdentity: user.genderIdentity ?? null,
-      matchableAs: (await loadMatching(uid, user)).matchableAs ?? [],
-      identityLockedAt: user.identityLockedAt ?? null,
-      pronouns: user.pronouns ?? null,
-      genderSelfDescribe: user.genderSelfDescribe ?? null,
-      displayName: user.displayName ?? '',
-      photoURLs: user.photoURLs ?? [],
-      bio: user.bio ?? '',
-      mode: (await loadPrivateProfile(uid, user)).mode ?? 'spark',
+      ...(await recoveryRecord(uid, user, phone)),
       isFounder: false,
-      subscriptionTier: priv.subscriptionTier,
-      reportCount: priv.reportCount,
       banned,
-      previousPairIds: [...asA.docs, ...asB.docs].map((d) => d.id),
       deletedByAdmin: adminUid,
     })
   }
@@ -431,7 +414,7 @@ export async function softDeleteAccount(
     locationLabel: '',
     ...ROOT_SCRUB,
   })
-  await clearPrivateData(uid)
+  await clearPrivateData(uid, { keepTrustLinks: banned || carry.keepTrustLinks })
   await getAuth()
     .deleteUser(uid)
     .catch((err: { code?: string }) => {

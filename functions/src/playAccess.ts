@@ -144,7 +144,7 @@ export async function setPlayVisibility(uid: string, visibility: 'active' | 'pau
 // ─── Triggers ────────────────────────────────────────────────────────────────
 
 const PLAN_KEYS = ['subscriptionTier', 'trialStartedAt', 'trialEndsAt', 'trialExpired', 'isSuspended', 'hadPaidPlan']
-const ROOT_KEYS = ['genderIdentity', 'isFounder', 'isSuspended', 'isDeleted']
+const ROOT_KEYS = ['genderIdentity', 'identityLockedAt', 'isFounder', 'isSuspended', 'isDeleted']
 const changed = (before: DocumentData | undefined, after: DocumentData | undefined, keys: string[]) =>
   keys.some((k) => JSON.stringify(before?.[k] ?? null) !== JSON.stringify(after?.[k] ?? null))
 

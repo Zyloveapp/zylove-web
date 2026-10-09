@@ -8,7 +8,7 @@ import { loadPlayName } from './playName'
 import { purgeMatchContent } from './matchCleanup'
 import { clearLikes } from './likes'
 import { contextOf, endPlayPair, loadMatch, type MatchCtx } from './playMatch'
-import { playIdOf } from './playIds'
+import { isPlayMatchId, playIdOf } from './playIds'
 
 // Behavioral safety signals feeding behaviorRiskScore.
 //
@@ -155,7 +155,13 @@ export const unmatchConnection = onCall(
     const ctx = await loadMatch(matchId)
     if (!ctx) return { success: true } // already gone
     const { ref, data: match } = ctx
-    if (!ctx.users.includes(uid)) throw new HttpsError('permission-denied', 'Not a participant in this match')
+    if (!ctx.has(uid)) throw new HttpsError('permission-denied', 'Not a participant in this match')
+    // F-069: a match the other person blocked is theirs — kept as evidence for
+    // as long as they want it; the person they blocked can't take it away.
+    if (match.isBlocked === true && match.blockedBy && match.blockedBy !== ctx.idOf(uid)) {
+      logger.info('unmatchConnection: blocked by the other person — kept', { matchId })
+      return { success: true }
+    }
     if (!isBotMatch(match) && !match.unmatchedAt) await recordPastConnection(ctx, match, Date.now(), null, uid)
     // Stage A: their likes in this mode go too, so a later like alone can't
     // bring the match back.
@@ -164,20 +170,25 @@ export const unmatchConnection = onCall(
     await endPlayPair(ctx)
     // T&S Phase 1: a chat with an open report is kept for the reporter —
     // read-only, still end-to-end encrypted — for PRESERVE_REPORTED_MS, then
-    // deleted (purgePreservedChats). The other person loses it at once.
+    // deleted (purgePreservedChats). F-069: and by default for the other
+    // person too, so whoever unmatches can't destroy what they said before
+    // it's reported; the one who unmatched loses it at once. A chat with a
+    // curated profile, or one only its last person is left in, just goes.
     const reporters = a && b ? await openReporters(matchId, match, a, b) : []
-    if (reporters.length) {
+    const other = ctx.otherOf(uid)
+    const keepFor = reporters.length ? reporters : a && b && other && !isBotMatch(match) ? [other] : []
+    if (keepFor.length) {
       // In Play every one of these is a Play ID (players is who may read it).
       const ids = (us: string[]) => us.map((u) => ctx.idOf(u))
       await ref.update({
-        [ctx.play ? 'players' : 'users']: ids(reporters),
+        [ctx.play ? 'players' : 'users']: ids(keepFor),
         [ctx.play ? 'pairPlayers' : 'pairUsers']: ids([a, b]),
         unmatchedAt: FieldValue.serverTimestamp(),
         unmatchedBy: ctx.idOf(uid),
-        preservedFor: ids(reporters),
+        preservedFor: ids(keepFor),
         preservedUntil: Timestamp.fromMillis(Date.now() + PRESERVE_REPORTED_MS),
       })
-      logger.info('unmatchConnection: preserved for reporter', { matchId, reporters: reporters.length })
+      logger.info('unmatchConnection: kept read-only', { matchId, kept: keepFor.length, reported: reporters.length > 0 })
       return { success: true }
     }
     await ref.delete()
@@ -499,6 +510,9 @@ export const getPastConnections = onCall(
       const name: unknown = p.names?.[otherUid]
       const matchId = typeof p.matchId === 'string' ? p.matchId : d.id
       const generation = num(p.generation)
+      // F-064: a Play connection is only ever named by its pm_ id — a record
+      // from before F-062 holds the uid pair, which would name the partner.
+      if (connectionMode(p) === 'play' && !isPlayMatchId(matchId)) continue
       if (connectionMode(p) === 'play') play.add(pastConnectionId(matchId, generation))
       byId.set(pastConnectionId(matchId, generation), {
         matchId,
@@ -535,8 +549,8 @@ export const getPastConnections = onCall(
       if (!otherUid || isBotMatch(m) || matchedAtOf(m) < since) continue
       if (mode && connectionMode(m) !== mode) continue
       const generation = generationOf(m)
-      if (connectionMode(m) === 'play') play.add(pastConnectionId(d.id, generation))
-      else play.delete(pastConnectionId(d.id, generation))
+      if (connectionMode(m) === 'play') continue // F-064: a uid-pair id (Play matches are pm_ now)
+      play.delete(pastConnectionId(d.id, generation))
       byId.set(pastConnectionId(d.id, generation), {
         matchId: d.id,
         generation,

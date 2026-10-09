@@ -27,14 +27,15 @@ import { REPORT_ONLY_IDS, REVIEW_TONE } from './shared/reviewCategories'
 import { checkScamSuspension } from './scamReports'
 import { queueAdminAlert } from './adminAlerts'
 import { SMS_SECRETS, textAccount } from './sms'
-import { phoneHash, wereMatched } from './trust'
+import { matchGenerations, phoneHash } from './trust'
+import { takeRateLimit } from './rateLimits'
 import { softDeleteAccount } from './adminActivity'
 import { audit, requireAdminAudited } from './audit'
 import { markBannedDevices } from './devices'
 import { blocklistPhotosOf, unblockPhotosOf } from './photoHashes'
 import { reportCounts } from './blocklistContext'
 import { decideEvidenceFor } from './evidence'
-import { isPlayId, isPlayMatchId, requireUidOfPlayId } from './playIds'
+import { isPlayMatchId, uidNamedIn } from './playIds'
 import { accountRef, adminUids, internalRef, isAdminAuth, isAdminUid, isSuspendedUid, loadInternal } from './userData'
 
 const BOT_PREFIXES = ['zbot-', 'seed-']
@@ -70,6 +71,9 @@ function millis(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
 }
 
+// F-070: reports per reporter per day — far above any real use.
+const REPORT_LIMIT = { max: 10, windowMs: DAY_MS }
+
 const isBotUid = (uid: string) => BOT_PREFIXES.some((p) => uid.startsWith(p))
 
 async function phoneOf(uid: string): Promise<string | null> {
@@ -92,7 +96,7 @@ export async function recordReport(input: {
   categories: string[]
   source: string
 }): Promise<void> {
-  const { reporterUid, reportedUid, matchId, generation, source } = input
+  const { reporterUid, reportedUid, matchId, source } = input
   if (reportedUid === reporterUid) throw new HttpsError('invalid-argument', "You can't report yourself.")
   const categories = [...new Set(input.categories)]
   if (categories.length === 0) throw new HttpsError('invalid-argument', 'Pick what happened.')
@@ -108,9 +112,17 @@ export async function recordReport(input: {
   if (isBotUid(reportedUid)) {
     throw new HttpsError('failed-precondition', "Curated profiles can't be reported.")
   }
-  if (!(await wereMatched(matchId, reporterUid, reportedUid))) {
+  // F-070: the generation is the server's — the claimed one only if it's a
+  // real match between them, else their latest — so there's one report per
+  // reporter, person and match, however it's called.
+  const generations = await matchGenerations(matchId, reporterUid, reportedUid)
+  if (!generations.length) {
     throw new HttpsError('permission-denied', 'You can only report people you matched with.')
   }
+  const generation = generations.includes(input.generation) ? input.generation : Math.max(...generations)
+  await takeRateLimit(reporterUid, 'report', REPORT_LIMIT).catch(() => {
+    throw new HttpsError('resource-exhausted', "You've sent a lot of reports today. Our team has them — you can send more tomorrow.")
+  })
 
   const ref = db().doc(`reports/${reporterUid}_${reportedUid}_${generation}`)
   // F-062: a Play report keeps the Play name and photo (how the reporter
@@ -118,9 +130,10 @@ export async function recordReport(input: {
   const play = isPlayMatchId(matchId) ? (await db().doc(`users/${reportedUid}/playProfile/data`).get()).data() : undefined
   const photos: unknown = play ? play.photoURLs : reported?.photoURLs
   const snapshotName: unknown = play ? play.playDisplayName : reported?.displayName
-  await db().runTransaction(async (tx) => {
+  const added = await db().runTransaction(async (tx) => {
     const existing = (await tx.get(ref)).data()
-    const merged = [...new Set([...(Array.isArray(existing?.categories) ? (existing.categories as string[]) : []), ...categories])]
+    const before = Array.isArray(existing?.categories) ? (existing.categories as string[]) : []
+    const merged = [...new Set([...before, ...categories])]
     tx.set(
       ref,
       {
@@ -150,14 +163,20 @@ export async function recordReport(input: {
       },
       { merge: true },
     )
+    // What this call added: a new report, or new categories on an open one.
+    return existing?.status !== 'pending' ? categories : categories.filter((c) => !before.includes(c))
   })
   logger.info('recordReport', { source, categories, urgent: categories.some((c) => URGENT.has(c)) })
   // Admin texts (adminAlerts.ts): child safety and felt unsafe / aggressive
-  // are urgent; everything else is batched.
-  await queueAdminAlert(
-    categories.includes('child_safety') ? 'childSafety' : categories.some((c) => URGENT.has(c)) ? 'reportUrgent' : 'reportNew',
-    { subjectUid: reporterUid },
-  )
+  // are urgent; everything else is batched. F-070: only for what's new —
+  // sending the same report again doesn't text anyone — and urgent texts
+  // count once per reported person per hour (aboutUid).
+  if (added.length) {
+    await queueAdminAlert(
+      added.includes('child_safety') ? 'childSafety' : added.some((c) => URGENT.has(c)) ? 'reportUrgent' : 'reportNew',
+      { subjectUid: reporterUid, aboutUid: reportedUid },
+    )
+  }
   // T&S Phase 2: enough independent scam reports suspend pending review.
   if (categories.includes('scam')) await checkScamSuspension(reportedUid)
 
@@ -175,10 +194,13 @@ function parseGeneration(data: unknown): number {
 }
 
 // The reported person as the caller was shown them: a uid in Spark, a Play
-// ID in Play (F-062) — mapped back to the account here.
+// ID in Play (F-062) — mapped back to the account here. F-064/F-065: only in
+// the match's own namespace; a mixed or unknown id gets the same answer as
+// someone they never matched with.
 async function reportedArg(data: unknown, caller: string): Promise<string> {
-  const v = str(data, 'reportedUid')
-  return isPlayId(v) ? requireUidOfPlayId(v, caller) : v
+  const uid = await uidNamedIn(str(data, 'matchId'), str(data, 'reportedUid'))
+  if (!uid || uid === caller) throw new HttpsError('permission-denied', 'You can only report people you matched with.')
+  return uid
 }
 
 export const submitReport = onCall(

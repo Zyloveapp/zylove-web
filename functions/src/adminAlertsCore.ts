@@ -403,6 +403,9 @@ export interface QueuedEvent {
   detail: Detail
   // Trust flags: the flag's reason keys (each admin's families decide).
   reasons?: string[]
+  // Who it's about (a report's reported person): urgent texts count once per
+  // person per hour (F-070), so one account can't be reported into a flood.
+  about?: string
 }
 
 // The event as this admin's SMS settings allow it, or null when it's off:
@@ -439,10 +442,12 @@ export interface AdminNotifyState {
   quiet: boolean
   // Urgent texts per type in the last hour (the runaway guard).
   urgentTimes: Partial<Record<AdminEvent, number[]>>
+  // F-070: when each person last had an urgent text about them (last hour).
+  urgentAbout: Record<string, number>
 }
 
 export function emptyState(): AdminNotifyState {
-  return { types: {}, day: { date: '', sent: 0 }, pausedUntil: null, quiet: false, urgentTimes: {} }
+  return { types: {}, day: { date: '', sent: 0 }, pausedUntil: null, quiet: false, urgentTimes: {}, urgentAbout: {} }
 }
 
 export function normalizeState(raw: unknown): AdminNotifyState {
@@ -466,6 +471,9 @@ export function normalizeState(raw: unknown): AdminNotifyState {
     for (const [k, v] of Object.entries(raw.urgentTimes)) {
       if (k in EVENTS && Array.isArray(v)) s.urgentTimes[k as AdminEvent] = v.filter((t): t is number => typeof t === 'number')
     }
+  }
+  if (isObj(raw.urgentAbout)) {
+    for (const [k, v] of Object.entries(raw.urgentAbout)) if (typeof v === 'number') s.urgentAbout[k] = v
   }
   return s
 }
@@ -516,12 +524,23 @@ export interface Outcome {
 // At the daily cap: the cap notice (once) and every non-urgent text holds
 // until 8 AM. Returns whether it's capped.
 function atCap(s: AdminNotifyState, now: number, texts: string[]): boolean {
+  liftPause(s, now)
   if (s.day.sent < DAILY_CAP) return false
   if (s.pausedUntil === null) {
     s.pausedUntil = nextCatchUp(now)
     texts.push(CAP_NOTICE)
   }
   return true
+}
+
+// F-070: when the cap's pause ends (8 AM) the day's count starts again — a
+// cap hit before 8 AM left the count at the cap for the rest of that day, so
+// the first text after 8 AM paused everything again until the next morning.
+function liftPause(s: AdminNotifyState, now: number) {
+  if (s.pausedUntil !== null && now >= s.pausedUntil) {
+    s.pausedUntil = null
+    s.day = { date: centralDate(now), sent: 0 }
+  }
 }
 
 function nonUrgentHeld(s: AdminNotifyState, settings: AdminNotifySettings, now: number): boolean {
@@ -544,14 +563,19 @@ function sendType(s: AdminNotifyState, type: AdminEvent, now: number, texts: str
 }
 
 // An event arrives (already filtered by smsEventFor).
-export function onEvent(stateIn: AdminNotifyState, settings: AdminNotifySettings, type: AdminEvent, n: number, detail: Detail, now: number): Outcome {
+export function onEvent(stateIn: AdminNotifyState, settings: AdminNotifySettings, type: AdminEvent, n: number, detail: Detail, now: number, about?: string): Outcome {
   const s = structuredClone(stateIn)
   const texts: string[] = []
   rollDay(s, now)
   const t = typeState(s, type)
-  addPending(t, n, detail, now)
 
   if (EVENTS[type].urgent) {
+    for (const [k, at] of Object.entries(s.urgentAbout)) if (now - at >= 60 * MIN) delete s.urgentAbout[k]
+    // F-070: someone already texted about this hour isn't again (nor counted
+    // — the first text's link shows every report about them).
+    if (about && s.urgentAbout[about] !== undefined) return { state: s, texts }
+    if (about) s.urgentAbout[about] = now
+    addPending(t, n, detail, now)
     const recent = (s.urgentTimes[type] ?? []).filter((at) => now - at < 60 * MIN)
     const collapsed = recent.length >= URGENT_PER_HOUR
     if (!collapsed || t.lastSentAt === null || now - t.lastSentAt >= URGENT_COLLAPSE_MS) {
@@ -563,6 +587,7 @@ export function onEvent(stateIn: AdminNotifyState, settings: AdminNotifySettings
     return { state: s, texts }
   }
 
+  addPending(t, n, detail, now)
   if (nonUrgentHeld(s, settings, now)) return { state: s, texts }
   if (t.lastSentAt === null || now - t.lastSentAt >= EVENTS[type].windowMs) sendType(s, type, now, texts)
   return { state: s, texts }
@@ -620,7 +645,7 @@ export function flush(stateIn: AdminNotifyState, settings: AdminNotifySettings, 
   s.quiet = false
   if (s.pausedUntil !== null && now < s.pausedUntil) return { state: s, texts }
   if (s.pausedUntil !== null) {
-    s.pausedUntil = null
+    liftPause(s, now)
     sendSummary(s, 'since last night', now, texts)
     return { state: s, texts }
   }

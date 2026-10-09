@@ -50,7 +50,7 @@ export const actOnPlayConnection = onCall(
     const action = data.action
     if (!matchId || (action !== 'report' && action !== 'block')) throw new HttpsError('invalid-argument', 'matchId and action (report | block) required')
     const ctx = await loadMatch(matchId)
-    if (!ctx || !ctx.play || !ctx.users.includes(uid)) throw new HttpsError('not-found', 'Connection not found.')
+    if (!ctx || !ctx.play || !ctx.has(uid)) throw new HttpsError('not-found', 'Connection not found.')
     const match = ctx.data
     const other = ctx.otherOf(uid)
     if (!other) throw new HttpsError('not-found', 'Connection not found.')

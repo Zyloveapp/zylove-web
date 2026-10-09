@@ -10,7 +10,7 @@ import { requireAdminAudited } from './audit'
 import { FRANKING_KEY } from './franking'
 import { parseKeys, photoPlaintext, verifyItem, type Verdict } from './frankingCore'
 import { OUTCOME_RETENTION_MS, deletable, expiryFor, open, seal, type Sealed } from './lockerCore'
-import { isPlayId, isPlayMatchId, uidOfPlayId } from './playIds'
+import { isPlayMatchId, uidNamedIn, uidOfPlayId } from './playIds'
 import { loadMatch, messagesPath } from './playMatch'
 import { loadPlayName } from './playName'
 import { REPORT_ONLY_CATEGORY_DEFS, REVIEW_CATEGORY_DEFS } from './shared/reviewCategories'
@@ -80,18 +80,21 @@ export const submitEvidence = onCall(
     const reporter = request.auth.uid
     const data = (request.data ?? {}) as Record<string, unknown>
     const matchId = str(data.matchId)
-    // F-062: in Play the reported person is named by their Play ID.
-    const reportedArg = str(data.reportedUid)
-    const reportedUid = isPlayId(reportedArg) ? ((await uidOfPlayId(reportedArg)) ?? '') : reportedArg
+    // F-062: in Play the reported person is named by their Play ID — and only
+    // that (F-065): a uid with a Play match, or a Play ID with a Spark one, is
+    // "Send the report first", the same as a wrong id.
+    const reportedUid = (await uidNamedIn(matchId, data.reportedUid)) ?? ''
     const play = isPlayMatchId(matchId)
     const generation = typeof data.generation === 'number' && data.generation > 0 ? Math.floor(data.generation) : 0
     const raw = Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : []
-    if (!matchId || !reportedUid || matchId.includes('/') || reportedUid.includes('/')) throw new HttpsError('invalid-argument', 'matchId and reportedUid required')
+    if (!matchId || matchId.includes('/') || typeof data.reportedUid !== 'string' || !data.reportedUid) throw new HttpsError('invalid-argument', 'matchId and reportedUid required')
     if (!raw.length) throw new HttpsError('invalid-argument', 'Pick at least one message.')
     if (raw.length > MAX_ITEMS) throw new HttpsError('invalid-argument', `At most ${MAX_ITEMS} messages per report.`)
     // Evidence belongs to a report this person filed.
     const report = (await db().doc(`reports/${reporter}_${reportedUid}_${generation}`).get()).data()
-    if (!report || report.reporterUid !== reporter) throw new HttpsError('failed-precondition', 'Send the report first.')
+    // F-097: and to this match — another conversation's messages can't be
+    // pulled in under it.
+    if (!reportedUid || !report || report.reporterUid !== reporter || report.matchId !== matchId) throw new HttpsError('failed-precondition', 'Send the report first.')
     const ctx = await loadMatch(matchId)
     const people = ctx ? ctx.users : [reporter, reportedUid]
     if (!people.includes(reporter) || !people.includes(reportedUid)) throw new HttpsError('permission-denied', 'Not your conversation.')

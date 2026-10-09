@@ -7,6 +7,7 @@ import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VE
 import { UserDoc, PairDoc, pairId } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
+import { scoringDocs } from "./onProfileWrite";
 import { loadMatching, requireActive, withPrivateProfile } from "../userData";
 import { atLeast, tierNow } from "../entitlements";
 import { loadSparkDetails, writeSparkDetails } from "../pairSpark";
@@ -31,16 +32,6 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   const pid     = pairId(tapperId, tappedId);
   const pairRef = db.collection("pairs").doc(pid);
 
-  // Stage 2 (Play sealing): Play scores only when both people have Play
-  // access, and kept in pairs/{id}/modes/play — never on the pair doc.
-  const play = await bothHavePlay(tapperId, tappedId);
-  // Whether the tapped person has physical preferences to score against
-  // (Stage 3: their preferences are private; the app only needs yes/no to
-  // hide the physical categories otherwise).
-  const tappedPrefs = await loadMatching(tappedId);
-  const hasPhysicalPrefs = (Array.isArray(tappedPrefs.seekingBodyTypes) && tappedPrefs.seekingBodyTypes.length > 0) ||
-    Boolean(tappedPrefs.seekingHeightMinCm) || Boolean(tappedPrefs.seekingHeightMaxCm);
-
   // Stage C / engine v2: everyone sees the score (Deep Fit's headline) and
   // its label; Spark+ the breakdown and dealbreakers; Elite Deep Fit's detail
   // (tier1: both directions, the reasons).
@@ -50,21 +41,43 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   const full = bot || atLeast(tier, "spark_plus");
   const deep = bot || tier === "elite";
 
+  // F-064/F-065: a Play tap is answered from Play state only (playPairData,
+  // keyed by Play IDs) — it never creates or scores pairs/{uidA_uidB}; and a
+  // Spark tap never carries Play scores (matching the two would link them).
+  if (playTap) {
+    if (!(await bothHavePlay(tapperId, tappedId))) throw new HttpsError("failed-precondition", "That profile isn't available.");
+    const cached = await loadPlayScores(tapperId, tappedId);
+    if (cached && cached.engineVersion === SCORE_ENGINE_VERSION) return playAnswer(cached, full);
+    const [tapperSnap, tappedSnap] = await Promise.all([db.doc(`users/${tapperId}`).get(), db.doc(`users/${tappedId}`).get()]);
+    if (!tapperSnap.exists || !tappedSnap.exists) throw new HttpsError("failed-precondition", "That profile isn't available.");
+    const [mine, theirs] = await Promise.all([
+      scoringDocs(tapperId, (tapperSnap.data() ?? {}) as UserDoc),
+      scoringDocs(tappedId, (tappedSnap.data() ?? {}) as UserDoc),
+    ]);
+    const result = calculatePlayScore(mine.full, theirs.full);
+    const fields = { ...playFields(result.score, result.breakdown, result.tier1), engineVersion: SCORE_ENGINE_VERSION };
+    await setPlayScores(tapperId, tappedId, fields);
+    return playAnswer(fields, full);
+  }
+  // Whether the tapped person has physical preferences to score against
+  // (Stage 3: their preferences are private; the app only needs yes/no to
+  // hide the physical categories otherwise).
+  const tappedPrefs = await loadMatching(tappedId);
+  const hasPhysicalPrefs = (Array.isArray(tappedPrefs.seekingBodyTypes) && tappedPrefs.seekingBodyTypes.length > 0) ||
+    Boolean(tappedPrefs.seekingHeightMinCm) || Boolean(tappedPrefs.seekingHeightMaxCm);
+
   // Return the cached score if the pair exists and was scored by the current
   // engine; older engine versions are re-scored below (merged into the doc).
   const existing = await pairRef.get();
   if (existing.exists && (existing.data() as PairDoc).engineVersion === SCORE_ENGINE_VERSION) {
     const data = existing.data() as PairDoc;
-    const playScores = play ? await loadPlayScores(pid, data) : undefined;
-    if (playTap) return playAnswer(playScores, full);
     const details = full ? await loadSparkDetails(pid, data) : null;
     return {
       pairId:     pid,
       sparkScore: data.sparkScore,
       sparkEnoughInfo: data.sparkEnoughInfo !== false,
       engineVersion: data.engineVersion,
-      ...(playScores && { playScore: playScores.playScore }),
-      breakdown:  { ...(details && { spark: details.sparkBreakdown }), ...(playScores && { play: playScores.playBreakdown }) },
+      breakdown:  { ...(details && { spark: details.sparkBreakdown }) },
       triggeredDealbreakers: details?.triggeredDealbreakers ?? [],
       ...(deep && details?.tier1Spark ? { tier1: details.tier1Spark } : {}),
       hasPhysicalPrefs,
@@ -72,12 +85,9 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
     };
   }
 
-  // Fetch Spark profiles (root user docs) + Play profiles (subcollection) in parallel
-  const [tapperSnap, tappedSnap, tapperPlaySnap, tappedPlaySnap] = await Promise.all([
+  const [tapperSnap, tappedSnap] = await Promise.all([
     db.collection("users").doc(tapperId).get(),
     db.collection("users").doc(tappedId).get(),
-    db.collection("users").doc(tapperId).collection("playProfile").doc("data").get().catch(() => null),
-    db.collection("users").doc(tappedId).collection("playProfile").doc("data").get().catch(() => null),
   ]);
 
   if (!tapperSnap.exists || !tappedSnap.exists) {
@@ -87,19 +97,10 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   // Scoring compares intents, which live in the owner-only private/profile (Stage 2).
   const tapperDoc  = await withPrivateProfile(tapperId, tapperSnap.data() ?? {}) as UserDoc;
   const tappedDoc  = await withPrivateProfile(tappedId, tappedSnap.data() ?? {}) as UserDoc;
-  const tapperPlay = tapperPlaySnap?.exists ? tapperPlaySnap.data() ?? {} : {};
-  const tappedPlay = tappedPlaySnap?.exists ? tappedPlaySnap.data() ?? {} : {};
-
-  // Merge Play profile fields into user doc for scoring
-  // Spark scoring uses root doc fields only
-  // Play scoring uses merged doc (Play fields override root where present)
-  const tapperFull = { ...tapperDoc, ...tapperPlay, playProfile: tapperPlay } as UserDoc;
-  const tappedFull = { ...tappedDoc, ...tappedPlay, playProfile: tappedPlay } as UserDoc;
 
   const spark = calculateSparkScore(tapperDoc, tappedDoc);
   const { score: sparkScore, breakdown: sparkBreakdown, triggeredDealbreakers } = spark;
   const sparkTier1 = deepFitRecord(spark.tier1, tapperId, tappedId);
-  const playResult = play ? calculatePlayScore(tapperFull, tappedFull) : null;
 
   const [userA, userB] = [tapperId, tappedId].sort();
 
@@ -125,16 +126,13 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   }
   writeSparkDetails(batch, pid, { breakdown: sparkBreakdown, dealbreakers: triggeredDealbreakers, tier1: sparkTier1 }, false);
   await batch.commit();
-  if (playResult) await setPlayScores(pid, playFields(playResult.score, playResult.breakdown, playResult.tier1));
-  if (playTap) return playAnswer(playResult ? { playScore: playResult.score, playBreakdown: playResult.breakdown, tier1Play: playResult.tier1 } : undefined, full);
 
   return {
     pairId: pid,
     sparkScore,
     sparkEnoughInfo: spark.enoughInfo,
     engineVersion: SCORE_ENGINE_VERSION,
-    ...(playResult && { playScore: playResult.score }),
-    breakdown: { ...(full && { spark: sparkBreakdown }), ...(playResult && { play: playResult.breakdown }) },
+    breakdown: { ...(full && { spark: sparkBreakdown }) },
     triggeredDealbreakers: full ? triggeredDealbreakers : [],
     ...(deep && sparkTier1 ? { tier1: sparkTier1 } : {}),
     hasPhysicalPrefs,

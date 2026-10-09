@@ -7,6 +7,7 @@ import { PLAY_TAG_LABELS, SPICE_META, type PlayInterestTag, type SpiceLevel } fr
 import { isSuspendedUid } from './userData'
 import { ensurePlayId, isPlayId, uidOfPlayId } from './playIds'
 import { createPlayMatch, matchRefOf } from './playMatch'
+import { playPairDataRef, playPairUsers } from './pairPlay'
 import { publicPlayProfile } from './playProfiles'
 
 // Demonstration profiles like back. When a real person likes a bot, the like
@@ -182,8 +183,9 @@ async function likeBackPlay(pendingRef: FirebaseFirestore.DocumentReference, bot
   })
   if (!created) return
   const batch = db.batch()
-  batch.set(db.doc(`pairs/${pairId}`), { userA: [botUid, likerUid].sort()[0], userB: [botUid, likerUid].sort()[1] }, { merge: true })
-  batch.set(db.doc(`pairs/${pairId}/likes/play`), { likedBy: FieldValue.arrayUnion(botUid, likerUid) }, { merge: true })
+  // F-065: Play likes live in playPairData (keyed by Play IDs), never under
+  // the uid pair.
+  batch.set(await playPairDataRef(botUid, likerUid), { users: playPairUsers(botUid, likerUid), likedBy: FieldValue.arrayUnion(botUid, likerUid) }, { merge: true })
   batch.set(db.doc(`users/${botUid}/matches/${matchId}`), { matchId, otherPlayId: likerPlayId, createdAt: now, mode: 'play' })
   batch.set(db.doc(`users/${likerUid}/matches/${matchId}`), { matchId, otherPlayId: botPlayId, createdAt: now, mode: 'play' })
   batch.delete(db.doc(`users/${botUid}/likeQueue/${likerPlayId}`))

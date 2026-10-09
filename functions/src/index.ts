@@ -52,13 +52,14 @@ import { recomputeBehaviorRisk, recordVibeSignal } from './behavior'
 import { newTrial, noteTrialHistory, planView, priorTrial, trialExempt } from './trial'
 import { cityIsOpen, launchCityOf, requireTier, tierNow } from './entitlements'
 import { accountRef, internalRef, isAdminAuth, isSuspendedUid, loadInternal, loadMatching, loadSettings, requireActive } from './userData'
-import { blockedEitherWay, likedInMode, pairIdOf, recordLike } from './likes'
+import { blockedEitherWay, likedInMode, likersInMode, pairIdOf, recordLike } from './likes'
 import { takeRateLimit } from './rateLimits'
 import { takeQuota } from './usage'
 import { loadSparkDetails } from './pairSpark'
 import { clientIp } from './legal'
 import { isBotUid, playStatus, requirePlayAccess, requirePlayEntitled } from './playAccess'
 import { loadPlayScores } from './pairPlay'
+import { otherUidOf } from './playPairQueries'
 import { markActed } from './explore'
 import { countMessages, generationOf, participants, pastConnectionId } from './matchGeneration'
 import { ensurePlayId, isPlayMatchId, requireUidOfPlayId } from './playIds'
@@ -535,7 +536,7 @@ export const likeBack = onCall(
     if ((await isSuspendedUid(callerId)) || (!bot && (await isSuspendedUid(likerUid))) || (await blockedEitherWay(callerId, likerUid))) {
       throw new HttpsError('failed-precondition', "That profile isn't available.")
     }
-    if (!bot) await recordLike(pairIdOf(callerId, likerUid), mode, callerId)
+    if (!bot) await recordLike(callerId, likerUid, mode, callerId)
 
     if (mode === 'play') {
       // F-062: a Play match — its own id, Play IDs only.
@@ -1746,6 +1747,8 @@ export const getSentSparks = onCall(
     if (mode === 'play') await requirePlayAccess(uid)
     const db = getFirestore()
 
+    if (mode === 'play') return { sent: await sentPlayLikes(uid) }
+
     // Stage B: likes per mode (pairs/{id}/likes/{mode}, server-only) — the
     // pair doc no longer says who liked whom (its participants could read it).
     const myLikes = (await db.collectionGroup('likes').where('likedBy', 'array-contains', uid).get()).docs.filter(
@@ -1767,7 +1770,6 @@ export const getSentSparks = onCall(
         const pair = pairSnap.data() ?? {}
         const otherUid: unknown = pair.userA === uid ? pair.userB : pair.userA
         if (typeof otherUid !== 'string') return null
-        if (mode === 'play') return sentPlay(uid, otherUid, pairSnap.id, pair)
         const [matchSnap, userSnap, queueSnap] = await Promise.all([
           db.collection('matches').doc(pairSnap.id).get(),
           db.collection('users').doc(otherUid).get(),
@@ -1798,8 +1800,20 @@ export const getSentSparks = onCall(
   },
 )
 
+// F-065: the caller's unanswered Play likes, from playPairData (keyed by
+// Play IDs) — Play likes no longer live under the uid pair.
+async function sentPlayLikes(uid: string): Promise<SentSpark[]> {
+  const snap = await getFirestore().collection('playPairData').where('likedBy', 'array-contains', uid).get()
+  const pending = snap.docs
+    .map((d) => ({ data: d.data(), other: otherUidOf(d.data(), uid) }))
+    .filter((x): x is { data: DocumentData; other: string } => !!x.other && !x.other.startsWith('zbot-') && !(x.data.likedBy as string[]).includes(x.other))
+    .slice(0, SENT_LIMIT)
+  const sent = await Promise.all(pending.map(({ other, data }) => sentPlay(uid, other, data)))
+  return sent.filter((s): s is SentSpark => s !== null).sort((a, b) => b.likedAt - a.likedAt)
+}
+
 // F-062: a sent Play like — the Play ID, Play name and photo, Play score.
-async function sentPlay(uid: string, otherUid: string, pairId: string, pair: DocumentData): Promise<SentSpark | null> {
+async function sentPlay(uid: string, otherUid: string, pair: DocumentData): Promise<SentSpark | null> {
   const db = getFirestore()
   const [myPlayId, otherPlayId] = await Promise.all([ensurePlayId(uid), ensurePlayId(otherUid)])
   const [live, userSnap, queueSnap, play] = await Promise.all([
@@ -1812,7 +1826,7 @@ async function sentPlay(uid: string, otherUid: string, pairId: string, pair: Doc
   if (live || !user || (await isSuspendedUid(otherUid, user))) return null
   if (!(await playStatus(otherUid)).access) return null
   const pub = publicPlayProfile(otherUid, otherPlayId, play, user)
-  const playScores = await loadPlayScores(pairId, pair)
+  const playScores = await loadPlayScores(uid, otherUid)
   return {
     playId: otherPlayId,
     displayName: pub.playDisplayName || 'Someone',
@@ -1820,10 +1834,10 @@ async function sentPlay(uid: string, otherUid: string, pairId: string, pair: Doc
     age: pub.age ?? null,
     sparkScore: null,
     sparkEnoughInfo: null,
-    engineVersion: typeof pair.engineVersion === 'number' ? pair.engineVersion : null,
+    engineVersion: typeof playScores?.engineVersion === 'number' ? playScores.engineVersion : null,
     playScore: typeof playScores?.playScore === 'number' ? playScores.playScore : null,
     tier1Spark: null,
-    likedAt: toMillis(queueSnap.get('likedAt')) || toMillis(pair.createdAt),
+    likedAt: toMillis(queueSnap.get('likedAt')) || toMillis(pair.scoredAt),
   }
 }
 
@@ -1849,16 +1863,6 @@ interface CuriousVisitor {
 const CURIOUS_LIMIT = 20
 
 
-// Did otherUid reveal the score in this mode? Reveals since the web started
-// recording the mode carry {otherUid}_revealed_{mode}. Older ones don't, so
-// for those `null` is returned and the caller checks the visitor has a
-// profile in that mode instead.
-function revealedInMode(pair: DocumentData, otherUid: string, mode: 'spark' | 'play'): boolean | null {
-  if (pair[`${otherUid}_revealed_${mode}`] === true) return true
-  const other = mode === 'play' ? 'spark' : 'play'
-  return pair[`${otherUid}_revealed_${other}`] === true ? false : null
-}
-
 // When the other person in a pair (not `uid`) revealed the score.
 function revealedAt(pair: DocumentData, uid: string): number {
   const otherUid = pair.userA === uid ? pair.userB : pair.userA
@@ -1881,8 +1885,9 @@ export const getCuriousVisitors = onCall(
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     await requireActive(request.auth.uid)
     const uid = request.auth.uid
-    const rawMode = (request.data as Record<string, unknown> | null)?.mode
-    const mode = rawMode === 'play' || rawMode === 'spark' ? rawMode : null
+    // F-064: one mode always (Spark unless asked) — with none, Play reveals
+    // were listed under the Spark profile.
+    const mode = (request.data as Record<string, unknown> | null)?.mode === 'play' ? 'play' : 'spark'
     // Stage 2: Play visitors only for callers with Play access.
     if (mode === 'play' && !(await playStatus(uid)).access) return { locked: true, count: 0, visitors: [] }
     const db = getFirestore()
@@ -1905,17 +1910,16 @@ export const getCuriousVisitors = onCall(
       .filter(({ pair }) => {
         const iAmA = pair.userA === uid
         const otherUid = iAmA ? pair.userB : pair.userA
-        if (typeof otherUid !== 'string' || pair[`${otherUid}_revealed`] !== true) return false
-        if (mode && revealedInMode(pair, otherUid, mode) === false) return false
+        // Only a reveal recorded as Spark (older ones with no mode may be Play's).
+        if (typeof otherUid !== 'string' || pair[`${otherUid}_revealed_spark`] !== true) return false
         if (pair.matched === true) return false
         // Neither side has liked: I haven't, and they haven't (Sparks covers that).
         return pair.userALiked !== true && pair.userBLiked !== true
       })
-    // Likes per mode (Stage B) — a like in either mode rules them out.
-    const likeSnaps = revealed.length
-      ? await db.getAll(...revealed.flatMap(({ id }) => [db.doc(`pairs/${id}/likes/spark`), db.doc(`pairs/${id}/likes/play`)]))
-      : []
-    const liked = (i: number) => [likeSnaps[2 * i], likeSnaps[2 * i + 1]].some((x) => (x?.get('likedBy') ?? []).length > 0)
+    // Spark likes rule them out (Stage B). F-065: never Play's — a Spark
+    // list that changed with a Play like would link the two.
+    const likeSnaps = revealed.length ? await db.getAll(...revealed.map(({ id }) => db.doc(`pairs/${id}/likes/spark`))) : []
+    const liked = (i: number) => (likeSnaps[i]?.get('likedBy') ?? []).length > 0
     const candidates = revealed.filter((_, i) => !liked(i)).sort((a, b) => revealedAt(b.pair, uid) - revealedAt(a.pair, uid))
 
     const visitors: CuriousVisitor[] = []
@@ -1925,9 +1929,9 @@ export const getCuriousVisitors = onCall(
       if (otherUid.startsWith('zbot-')) continue // real people only
       const [matchSnap, userSnap] = await Promise.all([db.collection('matches').doc(id).get(), db.collection('users').doc(otherUid).get()])
       const user = userSnap.data()
-      if (matchSnap.exists || !user || (await isSuspendedUid(otherUid, user))) continue
+      if (matchSnap.exists || !user || (await isSuspendedUid(otherUid, user)) || (await blockedEitherWay(uid, otherUid))) continue
       // Spark visitors need a Spark profile (Play-only accounts have Spark hidden).
-      if (mode === 'spark' && user.sparkVisibility === 'hidden') continue
+      if (user.sparkVisibility === 'hidden') continue
       visitors.push({
         uid: otherUid,
         ...modeIdentity(user, null),
@@ -1949,14 +1953,40 @@ export const getCuriousVisitors = onCall(
   },
 )
 
-// F-062: Play reveals are recorded here, server-side — never on the pair doc,
-// which a Spark partner can read — in playReveals/{viewedUid}/by/{viewerUid}.
+// F-062: Play reveals are recorded here, server-side, in
+// playReveals/{viewedUid}/by/{viewerUid}. F-080: not while suspended, never
+// between people who've blocked each other (quietly — no answer either way),
+// and rate-limited.
 export const recordPlayReveal = onCall({ timeoutSeconds: 15, invoker: 'public' }, async (request): Promise<{ ok: true }> => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
   const uid = request.auth.uid
+  await requireActive(uid)
   await requirePlayAccess(uid)
   const target = await requireUidOfPlayId((request.data as Record<string, unknown> | null)?.playId, uid)
+  await takeRateLimit(uid, 'reveal', REVEAL_LIMIT)
+  if (await blockedEitherWay(uid, target)) return { ok: true }
   await getFirestore().doc(`playReveals/${target}/by/${uid}`).set({ at: Date.now(), viewer: uid })
+  return { ok: true }
+})
+
+const REVEAL_LIMIT = { max: 300, windowMs: 60 * 60 * 1000 }
+
+// A Spark reveal (the viewer saw the score; feeds the other person's Curious
+// tab). F-065: recorded server-side — pairs/{id} is server-only now, since a
+// client read or update of it said whether the pair existed. Only on an
+// existing pair, and the answer is the same either way.
+export const recordSparkReveal = onCall({ timeoutSeconds: 15, invoker: 'public' }, async (request): Promise<{ ok: true }> => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
+  const uid = request.auth.uid
+  await requireActive(uid)
+  const target = (request.data as Record<string, unknown> | null)?.uid
+  if (typeof target !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(target) || target === uid) throw new HttpsError('invalid-argument', 'uid required')
+  await takeRateLimit(uid, 'reveal', REVEAL_LIMIT)
+  if (await blockedEitherWay(uid, target)) return { ok: true }
+  await getFirestore()
+    .doc(`pairs/${pairIdOf(uid, target)}`)
+    .update({ [`${uid}_revealed`]: true, [`${uid}_revealedAt`]: FieldValue.serverTimestamp(), [`${uid}_revealed_spark`]: true })
+    .catch(() => {})
   return { ok: true }
 })
 
@@ -1968,20 +1998,20 @@ async function curiousPlay(uid: string): Promise<CuriousVisitor[]> {
     if (visitors.length >= CURIOUS_LIMIT) break
     const otherUid = d.id
     if (otherUid.startsWith('zbot-')) continue // real people only
-    const pairId = pairIdOf(uid, otherUid)
-    const [likes, live, userSnap, play] = await Promise.all([
-      db.doc(`pairs/${pairId}/likes/play`).get(),
+    const [likers, live, userSnap, play] = await Promise.all([
+      likersInMode(uid, otherUid, 'play'),
       livePlayMatchOf(uid, otherUid),
       db.collection('users').doc(otherUid).get(),
       playDataOf(otherUid),
     ])
     // Liked (either side, in Play) or matched: Flames / Chats cover them.
-    if ((likes.get('likedBy') ?? []).length > 0 || live) continue
+    if (likers.length > 0 || live) continue
     const user = userSnap.data()
     if (!user || (await isSuspendedUid(otherUid, user)) || !(await playStatus(otherUid)).access) continue
+    if (await blockedEitherWay(uid, otherUid)) continue
     const playId = await ensurePlayId(otherUid)
     const pub = publicPlayProfile(otherUid, playId, play, user)
-    const scores = await loadPlayScores(pairId)
+    const scores = await loadPlayScores(uid, otherUid)
     visitors.push({
       playId,
       displayName: pub.playDisplayName || 'Someone',
@@ -2035,6 +2065,7 @@ export const getLikeCount = onCall({ timeoutSeconds: 15, invoker: 'public' }, as
   }
 })
 export { playAccessOnPlan, playAccessOnPlayProfile, playAccessOnProfile } from './playAccess'
+export { identityGuardOnIdentity, identityGuardOnUser } from './identityGuard'
 export { actOnPlayConnection, listLockedPlayConnections } from './lockedPlay'
 export { getDistances, grantSmsConsent, recordActivity, refreshAges, setLocation } from './location'
 export { createCheckoutSession, createPortalSession, stripeWebhook } from './stripe'

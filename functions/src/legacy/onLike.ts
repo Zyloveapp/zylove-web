@@ -3,7 +3,7 @@
 // settings (legacyOptions.ts) are new.
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { calculateSparkScore, calculatePlayScore, deepFitRecord, sparkPairFields } from "./scoring";
+import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkPairFields } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { getToken, sendPush } from "./notifications";
 import { LEGACY_RUNTIME } from "./legacyOptions";
@@ -11,6 +11,7 @@ import { internalRef, isSuspendedUid, withPrivateProfile } from "../userData";
 import { requirePlayAccess } from "../playAccess";
 import { markActed } from "../explore";
 import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
+import { scoringDocs } from "./onProfileWrite";
 import { blockedEitherWay, likedInMode, recordLike } from "../likes";
 import { takeQuota } from "../usage";
 import { loadSparkDetails, writeSparkDetails } from "../pairSpark";
@@ -55,33 +56,37 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
     if (!play) throw new HttpsError("failed-precondition", "That profile isn't available in Play.");
   }
 
-  let pair: PairDoc;
-  if (pairSnap.exists) {
+  // F-065: a Play like never creates or reads pairs/{uidA_uidB} for its
+  // state — its scores and likes are in playPairData (keyed by Play IDs).
+  let pair: PairDoc | undefined;
+  let playScores: admin.firestore.DocumentData | undefined;
+  if (mode === "play") {
+    playScores = await loadPlayScores(likerId, likedId);
+    if (!playScores) {
+      const [mine, theirs] = await Promise.all([
+        scoringDocs(likerId, (likerSnap.data() ?? {}) as UserDoc),
+        scoringDocs(likedId, (likedUserSnap.data() ?? {}) as UserDoc),
+      ]);
+      const result = calculatePlayScore(mine.full, theirs.full);
+      playScores = { ...playFields(result.score, result.breakdown, result.tier1), engineVersion: SCORE_ENGINE_VERSION };
+      await setPlayScores(likerId, likedId, playScores);
+    }
+  } else if (pairSnap.exists) {
     pair = pairSnap.data() as PairDoc;
   } else {
-    // Inline pair creation — mirrors onTap. Liker plays the tapper role
-    // (initiatedBy: likerId). Reuses already-fetched root docs; only the
-    // Play subdocs are read here. No view-counter side-effects.
+    // Inline pair creation — mirrors onTap (Spark only). Liker plays the
+    // tapper role (initiatedBy: likerId). Reuses already-fetched root docs.
+    // No view-counter side-effects.
     if (!likerSnap.exists || !likedUserSnap.exists) {
       throw new HttpsError("not-found", "User profile not found");
     }
 
-    const [likerPlaySnap, likedPlaySnap] = await Promise.all([
-      db.collection("users").doc(likerId).collection("playProfile").doc("data").get().catch(() => null),
-      db.collection("users").doc(likedId).collection("playProfile").doc("data").get().catch(() => null),
-    ]);
-
     // Scoring compares intents, which live in the owner-only private/profile (Stage 2).
     const likerDoc = await withPrivateProfile(likerId, likerSnap.data() ?? {}) as UserDoc;
     const likedDoc = await withPrivateProfile(likedId, likedUserSnap.data() ?? {}) as UserDoc;
-    const likerPlay = likerPlaySnap?.exists ? likerPlaySnap.data() ?? {} : {};
-    const likedPlay = likedPlaySnap?.exists ? likedPlaySnap.data() ?? {} : {};
-    const likerFull = { ...likerDoc, ...likerPlay, playProfile: likerPlay } as UserDoc;
-    const likedFull = { ...likedDoc, ...likedPlay, playProfile: likedPlay } as UserDoc;
 
     const spark = calculateSparkScore(likerDoc, likedDoc);
     const { breakdown: sparkBreakdown, triggeredDealbreakers } = spark;
-    const playResult = play ? calculatePlayScore(likerFull, likedFull) : null;
 
     const [userA, userB] = [likerId, likedId].sort();
 
@@ -99,14 +104,12 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
     pairBatch.set(pairRef, pair);
     writeSparkDetails(pairBatch, pid, { breakdown: sparkBreakdown, dealbreakers: triggeredDealbreakers, tier1: deepFitRecord(spark.tier1, likerId, likedId) }, false);
     await pairBatch.commit();
-    if (playResult) await setPlayScores(pid, playFields(playResult.score, playResult.breakdown, playResult.tier1));
   }
-  const playScores = mode === "play" ? await loadPlayScores(pid, pair) : undefined;
 
   const likedUser = likedUserSnap.data() as UserDoc;
   // Stage A: a match needs the other person's like in THIS mode.
   const otherLiked = await likedInMode(likedId, likerId, mode, pair);
-  await recordLike(pid, mode, likerId);
+  await recordLike(likerId, likedId, mode, likerId);
   // A live match between them stays as it is (never overwritten). F-062: a
   // Play match is its own doc (playMatches), apart from any Spark one.
   const playMatchId = mode === "play" ? await livePlayMatchOf(likerId, likedId) : null;
@@ -151,7 +154,7 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   // logic symmetric with the not-matched path.
   const likerDataForQueue = (likerSnap.data() ?? {}) as any;
   // Stage C: the report's details live in pairs/{id}/modes/spark.
-  const sparkDetails = await loadSparkDetails(pid, pair);
+  const sparkDetails = mode === "spark" ? await loadSparkDetails(pid, pair) : null;
   // A Play like shows the liker's Play profile — never their Spark one.
   const likerPlay = mode === "play"
     ? (await db.doc(`users/${likerId}/playProfile/data`).get()).data() ?? {}
@@ -163,12 +166,12 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
   await db.doc(`users/${likedId}/likeQueue/${likerPlayId ?? likerId}`).set({
     ...(likerPlayId ? { likerPlayId, ...(likerPublic?.curated ? { curated: true } : {}) } : { likerUid: likerId }),
     likedAt:               Date.now(),
-    compatibilityScore:    mode === "play" ? (playScores?.playScore ?? 0) : (pair.sparkScore ?? 0),
-    dealbreakersTriggered: mode === "play" ? [] : sparkDetails.triggeredDealbreakers,
+    compatibilityScore:    mode === "play" ? (playScores?.playScore ?? 0) : (pair?.sparkScore ?? 0),
+    dealbreakersTriggered: sparkDetails ? sparkDetails.triggeredDealbreakers : [],
     istopPicks:            false,
     breakdown:             mode === "play"
       ? (playScores?.playBreakdown ?? {})
-      : sparkDetails.sparkBreakdown,
+      : sparkDetails?.sparkBreakdown ?? {},
     dismissed:             false,
     isExpired:             false,
     action:                "like",
@@ -297,7 +300,7 @@ export const onLike = onCall(LEGACY_RUNTIME, async (request) => {
       isBlocked:          false,
       isBot:              likedId.startsWith("zbot-") || likerId.startsWith("zbot-"),
       // Only this mode's score (Stage 2: no Play data on Spark matches).
-      ...(mode === "play" ? { playScore: playScores?.playScore ?? 0 } : { sparkScore: pair.sparkScore ?? 0 }),
+      ...(mode === "play" ? { playScore: playScores?.playScore ?? 0 } : { sparkScore: pair?.sparkScore ?? 0 }),
       revealViewedAt:     null,
       revealViewedBy:     [],
       lastMessage:        null,

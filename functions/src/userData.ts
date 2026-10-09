@@ -209,6 +209,68 @@ export async function deletionView(uid: string, root: DocumentData): Promise<{ b
   }
 }
 
+// F-067: the moderation state a deletion carries — a suspension in force
+// (not the one a pending deletion sets) and the report count — and whether
+// the account's trust links (device sightings, trust profile) are kept
+// through the deletion, so a sign-up again can still be linked to it. Device
+// sightings still go after 90 days (purgeDeviceSightings).
+export async function moderationCarry(uid: string): Promise<{ reportCount: number; suspension: DocumentData | null; keepTrustLinks: boolean }> {
+  const n = (await internalRef(uid).get()).data() ?? {}
+  const until = typeof n.suspendedUntil?.toMillis === 'function' ? (n.suspendedUntil.toMillis() as number) : null
+  const live = n.isSuspended === true && n.suspendedForDeletion !== true && (until === null || until > Date.now())
+  const reportCount = typeof n.reportCount === 'number' ? n.reportCount : 0
+  return {
+    reportCount,
+    suspension: live
+      ? {
+          suspendedAt: n.suspendedAt ?? null,
+          suspendedUntil: n.suspendedUntil ?? null,
+          suspendedPendingReview: n.suspendedPendingReview === true,
+          suspendSource: n.suspendSource ?? null,
+          suspendReason: n.suspendReason ?? null,
+          suspendedBy: n.suspendedBy ?? null,
+        }
+      : null,
+    keepTrustLinks: live || reportCount > 0,
+  }
+}
+
+// The deletedAccounts/{phone} recovery record — the one shape every delete
+// path writes (self-delete, admin delete, the end of the 30-day grace), so
+// restoreAccount can always re-inflate identity and the moderation state
+// always comes along (F-067: the grace path wrote neither).
+export async function recoveryRecord(uid: string, root: DocumentData, phoneNumber: string): Promise<DocumentData> {
+  const [priv, matching, profile, carry, asA, asB] = await Promise.all([
+    deletionView(uid, root),
+    loadMatching(uid, root),
+    loadPrivateProfile(uid, root),
+    moderationCarry(uid),
+    db().collection('pairs').where('userA', '==', uid).get(),
+    db().collection('pairs').where('userB', '==', uid).get(),
+  ])
+  return {
+    phoneNumber,
+    previousUid: uid,
+    deletedAt: Timestamp.now(),
+    birthday: priv.birthday,
+    genderIdentity: root.genderIdentity ?? null,
+    matchableAs: matching.matchableAs ?? [],
+    identityLockedAt: root.identityLockedAt ?? null,
+    pronouns: root.pronouns ?? null,
+    genderSelfDescribe: root.genderSelfDescribe ?? null,
+    displayName: root.displayName ?? '',
+    photoURLs: root.photoURLs ?? [],
+    bio: root.bio ?? '',
+    mode: profile.mode ?? 'spark',
+    isFounder: root.isFounder ?? false,
+    subscriptionTier: priv.subscriptionTier,
+    reportCount: carry.reportCount,
+    suspension: carry.suspension,
+    banned: false,
+    previousPairIds: [...asA.docs, ...asB.docs].map((d) => d.id),
+  }
+}
+
 // Everything Play of a deleted account (Stage 2): the Play profile and PIN,
 // Play photos, Play pair scores, Play likes they sent (in the other person's
 // queue) and received (in their own), and their Play name and photo on the
@@ -223,9 +285,11 @@ export async function removePlayData(uid: string): Promise<void> {
   const { playIdOf, removePlayId } = await import('./playIds')
   const { endPlayPair, loadMatch, playMatchIdsOf } = await import('./playMatch')
   const playId = await playIdOf(uid)
-  const [pairsA, pairsB, ownQueue, matches, playMatchIds, reveals] = await Promise.all([
+  const [pairsA, pairsB, playPairs, ownQueue, matches, playMatchIds, reveals] = await Promise.all([
     firestore.collection('pairs').where('userA', '==', uid).get(),
     firestore.collection('pairs').where('userB', '==', uid).get(),
+    // F-065: Play scores and likes, keyed by Play IDs.
+    firestore.collection('playPairData').where('users', 'array-contains', uid).get(),
     firestore.collection(`users/${uid}/likeQueue`).where('mode', '==', 'play').get(),
     firestore.collection('matches').where('users', 'array-contains', uid).where('mode', '==', 'play').get(),
     playMatchIdsOf(uid),
@@ -240,8 +304,14 @@ export async function removePlayData(uid: string): Promise<void> {
     firestore.doc(`users/${uid}/settings/pause`),
     ...ownQueue.docs.map((d) => d.ref),
   ]
+  for (const p of playPairs.docs) {
+    refs.push(p.ref)
+    const users: unknown = p.get('users')
+    const other = Array.isArray(users) ? users.find((u) => u !== uid) : undefined
+    if (typeof other === 'string' && playId) refs.push(firestore.doc(`users/${other}/likeQueue/${playId}`))
+  }
   for (const p of [...pairsA.docs, ...pairsB.docs]) {
-    refs.push(firestore.doc(`pairs/${p.id}/modes/play`))
+    refs.push(firestore.doc(`pairs/${p.id}/modes/play`), firestore.doc(`pairs/${p.id}/likes/play`))
     const other = p.get('userA') === uid ? p.get('userB') : p.get('userA')
     if (typeof other === 'string') {
       const sent = firestore.doc(`users/${other}/likeQueue/${uid}`)
@@ -291,7 +361,9 @@ export async function removePlayData(uid: string): Promise<void> {
 // nightly purge). Kept: the public doc's remains (anonymised, for a restore),
 // their published photo files (a restore reuses them; the nightly purge
 // removes them) and legalAcceptance (the record of what they agreed to).
-export async function clearPrivateData(uid: string): Promise<void> {
+// keepTrustLinks (F-067, moderationCarry): a suspended or reported account's
+// device sightings and trust profile stay.
+export async function clearPrivateData(uid: string, { keepTrustLinks = false }: { keepTrustLinks?: boolean } = {}): Promise<void> {
   await removePlayData(uid)
   await removeTraces(uid)
   await Promise.all([
@@ -309,8 +381,7 @@ export async function clearPrivateData(uid: string): Promise<void> {
     db().doc(`keyBackups/${uid}`).delete(),
     db().doc(`behaviorSignals/${uid}`).delete(),
     // T&S Phase 1: device sightings and the account's trust profile.
-    removeDeviceData(uid),
-    db().doc(`trustProfiles/${uid}`).delete(),
+    ...(keepTrustLinks ? [] : [removeDeviceData(uid), db().doc(`trustProfiles/${uid}`).delete()]),
     // T&S Phase 2: AI / web-match results for its photos.
     db().doc(`photoSignals/${uid}`).delete(),
     // T&S Phase 5: its photo hashes and duplicate pairs (a scam ban copies

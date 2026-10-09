@@ -4,10 +4,11 @@
 // private/profile and private/matching triggers.
 import * as admin from "firebase-admin";
 import { onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
-import { calculateSparkScore, calculatePlayScore, deepFitRecord, sparkPairFields } from "./scoring";
+import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkPairFields } from "./scoring";
 import { UserDoc, PairDoc } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { bothHavePlay, playFields, setPlayScores } from "../pairPlay";
+import { otherUidOf } from "../playPairQueries";
 import { isSuspendedUid, withPrivateProfile } from "../userData";
 import { writeSparkDetails } from "../pairSpark";
 
@@ -38,10 +39,7 @@ export async function rescorePair(
   const pair     = pairSnap.data() as PairDoc;
   const otherUid = pair.userA === userId ? pair.userB : pair.userA;
 
-  const [otherSnap, play] = await Promise.all([
-    db.collection("users").doc(otherUid).get(),
-    bothHavePlay(userId, otherUid),
-  ]);
+  const otherSnap = await db.collection("users").doc(otherUid).get();
   if (!otherSnap.exists || otherSnap.data()?.isDeleted === true) return null;
   const other = await scoringDocs(otherUid, (otherSnap.data() ?? {}) as UserDoc);
 
@@ -62,18 +60,32 @@ export async function rescorePair(
     scoreCalculatedAt: admin.firestore.Timestamp.now(),
     scoreVersion:      admin.firestore.FieldValue.increment(1),
   });
-  if (play) {
-    const { score, breakdown, tier1 } = calculatePlayScore(mine.full, other.full);
-    setPlayScores(pairSnap.id, playFields(score, breakdown, tier1), batch);
-  } else {
-    setPlayScores(pairSnap.id, null, batch);
-  }
   return spark;
 }
 
+// F-065: Play scores live in playPairData (keyed by Play IDs) — rescored from
+// those docs, only while both people have Play access; otherwise removed.
+async function rescorePlayPairs(userId: string, mine: { spark: UserDoc; full: UserDoc }): Promise<void> {
+  const db = admin.firestore();
+  const snap = await db.collection("playPairData").where("users", "array-contains", userId).get();
+  for (const d of snap.docs) {
+    const otherUid = otherUidOf(d.data(), userId);
+    if (!otherUid) continue;
+    const otherSnap = await db.collection("users").doc(otherUid).get();
+    if (!otherSnap.exists || otherSnap.data()?.isDeleted === true) continue;
+    if (!(await bothHavePlay(userId, otherUid))) {
+      await setPlayScores(userId, otherUid, null);
+      continue;
+    }
+    const other = await scoringDocs(otherUid, (otherSnap.data() ?? {}) as UserDoc);
+    const { score, breakdown, tier1 } = calculatePlayScore(mine.full, other.full);
+    if ((await db.doc(`users/${userId}`).get()).data()?.isDeleted === true) return;
+    await setPlayScores(userId, otherUid, { ...playFields(score, breakdown, tier1), engineVersion: SCORE_ENGINE_VERSION });
+  }
+}
+
 // Rescores every pair of userId. Spark scores on the pair doc; Play scores
-// (Stage 2) in pairs/{id}/modes/play, and only while both people have Play
-// access — otherwise any Play scores are removed.
+// in playPairData (rescorePlayPairs).
 async function rescorePairs(userId: string, afterRoot: UserDoc): Promise<void> {
   const db = admin.firestore();
   // A deleted or suspended account isn't rescored (deletion removes its Play
@@ -86,6 +98,7 @@ async function rescorePairs(userId: string, afterRoot: UserDoc): Promise<void> {
     db.collection("pairs").where("userB", "==", userId).get(),
   ]);
 
+  await rescorePlayPairs(userId, mine);
   const allPairs = [...asA.docs, ...asB.docs];
   if (!allPairs.length) return;
 

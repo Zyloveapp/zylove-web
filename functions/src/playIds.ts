@@ -71,6 +71,19 @@ export async function requireUidOfPlayId(playId: unknown, callerUid?: string): P
   return uid
 }
 
+// F-064/F-065: a person named alongside a match → the account, only in that
+// match's namespace — a Play ID with a Play match (pm_…), a uid with a Spark
+// one. A uid with a Play match or a Play ID with a Spark one is null, the same
+// as a stranger, so the two ids can't be tested against each other.
+export async function uidNamedIn(matchId: string, id: unknown): Promise<string | null> {
+  if (typeof id !== 'string' || !id || id.includes('/')) return null
+  if (isPlayMatchId(matchId) !== isPlayId(id)) return null
+  return isPlayId(id) ? uidOfPlayId(id) : id
+}
+
+// The mode an id belongs to, with no match to go by: a Play ID is Play.
+export const modeOfId = (id: string): 'spark' | 'play' => (isPlayId(id) ? 'play' : 'spark')
+
 // Several uids → their Play IDs (creating any missing — a Play counterpart
 // always has one, this only covers accounts from before F-062).
 export async function playIdsOf(uids: string[]): Promise<Map<string, string>> {

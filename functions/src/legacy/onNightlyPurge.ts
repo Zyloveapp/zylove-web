@@ -12,7 +12,7 @@
 import * as admin from 'firebase-admin'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { LEGACY_RUNTIME } from './legacyOptions'
-import { ROOT_SCRUB, clearPrivateData, loadPrivateProfile } from '../userData'
+import { ROOT_SCRUB, clearPrivateData, moderationCarry, recoveryRecord } from '../userData'
 
 
 
@@ -250,17 +250,10 @@ export const processGraceExpiredDeletions = onSchedule(
 
         const userData = userSnap.data()!
 
-        // Recovery doc — same shape as deleteAccount writes (subset of fields
-        // sufficient for restoreAccount to re-inflate identity).
-        await db.collection('deletedAccounts').doc(phoneNumber).set({
-          previousUid: uid,
-          deletedAt:   now,
-          banned:      false,
-          displayName: userData.displayName,
-          photoURLs:   userData.photoURLs ?? [],
-          bio:         userData.bio ?? '',
-          intent:      (await loadPrivateProfile(uid, userData)).intent ?? 'spark',
-        })
+        // Recovery doc — the same record deleteAccount writes (F-067: with the
+        // identity restore needs and any suspension in force).
+        await db.collection('deletedAccounts').doc(phoneNumber).set(await recoveryRecord(uid, userData, phoneNumber))
+        const carry = await moderationCarry(uid)
 
         // Anonymize the user doc — same anonymization shape deleteAccount uses.
         await userRef.update({
@@ -272,7 +265,7 @@ export const processGraceExpiredDeletions = onSchedule(
           locationLabel: '',
           ...ROOT_SCRUB,
         })
-        await clearPrivateData(uid)
+        await clearPrivateData(uid, { keepTrustLinks: carry.keepTrustLinks })
 
         // Delete the Firebase Auth user. Idempotent — swallow user-not-found.
         await auth.deleteUser(uid).catch(() => {})

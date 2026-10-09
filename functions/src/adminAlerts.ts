@@ -75,6 +75,10 @@ export interface AlertInput {
   detail?: Detail
   // Trust flags: the flag's reason keys.
   reasons?: string[]
+  // F-070: who a report is about (subjectUid is the reporter) — urgent texts
+  // count once per person per hour, and an excluded account is excluded
+  // either way.
+  aboutUid?: string | null
 }
 
 // Never throws: an alert must not break what raised it.
@@ -89,6 +93,7 @@ export async function queueAdminAlert(type: AdminEvent, input: AlertInput = {}):
         detail: input.detail ?? {},
         reasons: input.reasons ?? [],
         subjectUid: input.subjectUid ?? null,
+        aboutUid: input.aboutUid ?? null,
         at: FieldValue.serverTimestamp(),
         expiresAt: Timestamp.fromMillis(Date.now() + QUEUE_TTL_MS),
       })
@@ -111,11 +116,12 @@ async function sendAll(adminUid: string, texts: string[]): Promise<void> {
 async function deliverTo(adminUid: string, ev: QueuedEvent, subjectUid: string | null, now: number): Promise<void> {
   const settings = normalizeSettings((await settingsDoc(adminUid).get()).data())
   if (subjectUid && settings.excludedUids.includes(subjectUid)) return
+  if (ev.about && settings.excludedUids.includes(ev.about)) return
   const allowed = smsEventFor(settings, ev)
   if (!allowed) return
   const texts = await db().runTransaction(async (tx) => {
     const state = normalizeState((await tx.get(stateDoc(adminUid))).data())
-    const out = onEvent(state, settings, ev.type, allowed.n, allowed.detail, now)
+    const out = onEvent(state, settings, ev.type, allowed.n, allowed.detail, now, ev.about)
     tx.set(stateDoc(adminUid), { ...out.state, updatedAt: FieldValue.serverTimestamp() })
     return out.texts
   })
@@ -137,6 +143,7 @@ export const adminAlertOnQueue = onDocumentCreated(
         n: typeof data.n === 'number' && data.n > 0 ? Math.floor(data.n) : 1,
         detail: (data.detail ?? {}) as Detail,
         reasons: Array.isArray(data.reasons) ? (data.reasons as unknown[]).filter((r): r is string => typeof r === 'string') : [],
+        ...(typeof data.aboutUid === 'string' && data.aboutUid ? { about: data.aboutUid } : {}),
       }
       const now = Date.now()
       for (const uid of await adminUids()) {

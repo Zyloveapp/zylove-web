@@ -37,12 +37,6 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/matches/$(matchId)).data;
     }
 
-    function isPairParticipant(pairId) {
-      // pairId format: uid1_uid2 (sorted), same convention as matches
-      return pairId.split('_')[0] == request.auth.uid
-          || pairId.split('_')[1] == request.auth.uid;
-    }
-
     // ─── Play access (Stage 2, F-004) ───────────────────────────────────────
     // Play data is sealed: another person's Play profile, Play scores, Play
     // matches and chats and Play likes take Play access. The server keeps
@@ -211,8 +205,24 @@ service cloud.firestore {
         'memberSince', 'accountCreatedAt',
         // T&S Phase 2: the reply band ("Usually replies") and, for a new
         // account's first 48 hours, when that ends (links note)
-        'replyBand', 'newUntil'
+        'replyBand', 'newUntil',
+        // F-066: the identity lock is set by the server on the first gender
+        // write (identityGuardOnUser)
+        'identityLockedAt'
       ];
+    }
+
+    // F-066: 18+. A public age written by the client must be an adult's, and
+    // a birthday (private/identity, "YYYY-MM-DD") an adult's as of now — a
+    // 29 February birthday counts from 1 March. The server also suspends
+    // anyone under 18 who got past this (identityGuard.ts).
+    function adultAge(d) {
+      return d.get('age', null) == null || (d.age is int && d.age >= 18 && d.age <= 120);
+    }
+    function adultBirthday(b) {
+      return (int(b[5:7]) == 2 && int(b[8:10]) == 29
+                ? timestamp.date(int(b[0:4]) + 18, 3, 1)
+                : timestamp.date(int(b[0:4]) + 18, int(b[5:7]), int(b[8:10]))) <= request.time;
     }
 
     // Published photos (photoURLs) are added only by Cloud Functions after
@@ -236,7 +246,8 @@ service cloud.firestore {
       allow list: if false;
       allow create: if callerActive() && isUser(uid) && isSignedIn()
                     && !request.resource.data.keys().hasAny(serverOnlyUserFields())
-                    && request.resource.data.get('photoURLs', []).size() == 0;
+                    && request.resource.data.get('photoURLs', []).size() == 0
+                    && adultAge(request.resource.data);
       // Identity-lock fields (age, genderIdentity, matchableAs,
       // identityLockedAt): blocked AFTER identityLockedAt is set. First
       // write (when field is still null) is permitted — that's the slide-2
@@ -247,6 +258,7 @@ service cloud.firestore {
       allow update: if callerActive() && isUser(uid) && isSignedIn()
                     && !request.resource.data.diff(resource.data).affectedKeys().hasAny(serverOnlyUserFields())
                     && photosOnlyShrink(resource.data, request.resource.data)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['age']) || adultAge(request.resource.data))
                     && (resource.data.get('identityLockedAt', null) == null
                         || !request.resource.data.diff(resource.data).affectedKeys()
                             .hasAny(['age', 'genderIdentity', 'matchableAs', 'identityLockedAt']))
@@ -327,7 +339,7 @@ service cloud.firestore {
       function validIdentity(d) {
         return d.keys().hasOnly(['legalName', 'legalNameSetAt', 'birthday'])
             && (!('legalName' in d) || (d.legalName is string && d.legalName.size() <= 100))
-            && (!('birthday' in d) || (d.birthday is string && d.birthday.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')));
+            && (!('birthday' in d) || (d.birthday is string && d.birthday.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') && adultBirthday(d.birthday)));
       }
       // Profile metadata that would reveal Play use (Stage 2): which modes the
       // owner uses, the current mode, their intentions. Owner only.
@@ -475,37 +487,17 @@ service cloud.firestore {
     }
 
     // ─── Pairs ──────────────────────────────────────────────────────────────
-    // Compatibility scoring docs written by client (clientOnTap) and Cloud
-    // Functions. Both participants can read/write their pair. Not blocked by
-    // isNotSuspended — that's checked on upstream user reads.
-
-    // Pairs: created and scored by Cloud Functions. Participants read the
-    // pair and may only mark their own reveals. Play scores (Stage 2) live
-    // in pairs/{id}/modes/play: participants with Play access read them.
+    // Server-only (F-065). Scores reach the app through onTap and the other
+    // callables, and Spark reveals are recorded by recordSparkReveal. A pair's
+    // id is the uid pair, so reading (or even updating) one told a participant
+    // whether it existed — which, after a Play tap, said who a Play ID was —
+    // and showed the other person's reveal fields to anyone. Play pair state
+    // lives in playPairData, keyed by Play IDs (default deny).
+    match /pairs/{pairId}/{document=**} {
+      allow read, write: if false;
+    }
     match /pairs/{pairId} {
-      allow read: if isSignedIn() && isPairParticipant(pairId);
-      allow update: if callerActive() && isSignedIn() && isPairParticipant(pairId)
-                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-                        request.auth.uid + '_revealed', request.auth.uid + '_revealedAt',
-                        request.auth.uid + '_revealed_spark']);
-      allow create, delete: if false;
-
-      // Stage C: the compatibility report beyond the score — breakdown and
-      // dealbreakers for Spark+, Deep Fit for Elite. Server-written.
-      match /modes/spark {
-        allow read: if isSignedIn() && isPairParticipant(pairId) && viewerHasSparkPlus();
-        allow write: if false;
-      }
-      match /modes/deep {
-        allow read: if isSignedIn() && isPairParticipant(pairId) && viewerHasElite();
-        allow write: if false;
-      }
-      // F-062: server-only — a Play user gets Play scores from onTap by Play
-      // ID; the pair doc's id is the uid pair. (Play reveals are server-side
-      // too: recordPlayReveal.)
-      match /modes/play {
-        allow read, write: if false;
-      }
+      allow read, write: if false;
     }
 
     // ─── Matches ────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { doc, getDoc, serverTimestamp, updateDoc, type DocumentData } from 'firebase/firestore'
+import { doc, getDoc, type DocumentData } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { friendlyError } from './errors'
@@ -279,22 +279,17 @@ export function fetchCompatibility(targetUid: string): Promise<CompatibilityResu
 
 // Marks that the viewer actually saw the score (the reveal button, or a full
 // report that opens revealed), as opposed to the background prefetch. Feeds
-// the other person's "Curious" tab. Only the viewer's own two fields are
-// touched; failures are ignored — it's a signal, not part of the reveal.
-// `${uid}_revealed_${mode}` records which mode it was seen in, so each mode's
-// Curious tab lists only its own visitors (getCuriousVisitors).
-export function recordReveal(uid: string, targetUid: string, mode?: Mode): void {
-  // F-062: a Play reveal is recorded server-side, by Play ID — never on the
-  // pair doc (a Spark partner can read it, and its id is the uid pair).
+// the other person's "Curious" tab. Failures are ignored — it's a signal,
+// not part of the reveal. The mode is the id's: a Play ID is a Play reveal.
+export function recordReveal(targetUid: string): void {
+  // F-062: a Play reveal is recorded server-side, by Play ID.
   if (isPlayId(targetUid)) {
     httpsCallable(functions, 'recordPlayReveal')({ playId: targetUid }).catch(() => {})
     return
   }
-  updateDoc(doc(db, 'pairs', [uid, targetUid].sort().join('_')), {
-    [`${uid}_revealed`]: true,
-    [`${uid}_revealedAt`]: serverTimestamp(),
-    ...(mode ? { [`${uid}_revealed_${mode}`]: true } : {}),
-  }).catch(() => {})
+  // F-065: the pair doc is server-only (a client read or update of it said
+  // whether it existed).
+  httpsCallable(functions, 'recordSparkReveal')({ uid: targetUid }).catch(() => {})
 }
 
 // onLike requires the pairs/{a_b} doc that onTap creates, so it's created in

@@ -172,7 +172,7 @@ export default function CompatibilityBlock({
     setStatus('loading')
     try {
       const data = await fetchCompatibility(targetUid)
-      if (uid) recordReveal(uid, targetUid, mode)
+      if (uid) recordReveal(targetUid)
       revealedScores.set(targetUid, data)
       setResult(data)
       setStatus('revealed')

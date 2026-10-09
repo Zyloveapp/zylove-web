@@ -1,15 +1,29 @@
-import { getFirestore, FieldValue, type DocumentData, type DocumentReference, type WriteBatch } from 'firebase-admin/firestore'
+import { getFirestore, FieldValue, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 import { playStatus } from './playAccess'
+import { ensurePlayId, playPairKey } from './playIds'
 
-// Play scores for a pair live apart from the pair doc (Stage 2): pairs/{id}
-// keeps the Spark score, likes and reveals; pairs/{id}/modes/play holds
-// playScore, playBreakdown and tier1Play, readable only by participants who
-// have Play access (firestore.rules). They're computed only when both people
-// have Play access — a Spark-only user's tap never produces Play data.
+// A Play pair's state — its Play scores and its Play likes — lives in
+// playPairData/{pA_pB} (F-065): server-only, keyed by the two Play IDs, never
+// under the uid pair. A Play tap or like doesn't create or touch
+// pairs/{uidA_uidB}, which a participant could test for. The doc:
+//   users          [uidA, uidB] sorted — internal, for the server's queries
+//   likedBy        uids who liked the other in Play (likes.ts)
+//   playScore, playBreakdown, tier1Play, scoredAt
+// Scores are computed only when both people have Play access — a Spark-only
+// user's tap never produces Play data.
 
 export const PLAY_PAIR_FIELDS = ['playScore', 'playBreakdown', 'tier1Play'] as const
 
-export const playPairRef = (pairId: string): DocumentReference => getFirestore().doc(`pairs/${pairId}/modes/play`)
+export async function playPairDataRef(a: string, b: string): Promise<DocumentReference> {
+  const [pa, pb] = await Promise.all([ensurePlayId(a), ensurePlayId(b)])
+  return getFirestore().doc(`playPairData/${playPairKey(pa, pb)}`)
+}
+
+export const playPairUsers = (a: string, b: string): string[] => [a, b].sort()
+
+// Before F-065 the scores were in pairs/{uidA_uidB}/modes/play (moved by
+// scripts/migrate-f065.mjs; read as a fallback until then).
+const legacyScoresRef = (a: string, b: string): DocumentReference => getFirestore().doc(`pairs/${playPairUsers(a, b).join('_')}/modes/play`)
 
 export async function bothHavePlay(a: string, b: string): Promise<boolean> {
   const [sa, sb] = await Promise.all([playStatus(a), playStatus(b)])
@@ -21,22 +35,20 @@ export function playFields(score: number, breakdown: unknown, tier1: unknown): D
   return { playScore: score, playBreakdown: breakdown, ...(tier1 ? { tier1Play: tier1 } : {}) }
 }
 
-// Stores the Play scores (or, with null, removes them) — in a batch if given.
-export function setPlayScores(pairId: string, fields: DocumentData | null, batch?: WriteBatch): Promise<unknown> | void {
-  const ref = playPairRef(pairId)
-  if (batch) {
-    if (fields) batch.set(ref, { ...fields, updatedAt: FieldValue.serverTimestamp() })
-    else batch.delete(ref)
+// Stores the pair's Play scores, or with null removes them (the likes stay).
+export async function setPlayScores(a: string, b: string, fields: DocumentData | null): Promise<void> {
+  const ref = await playPairDataRef(a, b)
+  if (fields) {
+    await ref.set({ users: playPairUsers(a, b), ...fields, scoredAt: FieldValue.serverTimestamp() }, { merge: true })
     return
   }
-  return fields ? ref.set({ ...fields, updatedAt: FieldValue.serverTimestamp() }) : ref.delete()
+  const gone = Object.fromEntries([...PLAY_PAIR_FIELDS, 'scoredAt'].map((k) => [k, FieldValue.delete()]))
+  if ((await ref.get()).exists) await ref.update(gone)
 }
 
-// The pair's Play scores: the subdoc, else (pairs not migrated yet) the old
-// copies on the pair doc.
-export async function loadPlayScores(pairId: string, pair?: DocumentData): Promise<DocumentData | undefined> {
-  const sub = (await playPairRef(pairId).get()).data()
-  if (sub) return sub
-  const p = pair ?? (await getFirestore().doc(`pairs/${pairId}`).get()).data()
-  return p && p.playScore !== undefined ? { playScore: p.playScore, playBreakdown: p.playBreakdown, tier1Play: p.tier1Play } : undefined
+// The pair's Play scores, if any.
+export async function loadPlayScores(a: string, b: string): Promise<DocumentData | undefined> {
+  const doc = (await (await playPairDataRef(a, b)).get()).data()
+  if (doc && doc.playScore !== undefined) return doc
+  return (await legacyScoresRef(a, b).get()).data()
 }

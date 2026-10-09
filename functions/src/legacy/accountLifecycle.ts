@@ -4,7 +4,7 @@ import { LEGACY_RUNTIME } from "./legacyOptions";
 import { UserDoc } from "./types";
 import { normalizeE164 } from "./utils/phone";
 import { priorTrial } from "../trial";
-import { ROOT_SCRUB, clearPrivateData, deletionView, identityRef, internalRef, isSuspendedUid, loadMatching, loadPrivateProfile, matchingRef, profileRef } from "../userData";
+import { ROOT_SCRUB, clearPrivateData, identityRef, internalRef, isSuspendedUid, matchingRef, moderationCarry, profileRef, recoveryRecord } from "../userData";
 
 
 
@@ -35,61 +35,10 @@ const auth = admin.auth();
     );
   }
 
-  // Grab all pair IDs so we can re-link on restore
-  const [asA, asB] = await Promise.all([
-    db.collection("pairs").where("userA", "==", uid).get(),
-    db.collection("pairs").where("userB", "==", uid).get(),
-  ]);
-  const previousPairIds = [...asA.docs, ...asB.docs].map((d) => d.id);
-  // Birthday, plan and report count live off the public doc now.
-  const priv = await deletionView(uid, user as any);
-  // Stage A: a moderation suspension survives delete → restore (not the one
-  // a pending deletion sets).
-  const internal = (await internalRef(uid).get()).data() ?? {};
-  const modSuspended = internal.isSuspended === true && internal.suspendedForDeletion !== true;
-
-  // Capture recovery data — every field needed to restore identity lock +
-  // policy state. Behavior score intentionally NOT captured; restored
-  // accounts reset to 50. reportCount preserved for admin audit but reset
-  // to 0 on restore so reputation doesn't leak across the delete/restore
-  // boundary (server-side policy, not the client).
-  const recoveryData: Record<string, any> = {
-    phoneNumber,
-    previousUid: uid,
-    deletedAt: admin.firestore.Timestamp.now(),
-
-    // Identity (locked on restore — immutability contract)
-    birthday:           priv.birthday,
-    genderIdentity:     (user as any).genderIdentity ?? null,
-    matchableAs:        (await loadMatching(uid, user as any)).matchableAs ?? [],
-    identityLockedAt:   (user as any).identityLockedAt ?? null,
-    pronouns:           (user as any).pronouns ?? null,
-    genderSelfDescribe: (user as any).genderSelfDescribe ?? null,
-
-    // Profile content (restored on restore)
-    displayName: user.displayName ?? "",
-    photoURLs:   user.photoURLs ?? [],
-    bio:         user.bio ?? "",
-    mode:        (await loadPrivateProfile(uid, user as any)).mode ?? "spark",
-
-    // Policy state
-    isFounder: (user as any).isFounder ?? false,
-    subscriptionTier: priv.subscriptionTier,
-    reportCount:      priv.reportCount,
-    suspension: modSuspended ? {
-      suspendedUntil: internal.suspendedUntil ?? null,
-      suspendSource:  internal.suspendSource ?? null,
-      suspendReason:  internal.suspendReason ?? null,
-      suspendedBy:    internal.suspendedBy ?? null,
-    } : null,
-
-    // Ban flag (set manually via admin SDK for bad actors)
-    banned: false,
-
-    // Pair cleanup tracking
-    previousPairIds,
-  };
-
+  // The recovery record (userData.ts — the shape every delete path writes),
+  // with any suspension in force and the report count (F-067).
+  const recoveryData = await recoveryRecord(uid, user as any, phoneNumber);
+  const carry = await moderationCarry(uid);
   await db.collection("deletedAccounts").doc(phoneNumber).set(recoveryData);
 
   // Soft-delete the user doc (anonymize PII). isSuspended: true ensures
@@ -106,7 +55,7 @@ const auth = admin.auth();
     locationLabel: "",
     ...ROOT_SCRUB,
   });
-  await clearPrivateData(uid);
+  await clearPrivateData(uid, { keepTrustLinks: carry.keepTrustLinks });
 
   // Delete Firebase Auth user last
   await auth.deleteUser(uid);
@@ -214,6 +163,17 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
   if (recovery.banned === true) {
     throw new HttpsError("permission-denied", "This account cannot be restored. Contact support.");
   }
+  // F-067: not onto an account that's suspended, or that already has a
+  // profile — restoring would overwrite its own suspension and report count
+  // with the old account's.
+  const [callerRoot, callerInternal] = await Promise.all([
+    db.collection("users").doc(newUid).get(),
+    internalRef(newUid).get(),
+  ]);
+  const ci = callerInternal.data();
+  if ((ci?.isSuspended === true && ci.suspendedForDeletion !== true) || (callerRoot.exists && callerRoot.data()?.isDeleted !== true)) {
+    throw new HttpsError("failed-precondition", "This account can't be restored from here. Contact support.");
+  }
 
   // Enforce 90-day window server-side (defense-in-depth; client should
   // never call restoreAccount outside hard_block status)
@@ -296,7 +256,8 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
     reportCount: typeof recovery.reportCount === "number" ? recovery.reportCount : 0,
     isSuspended: stillSuspended,
     ...(stillSuspended ? {
-      suspendedAt: now,
+      suspendedAt: recovery.suspension.suspendedAt ?? now,
+      suspendedPendingReview: recovery.suspension.suspendedPendingReview === true || !until,
       ...(until ? { suspendedUntil: until } : {}),
       suspendSource: recovery.suspension.suspendSource ?? "admin",
       suspendReason: recovery.suspension.suspendReason ?? null,

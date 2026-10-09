@@ -42,7 +42,15 @@ export interface MatchCtx {
   uidOf(id: string): string | null
   // The other participant's uid.
   otherOf(uid: string): string | null
+  // Whether uid still has this chat: one of its two people and, once it's
+  // kept read-only for someone (preservedFor), that someone — F-078: the
+  // person who left a kept chat can't act on it any more (in Play the
+  // server-only record still names both).
+  has(uid: string): boolean
 }
+
+const keptFor = (data: DocumentData): string[] | null =>
+  Array.isArray(data.preservedFor) ? data.preservedFor.filter((x: unknown): x is string => typeof x === 'string') : null
 
 function sparkCtx(id: string, ref: DocumentReference, data: DocumentData): MatchCtx {
   const raw: unknown = data.users ?? data.participants
@@ -57,6 +65,7 @@ function sparkCtx(id: string, ref: DocumentReference, data: DocumentData): Match
     idOf: (uid) => uid,
     uidOf: (x) => (users.includes(x) ? x : null),
     otherOf: (uid) => users.find((u) => u !== uid) ?? null,
+    has: (uid) => users.includes(uid) && (keptFor(data)?.includes(uid) ?? true),
   }
 }
 
@@ -74,6 +83,7 @@ function playCtx(id: string, ref: DocumentReference, data: DocumentData, members
     idOf: (uid) => ids[uid] ?? '',
     uidOf: (x) => owners.get(x) ?? null,
     otherOf: (uid) => users.find((u) => u !== uid) ?? null,
+    has: (uid) => users.includes(uid) && (keptFor(data)?.includes(ids[uid] ?? '') ?? true),
   }
 }
 
@@ -101,7 +111,7 @@ export async function loadMatch(matchId: unknown, tx?: Transaction): Promise<Mat
 // The match, with the caller one of its two people (else permission-denied).
 export async function requireParticipant(matchId: unknown, callerUid: string): Promise<MatchCtx> {
   const ctx = await loadMatch(matchId)
-  if (!ctx || !ctx.users.includes(callerUid)) throw new HttpsError('permission-denied', 'Not a participant in this match')
+  if (!ctx || !ctx.has(callerUid)) throw new HttpsError('permission-denied', 'Not a participant in this match')
   return ctx
 }
 
@@ -111,6 +121,9 @@ export async function requireMatchWith(matchId: unknown, callerUid: string, othe
   const ctx = await requireParticipant(matchId, callerUid)
   const other = typeof otherId === 'string' ? ctx.uidOf(otherId) : null
   if (!other || other === callerUid) throw new HttpsError('permission-denied', 'Not a participant in this match')
+  // F-078: only a live match — after a block or an unmatch the other person
+  // can't be rated or have openers written about them.
+  if (ctx.data.isBlocked === true || ctx.data.unmatchedAt != null) throw new HttpsError('failed-precondition', 'This conversation has ended.')
   return { ctx, other }
 }
 

@@ -1,5 +1,6 @@
 import { httpsCallable } from 'firebase/functions'
 import { auth, functions } from './firebase'
+import { isPlayId } from './playId'
 
 // How far away other people are, from the server (getDistances): whole miles
 // between the two saved locations, and whether they're in the viewer's launch
@@ -46,9 +47,13 @@ async function flush() {
   scheduled = false
   const batch = queued
   queued = new Map()
-  const uids = [...batch.keys()]
-  for (let i = 0; i < uids.length; i += BATCH) {
-    const chunk = uids.slice(i, i + BATCH)
+  // F-065: Play IDs and uids never share a call (the server refuses a mix).
+  const ids = [...batch.keys()]
+  const chunks: string[][] = []
+  for (const group of [ids.filter((x) => !isPlayId(x)), ids.filter(isPlayId)]) {
+    for (let i = 0; i < group.length; i += BATCH) chunks.push(group.slice(i, i + BATCH))
+  }
+  for (const chunk of chunks) {
     const found = await fetchBatch(chunk)
     for (const uid of chunk) {
       const d = found[uid] ?? null

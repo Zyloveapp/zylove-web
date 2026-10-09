@@ -56,7 +56,7 @@ export function unlockedAt(messages: { senderId: unknown; sentAt: number; messag
 async function liveMatch(matchId: string, uid: string): Promise<{ ref: FirebaseFirestore.DocumentReference; match: DocumentData; people: string[]; me: string; ctx: MatchCtx }> {
   const ctx = await loadMatch(matchId)
   const match = ctx?.data
-  if (!ctx || !match || !ctx.users.includes(uid)) throw new HttpsError('permission-denied', 'Not a participant')
+  if (!ctx || !match || !ctx.has(uid)) throw new HttpsError('permission-denied', 'Not a participant')
   if (match.isBot === true || ctx.users.some(isBot)) throw new HttpsError('failed-precondition', "Contact details can't be shared with a curated profile.")
   if (match.isBlocked === true || match.unmatchedAt || match.endedAt) throw new HttpsError('failed-precondition', 'This conversation has ended.')
   return { ref: ctx.ref, match, people: ctx.users.map((u) => ctx.idOf(u)), me: ctx.idOf(uid), ctx }
@@ -143,7 +143,7 @@ export const revokeContactExchange = onCall({ timeoutSeconds: 60, memory: '256Mi
   const matchId = matchIdArg(request.data)
   const ctx = await loadMatch(matchId)
   const match = ctx?.data
-  if (!ctx || !match || !ctx.users.includes(uid)) throw new HttpsError('permission-denied', 'Not a participant')
+  if (!ctx || !match || !ctx.has(uid)) throw new HttpsError('permission-denied', 'Not a participant')
   const ref = ctx.ref
   const me = ctx.idOf(uid)
   const status = (match.contactExchange as DocumentData | undefined)?.status

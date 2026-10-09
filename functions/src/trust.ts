@@ -10,7 +10,8 @@ import { setBlocked } from './explore'
 import { suspensionRefusal } from './appeals'
 import { probationOf } from './probation'
 import { loadMatch, messagesPath } from './playMatch'
-import { isPlayId, playIdOf, uidOfPlayId } from './playIds'
+import { isPlayId, modeOfId, playIdOf, uidOfPlayId } from './playIds'
+import { generationOf } from './matchGeneration'
 
 // Trust & safety: phone-level bans, the caller's blocked list, and
 // server-side photo consent acceptance.
@@ -33,21 +34,25 @@ export function phoneHash(phone: string): string {
   return createHash('sha256').update(phone.trim()).digest('hex')
 }
 
-// Both people were in this match: a live match doc, or one of the 90-day
-// records behavior.ts keeps when a match ends — pastConnections/
-// {matchId}_{generation}, or {matchId} for records from before generations.
-export async function wereMatched(matchId: string, a: string, b: string): Promise<boolean> {
+// The generations of this match both people were in — the live match doc's,
+// and those of the 90-day records behavior.ts keeps when a match ends
+// (pastConnections/{matchId}_{generation}, or {matchId} for records from
+// before generations, as 0). Empty: they weren't matched here.
+export async function matchGenerations(matchId: string, a: string, b: string): Promise<number[]> {
   const db = getFirestore()
   const both = (data: DocumentData | undefined) => {
     const users = participants(data)
     return users.includes(a) && users.includes(b)
   }
+  const out = new Set<number>()
   // F-062: a live Play match's people are in its server-only record.
   const live = await loadMatch(matchId)
-  if (live && live.users.includes(a) && live.users.includes(b)) return true
-  if (both((await db.collection('pastConnections').doc(matchId).get()).data())) return true
+  if (live && live.users.includes(a) && live.users.includes(b)) out.add(generationOf(live.data))
+  const legacy = (await db.collection('pastConnections').doc(matchId).get()).data()
+  if (both(legacy)) out.add(0)
   const past = await db.collection('pastConnections').where('matchId', '==', matchId).get()
-  return past.docs.some((d) => both(d.data()))
+  for (const d of past.docs) if (both(d.data())) out.add(typeof d.get('generation') === 'number' ? (d.get('generation') as number) : 0)
+  return [...out]
 }
 
 // ─── Phone-level ban ─────────────────────────────────────────────────────────
@@ -76,12 +81,42 @@ export const onBeforeSignIn = beforeUserSignedIn({ timeoutSeconds: 7, memory: '2
   // T&S Phase 4: a suspended account is refused here (its Auth account stays
   // enabled so this runs — after the phone was verified), with an appeal token.
   const uid = event.data?.uid
-  const refusal = uid ? await suspensionRefusal(uid).catch((err: unknown) => {
+  const refusal = uid ? await carrySuspension(uid, phone).then(() => suspensionRefusal(uid)).catch((err: unknown) => {
     logger.error('onBeforeSignIn: suspension lookup failed, allowing sign-in', { message: err instanceof Error ? err.message : String(err) })
     return null
   }) : null
   if (refusal) throw new HttpsError('permission-denied', refusal)
 })
+
+// F-067: an account deleted while suspended doesn't come back clean as a new
+// one on the same number — its suspension (deletedAccounts, recoveryRecord)
+// is applied to the new account here, before it's in, with the same appeal
+// path. Once it has ended (or been lifted on appeal) there's nothing to carry.
+export async function carrySuspension(uid: string, phone: string): Promise<void> {
+  const db = getFirestore()
+  const recovery = (await db.doc(`deletedAccounts/${phone}`).get()).data()
+  const s = recovery?.suspension as DocumentData | null | undefined
+  if (!s || recovery?.previousUid === uid) return
+  const until = s.suspendedUntil instanceof Timestamp ? s.suspendedUntil.toMillis() : null
+  if (until !== null && until <= Date.now()) return
+  const internalRef = db.doc(`userInternal/${uid}`)
+  if ((await internalRef.get()).data()?.isSuspended === true) return
+  await internalRef.set(
+    {
+      isSuspended: true,
+      suspendedAt: s.suspendedAt ?? Timestamp.now(),
+      suspendedUntil: s.suspendedUntil ?? null,
+      suspendedPendingReview: s.suspendedPendingReview === true || until === null,
+      suspendSource: s.suspendSource ?? 'admin',
+      suspendReason: s.suspendReason ?? null,
+      suspendedBy: s.suspendedBy ?? null,
+      reportCount: typeof recovery?.reportCount === 'number' ? recovery.reportCount : 0,
+      carriedFrom: recovery?.previousUid ?? null,
+    },
+    { merge: true },
+  )
+  logger.warn('onBeforeSignIn: suspension carried over from a deleted account')
+}
 
 // ─── Blocked users ───────────────────────────────────────────────────────────
 // Mobile's blockUser writes users/{a}/blockedUsers/{b} AND users/{b}/blockedUsers/{a}
@@ -171,14 +206,17 @@ export const unblockMember = onCall(
     const target = str(request.data, 'targetUid')
     const targetUid = isPlayId(target) ? await uidOfPlayId(target) : target
     if (!targetUid) throw new HttpsError('not-found', "You haven't blocked this person")
-    await liftBlock(request.auth.uid, targetUid)
+    await liftBlock(request.auth.uid, targetUid, modeOfId(target))
     return { success: true }
   },
 )
 
 // Lifts a block the caller placed (unblockMember, and mobile's unblockUser).
-export async function liftBlock(uid: string, targetUid: string): Promise<void> {
-  if (!(await blockedByCaller(uid)).has(targetUid)) {
+// F-065: only a block in `mode` (the mode of the id the caller used) — a uid
+// can't lift a Play block nor a Play ID a Spark one, so "not found" can't tell
+// whether a uid and a Play ID are the same person.
+export async function liftBlock(uid: string, targetUid: string, mode: 'spark' | 'play'): Promise<void> {
+  if (!(await blockedByCaller(uid, mode)).has(targetUid)) {
     throw new HttpsError('not-found', "You haven't blocked this person")
   }
   const db = getFirestore()
@@ -208,7 +246,7 @@ export const acceptPhotoConsent = onCall(
     const db = getFirestore()
     // F-062: a Play match too — its fields and messages name people by Play ID.
     const ctx = await loadMatch(matchId)
-    if (!ctx || !ctx.users.includes(uid)) throw new HttpsError('permission-denied', 'Not a participant')
+    if (!ctx || !ctx.has(uid)) throw new HttpsError('permission-denied', 'Not a participant')
     const matchRef = ctx.ref
     const me = ctx.idOf(uid)
 

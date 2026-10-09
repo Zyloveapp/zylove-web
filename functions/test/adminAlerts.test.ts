@@ -218,6 +218,38 @@ test(`after ${DAILY_CAP} texts in a day: one cap notice, then held until a catch
   assert.equal(morning.state.day.sent, 1)
 })
 
+test('F-070: a cap hit before 8 AM starts a fresh count when the pause lifts', () => {
+  const s = optedIn()
+  // Capped at 3 AM on the 9th: paused until 8 AM the same day.
+  let state = normalizeState({ day: { date: '2026-10-09', sent: DAILY_CAP }, pausedUntil: at(8, 0, 9) })
+  let out = onEvent(state, s, 'reportNew', 1, {}, at(3, 0, 9))
+  assert.deepEqual(out.texts, [])
+  const morning = flush(out.state, s, at(8, 0, 9))
+  assert.equal(morning.texts.length, 1, 'the catch-up summary')
+  assert.equal(morning.state.pausedUntil, null)
+  assert.equal(morning.state.day.sent, 1, 'counted from the summary, not from the cap')
+  // The next alert that morning texts — it isn't paused again until tomorrow.
+  state = morning.state
+  out = onEvent(state, s, 'photoReview', 1, {}, at(9, 0, 9))
+  assert.equal(out.texts.length, 1)
+  assert.equal(out.state.pausedUntil, null)
+})
+
+test('F-070: urgent texts count once per reported person per hour', () => {
+  const s = optedIn()
+  let state = emptyState()
+  const texts: string[] = []
+  for (let i = 0; i < 30; i++) {
+    const out = onEvent(state, s, 'reportUrgent', 1, {}, NOON + i * MIN, 'victim')
+    state = out.state
+    texts.push(...out.texts)
+  }
+  assert.equal(texts.length, 1, 'thirty reports about one person: one text')
+  // Someone else is texted about at once; the same person again after an hour.
+  assert.equal(onEvent(state, s, 'reportUrgent', 1, {}, NOON + 31 * MIN, 'someone-else').texts.length, 1)
+  assert.equal(onEvent(state, s, 'reportUrgent', 1, {}, NOON + 61 * MIN, 'victim').texts.length, 1)
+})
+
 test('urgent texts go through past the daily cap', () => {
   const s = optedIn()
   const state = normalizeState({ day: { date: '2026-10-08', sent: DAILY_CAP }, pausedUntil: at(8, 0, 9) })

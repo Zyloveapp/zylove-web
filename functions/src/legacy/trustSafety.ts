@@ -8,7 +8,7 @@
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { LEGACY_RUNTIME } from "./legacyOptions";
-import { isPlayId, requireUidOfPlayId } from "../playIds";
+import { isPlayId, modeOfId, requireUidOfPlayId, uidNamedIn, uidOfPlayId } from "../playIds";
 import { endPlayPair, loadMatch } from "../playMatch";
 import { setPlayVisibility } from "../playAccess";
 import { internalRef, isSuspendedUid } from "../userData";
@@ -287,12 +287,22 @@ export const blockUser = onCall(LEGACY_RUNTIME, async (request) => {
     throw new HttpsError("invalid-argument", "targetUid required");
   }
   // F-062: from a Play chat, the other person is named by their Play ID.
-  const targetUid = isPlayId(target) ? await requireUidOfPlayId(target, uid) : target;
+  // F-064/F-065: with a match, only in that match's namespace (same answer as
+  // a stranger otherwise); without one, the id's own namespace is the mode, so
+  // a Play block is never listed (by uid) as a Spark one.
+  let targetUid: string;
+  if (matchId !== undefined) {
+    const named = typeof matchId === "string" ? await uidNamedIn(matchId, target) : null;
+    if (!named) throw new HttpsError("permission-denied", "Not your match");
+    targetUid = named;
+  } else {
+    targetUid = isPlayId(target) ? await requireUidOfPlayId(target, uid) : target;
+  }
   if (uid === targetUid) throw new HttpsError("invalid-argument", "Cannot block yourself");
 
   // Stage B: blocking stays open to suspended accounts (as reporting does) —
   // it only ever protects them.
-  await blockPair(uid, targetUid, matchId);
+  await blockPair(uid, targetUid, matchId, modeOfId(target));
   return { success: true };
 });
 
@@ -301,12 +311,12 @@ export const blockUser = onCall(LEGACY_RUNTIME, async (request) => {
 // Stage A: the match must be the two of theirs (anyone's id was accepted);
 // both mirror docs record who blocked (blockedBy), which is what unblocking
 // checks; and their likes go, so liking again can't re-create the match.
-export async function blockPair(uid: string, targetUid: string, matchId?: string): Promise<void> {
+export async function blockPair(uid: string, targetUid: string, matchId?: string, idMode?: "spark" | "play"): Promise<void> {
   const db = admin.firestore();
   const now = admin.firestore.Timestamp.now();
   const batch = db.batch();
 
-  let mode: "spark" | "play" | null = null;
+  let mode: "spark" | "play" | null = idMode ?? null;
   // F-062: a Play match (pm_…) too; its people are in the server-only record.
   const ctx = matchId ? await loadMatch(matchId) : null;
   if (matchId) {
@@ -358,6 +368,10 @@ export const unblockUser = onCall(LEGACY_RUNTIME, async (request) => {
   }
   // Stage A: only a block the caller placed (as unblockMember) — the person
   // blocked could lift it here. F-062: a Play ID names the person in Play.
-  await liftBlock(uid, isPlayId(targetUid) ? await requireUidOfPlayId(targetUid, uid) : targetUid);
+  // F-065: only a block in the id's own mode (a uid lifts a Spark block, a
+  // Play ID a Play one) — anything else is "not found", like a stranger.
+  const lifted = isPlayId(targetUid) ? await uidOfPlayId(targetUid) : targetUid;
+  if (!lifted) throw new HttpsError("not-found", "You haven't blocked this person");
+  await liftBlock(uid, lifted, modeOfId(targetUid));
   return { success: true };
 });

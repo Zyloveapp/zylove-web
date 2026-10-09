@@ -171,24 +171,28 @@ function coordsFrom(loc: DocumentData | undefined, root: DocumentData | undefine
 
 // How far the caller is from each of `uids` (up to MAX_UIDS). Anyone without
 // a saved location — or the caller, if they have none — is left out.
-// Of `uids`, those `uid` may get a distance for (getDistances).
-async function visibleTo(uid: string, uids: string[]): Promise<Set<string>> {
+// Of `uids`, those `uid` may get a distance for (getDistances) — in `mode`
+// only (F-065): people from the caller's Spark deck, matches and likes for a
+// Spark call, from Play's for a Play call, so neither vouches for the other.
+async function visibleTo(uid: string, uids: string[], mode: 'spark' | 'play'): Promise<Set<string>> {
   const db = getFirestore()
-  const [state, matches, playMatches, queue] = await Promise.all([
+  const [state, matches, queue] = await Promise.all([
     db.doc(`exploreState/${uid}`).get(),
-    db.collection('matches').where('users', 'array-contains', uid).select('users').get(),
-    // F-062: Play matches' people are in their server-only records.
-    db.collection('playMatchMembers').where('users', 'array-contains', uid).select('users').get(),
+    mode === 'spark'
+      ? db.collection('matches').where('users', 'array-contains', uid).select('users').get()
+      : // F-062: Play matches' people are in their server-only records.
+        db.collection('playMatchMembers').where('users', 'array-contains', uid).select('users').get(),
     db.collection(`users/${uid}/likeQueue`).select().get(),
   ])
   const st = state.data() ?? {}
   const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
-  // Play likes are keyed by the liker's Play ID.
-  const likers = await Promise.all(queue.docs.map(async (d) => (isPlayId(d.id) ? await uidOfPlayId(d.id) : d.id)))
+  // Play likes are keyed by the liker's Play ID; Spark likes by uid.
+  const likers = await Promise.all(
+    queue.docs.filter((d) => isPlayId(d.id) === (mode === 'play')).map(async (d) => (isPlayId(d.id) ? await uidOfPlayId(d.id) : d.id)),
+  )
   const known = new Set<string>([
-    ...list(st.spark?.deck), ...list(st.spark?.acted), ...list(st.play?.deck), ...list(st.play?.acted),
+    ...list(st[mode]?.deck), ...list(st[mode]?.acted),
     ...matches.docs.flatMap((d) => list(d.get('users'))),
-    ...playMatches.docs.flatMap((d) => list(d.get('users'))),
     ...likers.filter((u): u is string => !!u),
   ])
   const blocked = new Set(list(st.blocked))
@@ -212,7 +216,11 @@ export const getDistances = onCall(
       throw new HttpsError('invalid-argument', `uids must be up to ${MAX_UIDS} user ids`)
     }
     // F-062: in Play, people are named by Play ID — answered by the same ID.
+    // F-065: one namespace per call. Mixed, a uid and a Play ID of the same
+    // person collapsed into one answer, which said they were the same.
     const asked = [...new Set(raw as string[])]
+    const play = asked.some(isPlayId)
+    if (play && !asked.every(isPlayId)) throw new HttpsError('invalid-argument', 'uids and Play IDs go in separate calls')
     const owners = await Promise.all(asked.map(async (x) => (isPlayId(x) ? await uidOfPlayId(x) : x)))
     const idFor = new Map<string, string>()
     asked.forEach((x, i) => owners[i] && idFor.set(owners[i]!, x))
@@ -228,7 +236,7 @@ export const getDistances = onCall(
     // Explore deck or already seen there, matched, or who liked them — and
     // not blocked either way, suspended or deleted. Any uid used to work, so
     // a blocked person could narrow down someone's ~1-mile cell by moving.
-    const visible = await visibleTo(uid, uids)
+    const visible = await visibleTo(uid, uids, play ? 'play' : 'spark')
 
     const locs = await db.getAll(...uids.map(locationRef))
     const missing = uids.filter((_, i) => typeof locs[i].data()?.lat !== 'number')
