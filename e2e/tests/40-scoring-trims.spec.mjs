@@ -55,7 +55,17 @@ test('F-098: an Elite tap and the stored Deep Fit carry no raw floats, confidenc
   expectPublicDeepFit((await db.doc(`pairs/${id}/modes/deep`).get()).data().tier1Spark, [a.uid, b.uid])
 
   // A doc stored before the trim (raw floats) is trimmed on the way out.
-  await db.doc(`pairs/${id}/modes/deep`).set({
+  // First let the re-scores from seeding and the plan change land (the plan
+  // mirror writes the public doc, whose trigger re-scores the pair), or one
+  // would overwrite the old doc planted below.
+  const deepRef = db.doc(`pairs/${id}/modes/deep`)
+  for (let i = 0, last = ''; i < 30; i++) {
+    const t = String((await deepRef.get()).updateTime?.toMillis())
+    if (t === last) break
+    last = t
+    await new Promise((r) => setTimeout(r, 2500))
+  }
+  await deepRef.set({
     tier1Spark: {
       archetype: { id: 'kindred', label: 'Kindred', copy: 'c', confidence: 0.8312 },
       combinedScore: 71.837, asymmetryGap: 12.34, dataConfidence: 0.71, coverage: 0.71, enoughInfo: true,
@@ -72,7 +82,10 @@ test('F-098: an Elite tap and the stored Deep Fit carry no raw floats, confidenc
   const { sent } = await callAs(a.uid, 'getSentSparks', { mode: 'spark' })
   expect(sent).toHaveLength(1)
   expectPublicDeepFit(sent[0].tier1Spark, [a.uid, b.uid])
-  expect(sent[0].tier1Spark.archetype).toEqual({ id: 'kindred', label: 'Kindred', copy: 'c' })
+  // The like may re-score the pair (a fresh, trimmed record replaces the old
+  // doc) — either way only the public archetype goes out (the same
+  // loadSparkDetails read the tap above checked on the old doc).
+  expect(Object.keys(sent[0].tier1Spark.archetype ?? {}).sort()).toEqual(['copy', 'id', 'label'])
 })
 
 test("F-100: a Spark+ breakdown's core fit (and the headline) doesn't move when the other person's intent changes", async () => {
