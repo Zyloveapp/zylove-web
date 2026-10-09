@@ -314,7 +314,52 @@ service cloud.firestore {
                 // F-018 / §4.A1: never shown — matching only
                 'religion', 'politicalView',
                 // §4.A2: gender (off the public doc) and how it's shown
-                'genderIdentity', 'genderSelfDescribe', 'pronouns', 'genderHidden', 'showGender'];
+                'genderIdentity', 'genderSelfDescribe', 'pronouns', 'genderHidden', 'showGender',
+                // F-099: when each limited field last changed
+                'fieldChangedAt'];
+      }
+      // F-099: religion, politics, drinking, attraction and dealbreakers
+      // (here) and the intent (private/profile) change at most once every 30
+      // days each — dealbreaker probing (your own different_religion /
+      // heavy_drinker dealbreaker, then cycling your own value) re-scores
+      // every pair and reads the others' private values back. The first value
+      // (never set: absent, null, '' or []) is free and starts no clock.
+      // After that a change — clearing included — must stamp
+      // fieldChangedAt.<field> with request.time, and is refused while the
+      // last stamp is under 30 days old. The stamps change only that way (the
+      // owner can't backdate or remove one). Re-saving the same value isn't a
+      // change (diff); the app saves lists sorted. Server writes skip this.
+      function limitedMatchingKeys() {
+        return ['religion', 'politicalView', 'drinkingHabit', 'attractedTo', 'dealbreakers'];
+      }
+      function stampsOf(d) {
+        return d.get('fieldChangedAt', {});
+      }
+      function unsetValue(v) {
+        return v == null || ((v is list || v is string) && v.size() == 0);
+      }
+      function stampsValid(before, after, keys) {
+        return (!('fieldChangedAt' in after) || after.fieldChangedAt is map)
+            && stampsOf(after).diff(stampsOf(before)).affectedKeys().hasOnly(keys);
+      }
+      function stampedNow(after, f) {
+        return stampsOf(after).get(f, null) == request.time;
+      }
+      function limitedChangeOk(before, after, f) {
+        let stampMoved = f in stampsOf(after).diff(stampsOf(before)).affectedKeys();
+        return !(f in after.diff(before).affectedKeys())
+            ? !stampMoved
+            : (unsetValue(before.get(f, null)) && !(f in stampsOf(before)) && !stampMoved)
+              || (stampedNow(after, f)
+                  && (!(f in stampsOf(before)) || stampsOf(before)[f] <= request.time - duration.value(30, 'd')));
+      }
+      function limitedMatchingOk(before, after) {
+        return stampsValid(before, after, limitedMatchingKeys())
+            && limitedChangeOk(before, after, 'religion')
+            && limitedChangeOk(before, after, 'politicalView')
+            && limitedChangeOk(before, after, 'drinkingHabit')
+            && limitedChangeOk(before, after, 'attractedTo')
+            && limitedChangeOk(before, after, 'dealbreakers');
       }
       // §4.A2: a key from the app's list (a string), or a list from older
       // mobile Play builds; null when unset. Self-description and pronouns go
@@ -351,8 +396,10 @@ service cloud.firestore {
       match /private/matching {
         allow read: if isSignedIn() && isUser(uid);
         allow create: if callerActive() && isSignedIn() && isUser(uid) && validMatching(request.resource.data)
+                      && !('fieldChangedAt' in request.resource.data)
                       && (!request.resource.data.keys().hasAny(identityLockedKeys()) || identityUnlocked());
         allow update: if callerActive() && isSignedIn() && isUser(uid) && validMatching(request.resource.data)
+                      && limitedMatchingOk(resource.data, request.resource.data)
                       && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(identityLockedKeys()) || identityUnlocked());
         allow delete: if false;
       }
@@ -391,15 +438,31 @@ service cloud.firestore {
       // Profile metadata that would reveal Play use (Stage 2): which modes the
       // owner uses, the current mode, their intentions. Owner only.
       function validPrivateProfile(d) {
-        return d.keys().hasOnly(['intent', 'onboardingPath', 'mode', 'intentionAnswers'])
+        return d.keys().hasOnly(['intent', 'onboardingPath', 'mode', 'intentionAnswers', 'fieldChangedAt'])
             && (!('intent' in d) || d.intent in ['spark', 'play', 'open'])
             && (!('onboardingPath' in d) || d.onboardingPath in ['spark', 'play', 'both'])
             && (!('mode' in d) || d.mode in ['spark', 'play'])
             && (!('intentionAnswers' in d) || (d.intentionAnswers is list && d.intentionAnswers.size() <= 20));
       }
+      // F-099: the intent changes once every 30 days like the matching fields
+      // above (limitedChangeOk). Deleting a profile is never blocked: going
+      // from 'open' to the one mode left, once the other's profile is gone,
+      // is allowed at any time — still stamped, so adding it back waits.
+      function intentNarrowed(before, after) {
+        return before.get('intent', null) == 'open' && stampedNow(after, 'intent')
+            && ((after.get('intent', null) == 'spark'
+                 && !existsAfter(/databases/$(database)/documents/users/$(uid)/playProfile/data))
+                || (after.get('intent', null) == 'play'
+                    && !existsAfter(/databases/$(database)/documents/users/$(uid)/sparkProfile/data)));
+      }
       match /private/profile {
         allow read: if isSignedIn() && isUser(uid);
-        allow create, update: if callerActive() && isSignedIn() && isUser(uid) && validPrivateProfile(request.resource.data);
+        allow create: if callerActive() && isSignedIn() && isUser(uid) && validPrivateProfile(request.resource.data)
+                      && !('fieldChangedAt' in request.resource.data);
+        allow update: if callerActive() && isSignedIn() && isUser(uid) && validPrivateProfile(request.resource.data)
+                      && stampsValid(resource.data, request.resource.data, ['intent'])
+                      && (limitedChangeOk(resource.data, request.resource.data, 'intent')
+                          || intentNarrowed(resource.data, request.resource.data));
         allow delete: if false;
       }
 
