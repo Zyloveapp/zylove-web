@@ -34,7 +34,6 @@ import {
   parsePlayGoDeeperRequest,
 } from './playGoDeeperPrompt'
 import { SPARK_GO_DEEPER_FOCUS, buildSparkGoDeeperPrompt, parseSparkGoDeeperRequest } from './sparkGoDeeperPrompt'
-import { sparkScoreFor } from './legacy/scoring'
 import { BLOCKED_LINE_TYPES } from './signupGuard'
 import { LOOKUP_SECRETS, SMS_SECRETS, claimSparkSmsSlot, decideMessageSms, lookupLineType, nameFor, sendSMS, smsTarget } from './sms'
 
@@ -940,8 +939,6 @@ interface ReviewTarget {
   generation: number
   // Messages in that generation — the "had a conversation" check.
   messageCount: number
-  // Low (fresh-eyes review): both people wrote at least one message.
-  bothSent: boolean
 }
 
 // Which match generation a review is for, and whether both people were in
@@ -974,8 +971,7 @@ async function resolveReviewTarget(
     if (!ctx.pair.includes(otherUid)) throw notParticipant()
     const generation = generationOf(live)
     if (requested === null || requested === generation) {
-      const c = await countMessages(matchId, generation)
-      return { ended: matchEnded(live), generation, messageCount: c.total, bothSent: !!c.bySender[callerId] && !!c.bySender[otherUid] }
+      return { ended: matchEnded(live), generation, messageCount: (await countMessages(matchId, generation)).total }
     }
   }
 
@@ -991,18 +987,15 @@ async function resolveReviewTarget(
   if (record) {
     requireBoth(record)
     const generation = num(record.generation, 0)
-    const sent = record.sentCounts as Record<string, number> | undefined
-    const c = typeof record.messageCount === 'number' && sent ? null : await countMessages(matchId, generation)
-    const by = sent ?? c?.bySender ?? {}
-    const messageCount = typeof record.messageCount === 'number' ? record.messageCount : (c?.total ?? 0)
-    return { ended: true, generation, messageCount, bothSent: !!by[callerId] && !!by[otherUid] }
+    const messageCount =
+      typeof record.messageCount === 'number' ? record.messageCount : (await countMessages(matchId, generation)).total
+    return { ended: true, generation, messageCount }
   }
 
   // Ended before past connections were kept: only the id vouches for the
   // pair, and messages (which only participants can write) for the match.
   if (live || matchId !== [callerId, otherUid].sort().join('_')) throw notParticipant()
-  const c = await countMessages(matchId, 0)
-  return { ended: true, generation: 0, messageCount: c.total, bothSent: !!c.bySender[callerId] && !!c.bySender[otherUid] }
+  return { ended: true, generation: 0, messageCount: (await countMessages(matchId, 0)).total }
 }
 
 // Queues the reviewed user for the safety team once a category crosses its
@@ -1056,7 +1049,7 @@ export const submitReview = onCall(
     const categories = parseCategories(request.data)
     if (BOT_PREFIXES.some((p) => reviewedUid.startsWith(p))) throw new HttpsError('invalid-argument', 'Bots cannot be reviewed')
     const requested: unknown = (request.data as Record<string, unknown> | null)?.generation
-    const { ended, generation, messageCount, bothSent } = await resolveReviewTarget(
+    const { ended, generation, messageCount } = await resolveReviewTarget(
       matchId,
       callerId,
       reviewedUid,
@@ -1064,9 +1057,7 @@ export const submitReview = onCall(
     )
 
     const db = getFirestore()
-    // Low (fresh-eyes review): a conversation means both wrote — your own one
-    // message used to be enough to review someone.
-    if (messageCount < 1 || !bothSent) throw new HttpsError('failed-precondition', 'Have a conversation before leaving a review')
+    if (messageCount < 1) throw new HttpsError('failed-precondition', 'Have a conversation before leaving a review')
 
     const positive = categories.filter((c) => REVIEW_TONE.get(c) === 'positive')
     const neutral = categories.filter((c) => REVIEW_TONE.get(c) === 'neutral')
@@ -1536,8 +1527,6 @@ export const getSentSparks = onCall(
     // Stage C: the Sent tab is part of "who liked you" — Spark+.
     const callerTier = await requireTier(request.auth.uid, 'spark_plus', 'Sent likes')
     const uid = request.auth.uid
-    // Low (fresh-eyes review): each call reads all of the caller's pairs.
-    await takeRateLimit(uid, 'sentSparks', { max: 60, windowMs: 10 * 60 * 1000 })
     const mode = (request.data as Record<string, unknown> | null)?.mode === 'play' ? 'play' : 'spark'
     if (mode === 'play') await requirePlayAccess(uid)
     const db = getFirestore()
@@ -1580,7 +1569,7 @@ export const getSentSparks = onCall(
           uid: otherUid,
           ...modeIdentity(user, null),
           age: typeof user.age === 'number' && user.age > 0 ? user.age : null,
-          sparkScore: sparkScoreFor(pair, uid),
+          sparkScore: typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
           sparkEnoughInfo: typeof pair.sparkEnoughInfo === 'boolean' ? pair.sparkEnoughInfo : null,
           engineVersion: typeof pair.engineVersion === 'number' ? pair.engineVersion : null,
           playScore: null,
@@ -1680,8 +1669,6 @@ export const getCuriousVisitors = onCall(
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     await requireActive(request.auth.uid)
     const uid = request.auth.uid
-    // Low (fresh-eyes review): each call reads all of the caller's pairs.
-    await takeRateLimit(uid, 'curiousVisitors', { max: 60, windowMs: 10 * 60 * 1000 })
     // F-064: one mode always (Spark unless asked) — with none, Play reveals
     // were listed under the Spark profile.
     const mode = (request.data as Record<string, unknown> | null)?.mode === 'play' ? 'play' : 'spark'
@@ -1735,7 +1722,7 @@ export const getCuriousVisitors = onCall(
         age: typeof user.age === 'number' && user.age > 0 ? user.age : null,
         locationLabel: typeof user.locationLabel === 'string' && user.locationLabel ? user.locationLabel : null,
         intent: mode,
-        sparkScore: sparkScoreFor(pair, uid),
+        sparkScore: typeof pair.sparkScore === 'number' ? pair.sparkScore : null,
         sparkEnoughInfo: typeof pair.sparkEnoughInfo === 'boolean' ? pair.sparkEnoughInfo : null,
         engineVersion: typeof pair.engineVersion === 'number' ? pair.engineVersion : null,
         playScore: null,

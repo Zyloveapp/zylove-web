@@ -4,6 +4,7 @@ import { logger } from 'firebase-functions'
 import { FieldValue, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { ensurePlayId, playIdOf } from './playIds'
 import { isBotUid } from './playAccess'
+import { maskProfileDoc } from './profileText'
 
 // F-062 — the Play profile others see: playProfiles/{playId}, a server-kept
 // copy of users/{uid}/playProfile/data (now owner-only) with only what a
@@ -88,6 +89,10 @@ const quietly = (uid: string) =>
   refreshPlayProfile(uid).catch((err: unknown) => logger.error('playProfiles: refresh failed', { message: String(err) }))
 
 export const playProfileOnWrite = onDocumentWritten({ document: 'users/{uid}/playProfile/data', memory: '256MiB' }, async (e) => {
+  // F-112: contact details masked in the source first; that write re-runs
+  // this trigger, which then mirrors the masked text.
+  const after = e.data?.after
+  if (after?.exists && (await maskProfileDoc(after.ref, after.data(), 'play'))) return
   await quietly(e.params.uid)
 })
 

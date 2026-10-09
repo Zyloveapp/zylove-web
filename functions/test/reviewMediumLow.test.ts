@@ -7,7 +7,7 @@ import { FOUNDER_MIN_AGE_MS, founderGate, founderPhoneHash, revokedPlan } from '
 import { signupDecision } from '../src/signupGuard'
 import { isUsNumber } from '../src/phoneRegion'
 import { ipBucket, ipRateKey } from '../src/clientIp'
-import { maskProfileText, maskedFields, needsMask } from '../src/profileText'
+import { MAX_PROFILE_TEXT, maskProfileText, maskedFields, needsMask } from '../src/profileText'
 import { calculateSparkScore, sparkPairFields, sparkScoreFor, sparkViews } from '../src/legacy/scoring'
 import { DEALBREAKER_CAP } from '../src/legacy/tier1/scorePair'
 import { PAST_DUE_GRACE_MS, computeEntitlement } from '../src/entitlements'
@@ -122,6 +122,14 @@ test('profile text: links, domains, handles, emails and phone numbers are masked
   }
   const once = maskProfileText('ig @x_handle and 5125550123')
   assert.equal(maskProfileText(once), once, 'idempotent')
+})
+
+test('profile text: text past MAX_PROFILE_TEXT is cut first (fast; nothing hidden past the limit)', () => {
+  const t = Date.now()
+  const out = maskedFields({ bio: 'y'.repeat(100_000) + ' call 5125550123' }, ['bio'], [], [])
+  assert.ok(Date.now() - t < 2000, 'bounded time')
+  assert.equal(out!.bio.length, MAX_PROFILE_TEXT)
+  assert.equal(maskedFields({ bio: 'y'.repeat(MAX_PROFILE_TEXT) }, ['bio'], [], []), null)
 })
 
 test('profile text: only the fields that need it are rewritten', () => {

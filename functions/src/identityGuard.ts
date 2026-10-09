@@ -7,6 +7,7 @@ import { buildGenderLine } from './genderLine'
 import { suspendAccount } from './reports'
 import { queueAdminAlert } from './adminAlerts'
 import { isBotUid } from './playAccess'
+import { maskProfileDoc } from './profileText'
 
 // F-066: identity and age, decided server-side.
 //
@@ -94,6 +95,9 @@ export const identityGuardOnUser = onDocumentWritten({ document: 'users/{uid}', 
   if (isBotUid(uid)) return
   const after = event.data?.after.data()
   if (!after || after.isDeleted === true) return
+  // F-112: contact details in the public text are masked (the write re-runs
+  // this trigger, which then finds nothing to mask).
+  if (event.data?.after.ref && (await maskProfileDoc(event.data.after.ref, after, 'root'))) return
   const before = event.data?.before.data()
   // The profile may be created after private/matching (or carry an old
   // gender copy): lock then, and give it its genderLine.
