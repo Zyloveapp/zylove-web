@@ -49,8 +49,7 @@ export { deletePlayProfile, updateDisplayName } from './displayName'
 export { processBotLikeBacks, queueBotLikeBack } from './botLikeBack'
 import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { keptForReport, recomputeBehaviorRisk, recordVibeSignal } from './behavior'
-import { newTrial, noteTrialHistory, planView, priorTrial, trialExempt } from './trial'
-import { cityIsOpen, launchCityOf, requireTier, tierNow } from './entitlements'
+import { requireTier, tierNow } from './entitlements'
 import { accountRef, internalRef, isAdminAuth, isDeletedUid, isSuspendedUid, loadInternal, loadMatching, loadSettings, requireActive } from './userData'
 import { blockedEitherWay, likedInMode, likersInMode, pairIdOf } from './likes'
 // §4.A3: likes are named to the liked person by an opaque like id.
@@ -81,7 +80,7 @@ import {
   REVIEW_TONE,
 } from './shared/reviewCategories'
 import { updateSearchName } from './searchName'
-import { NEW_ACCOUNT_MS } from './shared/scamRules'
+import { ensureAccountDefaults, memberSinceOf } from './accountDefaults'
 import { PLAY_PROMPTS, SPARK_PROMPTS, UNIVERSAL_PROMPTS } from './shared/profile'
 
 initializeApp()
@@ -332,17 +331,16 @@ const INTERNAL_DEFAULTS = {
   isSuspended: false,
 } as const
 
+// "2026-10": the month an account was created (accountDefaults.ts).
+export { memberSinceOf }
+
 // Fills in whichever defaults are missing for the caller. Only missing fields
 // are written, so values set elsewhere (e.g. Elite from a founder spot) are
 // never overwritten. Idempotent. Also starts the 30-day trial (trial.ts) for
 // anyone without one whose market has opened — existing users too, since the
 // app calls this on every load. In a pre-launch market (or none) there's no
-// clock yet.
-// "2026-10": the month an account was created, Central time.
-export function memberSinceOf(ms: number): string {
-  const f = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit' }).format(new Date(ms))
-  return f.slice(0, 7)
-}
+// clock yet. H1: the server does the trial and the account's age without
+// this call too (accountDefaults.ts).
 
 export const initUserDefaults = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
@@ -379,46 +377,13 @@ export const initUserDefaults = onCall(
     if (data.identityLockedAt == null && matchingNow.genderIdentity != null) {
       missing.identityLockedAt = FieldValue.serverTimestamp()
     }
-    // The trial: once per phone number (trialHistory, Stage C), never after a
-    // paid plan, and only in a launch city that's open.
-    if (internal.trialStartedAt === undefined && internal.hadPaidPlan !== true && !trialExempt({ ...planView(data, internal), genderIdentity: matchingNow.genderIdentity, matchableAs: matchingNow.matchableAs })) {
-      // The verified number: from the token, else the Auth record (sign-ins
-      // that don't carry it on the token).
-      const phone =
-        typeof request.auth.token.phone_number === 'string'
-          ? request.auth.token.phone_number
-          : ((await getAuth().getUser(uid).catch(() => null))?.phoneNumber ?? null)
-      const prior = await priorTrial(phone)
-      if (prior?.hadPaidPlan === true) missingInternal.hadPaidPlan = true
-      else if (prior?.trialStartedAt) {
-        const ends = prior.trialEndsAt as Timestamp
-        Object.assign(missingInternal, { trialStartedAt: prior.trialStartedAt, trialEndsAt: ends, trialExpired: ends.toMillis() <= Date.now() })
-      } else {
-        const cityId = launchCityOf((await getFirestore().doc(`userLocations/${uid}`).get()).data())
-        if (cityId && cityIsOpen((await getFirestore().doc(`config/city_${cityId}`).get()).data())) {
-          const t = newTrial()
-          Object.assign(missingInternal, t)
-          await noteTrialHistory(phone, { trialStartedAt: t.trialStartedAt, trialEndsAt: t.trialEndsAt })
-        }
-      }
-    }
-    // T&S Phase 1: account age from Firebase Auth — the client's createdAt
-    // can be rewritten. accountCreatedAt (ms) stays server-side; the profile
-    // shows only the month ("Member since").
-    if (typeof internal.accountCreatedAt !== 'number' || typeof data.memberSince !== 'string') {
-      const created = Date.parse((await getAuth().getUser(uid).catch(() => null))?.metadata.creationTime ?? '')
-      if (Number.isFinite(created)) {
-        if (typeof internal.accountCreatedAt !== 'number') missingInternal.accountCreatedAt = created
-        if (typeof data.memberSince !== 'string') missing.memberSince = memberSinceOf(created)
-      }
-    }
-    // T&S Phase 2: while an account is under 48 hours old, its profile says
-    // until when (to the hour), so a recipient's app can put a safety note on
-    // links it sent then. Older accounts never get the field.
-    const createdAt = typeof internal.accountCreatedAt === 'number' ? internal.accountCreatedAt : (missingInternal.accountCreatedAt as number | undefined)
-    if (typeof data.newUntil !== 'number' && typeof createdAt === 'number' && Date.now() < createdAt + NEW_ACCOUNT_MS) {
-      missing.newUntil = Math.ceil((createdAt + NEW_ACCOUNT_MS) / 3_600_000) * 3_600_000
-    }
+    // The trial (once per phone number, never after a paid plan, only in a
+    // launch city that's open) and the account's age (accountCreatedAt,
+    // memberSince, newUntil): H1 — the server fills these in itself too
+    // (accountDefaults.ts, from the entitlement triggers), so skipping this
+    // call gains nothing. The verified number: from the token, else the Auth
+    // record (sign-ins that don't carry it on the token).
+    await ensureAccountDefaults(uid, typeof request.auth.token.phone_number === 'string' ? { phone: request.auth.token.phone_number } : {})
     // T&S Phase 1: the admin directory's name index.
     if (typeof data.displayName === 'string' && internal.searchName !== data.displayName.trim().toLowerCase()) {
       await updateSearchName(uid, data.displayName)

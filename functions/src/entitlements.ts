@@ -13,8 +13,9 @@ import { eliteByMatching } from './identity'
 //            2), founder, paid, trial, prelaunch (near a launch city still
 //            in its founding period), waiting (no launch city yet: no
 //            location, or linked to a major city that hasn't launched —
-//            decision 1), free (trial over, or cancelled: never a second
-//            trial or pre-launch)
+//            decision 1; or, H1, their city is open and the server is
+//            about to start their trial), free (trial over, or cancelled:
+//            never a second trial or pre-launch)
 //   until    when a trial grants it: its end (rules compare it with
 //            request.time); else null
 //   cityId   the launch city (or linked major city) it was decided for
@@ -49,8 +50,10 @@ export function launchCityOf(loc: DocumentData | undefined): string | null {
 }
 
 export function computeEntitlement(
-  // linkedCityOpen: whether the linked (far) city — when it's a launch city — has opened.
-  input: { root?: DocumentData; plan?: DocumentData; matching?: DocumentData; loc?: DocumentData; linkedCityOpen?: boolean },
+  // marketOpen: whether their market (the launch city they're in) has
+  // opened; linkedCityOpen: whether the linked (far) city — when it's a
+  // launch city — has.
+  input: { root?: DocumentData; plan?: DocumentData; matching?: DocumentData; loc?: DocumentData; marketOpen?: boolean; linkedCityOpen?: boolean },
   now = Date.now(),
 ): Entitlement {
   const { root, plan = {}, matching = {}, loc } = input
@@ -76,14 +79,15 @@ export function computeEntitlement(
   // Never had a trial: a cancelled subscriber gets neither a trial nor pre-launch.
   if (plan.hadPaidPlan === true) return e('free', 'free')
   // Near a launch city (within its radius — the locked market): Elite while
-  // it's founding, and once it's open until their trial starts
-  // (initUserDefaults / onMarketOpened start it).
+  // it's founding.
+  // H1: once it's open, nothing without a trial — Free ("waiting") until the
+  // server starts it (accountDefaults.ts, from the triggers that recompute
+  // this), which also looks up the phone's trial history. Pre-launch here
+  // had no end: an account that never called initUserDefaults kept it.
   const market = typeof loc?.marketCityId === 'string' && ZYLOVE_CITIES.some((c) => c.id === loc.marketCityId)
-  if (market) return e('elite', 'prelaunch')
-  // Linked from further away: Free until that city opens; then, until their
-  // trial starts, the same as everyone there.
-  const linkedLaunch = typeof loc?.linkedCityId === 'string' && ZYLOVE_CITIES.some((c) => c.id === loc.linkedCityId)
-  if (linkedLaunch && input.linkedCityOpen === true) return e('elite', 'prelaunch')
+  if (market) return input.marketOpen === true ? e('free', 'waiting') : e('elite', 'prelaunch')
+  // Linked from further away: Free until that city opens, and then until
+  // their trial starts.
   return e('free', 'waiting')
 }
 
