@@ -74,9 +74,17 @@ const ATTRACTED_TO_MATCHES: Record<string, readonly string[]> = {
   men:             ['man', 'transman'],
   women:           ['woman', 'transwoman'],
   nonbinarypeople: ['nonbinary', 'genderfluid', 'agender', 'selfdescribe'],
-  transmen:        ['transman'],
-  transwomen:      ['transwoman'],
   everyone:        ['*'],
+};
+
+// §4.A2 / F-098: "Trans men" / "Trans women" attraction counts as men /
+// women, as Explore matches (explore.ts) — kept apart, a cis person's score
+// went to 0 for someone attracted only to trans women while a trans
+// person's didn't, telling the hidden gender apart. No trans filter anywhere.
+const ATTRACTION_FOLD: Record<string, string> = { transmen: 'men', transwomen: 'women' };
+const attractionKey = (v: unknown): string => {
+  const k = canonical(v);
+  return ATTRACTION_FOLD[k] ?? k;
 };
 
 const OFF_MAP_IDENTITIES = new Set(['genderfluid', 'agender', 'selfdescribe']);
@@ -84,7 +92,7 @@ const OFF_MAP_IDENTITIES = new Set(['genderfluid', 'agender', 'selfdescribe']);
 // Defensive against: undefined/null inputs, array-typed gender (Play mode),
 // non-string values, and underscore/hyphen/space variations.
 function prefMatchesGender(pref: unknown, gender: unknown, matchableAs?: unknown): boolean {
-  const prefKey = canonical(pref);
+  const prefKey = attractionKey(pref);
   if (!prefKey) return false;
   const rule = ATTRACTED_TO_MATCHES[prefKey];
   if (!rule) return false;
@@ -97,7 +105,7 @@ function prefMatchesGender(pref: unknown, gender: unknown, matchableAs?: unknown
   const hasOffMap = genders.some(g => OFF_MAP_IDENTITIES.has(g));
   if (hasOffMap && Array.isArray(matchableAs)) {
     for (const m of matchableAs) {
-      const mKey = canonical(m);
+      const mKey = attractionKey(m);
       if (mKey === prefKey || mKey === 'everyone') return true;
     }
   }
@@ -105,7 +113,7 @@ function prefMatchesGender(pref: unknown, gender: unknown, matchableAs?: unknown
 }
 
 // Hard-zero on any one-way orientation rejection. Only mutual yes returns 1.
-function attractionCompatibility(a: any, b: any): number {
+export function attractionCompatibility(a: any, b: any): number {
   const aAttr = Array.isArray((a as any)?.attractedTo) ? (a as any).attractedTo : [];
   const bAttr = Array.isArray((b as any)?.attractedTo) ? (b as any).attractedTo : [];
   const aAttractedToB = aAttr.some((pref: unknown) =>
