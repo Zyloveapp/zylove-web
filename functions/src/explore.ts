@@ -4,6 +4,9 @@ import { logger } from 'firebase-functions'
 import { getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { distanceMiles } from './cities'
 import { marketFor } from './trial'
+// H2: the one reading of gender (identity.ts → gender.ts), shared with
+// identity Elite and the founding circle.
+import { categoriesOf } from './identity'
 import { isBotUid, playStatus, requirePlayAccess } from './playAccess'
 import { GENDER_FIELDS, genderOf, isSuspendedUid, loadInternal, loadLocation, loadMatching, loadPrivateProfile, userRef } from './userData'
 import { takeRateLimit, takeRateLimitUpTo } from './rateLimits'
@@ -46,22 +49,6 @@ const db = () => getFirestore()
 export const indexRef = (uid: string) => db().doc(`exploreIndex/${uid}`)
 export const stateRef = (uid: string) => db().doc(`exploreState/${uid}`)
 
-// Mirrors the web app's genderToAttractedToCategory (src/utils/genderUtils.ts).
-function categoriesOf(genderIdentity: unknown, matchableAs: unknown): string[] {
-  const g = Array.isArray(genderIdentity) ? genderIdentity[0] : genderIdentity
-  switch (g) {
-    case 'man':
-    case 'trans_man':
-      return ['men']
-    case 'woman':
-    case 'trans_woman':
-      return ['women']
-    case 'nonbinary':
-      return ['nonbinary_people']
-    default:
-      return Array.isArray(matchableAs) && matchableAs.length ? matchableAs.filter((x): x is string => typeof x === 'string') : ['everyone']
-  }
-}
 const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : typeof v === 'string' ? [v] : [])
 const hidden = (v: unknown) => v === 'paused' || v === 'hidden'
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)

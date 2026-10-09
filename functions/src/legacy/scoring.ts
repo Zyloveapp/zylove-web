@@ -9,6 +9,7 @@ import { computePairScore, DEALBREAKER_CAP, hasEnoughInfo, shrinkToPrior } from 
 import { calibrateTier0 } from "./tier1/calibration";
 import { matchPlayArchetype } from "./tier1/archetypeMatcher";
 import type { DatingProfile } from "./types";
+import { normalizeGender } from "../gender";
 
 // The scoring engine's version, stored on every pair score (engineVersion).
 // Bump it with any change to the Spark math, mappings or calibration: onTap
@@ -101,7 +102,10 @@ function prefMatchesGender(pref: unknown, gender: unknown, matchableAs?: unknown
   if (!rule) return false;
   if (rule.includes('*')) return true;
 
-  const genders = (Array.isArray(gender) ? gender : [gender]).map(canonical).filter(Boolean);
+  // H2: the stored gender read as Explore and identity Elite read it
+  // (gender.ts) — a list by its first entry, older labels by their key.
+  const key = normalizeGender(gender);
+  const genders = key ? [canonical(key)] : [];
   if (!genders.length) return false;
   if (genders.some(g => rule.includes(g))) return true;
 

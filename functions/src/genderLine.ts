@@ -17,6 +17,8 @@
 // No category is singled out for filtering anywhere (Matthew's decision):
 // this is display only.
 
+import { normalizeGender } from './gender'
+
 export const GENDER_LINE_LABELS: Record<string, string> = {
   man: 'Man',
   woman: 'Woman',
@@ -43,13 +45,10 @@ export interface GenderLineInput {
 }
 
 // The stored key: a string on the web, an array from mobile Play; older
-// mobile builds stored labels ("Trans Woman", "non-binary").
+// mobile builds stored labels ("Trans Woman", "non-binary"). H2: the one
+// normaliser (gender.ts), so the line says what Explore matches on.
 export function genderKey(v: unknown): string | null {
-  const raw = Array.isArray(v) ? v[0] : v
-  if (typeof raw !== 'string') return null
-  const k = raw.trim().toLowerCase().replace(/[\s-]+/g, '_')
-  if (!k) return null
-  return k === 'non_binary' ? 'nonbinary' : k === 'self_described' ? 'self_describe' : k
+  return normalizeGender(v)
 }
 
 // Free text that goes on the public doc: letters (any language) and a few

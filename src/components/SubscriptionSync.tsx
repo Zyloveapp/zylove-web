@@ -4,6 +4,7 @@ import { functions } from '../services/firebase'
 import { useAuthStore } from '../store/authStore'
 import { useSubscriptionStore } from '../store/subscriptionStore'
 import {
+  entitlementOf,
   getDaysLeftInTrial,
   getSubscriptionStatus,
   getUserTier,
@@ -11,6 +12,7 @@ import {
   isAlwaysElite,
   marketOf,
   subscribeTierFields,
+  trialStarted,
 } from '../services/subscription'
 
 const EMPTY = { daysLeft: null, alwaysElite: false, subscriptionStatus: null, trialEnded: false, marketName: null } as const
@@ -18,10 +20,11 @@ const EMPTY = { daysLeft: null, alwaysElite: false, subscriptionStatus: null, tr
 // Keeps useSubscriptionStore in step with the signed-in user's plan (the
 // server's entitlement). If it can't be read, the app shows Free.
 //
-// No trial yet (pre-launch): asks the server (initUserDefaults) to start one
-// in case their market has opened — once per session, and again if their
-// saved location moves to another market. The server decides; in a market
-// that hasn't opened it does nothing.
+// No trial yet (pre-launch, or Free while their open city's trial starts):
+// asks the server (initUserDefaults) to start one in case their market has
+// opened — once per session, and again if their saved location moves to
+// another market. The server decides; in a market that hasn't opened it does
+// nothing. (It starts the trial by itself too — H1; this only saves a wait.)
 export default function SubscriptionSync() {
   const uid = useAuthStore((s) => s.user?.uid) ?? null
   const set = useSubscriptionStore((s) => s.set)
@@ -35,7 +38,7 @@ export default function SubscriptionSync() {
       (fields) => {
         const tier = getUserTier(fields)
         const market = marketOf(fields)
-        if (tier === 'prelaunch') {
+        if (tier === 'prelaunch' || (entitlementOf(fields)?.source === 'waiting' && !trialStarted(fields))) {
           const key = market?.id ?? 'none'
           if (askedFor !== key) {
             askedFor = key

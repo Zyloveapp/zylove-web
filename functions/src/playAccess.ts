@@ -2,7 +2,7 @@ import { HttpsError } from 'firebase-functions/v2/https'
 import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
-import { cityIsOpen, computeEntitlement, type Entitlement } from './entitlements'
+import { cityIsOpen, computeEntitlement, launchCityOf, type Entitlement } from './entitlements'
 import { accountRef, internalRef, userRef } from './userData'
 
 // Play access (Stage 2, F-004). Play data is sealed: reading another
@@ -74,7 +74,7 @@ export function computeFlags(
 // land after a newer one and overwrite it with a stale plan.
 export async function refreshPlayAccess(uid: string): Promise<PlayFlags> {
   const db = getFirestore()
-  return db.runTransaction(async (tx) => {
+  const result = await db.runTransaction(async (tx): Promise<{ flags: PlayFlags; defaults?: boolean }> => {
     const [root, internal, play, matching, loc] = await Promise.all([
       tx.get(userRef(uid)),
       tx.get(internalRef(uid)),
@@ -82,9 +82,10 @@ export async function refreshPlayAccess(uid: string): Promise<PlayFlags> {
       tx.get(db.doc(`users/${uid}/private/matching`)),
       tx.get(db.doc(`userLocations/${uid}`)),
     ])
-    // A far user's linked city, if it's a launch city: has it opened?
-    const linked: unknown = loc.data()?.linkedCityId
-    const linkedCfg = typeof linked === 'string' && !loc.data()?.marketCityId ? await tx.get(db.doc(`config/city_${linked}`)) : null
+    // Their launch city (the market, else a far user's linked launch city):
+    // has it opened?
+    const city = launchCityOf(loc.data())
+    const open = city ? cityIsOpen((await tx.get(db.doc(`config/city_${city}`))).data()) : false
     // The whole entitlement, stored with the Play flags it decides.
     const ent = computeEntitlement({
       root: root.data(),
@@ -92,12 +93,20 @@ export async function refreshPlayAccess(uid: string): Promise<PlayFlags> {
       // §4.A2: gender is in private/matching too; root copies until migrated.
       matching: { matchableAs: root.data()?.matchableAs, genderIdentity: root.data()?.genderIdentity, ...matching.data() },
       loc: loc.data(),
-      linkedCityOpen: linkedCfg ? cityIsOpen(linkedCfg.data()) : false,
+      marketOpen: open,
+      linkedCityOpen: open,
     })
     const flags = computeFlags(root.data(), internal.data(), play.data(), ent)
     // A deleted account's server record is gone for good (clearPrivateData):
     // never write it back.
-    if (!root.exists || root.data()?.isDeleted === true) return flags
+    if (!root.exists || root.data()?.isDeleted === true) return { flags }
+    // H1: account age or a trial still to fill in (accountDefaults.ts) —
+    // done after this transaction; its write brings this back round.
+    const n = internal.data() ?? {}
+    const defaults =
+      typeof n.accountCreatedAt !== 'number' ||
+      typeof root.data()?.memberSince !== 'string' ||
+      (n.trialStartedAt === undefined && n.hadPaidPlan !== true && (ent.source === 'waiting' || ent.source === 'prelaunch'))
     const cur = internal.data() ?? {}
     const entJson = (x: DocumentData | undefined) =>
       JSON.stringify({ tier: x?.tier ?? null, source: x?.source ?? null, until: toMillis(x?.until) ?? null, cityId: x?.cityId ?? null })
@@ -112,8 +121,13 @@ export async function refreshPlayAccess(uid: string): Promise<PlayFlags> {
       // new plan shows without a gap.
       tx.set(accountRef(uid), { ...flags, entitlement: ent }, { merge: true })
     }
-    return flags
+    return { flags, defaults }
   })
+  if (result.defaults) {
+    const { ensureAccountDefaults } = await import('./accountDefaults')
+    await ensureAccountDefaults(uid).catch((err) => logger.error('ensureAccountDefaults failed', { message: String(err) }))
+  }
+  return result.flags
 }
 
 // The stored flags, read now: entitled / access as of this moment.
@@ -174,11 +188,13 @@ export const playAccessOnPlayProfile = onDocumentWritten({ document: 'users/{uid
 })
 
 // Stage C: how someone is matched (matchableAs) and their launch city also
-// decide the tier. §4.A2: the gender lives here now too, but identity-based
+// decide the tier. §4.A2: the gender lives here now too; identity-based
 // Elite needs the lock, and the lock (playAccessOnProfile) comes after it.
+// H2: a server rewrite of a locked gender (scripts/migrate-gender-keys.mjs)
+// is followed too.
 export const entitlementOnMatching = onDocumentWritten({ document: 'users/{uid}/private/matching', memory: '256MiB' }, async (event) => {
   if (isBotUid(event.params.uid)) return
-  if (event.data?.before.exists && !changed(event.data.before.data(), event.data?.after.data(), ['matchableAs'])) return
+  if (event.data?.before.exists && !changed(event.data.before.data(), event.data?.after.data(), ['matchableAs', 'genderIdentity'])) return
   await refreshPlayAccess(event.params.uid)
 })
 export const entitlementOnLocation = onDocumentWritten({ document: 'userLocations/{uid}', memory: '256MiB' }, async (event) => {

@@ -84,12 +84,18 @@ function membershipRow(user: DocumentData, mode: Mode): Row {
     }
   }
   // Stage C: no launch city near them yet — Free until their linked city opens.
+  // H1: or their city has opened and the server is starting their trial.
   const waiting = waitingForCity(user)
   if (waiting !== null || entitlementOf(user)?.source === 'waiting') {
     const city = waiting ? anyCityById(waiting) : null
+    const opened = city !== null && marketOf(user)?.id === city.id
     return {
       label: '✦ Free',
-      sublabel: city ? `Your 30-day Elite trial starts when Zylove opens in ${city.name}. Upgrade any time →` : 'Upgrade any time →',
+      sublabel: opened
+        ? 'Your 30-day Elite trial is starting. Upgrade any time →'
+        : city
+          ? `Your 30-day Elite trial starts when Zylove opens in ${city.name}. Upgrade any time →`
+          : 'Upgrade any time →',
       border: 'cobalt',
       action: 'upgrade',
     }

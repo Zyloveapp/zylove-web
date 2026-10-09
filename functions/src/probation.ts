@@ -27,9 +27,17 @@ export async function probationOf(uid: string, now = Date.now()): Promise<Probat
   const cfg = (await db().doc(`probation/${loc.marketCityId}`).get()).data()
   if (cfg?.enabled !== true) return null
   const created = (await db().doc(`userInternal/${uid}`).get()).data()?.accountCreatedAt
-  if (typeof created !== 'number') return null
+  return probationFor(cfg, created, now)
+}
+
+// Pure: the limits for an account created at `created` (ms) under a city's
+// switch. H1: no accountCreatedAt counts as new — it's filled in
+// server-side (accountDefaults.ts), so missing means not yet, never "old";
+// it used to mean no probation at all.
+export function probationFor(cfg: { enabled?: unknown; days?: unknown; likesPerDay?: unknown } | undefined, created: unknown, now = Date.now()): Probation | null {
+  if (cfg?.enabled !== true) return null
   const days = typeof cfg.days === 'number' && cfg.days > 0 ? cfg.days : PROBATION_DEFAULTS.days
-  if (now - created >= days * DAY_MS) return null
+  if (typeof created === 'number' && now - created >= days * DAY_MS) return null
   return { likesPerDay: typeof cfg.likesPerDay === 'number' && cfg.likesPerDay >= 0 ? cfg.likesPerDay : PROBATION_DEFAULTS.likesPerDay, noChatPhotos: true }
 }
 

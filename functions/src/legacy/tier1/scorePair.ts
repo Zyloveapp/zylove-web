@@ -52,6 +52,7 @@ import { calibrateTier1 } from './calibration'
 import type { DatingProfile, Dealbreaker } from '../types'
 import { matchSparkArchetype, matchUnlikelyFit } from './archetypeMatcher'
 import type { ArchetypeMatch } from './archetypes'
+import { normalizeGender } from '../../gender'
 
 // ─── Public types ─────────────────────────────────────────────────────────
 
@@ -268,7 +269,10 @@ function prefMatchesGender(pref: unknown, gender: unknown, matchableAs?: unknown
   if (!rule) return false
   if (rule.includes('*')) return true
 
-  const genders = (Array.isArray(gender) ? gender : [gender]).map(canonical).filter(Boolean)
+  // H2: the stored gender read as Explore and identity Elite read it
+  // (gender.ts) — a list by its first entry, older labels by their key.
+  const key = normalizeGender(gender)
+  const genders = key ? [canonical(key)] : []
   if (!genders.length) return false
   if (genders.some(g => rule.includes(g))) return true
 

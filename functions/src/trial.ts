@@ -24,21 +24,12 @@ import { eliteByMatching } from './identity'
 
 export const TRIAL_MS = 30 * 24 * 60 * 60 * 1000
 
-// Women and other non-male identities get lifetime Elite on the web
-// ('nonbinary' is how it's stored). Mobile still elevates only woman /
-// trans_woman.
-export const ALWAYS_ELITE_IDENTITIES = ['woman', 'trans_woman', 'nonbinary', 'non_binary', 'genderfluid', 'agender', 'self_describe']
-
-function genderOf(user: DocumentData): string {
-  const g: unknown = Array.isArray(user.genderIdentity) ? user.genderIdentity[0] : user.genderIdentity
-  return typeof g === 'string' ? g.toLowerCase().trim() : ''
-}
-
 // Stage C (decision 2): by how they're matched (women / nonbinary people),
 // not the identity they describe. `user` should carry matchableAs (from
-// private/matching) for identities that don't map to a category.
+// private/matching) for identities that don't map to a category. H2: the
+// gender is read by identity.ts (gender.ts), as Explore reads it.
 export function hasEliteIdentity(user: DocumentData): boolean {
-  return eliteByMatching(genderOf(user) || user.genderIdentity, user.matchableAs)
+  return eliteByMatching(user.genderIdentity, user.matchableAs)
 }
 
 export function hasPaidSubscription(user: DocumentData | undefined): boolean {
@@ -93,9 +84,9 @@ const isBotUid = (uid: string) => uid.startsWith('zbot-') || uid.startsWith('see
 
 // A city opening (config/city_{id} goes from not open to open): stamp
 // discoveryOpenedAt, publish it to publicStats/city_{id} (the web app's
-// pre-launch line reads it), and start the trial for every non-exempt,
-// onboarded user in that market who doesn't have one. Users still in
-// onboarding get theirs from initUserDefaults when they finish.
+// pre-launch line reads it), and start the trial for every non-exempt user
+// in that market who doesn't have one (H1: with the phone's trial history,
+// as initUserDefaults does).
 export const onMarketOpened = onDocumentWritten(
   { document: 'config/{docId}', timeoutSeconds: 540, memory: '512MiB' },
   async (event) => {
@@ -119,30 +110,20 @@ export const onMarketOpened = onDocumentWritten(
       db.collection('userLocations').where('marketCityId', '==', city.id).select().get(),
       db.collection('userLocations').where('linkedCityId', '==', city.id).select().get(),
     ])
-    const starting: string[] = []
     const everyone = [...new Set([...inMarket.docs, ...linked.docs].map((d) => d.id))].filter((id) => !isBotUid(id))
+    // H1: each trial as initUserDefaults starts it (accountDefaults.ts): the
+    // phone's trial history first — a number that had one, or paid, doesn't
+    // get a fresh one — and none for the exempt or suspended.
+    const { ensureAccountDefaults } = await import('./accountDefaults')
+    let started = 0
     for (const id of everyone) {
-      const [root, internal, matching] = await Promise.all([db.doc(`users/${id}`).get(), db.doc(`userInternal/${id}`).get(), db.doc(`users/${id}/private/matching`).get()])
-      // §4.A2: gender from private/matching (the root's old copy until migrated).
-      const u: DocumentData = { ...planView(root.data(), internal.data()), genderIdentity: matching.get('genderIdentity') ?? root.get('genderIdentity'), matchableAs: matching.get('matchableAs') }
-      if (root.data()?.onboardingComplete === true && u.trialStartedAt === undefined && u.hadPaidPlan !== true && !trialExempt(u)) starting.push(id)
-    }
-    const trial = newTrial()
-    for (let i = 0; i < starting.length; i += 450) {
-      const batch = db.batch()
-      for (const uid of starting.slice(i, i + 450)) batch.set(db.doc(`userInternal/${uid}`), trial, { merge: true })
-      await batch.commit()
-    }
-    // Their trial on record by phone (trialHistory), so it can't be had twice.
-    const { getAuth } = await import('firebase-admin/auth')
-    for (const uid of starting) {
-      const phone = (await getAuth().getUser(uid).catch(() => null))?.phoneNumber
-      await noteTrialHistory(phone, { trialStartedAt: trial.trialStartedAt, trialEndsAt: trial.trialEndsAt }).catch(() => {})
+      const r = await ensureAccountDefaults(id).catch(() => null)
+      if (r?.trial === 'new') started++
     }
     // Everyone's entitlement follows the city (pre-launch → trial).
     const { refreshPlayAccess } = await import('./playAccess')
     for (const id of everyone) await refreshPlayAccess(id).catch(() => {})
-    logger.info('onMarketOpened', { city: city.id, trialsStarted: starting.length, refreshed: everyone.length })
+    logger.info('onMarketOpened', { city: city.id, trialsStarted: started, refreshed: everyone.length })
   },
 )
 

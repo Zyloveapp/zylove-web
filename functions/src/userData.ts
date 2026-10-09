@@ -237,13 +237,27 @@ export async function deletionView(uid: string, root: DocumentData): Promise<{ b
 // the account's trust links (device sightings, trust profile) are kept
 // through the deletion, so a sign-up again can still be linked to it. Device
 // sightings still go after 90 days (purgeDeviceSightings).
-export async function moderationCarry(uid: string): Promise<{ reportCount: number; suspension: DocumentData | null; keepTrustLinks: boolean }> {
-  const n = (await internalRef(uid).get()).data() ?? {}
+// H6: also the holds (F-074's scam hold, an admin's reduced visibility),
+// which a restore puts back, and reports still waiting for review — with any
+// of those, or a pending report, the trust links stay too.
+export async function moderationCarry(
+  uid: string,
+): Promise<{ reportCount: number; pendingReports: number; suspension: DocumentData | null; holds: DocumentData; keepTrustLinks: boolean }> {
+  const [internal, reports] = await Promise.all([internalRef(uid).get(), db().collection('reports').where('reportedUid', '==', uid).get()])
+  const n = internal.data() ?? {}
   const until = typeof n.suspendedUntil?.toMillis === 'function' ? (n.suspendedUntil.toMillis() as number) : null
   const live = n.isSuspended === true && n.suspendedForDeletion !== true && (until === null || until > Date.now())
   const reportCount = typeof n.reportCount === 'number' ? n.reportCount : 0
+  const { reportPending } = await import('./restoreCheck')
+  const pendingReports = reports.docs.filter((d) => reportPending(d.data())).length
+  const holds: DocumentData = {
+    ...(n.hiddenPendingReview ? { hiddenPendingReview: n.hiddenPendingReview } : {}),
+    ...(n.visibilityReduced === true ? { visibilityReduced: true } : {}),
+  }
   return {
     reportCount,
+    pendingReports,
+    holds,
     suspension: live
       ? {
           suspendedAt: n.suspendedAt ?? null,
@@ -254,7 +268,7 @@ export async function moderationCarry(uid: string): Promise<{ reportCount: numbe
           suspendedBy: n.suspendedBy ?? null,
         }
       : null,
-    keepTrustLinks: live || reportCount > 0,
+    keepTrustLinks: live || reportCount > 0 || pendingReports > 0 || Object.keys(holds).length > 0,
   }
 }
 
@@ -293,6 +307,8 @@ export async function recoveryRecord(uid: string, root: DocumentData, phoneNumbe
     subscriptionTier: priv.subscriptionTier,
     reportCount: carry.reportCount,
     suspension: carry.suspension,
+    // H6: put back by a restore (F-074's scam hold, reduced visibility).
+    holds: carry.holds,
     banned: false,
     previousPairIds: [...asA.docs, ...asB.docs].map((d) => d.id),
   }
