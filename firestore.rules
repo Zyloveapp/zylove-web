@@ -470,22 +470,13 @@ service cloud.firestore {
 
       // Like queue — who liked you. Written only by Cloud Functions (onLike,
       // bots): likeBack treats an entry as a real like, so a client may never
-      // create one (Stage A). Play likes (mode 'play') carry the liker's Play
-      // profile: the owner needs Play access to read them (queries filter on mode).
+      // create one (Stage A). §4.A3: server-only — a doc is keyed by the
+      // liker's uid (or Play ID) and a uid opens their public profile. The
+      // app gets the count and the likes by opaque like id from getLikes,
+      // previews from getLikerPreview (plan-gated), and likes back, passes
+      // and dismisses through callables.
       match /likeQueue/{doc} {
-        // Stage C: the list (who, not how many) is Spark+; Free gets the
-        // count from getLikeCount.
-        // A bot's like is visible on every plan (no paid feature involves a bot).
-        // F-062: Play likes are keyed by the liker's Play ID; a curated one
-        // says so (curated).
-        allow read: if isUser(uid) && isSignedIn()
-                    && (viewerHasSparkPlus() || doc.matches('^zbot-.*$') || resource.data.get('curated', false) == true)
-                    && (resource.data.get('mode', 'spark') != 'play' || viewerHasPlay());
-        // The owner may dismiss an entry (and nothing else) or delete it.
-        allow update: if callerActive() && isSignedIn() && isUser(uid)
-                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['dismissed', 'dismissedAt']);
-        allow delete: if callerActive() && isSignedIn() && isUser(uid);
-        allow create: if false;
+        allow read, write: if false;
       }
 
       // Blocked users list — CF-only writes via blockUser Callable. F-062:
