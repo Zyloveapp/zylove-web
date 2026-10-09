@@ -314,7 +314,8 @@ function RevealedScore({
   const dealbreakers = isPlay ? [] : (result.triggeredDealbreakers ?? [])
   // onTap's tier1 is Spark-only; Play's archetype comes from the pair doc.
   const tier1 = isPlay ? null : (result.tier1 ?? null)
-  const sparkArchetype = tier1?.archetype && tier1.archetype.confidence > 0.4 ? tier1.archetype : null
+  // The server sends only clear matches (F-098: without their confidence).
+  const sparkArchetype = tier1?.archetype ?? null
   // Engine v2: the Spark archetype is part of Elite's Deep Fit card below.
   const v2 = !isPlay && isCalibratedEngine(result.engineVersion)
   const archetype = isPlay ? playArchetype : v2 ? null : sparkArchetype
@@ -407,7 +408,7 @@ function RevealedScore({
               <li key={c.key} className="text-sm">
                 <span className="text-white/55">{c.label}</span>
                 <span className="mx-2 text-white/20">·</span>
-                <span className="text-white/80">{whyThisWorks(c.key, c.value, tier1?.asymmetryGap ?? null, facts)}</span>
+                <span className="text-white/80">{whyThisWorks(c.key, c.value, tier1?.asymmetryBand ?? null, facts)}</span>
               </li>
             ))}
           </ul>

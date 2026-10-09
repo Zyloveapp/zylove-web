@@ -64,12 +64,15 @@ function levelWords(value: number): string {
 // One "Why this works" sentence per score category. `facts` is null until the
 // viewer's own profile has loaded (and in Play), so each case has a fallback
 // that doesn't need it.
-export function whyThisWorks(key: string, value: number, asymmetryGap: number | null, facts: ProfileFacts | null): string {
+// `asymmetryBand` is Deep Fit's |A→B − B→A| as a band (F-098: the server
+// no longer sends the raw gap): 0 under 5 points, 1 up to 10, 2 up to 20,
+// 3 above.
+export function whyThisWorks(key: string, value: number, asymmetryBand: number | null, facts: ProfileFacts | null): string {
   switch (key) {
     case 'coreFit':
-      if (asymmetryGap === null || asymmetryGap > 20) return 'Worth exploring — some key differences to discuss'
-      if (asymmetryGap < 5) return 'You both lead with depth — fundamentals are tightly aligned'
-      if (asymmetryGap <= 10) return 'Your foundations are compatible — similar emotional wavelength'
+      if (asymmetryBand === null || asymmetryBand >= 3) return 'Worth exploring — some key differences to discuss'
+      if (asymmetryBand === 0) return 'You both lead with depth — fundamentals are tightly aligned'
+      if (asymmetryBand === 1) return 'Your foundations are compatible — similar emotional wavelength'
       return 'Compatible at the core, with complementary differences'
 
     case 'valuesIntentions':

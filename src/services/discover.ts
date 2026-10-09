@@ -185,20 +185,24 @@ export interface OnLikeResponse {
 // loveLanguages, lifestyle, personality. Play: nonNegotiables,
 // physicalCompatibility, energyVibe, intentionsLimits.
 // Tier 1 facet scoring (Spark only — onTap returns the pair's tier1Spark).
+// The server only emits clear matches (tier1/archetypes.ts MIN_CONFIDENCE);
+// F-098: it no longer sends the confidence itself.
 export interface ArchetypeMatch {
   id: string
   label: string
   copy: string
-  confidence: number // 0–1; the server only emits clear matches (≥ 0.6, tier1/archetypes.ts MIN_CONFIDENCE)
 }
 
+// F-098: Deep Fit as the server shows it (scoring.ts publicDeepFit) — no raw
+// floats, confidence or coverage.
 export interface Tier1Result {
   archetype: ArchetypeMatch | null
-  combinedScore: number | null // engine v1 could exceed 100; v2 is 0–100
-  asymmetryGap: number | null // |A→B − B→A| in score points
-  dataConfidence: number | null
+  combinedScore: number | null // rounded
+  // |A→B − B→A| as a band: 0 under 5 points, 1 up to 10, 2 up to 20, 3 above.
+  asymmetryBand: number | null
   // Engine v2 Deep Fit detail (Elite): fitFor[uid] = how well the other
-  // person fits that uid; where the pair lines up and differs most.
+  // person fits that uid (in bands of 5); where the pair lines up and
+  // differs most.
   fitFor: Record<string, number>
   strengths: string[]
   differences: string[]
@@ -235,7 +239,13 @@ function parseArchetype(v: unknown): ArchetypeMatch | null {
   if (typeof v !== 'object' || v === null) return null
   const a = v as Record<string, unknown>
   if (typeof a.id !== 'string' || typeof a.label !== 'string') return null
-  return { id: a.id, label: a.label, copy: typeof a.copy === 'string' ? a.copy : '', confidence: num(a.confidence) ?? 0 }
+  return { id: a.id, label: a.label, copy: typeof a.copy === 'string' ? a.copy : '' }
+}
+
+// The band for a raw gap — only for an answer from functions deployed
+// before F-098 (they sent asymmetryGap); same thresholds as the server's.
+function gapBand(gap: number): number {
+  return gap < 5 ? 0 : gap <= 10 ? 1 : gap <= 20 ? 2 : 3
 }
 
 // tier1 is server-computed and fail-open (null when scoring it failed), so
@@ -246,8 +256,7 @@ export function parseTier1(v: unknown): Tier1Result | null {
   return {
     archetype: parseArchetype(t.archetype),
     combinedScore: num(t.combinedScore),
-    asymmetryGap: num(t.asymmetryGap),
-    dataConfidence: num(t.dataConfidence),
+    asymmetryBand: num(t.asymmetryBand) ?? (num(t.asymmetryGap) === null ? null : gapBand(num(t.asymmetryGap)!)),
     fitFor:
       typeof t.fitFor === 'object' && t.fitFor !== null
         ? Object.fromEntries(Object.entries(t.fitFor).filter((e): e is [string, number] => num(e[1]) !== null))
@@ -365,10 +374,6 @@ export function scoreLabel(value: number): ScoreLabel {
   return 'Some differences'
 }
 
-// Engine v1 only: Deep Fit inflated thin profiles and could pass 100, so it
-// headlined only when under 100 with most tag lists filled in.
-const DEEP_FIT_MIN_CONFIDENCE = 0.6
-
 export interface DisplayScore {
   value: number | null // 0–100, rounded; null = "Not enough info"
   deep: boolean // true when this is the Deep Fit (tier1) score
@@ -377,21 +382,18 @@ export interface DisplayScore {
 
 // The one compatibility number shown anywhere. Engine v2: the pair's
 // sparkScore — Deep Fit's headline, the same for every plan (plans differ
-// in the explanation, not the number). Engine v1 (until re-scored): Deep
-// Fit when trustworthy, else the base score. Always 0–100.
+// in the explanation, not the number). Engine v1 (until re-scored): the
+// base score (F-098: Deep Fit's dataConfidence, which once let it headline,
+// is no longer sent). Always 0–100.
 export function displayScore(result: CompatibilityResult, mode: Mode): DisplayScore | null {
   if (mode === 'play') {
     return typeof result.playScore === 'number' ? { value: clampScore(result.playScore), deep: false, label: null } : null
   }
-  const t = result.tier1
   if (isCalibratedEngine(result.engineVersion)) {
     if (result.sparkEnoughInfo === false) return { value: null, deep: true, label: 'Not enough info' }
     if (typeof result.sparkScore !== 'number') return null
     const value = clampScore(result.sparkScore)
     return { value, deep: true, label: scoreLabel(value) }
-  }
-  if (t && t.combinedScore !== null && t.combinedScore <= 100 && (t.dataConfidence ?? 0) >= DEEP_FIT_MIN_CONFIDENCE) {
-    return { value: clampScore(t.combinedScore), deep: true, label: null }
   }
   return typeof result.sparkScore === 'number' ? { value: clampScore(result.sparkScore), deep: false, label: null } : null
 }

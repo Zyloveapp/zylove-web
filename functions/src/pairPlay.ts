@@ -1,6 +1,7 @@
 import { getFirestore, FieldValue, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 import { playStatus } from './playAccess'
 import { ensurePlayId, playPairKey } from './playIds'
+import { publicPlayTier1 } from './legacy/scoring'
 
 // A Play pair's state — its Play scores and its Play likes — lives in
 // playPairData/{pA_pB} (F-065): server-only, keyed by the two Play IDs, never
@@ -30,9 +31,11 @@ export async function bothHavePlay(a: string, b: string): Promise<boolean> {
   return sa.access && sb.access
 }
 
-// The Play fields of a scoring result, ready to store (tier1Play only when set).
+// The Play fields of a scoring result, ready to store (tier1Play only when
+// set; F-098: its public shape only — the archetype without confidence).
 export function playFields(score: number, breakdown: unknown, tier1: unknown): DocumentData {
-  return { playScore: score, playBreakdown: breakdown, ...(tier1 ? { tier1Play: tier1 } : {}) }
+  const tier1Play = publicPlayTier1(tier1)
+  return { playScore: score, playBreakdown: breakdown, ...(tier1Play ? { tier1Play } : {}) }
 }
 
 // The merge write for a pair's Play scores. A result with no archetype

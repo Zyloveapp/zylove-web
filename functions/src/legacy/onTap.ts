@@ -3,7 +3,7 @@
 // settings (legacyOptions.ts) are new.
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkPairFields } from "./scoring";
+import { calculateSparkScore, calculatePlayScore, deepFitRecord, publicPlayTier1, SCORE_ENGINE_VERSION, sparkPairFields } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { bothHavePlay, loadPlayScores, playFields, setPlayScores } from "../pairPlay";
@@ -156,15 +156,16 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
 });
 
 // F-062: what a Play tap returns — the Play score, its breakdown and
-// the Play archetype (tier1Play's), no ids.
+// the Play archetype (tier1Play's), no ids. F-098: the archetype in its
+// public shape (no confidence), whatever the stored doc still carries.
 function playAnswer(scores: admin.firestore.DocumentData | undefined, full: boolean) {
-  const tier1 = scores?.tier1Play as { archetype?: unknown } | undefined;
+  const tier1 = publicPlayTier1(scores?.tier1Play);
   return {
     engineVersion: SCORE_ENGINE_VERSION,
     ...(scores && { playScore: scores.playScore }),
     breakdown: { ...(scores && { play: scores.playBreakdown }) },
     triggeredDealbreakers: [],
-    ...(tier1?.archetype ? { playArchetype: tier1.archetype } : {}),
+    ...(tier1 ? { playArchetype: tier1.archetype } : {}),
     locked: !full,
   };
 }

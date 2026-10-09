@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { calculatePlayScore, calculateSparkScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkPairFields } from '../src/legacy/scoring'
+import { asymmetryBand, calculatePlayScore, calculateSparkScore, deepFitRecord, hasRawDeepFit, hasRawPlayTier1, publicDeepFit, publicPlayTier1, SCORE_ENGINE_VERSION, sparkPairFields } from '../src/legacy/scoring'
 import { DEALBREAKER_CAP } from '../src/legacy/tier1/scorePair'
 import type { UserDoc } from '../src/legacy/types'
 import { person, quantile, rng, type Profile } from './population'
@@ -59,9 +59,69 @@ test('the headline is the Deep Fit score, with both directions and reasons', () 
   const t = r.tier1!
   for (const v of [t.directions.ab, t.directions.ba]) assert.ok(v >= 0 && v <= 100, `direction ${v}`)
   assert.ok(t.strengths.length > 0, 'no strengths')
-  const rec = deepFitRecord(t, 'uidA', 'uidB') as { fitFor: Record<string, number>; directions?: unknown }
-  assert.deepEqual(rec.fitFor, { uidA: Math.round(t.directions.ab), uidB: Math.round(t.directions.ba) })
-  assert.equal(rec.directions, undefined)
+  const rec = deepFitRecord(t, 'uidA', 'uidB')!
+  const band5 = (v: number) => Math.round(v / 5) * 5
+  assert.deepEqual(rec.fitFor, { uidA: band5(t.directions.ab), uidB: band5(t.directions.ba) })
+  assert.equal((rec as unknown as Record<string, unknown>).directions, undefined)
+})
+
+// ─── F-098: the stored / shown Deep Fit record ──────────────────────────────
+
+const RECORD_KEYS = ['archetype', 'asymmetryBand', 'combinedScore', 'differences', 'enoughInfo', 'fitFor', 'strengths']
+
+test('F-098: the Deep Fit record holds no raw floats, confidence or coverage', () => {
+  const rnd = rng(31)
+  let withArchetype = 0
+  for (let i = 0; i < 2000; i++) {
+    const r = score(person(rnd, 'man', { dealbreakers: true }), person(rnd, 'woman', { dealbreakers: true }))
+    const rec = deepFitRecord(r.tier1, 'uidA', 'uidB')!
+    assert.deepEqual(Object.keys(rec).sort(), RECORD_KEYS)
+    assert.ok(Number.isInteger(rec.combinedScore), `combinedScore ${rec.combinedScore}`)
+    assert.equal(rec.combinedScore, r.score)
+    for (const v of Object.values(rec.fitFor)) assert.equal(v % 5, 0, `fitFor ${v}`)
+    assert.ok([0, 1, 2, 3].includes(rec.asymmetryBand as number), `band ${rec.asymmetryBand}`)
+    assert.equal(rec.asymmetryBand, asymmetryBand(r.tier1!.asymmetryGap))
+    if (rec.archetype) {
+      withArchetype++
+      assert.deepEqual(Object.keys(rec.archetype).sort(), ['copy', 'id', 'label'])
+    }
+    const json = JSON.stringify(rec)
+    for (const k of ['confidence', 'coverage', 'dataConfidence', 'asymmetryGap', 'directions']) assert.ok(!json.includes(k), `${k} in ${json}`)
+  }
+  assert.ok(withArchetype > 50, `only ${withArchetype} with an archetype`)
+})
+
+test('F-098: asymmetry bands follow the app\'s wording thresholds', () => {
+  assert.deepEqual([0, 4.99, 5, 10, 10.01, 20, 20.5, 80].map(asymmetryBand), [0, 0, 1, 1, 2, 2, 3, 3])
+})
+
+test('F-098: an old-shape stored record is trimmed at read time', () => {
+  const old = {
+    archetype: { id: 'kindred', label: 'Kindred', copy: 'c', confidence: 0.8312 },
+    combinedScore: 71.83742, asymmetryGap: 12.3456, dataConfidence: 0.71, coverage: 0.71, enoughInfo: true,
+    strengths: ['Integrity'], differences: ['Pace'], fitFor: { a: 73, b: 66 },
+  }
+  assert.deepEqual(publicDeepFit(old), {
+    archetype: { id: 'kindred', label: 'Kindred', copy: 'c' },
+    combinedScore: 72, fitFor: { a: 75, b: 65 }, asymmetryBand: 2,
+    strengths: ['Integrity'], differences: ['Pace'], enoughInfo: true,
+  })
+  assert.equal(hasRawDeepFit(old), true)
+  // The trimmed shape is a fixed point: re-trimming changes nothing.
+  assert.deepEqual(publicDeepFit(publicDeepFit(old)), publicDeepFit(old))
+  assert.equal(hasRawDeepFit(publicDeepFit(old)), false)
+  // Engine v1 (no fitFor, no enoughInfo) and junk.
+  assert.deepEqual(publicDeepFit({ combinedScore: 104.2, asymmetryGap: 3, dataConfidence: 0.9 }), {
+    archetype: null, combinedScore: 104, fitFor: {}, asymmetryBand: 0, strengths: [], differences: [], enoughInfo: null,
+  })
+  assert.equal(publicDeepFit(null), null)
+  assert.equal(publicDeepFit('x'), null)
+  // Play: the archetype without confidence, the score rounded.
+  const play = { archetype: { id: 'slow_burn', label: 'Slow Burn', copy: 'p', confidence: 0.9 }, combinedScore: 64, asymmetryGap: 0, dataConfidence: 1 }
+  assert.deepEqual(publicPlayTier1(play), { archetype: { id: 'slow_burn', label: 'Slow Burn', copy: 'p' }, combinedScore: 64 })
+  assert.equal(hasRawPlayTier1(play), true)
+  assert.equal(hasRawPlayTier1(publicPlayTier1(play)), false)
+  assert.equal(publicPlayTier1({ combinedScore: 50 }), null)
 })
 
 test('no reasons without enough info', () => {

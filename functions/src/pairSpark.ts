@@ -1,4 +1,5 @@
 import { FieldValue, getFirestore, type DocumentData, type WriteBatch } from 'firebase-admin/firestore'
+import { publicDeepFit } from './legacy/scoring'
 
 // Stage C: what a Spark compatibility report shows beyond the score, kept
 // off the pair doc (both people can read that) in sub-docs the rules gate by
@@ -33,11 +34,14 @@ export function writeSparkDetails(batch: WriteBatch, pairId: string, d: { breakd
 }
 
 // The details, from the sub-docs (older pair docs: from the pair itself).
+// F-098: Deep Fit in its public shape (publicDeepFit) — docs stored before
+// the trim keep raw floats until re-scored, so it's trimmed here, on every
+// read that reaches a client (onTap, getSentSparks, getCuriousVisitors).
 export async function loadSparkDetails(pairId: string, pair?: DocumentData): Promise<SparkDetails> {
   const [s, d] = await db().getAll(sparkDetailsRef(pairId), deepFitRef(pairId))
   return {
     sparkBreakdown: s.get('sparkBreakdown') ?? pair?.sparkBreakdown ?? {},
     triggeredDealbreakers: (s.get('triggeredDealbreakers') ?? pair?.triggeredDealbreakers ?? []) as string[],
-    tier1Spark: d.get('tier1Spark') ?? pair?.tier1Spark ?? null,
+    tier1Spark: publicDeepFit(d.get('tier1Spark') ?? pair?.tier1Spark ?? null),
   }
 }
