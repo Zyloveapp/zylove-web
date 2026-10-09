@@ -1,4 +1,4 @@
-import { doc, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore'
+import { doc, getDoc, writeBatch } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { FirebaseError } from 'firebase/app'
 import { db, functions } from './firebase'
@@ -326,7 +326,6 @@ export async function savePlayOnlyOnboarding(
       openTo: [],
       onboardingComplete: true,
       sparkVisibility: 'hidden',
-      profileUpdatedAt: serverTimestamp(),
       ...((keys.changed || !existing.exists()) && { publicKey: keys.publicKey }),
       ...(!existing.exists() && { photoURLs: [], locationLabel: '', phoneVerified: false, createdAt: now }),
     },

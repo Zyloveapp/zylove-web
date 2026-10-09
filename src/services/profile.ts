@@ -1,4 +1,4 @@
-import { arrayRemove, deleteField, doc, getDoc, serverTimestamp, updateDoc, writeBatch } from 'firebase/firestore'
+import { arrayRemove, deleteField, doc, getDoc, updateDoc, writeBatch } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { loadIdentity } from './privateIdentity'
@@ -122,7 +122,8 @@ export interface SparkEdits {
 
 // Writes the root doc (Discover and the profile view read it) and
 // sparkProfile/data (both editors load from it) so the two never disagree.
-// A changed profileUpdatedAt triggers onProfileWrite rescoring. §4.A2:
+// onProfileWrite re-scores from the changed fields (H8: profileUpdatedAt is
+// the server's). §4.A2:
 // pronouns and the gender display choices go to the owner-only
 // private/matching; the server rewrites the public genderLine from them.
 export async function saveSparkEdits(uid: string, e: SparkEdits): Promise<void> {
@@ -140,7 +141,6 @@ export async function saveSparkEdits(uid: string, e: SparkEdits): Promise<void> 
   batch.update(doc(db, 'users', uid), {
     bio,
     promptAnswers,
-    profileUpdatedAt: serverTimestamp(),
   })
   batch.set(
     doc(db, `users/${uid}/sparkProfile/data`),
@@ -162,9 +162,9 @@ export interface GoDeeperEdits {
   stressResponse: string
 }
 
-// A changed profileUpdatedAt triggers onProfileWrite rescoring.
+// The styles are scored: onProfileWrite re-scores when they change.
 export async function saveGoDeeper(uid: string, a: GoDeeperEdits): Promise<void> {
-  await updateDoc(doc(db, 'users', uid), { ...a, profileUpdatedAt: serverTimestamp() })
+  await updateDoc(doc(db, 'users', uid), { ...a })
 }
 
 // ─── Photos ──────────────────────────────────────────────────────────────────
@@ -181,7 +181,7 @@ export function photoError(file: File): string | null {
 // arrayRemove, never a rewrite of the whole list, so photos added elsewhere
 // (mobile, moderation) are never dropped.
 export async function removeProfilePhoto(uid: string, url: string): Promise<void> {
-  await updateDoc(doc(db, 'users', uid), { photoURLs: arrayRemove(url), profileUpdatedAt: serverTimestamp() })
+  await updateDoc(doc(db, 'users', uid), { photoURLs: arrayRemove(url) })
 }
 
 // ─── Bio ─────────────────────────────────────────────────────────────────────
@@ -285,7 +285,7 @@ export async function saveDynamicPrompt(
     { promptId: DYNAMIC_PROMPT_ID, answer: answer.trim() },
   ]
   const batch = writeBatch(db)
-  batch.update(doc(db, 'users', uid), { promptAnswers, dynamicPrompt: question, profileUpdatedAt: serverTimestamp() })
+  batch.update(doc(db, 'users', uid), { promptAnswers, dynamicPrompt: question })
   batch.set(
     doc(db, `users/${uid}/sparkProfile/data`),
     {
