@@ -4,7 +4,7 @@
 // private/profile and private/matching triggers.
 import * as admin from "firebase-admin";
 import { onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
-import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkPairFields } from "./scoring";
+import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkBreakdownRecord, sparkPairFields } from "./scoring";
 import { UserDoc, PairDoc } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { bothHavePlay, playFields, setPlayScores } from "../pairPlay";
@@ -63,7 +63,8 @@ export async function rescorePair(
   if (!batch) return spark;
 
   // Stage C: the details go to the plan-gated sub-docs (pairSpark.ts).
-  writeSparkDetails(batch, pairSnap.id, { breakdown: spark.breakdown, dealbreakers: spark.triggeredDealbreakers, tier1: deepFitRecord(spark.tier1, userId, otherUid) }, false);
+  // F-098: the physical bar per viewer, Deep Fit in its public shape.
+  writeSparkDetails(batch, pairSnap.id, { breakdown: sparkBreakdownRecord(spark, userId, otherUid), dealbreakers: spark.triggeredDealbreakers, tier1: deepFitRecord(spark.tier1, userId, otherUid) }, false);
   batch.update(pairSnap.ref, {
     ...sparkPairFields(spark),
     sparkBreakdown: admin.firestore.FieldValue.delete(),

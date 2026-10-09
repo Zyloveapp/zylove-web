@@ -1,6 +1,7 @@
 import { getFirestore, FieldValue, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 import { playStatus } from './playAccess'
 import { ensurePlayId, playPairKey } from './playIds'
+import { publicPlayTier1, SCORE_ENGINE_VERSION } from './legacy/scoring'
 
 // A Play pair's state — its Play scores and its Play likes — lives in
 // playPairData/{pA_pB} (F-065): server-only, keyed by the two Play IDs, never
@@ -30,9 +31,11 @@ export async function bothHavePlay(a: string, b: string): Promise<boolean> {
   return sa.access && sb.access
 }
 
-// The Play fields of a scoring result, ready to store (tier1Play only when set).
+// The Play fields of a scoring result, ready to store (tier1Play only when
+// set; F-098: its public shape only — the archetype without confidence).
 export function playFields(score: number, breakdown: unknown, tier1: unknown): DocumentData {
-  return { playScore: score, playBreakdown: breakdown, ...(tier1 ? { tier1Play: tier1 } : {}) }
+  const tier1Play = publicPlayTier1(tier1)
+  return { playScore: score, playBreakdown: breakdown, ...(tier1Play ? { tier1Play } : {}) }
 }
 
 // The merge write for a pair's Play scores. A result with no archetype
@@ -57,4 +60,22 @@ export async function loadPlayScores(a: string, b: string): Promise<DocumentData
   const doc = (await (await playPairDataRef(a, b)).get()).data()
   if (doc && doc.playScore !== undefined) return doc
   return (await legacyScoresRef(a, b).get()).data()
+}
+
+// F-062: what a Play tap returns (onTap) — the Play score, its breakdown and
+// the Play archetype (tier1Play's), no ids. F-098: gated by plan as Spark's
+// equivalents are — everyone the score; Spark+ (`full`) the breakdown, as
+// Spark's breakdown; Elite (`deep`) the archetype, as Spark's archetype is
+// part of Elite's Deep Fit — and the archetype in its public shape (no
+// confidence), whatever the stored doc still carries.
+export function playTapAnswer(scores: DocumentData | undefined, { full, deep }: { full: boolean; deep: boolean }) {
+  const tier1 = deep ? publicPlayTier1(scores?.tier1Play) : null
+  return {
+    engineVersion: SCORE_ENGINE_VERSION,
+    ...(scores && { playScore: scores.playScore }),
+    breakdown: { ...(scores && full && { play: scores.playBreakdown }) },
+    triggeredDealbreakers: [],
+    ...(tier1 ? { playArchetype: tier1.archetype } : {}),
+    locked: !full,
+  }
 }

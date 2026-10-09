@@ -45,15 +45,14 @@ export interface CompatibilityScorecard {
   sparkScore?: number
   playScore?: number
   tier1?: {
+    // F-098: the public Deep Fit shape (no confidence or raw floats).
     archetype?: {
       id: string
       label: string
       copy: string
-      confidence: number
     }
     combinedScore?: number
-    asymmetryGap?: number
-    dataConfidence?: number
+    asymmetryBand?: number
   } | null
   breakdown?: {
     spark?: Record<string, number>

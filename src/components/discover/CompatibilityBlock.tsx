@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
-  SCORE_ENGINE_VERSION,
   displayScore,
   fetchCompatibility,
   fetchMyProfile,
   fetchPlayArchetype,
+  isCalibratedEngine,
   recordReveal,
   type ArchetypeMatch,
   type CompatibilityResult,
@@ -78,13 +78,13 @@ function dealbreakerLabel(id: string): string {
 // With nothing to score against, the server returns a neutral default, so
 // these are hidden rather than shown as a misleading number.
 // Whether they have physical preferences comes from the server (onTap's
-// hasPhysicalPrefs) — their preferences are private (Stage 3).
+// hasPhysicalPrefs) — their preferences are private (Stage 3). Spark's
+// physical bar is the viewer's own direction (F-098), which the server
+// leaves null when the viewer stated no preferences; only Play's (both
+// directions) still depends on theirs.
 function emptyCategories(p: DiscoverProfile, hasPhysicalPrefs: boolean | undefined): Set<string> {
   const empty = new Set<string>()
-  if (hasPhysicalPrefs !== true) {
-    empty.add('physicalPrefs')
-    empty.add('physicalCompatibility')
-  }
+  if (hasPhysicalPrefs !== true) empty.add('physicalCompatibility')
   if (!p.loveLangGive?.length && !p.loveLangReceive?.length) empty.add('loveLanguages')
   return empty
 }
@@ -314,9 +314,10 @@ function RevealedScore({
   const dealbreakers = isPlay ? [] : (result.triggeredDealbreakers ?? [])
   // onTap's tier1 is Spark-only; Play's archetype comes from the pair doc.
   const tier1 = isPlay ? null : (result.tier1 ?? null)
-  const sparkArchetype = tier1?.archetype && tier1.archetype.confidence > 0.4 ? tier1.archetype : null
+  // The server sends only clear matches (F-098: without their confidence).
+  const sparkArchetype = tier1?.archetype ?? null
   // Engine v2: the Spark archetype is part of Elite's Deep Fit card below.
-  const v2 = !isPlay && result.engineVersion === SCORE_ENGINE_VERSION
+  const v2 = !isPlay && isCalibratedEngine(result.engineVersion)
   const archetype = isPlay ? playArchetype : v2 ? null : sparkArchetype
   // Play "Why this works" is built from both Play profiles once they load.
   const playLines = isPlay && fullReport && playFacts ? playWhyLines(playFacts) : null
@@ -330,7 +331,8 @@ function RevealedScore({
     <div
       className={`mt-4 transition-all duration-500 ${visible ? 'translate-y-0 opacity-100 blur-0' : 'translate-y-1 opacity-0 blur-sm'}`}
     >
-      {fullAccess && archetype && (
+      {/* F-098: Play's archetype is Elite, as Spark's (in Deep Fit) is; the server sends it only then. */}
+      {(isPlay ? deepAccess : fullAccess) && archetype && (
         <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/5 p-4">
           <p className={`text-sm font-semibold ${isPlay ? 'text-[#E03131]' : 'text-[#1B4FD8]'}`}>
             {isPlay ? '🔥' : '✦'} {archetype.label}
@@ -407,7 +409,7 @@ function RevealedScore({
               <li key={c.key} className="text-sm">
                 <span className="text-white/55">{c.label}</span>
                 <span className="mx-2 text-white/20">·</span>
-                <span className="text-white/80">{whyThisWorks(c.key, c.value, tier1?.asymmetryGap ?? null, facts)}</span>
+                <span className="text-white/80">{whyThisWorks(c.key, c.value, tier1?.asymmetryBand ?? null, facts)}</span>
               </li>
             ))}
           </ul>

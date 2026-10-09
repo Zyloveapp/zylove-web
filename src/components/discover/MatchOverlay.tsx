@@ -104,7 +104,7 @@ function SparkMatchOverlay({ match, onClose }: MatchOverlayProps) {
     fetchCompatibility(match.theirUid)
       .then((r) => {
         const a = r.tier1?.archetype
-        if (!cancelled && a && a.confidence > 0.4) setArchetype(a)
+        if (!cancelled && a) setArchetype(a) // only clear matches are sent (F-098: no confidence)
       })
       .catch(() => {})
     return () => {

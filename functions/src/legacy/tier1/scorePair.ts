@@ -47,7 +47,7 @@ import {
   DEALBREAKER_REPULSION_MAP,
   type DealbreakerRepulsion,
 } from './traitToFacetMap'
-import type { FacetAnalysis, FacetVector } from './facetProfile'
+import { analyzeFacets, type FacetAnalysis, type FacetVector } from './facetProfile'
 import { calibrateTier1 } from './calibration'
 import type { DatingProfile, Dealbreaker } from '../types'
 import { matchSparkArchetype, matchUnlikelyFit } from './archetypeMatcher'
@@ -86,7 +86,8 @@ export interface PairScoreResult {
   displayAB:               number
   displayBA:               number
   // Deep Fit's reasons: the facets (display names) where the two line up
-  // most, and where they differ most. Only facets both gave evidence for.
+  // most, and where they differ most. Only facets both gave evidence for,
+  // without dealbreaker shadows (F-098).
   strengths:               string[]
   differences:             string[]
   // Both people answered enough recognized questions, and the shared
@@ -211,12 +212,6 @@ function validateFacetVector(vector: FacetVector, name: string): void {
 
 // ─── Intent / attraction helpers (copied from legacy compatibility.ts) ────
 
-// null when either side is unknown — excluded, not a half match.
-function exactMatch(a: unknown, b: unknown): number | null {
-  if (a == null || b == null || a === '' || b === '') return null
-  return a === b ? 1 : 0
-}
-
 function ageCompatibility(a: any, b: any): number {
   const aMin = a?.ageMin ?? 18
   const aMax = a?.ageMax ?? 99
@@ -302,13 +297,15 @@ export function attractionCompatibility(a: any, b: any): number {
   return 0
 }
 
-// intentScore blends the three similarity-required signals: declared intent
-// agreement, mutual age range fit, and mutual attraction. Symmetric by
-// construction — arguments commute.
+// intentScore blends the similarity-required signals: mutual age range fit
+// and mutual attraction. Symmetric by construction — arguments commute.
+// F-100: the declared intent (spark / play / open) is left out. It's owner-
+// only (it says whether someone uses Play), and agreement moved every
+// headline by ~10 points — switching your own intent once showed each
+// tapped person's. Every pair scored here is a Spark pair, so it adds
+// nothing worth that.
 function intentScore(a: DatingProfile, b: DatingProfile, attractionValue: number): number {
-  const parts = [exactMatch((a as any).intent, (b as any).intent), ageCompatibility(a, b), attractionValue]
-    .filter((x): x is number => x !== null)
-  return parts.reduce((x, y) => x + y, 0) / parts.length
+  return (ageCompatibility(a, b) + attractionValue) / 2
 }
 
 // ─── Physical scoring with Option C amplification ─────────────────────────
@@ -606,7 +603,7 @@ export function computePairScore(
 
   // Symmetric components — computed once, used in both directions.
   // Facet similarity/complementarity is commutative: facetScore(a, b) == facetScore(b, a).
-  // Same for exactMatch(intent), ageCompatibility, attractionCompatibility.
+  // Same for ageCompatibility and attractionCompatibility.
   const { baseScore, coverage, facetScores } = computeBaseAndFacetScores(analysisA, analysisB)
   const intent                               = intentScore(userA, userB, attraction)
 
@@ -631,6 +628,14 @@ export function computePairScore(
   const combined = toDisplay(combinedRaw)
   const enoughInfo = hasEnoughInfo(coverage, analysisA.recognized, analysisB.recognized)
 
+  // F-098: what's displayed — the archetype and the reasons — comes from
+  // the facets without dealbreaker shadows (analyzeFacets shadows: false),
+  // so a label never rests on someone's private dealbreakers. The score
+  // above keeps them (unchanged).
+  const shownA = analyzeFacets(userA, { shadows: false })
+  const shownB = analyzeFacets(userB, { shadows: false })
+  const shownFacetScores = computeBaseAndFacetScores(shownA, shownB).facetScores
+
   // Archetype classification — facet-based matchers run first, Unlikely
   // Fit runs post-score as fallback. Unlikely Fit is stubbed (always
   // null) until Phase 6 calibrates its band against production score
@@ -639,8 +644,8 @@ export function computePairScore(
   // No archetype without enough to go on — it would describe the gaps.
   const archetype: ArchetypeMatch | null = !enoughInfo
     ? null
-    : matchSparkArchetype(vectorA, vectorB) ??
-      matchUnlikelyFit(vectorA, vectorB, combined, hasDealbreakerPenalty)
+    : matchSparkArchetype(shownA.vector, shownB.vector) ??
+      matchUnlikelyFit(shownA.vector, shownB.vector, combined, hasDealbreakerPenalty)
 
   return {
     scoreAB,
@@ -664,7 +669,7 @@ export function computePairScore(
     coverage,
     displayAB:               toDisplay(scoreAB),
     displayBA:               toDisplay(scoreBA),
-    ...(enoughInfo ? reasons(facetScores) : { strengths: [], differences: [] }),
+    ...(enoughInfo ? reasons(shownFacetScores) : { strengths: [], differences: [] }),
     enoughInfo,
 
     asymmetryData: {

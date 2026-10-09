@@ -4,7 +4,7 @@
 // Field names corrected to match actual Firestore data from onboarding.
 
 import { UserDoc, SparkBreakdown, PlayBreakdown } from "./types";
-import { analyzeFacets, computeFacetProfile } from "./tier1/facetProfile";
+import { analyzeFacets } from "./tier1/facetProfile";
 import { computePairScore, DEALBREAKER_CAP, hasEnoughInfo, shrinkToPrior } from "./tier1/scorePair";
 import { calibrateTier0 } from "./tier1/calibration";
 import { matchPlayArchetype } from "./tier1/archetypeMatcher";
@@ -17,7 +17,10 @@ import type { DatingProfile } from "./types";
 //   1 — original Tier 0 / Tier 1 (missing data = neutral match, 3× physical)
 //   2 — 2026-10 overhaul: missing data excluded, caps, dealbreakers lower
 //       the score, 27 web answers mapped, calibrated, "Not enough info"
-export const SCORE_ENGINE_VERSION = 2;
+//   3 — F-100 / F-098 (2026-10-09): intent no longer scored; Deep Fit
+//       records trimmed (no raw floats), labels without dealbreaker shadow
+//       facets, the physical bar per viewer
+export const SCORE_ENGINE_VERSION = 3;
 
 // Tier 0 category weights. Categories with no data on one side are left out
 // and the rest renormalized. A triggered dealbreaker halves the score per
@@ -212,11 +215,6 @@ function overlapOrNull(a: unknown, b: unknown): number | null {
   return arrayOverlap(a, b);
 }
 
-function exactOrNull(a: unknown, b: unknown): number | null {
-  if (a == null || b == null || a === "" || b === "") return null;
-  return a === b ? 1 : 0;
-}
-
 function mean(xs: (number | null)[]): number | null {
   const known = xs.filter((x): x is number => x !== null);
   return known.length ? known.reduce((x, y) => x + y, 0) / known.length : null;
@@ -260,7 +258,13 @@ export function calculateSparkScore(
   raw: { tier0: number; tier1: number | null };
   // The Tier 0 score on the display scale (the headline's fallback).
   tier0Score: number;
+  // The Tier 0 categories. physicalPrefs here is the mean of both
+  // directions (it feeds tier0Score); never stored or shown as is — F-098:
+  // see sparkBreakdownRecord.
   breakdown: SparkBreakdown;
+  // Each direction's physical fit, 0–100 (null: no criteria stated):
+  // ab = how well B fits A's physical preferences, ba = A fits B's.
+  physicalDirections: { ab: number | null; ba: number | null };
   triggeredDealbreakers: string[];
   tier1: Tier1Spark | null;
 } {
@@ -271,7 +275,9 @@ export function calculateSparkScore(
   const attraction = attractionCompatibility(a, b);
 
   const breakdown: SparkBreakdown = {
-    coreFit: Math.round((mean([exactOrNull(a.intent, b.intent), ageCompatibility(a, b), attraction]) ?? 0) * 100),
+    // F-100: intent left out (as Deep Fit's intentScore) — the bar moved
+    // 100/83 vs 67/50 when you switched your own, showing theirs.
+    coreFit: Math.round(((ageCompatibility(a, b) + attraction) / 2) * 100),
     dealbreakers: dealbreakerResult.clean * 100,
     valuesIntentions: pct(overlapOrNull(a.relationshipValues, b.relationshipValues)),
     physicalPrefs: pct(mean([physicalOrNull(a, b), physicalOrNull(b, a)])),
@@ -334,6 +340,7 @@ export function calculateSparkScore(
     enoughInfo: attraction !== 0 && hasEnoughInfo(coverage, facetsA.recognized, facetsB.recognized),
     raw: { tier0: raw0, tier1: raw1 },
     breakdown,
+    physicalDirections: { ab: pct(physicalOrNull(a, b)), ba: pct(physicalOrNull(b, a)) },
     triggeredDealbreakers: dealbreakerResult.triggered,
     tier1,
   };
@@ -355,11 +362,122 @@ export interface Tier1Spark {
 
 // What pairs/{id}/modes/deep stores (Elite): Deep Fit with the directions
 // keyed by uid — fitFor[uid] = how well the other person fits that uid —
-// so either person's view reads the same doc.
-export function deepFitRecord(tier1: Tier1Spark | null, uidA: string, uidB: string): Record<string, unknown> | null {
+// so either person's view reads the same doc. F-098: only the public shape
+// (publicDeepFit) is stored.
+export function deepFitRecord(tier1: Tier1Spark | null, uidA: string, uidB: string): DeepFitRecord | null {
   if (!tier1) return null;
   const { directions, ...rest } = tier1;
-  return { ...rest, fitFor: { [uidA]: Math.round(directions.ab), [uidB]: Math.round(directions.ba) } };
+  return publicDeepFit({ ...rest, fitFor: { [uidA]: directions.ab, [uidB]: directions.ba } });
+}
+
+// ─── F-098: Deep Fit as stored and shown ─────────────────────────────────────
+// Unrounded floats (combinedScore, the directions, asymmetryGap, the
+// archetype's confidence, coverage) could be inverted, with edits to your own
+// profile, into the other person's private preferences and dealbreakers. So
+// Deep Fit is stored and returned only as: the archetype's id/label/copy, a
+// rounded combined score, each direction in bands of FIT_BAND, the asymmetry
+// as a band (asymmetryBand), the reasons and enoughInfo. Every path that
+// returns a stored record to a client runs it through publicDeepFit /
+// publicPlayTier1 too: older docs keep the raw fields until re-scored.
+
+export const FIT_BAND = 5;
+const toBand = (v: number): number => Math.round(v / FIT_BAND) * FIT_BAND;
+
+export interface PublicArchetype { id: string; label: string; copy: string }
+
+export interface DeepFitRecord {
+  archetype:     PublicArchetype | null;
+  combinedScore: number | null;
+  fitFor:        Record<string, number>;
+  asymmetryBand: AsymmetryBand | null;
+  strengths:     string[];
+  differences:   string[];
+  enoughInfo:    boolean | null;
+}
+
+// |A→B − B→A| (score points) in the bands the app words it by (compare.ts
+// whyThisWorks): 0 under 5, 1 up to 10, 2 up to 20, 3 above.
+export type AsymmetryBand = 0 | 1 | 2 | 3;
+export function asymmetryBand(gap: number): AsymmetryBand {
+  return gap < 5 ? 0 : gap <= 10 ? 1 : gap <= 20 ? 2 : 3;
+}
+
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const stringList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
+export function publicArchetype(v: unknown): PublicArchetype | null {
+  if (typeof v !== "object" || v === null) return null;
+  const a = v as Record<string, unknown>;
+  if (typeof a.id !== "string" || typeof a.label !== "string") return null;
+  return { id: a.id, label: a.label, copy: typeof a.copy === "string" ? a.copy : "" };
+}
+
+// A stored Deep Fit record (any engine's shape) as it may be shown.
+export function publicDeepFit(v: unknown): DeepFitRecord | null {
+  if (typeof v !== "object" || v === null) return null;
+  const t = v as Record<string, unknown>;
+  const fitFor = typeof t.fitFor === "object" && t.fitFor !== null
+    ? Object.fromEntries(Object.entries(t.fitFor).filter((e): e is [string, number] => finite(e[1])).map(([k, n]) => [k, toBand(n)]))
+    : {};
+  const band = finite(t.asymmetryBand) && [0, 1, 2, 3].includes(t.asymmetryBand)
+    ? (t.asymmetryBand as AsymmetryBand)
+    : finite(t.asymmetryGap) ? asymmetryBand(t.asymmetryGap) : null;
+  return {
+    archetype:     publicArchetype(t.archetype),
+    combinedScore: finite(t.combinedScore) ? Math.round(t.combinedScore) : null,
+    fitFor,
+    asymmetryBand: band,
+    strengths:     stringList(t.strengths),
+    differences:   stringList(t.differences),
+    enoughInfo:    typeof t.enoughInfo === "boolean" ? t.enoughInfo : null,
+  };
+}
+
+// Play's tier1 as stored and shown: the archetype (no confidence) and the
+// Play score; null without an archetype.
+export function publicPlayTier1(v: unknown): { archetype: PublicArchetype; combinedScore: number | null } | null {
+  if (typeof v !== "object" || v === null) return null;
+  const t = v as Record<string, unknown>;
+  const archetype = publicArchetype(t.archetype);
+  return archetype ? { archetype, combinedScore: finite(t.combinedScore) ? Math.round(t.combinedScore) : null } : null;
+}
+
+// Whether a stored record still carries fields publicDeepFit drops or
+// changes (for scripts/rescore-pairs.mjs's count).
+export function hasRawDeepFit(v: unknown): boolean {
+  if (typeof v !== "object" || v === null) return false;
+  return JSON.stringify(v) !== JSON.stringify(publicDeepFit(v));
+}
+export function hasRawPlayTier1(v: unknown): boolean {
+  if (typeof v !== "object" || v === null) return false;
+  return JSON.stringify(v) !== JSON.stringify(publicPlayTier1(v));
+}
+
+// ─── F-098: the Spark+ physical bar, per viewer ──────────────────────────────
+// The breakdown's physicalPrefs was the mean of both directions, so with
+// your own preferences known (or cleared) it gave away the other person's
+// private seeking body type / height. Each person sees only their own
+// direction — how well the other person fits what THEY want, from their own
+// preferences and the other's public height and body type. Stored keyed by
+// uid like Deep Fit's fitFor (pairs/{id}/modes/spark is server-only) and
+// picked per viewer on every read (sparkBreakdownFor).
+
+export type StoredSparkBreakdown = Omit<SparkBreakdown, "physicalPrefs"> & { physicalPrefsFor: Record<string, number | null> };
+
+// What pairs/{id}/modes/spark stores; A/B = calculateSparkScore's arguments.
+export function sparkBreakdownRecord(result: Pick<ReturnType<typeof calculateSparkScore>, "breakdown" | "physicalDirections">, uidA: string, uidB: string): StoredSparkBreakdown {
+  const { physicalPrefs: _mean, ...rest } = result.breakdown;
+  return { ...rest, physicalPrefsFor: { [uidA]: result.physicalDirections.ab, [uidB]: result.physicalDirections.ba } };
+}
+
+// A stored breakdown (any shape) as `viewerUid` may see it: physicalPrefs
+// is their own direction. An older doc (only the two-way mean) shows none
+// until re-scored.
+export function sparkBreakdownFor(stored: unknown, viewerUid: string): Record<string, unknown> {
+  if (typeof stored !== "object" || stored === null) return {};
+  const { physicalPrefs: _mean, physicalPrefsFor, ...rest } = stored as Record<string, unknown>;
+  const own = typeof physicalPrefsFor === "object" && physicalPrefsFor !== null ? (physicalPrefsFor as Record<string, unknown>)[viewerUid] : null;
+  return { ...rest, physicalPrefs: finite(own) ? own : null };
 }
 
 // The pair-doc fields for a Spark result (the headline everyone sees).
@@ -435,12 +553,8 @@ export function calculatePlayScore(
 ): {
   score: number;
   breakdown: PlayBreakdown;
-  tier1: {
-    archetype:      NonNullable<ReturnType<typeof matchPlayArchetype>>;
-    combinedScore:  number;
-    asymmetryGap:   number;
-    dataConfidence: number;
-  } | null;
+  // F-098: the public shape only (publicPlayTier1).
+  tier1: { archetype: PublicArchetype; combinedScore: number | null } | null;
 } {
   const a = userA as any;
   const b = userB as any;
@@ -472,19 +586,16 @@ export function calculatePlayScore(
 
   // Compute Play archetype, wrapped to match Spark's tier1 shape so the UI
   // can read tier1.archetype.label uniformly across both modes.
-  const facetA = computeFacetProfile(userA as any);
-  const facetB = computeFacetProfile(userB as any);
+  // F-098: the label is displayed, so it's from the facets without
+  // dealbreaker shadows (they'd show the private dealbreakers).
+  const facetA = analyzeFacets(userA as any, { shadows: false }).vector;
+  const facetB = analyzeFacets(userB as any, { shadows: false }).vector;
   const spiceAligned = isSpiceAligned(a.spiceLevel ?? '', b.spiceLevel ?? '');
   const archetype = matchPlayArchetype(facetA, facetB, spiceAligned) ?? null;
 
   return {
     score: Math.min(100, Math.max(0, score)),
     breakdown,
-    tier1: archetype ? {
-      archetype,
-      combinedScore: score,
-      asymmetryGap:  0,
-      dataConfidence: 1,
-    } : null,
+    tier1: publicPlayTier1(archetype ? { archetype, combinedScore: score } : null),
   };
 }
