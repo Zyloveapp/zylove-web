@@ -7,6 +7,9 @@ import { priorTrial } from "../trial";
 import { takeRateLimit } from "../rateLimits";
 import { restoreBirthdayMatches } from "../restoreCheck";
 import { buildGenderLine } from "../genderLine";
+import { normalizeGender } from "../gender";
+import { rekeyBlocks, reportPending, type BlockEntry } from "../restoreCheck";
+import { setBlocked, stateRef } from "../explore";
 import { STRIPE_SECRETS, cancelSubscriptionsForDeletion } from "../stripe";
 import { ROOT_SCRUB, clearPrivateData, identityRef, internalRef, isSuspendedUid, matchingRef, moderationCarry, profileRef, recoveryRecord } from "../userData";
 
@@ -202,16 +205,28 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
     throw restoreRefused();
   }
 
+  const previousUid = recovery.previousUid;
+  // H6: not while reports against the account wait for review — restoring
+  // would move it to a new uid and leave them (and whatever the team decides
+  // on them: a suspension, a ban) on the old one. Once they're reviewed it
+  // can be restored. Asked after the birthday, so only the owner learns it.
+  const pendingReports = typeof previousUid === "string" && previousUid
+    ? (await db.collection("reports").where("reportedUid", "==", previousUid).get()).docs.filter((d) => reportPending(d.data()))
+    : [];
+  if (pendingReports.length > 0) {
+    throw new HttpsError("failed-precondition", "This account can't be restored right now. Contact support.");
+  }
+
   // Build restored user doc from recovery — explicit, no spread. Every
   // field is a conscious decision.
   const now = admin.firestore.Timestamp.now();
   const priorTrialDoc = await priorTrial(phoneNumber);
-  const previousUid = recovery.previousUid;
 
   // §4.A2: gender, its self-description, pronouns and the display choices
   // (a gender they'd hidden stays hidden).
+  // H2: as a key (gender.ts), like everything else the rules let in.
   const restoredGender = {
-    genderIdentity:     recovery.genderIdentity ?? null,
+    genderIdentity:     normalizeGender(recovery.genderIdentity),
     genderSelfDescribe: recovery.genderSelfDescribe ?? null,
     pronouns:           recovery.pronouns ?? null,
     genderHidden:       recovery.genderHidden === true,
@@ -279,6 +294,9 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
     ...(priorTrialDoc?.trialStartedAt ? { trialStartedAt: priorTrialDoc.trialStartedAt, trialEndsAt: priorTrialDoc.trialEndsAt, trialExpired: (priorTrialDoc.trialEndsAt as admin.firestore.Timestamp).toMillis() <= Date.now() } : {}),
     ...(priorTrialDoc?.hadPaidPlan ? { hadPaidPlan: true } : {}),
     reportCount: typeof recovery.reportCount === "number" ? recovery.reportCount : 0,
+    // H6: a scam hold (F-074) or reduced visibility comes back with them.
+    ...(recovery.holds?.hiddenPendingReview ? { hiddenPendingReview: recovery.holds.hiddenPendingReview } : {}),
+    ...(recovery.holds?.visibilityReduced === true ? { visibilityReduced: true } : {}),
     isSuspended: stillSuspended,
     ...(stillSuspended ? {
       suspendedAt: recovery.suspension.suspendedAt ?? now,
@@ -309,6 +327,15 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
     }
   }
 
+  // H6: every block by or against the old uid, read before its docs go
+  // (its own list, other people's entries for it; legacy blocks too).
+  const blockEntries = await blocksNaming(previousUid);
+  const legacyBlocks = await Promise.all([
+    db.collection("blocks").where("blockerUid", "==", previousUid).get(),
+    db.collection("blocks").where("blockedUid", "==", previousUid).get(),
+  ]);
+  const trustFlag = await db.doc(`trustFlags/${previousUid}`).get();
+
   // NOTE: previousUid's user doc may have been purged by onNightlyPurge
   // if the account was deleted >12 months ago. This batch.delete is a no-op
   // in that case, which is fine. Any future logic that READS
@@ -317,6 +344,29 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
   batch.delete(recoveryRef);
 
   await batch.commit();
+  // H6: the blocks, re-keyed to the new uid on both sides (so they apply
+  // both ways again), Explore's lists with them, and the account's open trust
+  // flag (the scam hold's) — before the old uid's own list goes below.
+  const rekeyed = rekeyBlocks(previousUid, newUid, blockEntries);
+  const writes: ((b: admin.firestore.WriteBatch) => void)[] = [
+    ...rekeyed.set.map((w) => (b: admin.firestore.WriteBatch) => b.set(db.doc(w.path), w.data)),
+    ...rekeyed.remove.filter((p) => !p.startsWith(`users/${previousUid}/`)).map((p) => (b: admin.firestore.WriteBatch) => b.delete(db.doc(p))),
+    ...legacyBlocks[0].docs.map((d) => (b: admin.firestore.WriteBatch) => b.update(d.ref, { blockerUid: newUid })),
+    ...legacyBlocks[1].docs.map((d) => (b: admin.firestore.WriteBatch) => b.update(d.ref, { blockedUid: newUid })),
+  ];
+  if (trustFlag.exists) {
+    writes.push((b) => b.set(db.doc(`trustFlags/${newUid}`), { ...trustFlag.data(), uid: newUid }));
+    writes.push((b) => b.delete(trustFlag.ref));
+  }
+  for (let i = 0; i < writes.length; i += 400) {
+    const b = db.batch();
+    for (const w of writes.slice(i, i + 400)) w(b);
+    await b.commit();
+  }
+  for (const other of rekeyed.others) {
+    await setBlocked(newUid, other, true);
+    await stateRef(other).set({ blocked: admin.firestore.FieldValue.arrayRemove(previousUid) }, { merge: true });
+  }
   // Stage B (F-057): the old uid's leftover subcollections too — the nightly
   // purge never finds them once its root doc is gone. Its published photo
   // files stay: the restored profile still points at them.
@@ -327,3 +377,28 @@ export const restoreAccount = onCall(LEGACY_RUNTIME, async (request) => {
     isFounder: false, // Stage C: not restored
   };
 });
+
+// H6: every blockedUsers doc naming `uid` — its own list, and other people's
+// entries for it (by the field each doc carries; the mirror of its own list
+// covers any the query can't reach).
+async function blocksNaming(uid: string): Promise<BlockEntry[]> {
+  const db = admin.firestore();
+  const own = await db.collection(`users/${uid}/blockedUsers`).get();
+  const entries: BlockEntry[] = own.docs.map((d) => ({ owner: uid, other: d.id, data: d.data() }));
+  const theirs = await db.collectionGroup("blockedUsers").where("uid", "==", uid).get().catch((err: unknown) => {
+    console.error("restoreAccount: blockedUsers lookup failed", err instanceof Error ? err.message : err);
+    return null;
+  });
+  for (const d of theirs?.docs ?? []) {
+    const owner = d.ref.parent.parent?.id;
+    if (owner && owner !== uid && d.id === uid) entries.push({ owner, other: uid, data: d.data() });
+  }
+  // The mirrors of its own list, if the query missed them.
+  const seen = new Set(entries.filter((e) => e.other === uid).map((e) => e.owner));
+  const missing = own.docs.map((d) => d.id).filter((o) => !seen.has(o));
+  if (missing.length) {
+    const mirrors = await db.getAll(...missing.map((o) => db.doc(`users/${o}/blockedUsers/${uid}`)));
+    for (const m of mirrors) if (m.exists) entries.push({ owner: m.ref.parent.parent!.id, other: uid, data: m.data() ?? {} });
+  }
+  return entries;
+}

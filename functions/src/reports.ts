@@ -467,6 +467,21 @@ async function resolveReports(uid: string, status: 'actioned' | 'cleared', actio
   return open.length
 }
 
+// H6: the uid an account lives under now. A restore (restoreAccount) gives
+// it a new uid and deletes the old root doc; the new root doc names the old
+// uid (previousUid, server-written). Followed through repeated restores.
+export async function currentUidOf(uid: string): Promise<string> {
+  let cur = uid
+  for (let i = 0; i < 5; i++) {
+    const root = (await db().doc(`users/${cur}`).get()).data()
+    if (root && root.isDeleted !== true) return cur
+    const next = await db().collection('users').where('previousUid', '==', cur).limit(1).get()
+    if (next.empty) return cur
+    cur = next.docs[0].id
+  }
+  return cur
+}
+
 // A suspension: userInternal state, sign-in disabled and sessions ended.
 // `days` null = until an admin reviews it (T&S auto-suspension).
 export async function suspendAccount(uid: string, days: number | null, by: string, source: 'admin' | 'trust' | 'auto_scam'): Promise<void> {
@@ -521,7 +536,12 @@ export const adminModerate = onCall(
   async (request): Promise<{ ok: true; resolved?: number; texted?: boolean; phoneBanned?: boolean }> => {
     const adminUid = await requireAdmin(request.auth, 'adminModerate')
     const data = (request.data ?? {}) as Record<string, unknown>
-    const uid = str(data, 'uid')
+    // H6: the reports name the uid the account had then; a deleted and
+    // restored account lives on under a new one. The action reaches the
+    // account as it is now (uid); the reports are resolved where they're
+    // filed (reportedUid).
+    const reportedUid = str(data, 'uid')
+    const uid = await currentUidOf(reportedUid)
     const action = data.action as ModerateAction
     if (!ACTIONS.includes(action)) throw new HttpsError('invalid-argument', 'Unknown action.')
     if (isBotUid(uid)) throw new HttpsError('failed-precondition', 'Not for curated profiles.')
@@ -539,7 +559,13 @@ export const adminModerate = onCall(
     const reason = typeof data.reason === 'string' && data.reason.trim() ? data.reason.trim().slice(0, 300) : null
     // The audit keeps the action and its outcome, never the warning text itself.
     const log = (detail: Record<string, unknown> = {}) =>
-      audit({ actor: adminUid, action: `report.${action}`, target: uid, reason, detail: { ...detail, ...(message ? { messageChars: message.length } : {}) } })
+      audit({
+        actor: adminUid,
+        action: `report.${action}`,
+        target: uid,
+        reason,
+        detail: { ...detail, ...(message ? { messageChars: message.length } : {}), ...(uid !== reportedUid ? { restoredFrom: reportedUid } : {}) },
+      })
     // F-094: the account-changing actions are logged as an attempt before
     // anything changes (the outcome follows) — a failure partway still
     // leaves a record.
@@ -554,7 +580,7 @@ export const adminModerate = onCall(
         await accountRef(uid).set({ adminNotice: notice('warning', message ?? DEFAULT_WARNING) }, { merge: true })
         await internalRef(uid).set({ lastWarnedAt: FieldValue.serverTimestamp() }, { merge: true })
         const texted = await textAccount(uid, 'account', 'Zylove: You have an important notice about your account. Open zylove.app to read it.')
-        const resolved = await resolveReports(uid, 'actioned', action, adminUid)
+        const resolved = await resolveReports(reportedUid, 'actioned', action, adminUid)
         await log({ texted })
         return { ok: true, resolved, texted }
       }
@@ -571,7 +597,7 @@ export const adminModerate = onCall(
         if (!SUSPEND_DAYS.includes(days as (typeof SUSPEND_DAYS)[number])) throw new HttpsError('invalid-argument', 'days must be 30, 60 or 90.')
         if (!user || user.isDeleted === true) throw new HttpsError('failed-precondition', 'That account no longer exists.')
         await suspendAccount(uid, days as number, adminUid, 'admin')
-        const resolved = await resolveReports(uid, 'actioned', action, adminUid)
+        const resolved = await resolveReports(reportedUid, 'actioned', action, adminUid)
         await log({ days })
         return { ok: true, resolved }
       }
@@ -628,7 +654,9 @@ export const adminModerate = onCall(
         // T&S Phase 5: a ban for scams/fraud (the admin says so, or it was
         // reported as a scam) puts its photos on the blocklist — before the
         // soft delete removes them; kept while the ban stands.
-        const reportCats = (await db().collection('reports').where('reportedUid', '==', uid).get()).docs.map((d) => categoriesOf(d.data()))
+        const reportCats = (
+          await Promise.all([...new Set([uid, reportedUid])].map((u) => db().collection('reports').where('reportedUid', '==', u).get()))
+        ).flatMap((q) => q.docs.map((d) => categoriesOf(d.data())))
         const scamBan = data.scam === true || reportCats.some((c) => c.includes('scam'))
         // With the ban's context, recorded now — the name goes with the soft delete.
         const blocklistedPhotos = scamBan
@@ -643,7 +671,7 @@ export const adminModerate = onCall(
         if (user && user.isDeleted !== true) await softDeleteAccount(uid, user, adminUid, { banned: true })
         else if (phone) await db().doc(`deletedAccounts/${phone}`).set({ banned: true }, { merge: true })
         if (user) await internalRef(uid).set({ bannedAt: FieldValue.serverTimestamp(), bannedBy: adminUid }, { merge: true })
-        const resolved = await resolveReports(uid, 'actioned', action, adminUid)
+        const resolved = await resolveReports(reportedUid, 'actioned', action, adminUid)
         if (user) await internalRef(uid).set({ banScam: scamBan }, { merge: true })
         await log({ phoneBanned: phone !== null, bannedDevices, scamBan, blocklistedPhotos })
         logger.warn('adminModerate: banned', { phoneBanned: phone !== null })
@@ -651,7 +679,7 @@ export const adminModerate = onCall(
       }
       case 'clear': {
         // Dismisses only: reports never changed the account, so nothing to undo.
-        const resolved = await resolveReports(uid, 'cleared', action, adminUid)
+        const resolved = await resolveReports(reportedUid, 'cleared', action, adminUid)
         await log({ resolved })
         return { ok: true, resolved }
       }

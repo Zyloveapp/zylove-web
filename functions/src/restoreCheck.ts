@@ -34,3 +34,57 @@ export function restoreBirthdayMatches(typed: unknown, stored: unknown): boolean
   const got = isoDate(typed)
   return want !== null && got !== null && want === got
 }
+
+// ─── H6: what follows a restored account ─────────────────────────────────────
+// A restore gives the account a new uid (the old Auth user is gone). Blocks
+// are keyed by uid — users/{a}/blockedUsers/{b}, on both sides, recording who
+// placed it (blockedBy) — so without this every block against (or by) the
+// account stopped applying once it was restored.
+
+export interface BlockEntry {
+  // users/{owner}/blockedUsers/{other}
+  owner: string
+  other: string
+  data: Record<string, unknown>
+}
+
+// Every blockedUsers doc naming the old uid (its own list, and other people's
+// entries for it), re-keyed to the new uid: the docs to write and the ones to
+// remove. Each side keeps its own doc's fields where it has one (a block's two
+// docs normally match); a side with none gets the other's. Pure.
+export function rekeyBlocks(
+  oldUid: string,
+  newUid: string,
+  entries: BlockEntry[],
+): { set: { path: string; data: Record<string, unknown> }[]; remove: string[]; others: string[] } {
+  const swap = (v: unknown) => (v === oldUid ? newUid : v)
+  const sets = new Map<string, Record<string, unknown>>()
+  const own = new Set<string>()
+  const remove = new Set<string>()
+  const others = new Set<string>()
+  const put = (owner: string, other: string, data: Record<string, unknown>, direct: boolean) => {
+    const path = `users/${owner}/blockedUsers/${other}`
+    if (own.has(path)) return
+    if (direct) own.add(path)
+    else if (sets.has(path)) return
+    const next: Record<string, unknown> = { ...data, uid: other }
+    if ('blockedBy' in data) next.blockedBy = swap(data.blockedBy)
+    sets.set(path, next)
+  }
+  for (const e of entries) {
+    const other = e.owner === oldUid ? e.other : e.other === oldUid ? e.owner : null
+    if (other === null || other === oldUid || other === newUid) continue
+    others.add(other)
+    remove.add(`users/${oldUid}/blockedUsers/${other}`)
+    remove.add(`users/${other}/blockedUsers/${oldUid}`)
+    const mine = e.owner === oldUid
+    put(mine ? newUid : other, mine ? other : newUid, e.data, true)
+    put(mine ? other : newUid, mine ? newUid : other, e.data, false)
+  }
+  return { set: [...sets].map(([path, data]) => ({ path, data })), remove: [...remove], others: [...others] }
+}
+
+// A report still waiting for the team (reports.ts: anything not actioned or
+// cleared). H6: an account reported and not yet reviewed isn't restored —
+// deleting and restoring would leave the reports on a uid nobody uses.
+export const reportPending = (r: Record<string, unknown>): boolean => r.status !== 'actioned' && r.status !== 'cleared'
