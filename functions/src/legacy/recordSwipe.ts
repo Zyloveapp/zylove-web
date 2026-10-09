@@ -49,7 +49,7 @@ export const recordSwipe = onCall(LEGACY_RUNTIME, async (request) => {
     throw new HttpsError("permission-denied", "Account suspended");
   }
   // F-090: no swipes recorded on someone who's gone, suspended or blocked either way.
-  await requireAvailableTarget(uid, targetUid);
+  await requireAvailableTarget(uid, targetUid, mode);
 
   await db.collection("swipes").add({
     swiperId: uid,

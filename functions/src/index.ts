@@ -547,7 +547,7 @@ export const likeBack = onCall(
     // Stage C: liking back from "who liked you" is Spark+ — except a bot's
     // like (no paid feature ever involves a bot).
     if (!likerUid.startsWith('zbot-')) await requireTier(callerId, 'spark_plus', 'Liking back')
-    if ((await isSuspendedUid(callerId)) || (!bot && (await isSuspendedUid(likerUid))) || (await blockedEitherWay(callerId, likerUid))) {
+    if ((await isSuspendedUid(callerId)) || (!bot && (await isSuspendedUid(likerUid))) || (await blockedEitherWay(callerId, likerUid, mode))) {
       throw new HttpsError('failed-precondition', "That profile isn't available.")
     }
     // §4.A3: the like back itself is an ordinary like (the app used to call
@@ -1968,7 +1968,7 @@ export const getCuriousVisitors = onCall(
       if (otherUid.startsWith('zbot-')) continue // real people only
       const [matchSnap, userSnap] = await Promise.all([db.collection('matches').doc(id).get(), db.collection('users').doc(otherUid).get()])
       const user = userSnap.data()
-      if (matchSnap.exists || !user || (await isSuspendedUid(otherUid, user)) || (await blockedEitherWay(uid, otherUid))) continue
+      if (matchSnap.exists || !user || (await isSuspendedUid(otherUid, user)) || (await blockedEitherWay(uid, otherUid, 'spark'))) continue
       // Spark visitors need a Spark profile (Play-only accounts have Spark hidden).
       if (user.sparkVisibility === 'hidden') continue
       visitors.push({
@@ -2003,7 +2003,7 @@ export const recordPlayReveal = onCall({ timeoutSeconds: 15, invoker: 'public' }
   await requirePlayAccess(uid)
   const target = await requireUidOfPlayId((request.data as Record<string, unknown> | null)?.playId, uid)
   await takeRateLimit(uid, 'reveal', REVEAL_LIMIT)
-  if (await blockedEitherWay(uid, target)) return { ok: true }
+  if (await blockedEitherWay(uid, target, 'play')) return { ok: true }
   await getFirestore().doc(`playReveals/${target}/by/${uid}`).set({ at: Date.now(), viewer: uid })
   return { ok: true }
 })
@@ -2021,7 +2021,7 @@ export const recordSparkReveal = onCall({ timeoutSeconds: 15, invoker: 'public' 
   const target = (request.data as Record<string, unknown> | null)?.uid
   if (typeof target !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(target) || target === uid) throw new HttpsError('invalid-argument', 'uid required')
   await takeRateLimit(uid, 'reveal', REVEAL_LIMIT)
-  if (await blockedEitherWay(uid, target)) return { ok: true }
+  if (await blockedEitherWay(uid, target, 'spark')) return { ok: true }
   await getFirestore()
     .doc(`pairs/${pairIdOf(uid, target)}`)
     .update({ [`${uid}_revealed`]: true, [`${uid}_revealedAt`]: FieldValue.serverTimestamp(), [`${uid}_revealed_spark`]: true })
@@ -2047,7 +2047,7 @@ async function curiousPlay(uid: string): Promise<CuriousVisitor[]> {
     if (likers.length > 0 || live) continue
     const user = userSnap.data()
     if (!user || (await isSuspendedUid(otherUid, user)) || !(await playStatus(otherUid)).access) continue
-    if (await blockedEitherWay(uid, otherUid)) continue
+    if (await blockedEitherWay(uid, otherUid, 'play')) continue
     const playId = await ensurePlayId(otherUid)
     const pub = publicPlayProfile(otherUid, playId, play, user)
     const scores = await loadPlayScores(uid, otherUid)

@@ -12,6 +12,7 @@ import { probationOf } from './probation'
 import { loadMatch, messagesPath } from './playMatch'
 import { isPlayId, modeOfId, playIdOf, uidOfPlayId } from './playIds'
 import { generationOf } from './matchGeneration'
+import { afterLift, blockModes } from './blockCore'
 
 // Trust & safety: phone-level bans, the caller's blocked list, and
 // server-side photo consent acceptance.
@@ -154,8 +155,9 @@ async function blockedByCaller(uid: string, mode: 'spark' | 'play' | null = null
   for (const d of mirror.docs) {
     const by: unknown = d.data().blockedBy
     if (typeof by !== 'string') continue
-    const m: unknown = d.data().mode
-    if (by === uid && (!mode || (m === 'play' ? 'play' : 'spark') === mode)) mine.add(d.id)
+    // H3: a block may hold in both modes (modes); one with no mode is Spark's here.
+    const modes = blockModes(d.data()) ?? ['spark']
+    if (by === uid && (!mode || modes.includes(mode))) mine.add(d.id)
     else if (by !== uid) theirs.add(d.id)
   }
   for (const m of matches.docs) {
@@ -223,20 +225,29 @@ export const unblockMember = onCall(
 // Lifts a block the caller placed (unblockMember, and mobile's unblockUser).
 // F-065: only a block in `mode` (the mode of the id the caller used) — a uid
 // can't lift a Play block nor a Play ID a Spark one, so "not found" can't tell
-// whether a uid and a Play ID are the same person.
+// whether a uid and a Play ID are the same person. C1: only the person who
+// placed it (blockedBy, which blocking never rewrites). H3: a block placed
+// in both modes is lifted in this one only.
 export async function liftBlock(uid: string, targetUid: string, mode: 'spark' | 'play'): Promise<void> {
   if (!(await blockedByCaller(uid, mode)).has(targetUid)) {
     throw new HttpsError('not-found', "You haven't blocked this person")
   }
   const db = getFirestore()
-  const legacy = await db.collection('blocks').where('blockerUid', '==', uid).where('blockedUid', '==', targetUid).get()
+  const mineRef = db.doc(`users/${uid}/blockedUsers/${targetUid}`)
+  const theirsRef = db.doc(`users/${targetUid}/blockedUsers/${uid}`)
+  const rest = afterLift((await mineRef.get()).data(), mode)
   const batch = db.batch()
-  batch.delete(db.doc(`users/${uid}/blockedUsers/${targetUid}`))
-  batch.delete(db.doc(`users/${targetUid}/blockedUsers/${uid}`))
-  for (const d of legacy.docs) batch.delete(d.ref)
+  if (rest === 'delete') {
+    const legacy = await db.collection('blocks').where('blockerUid', '==', uid).where('blockedUid', '==', targetUid).get()
+    batch.delete(mineRef)
+    batch.delete(theirsRef)
+    for (const d of legacy.docs) batch.delete(d.ref)
+  } else {
+    for (const ref of [mineRef, theirsRef]) batch.set(ref, { modes: rest, mode: rest[0] }, { merge: true })
+  }
   await batch.commit()
-  // Explore (Stage 3): they can see each other again.
-  await setBlocked(uid, targetUid, false)
+  // Explore (Stage 3): they can see each other again (in this mode, H3).
+  await setBlocked(uid, targetUid, rest === 'delete' ? [] : rest)
 }
 
 // ─── Photo consent ───────────────────────────────────────────────────────────

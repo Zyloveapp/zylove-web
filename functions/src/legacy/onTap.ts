@@ -36,7 +36,7 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   if (tapperId === tappedId) throw new HttpsError("invalid-argument", "Cannot tap yourself");
   // F-090: nothing about someone who's gone, suspended or blocked either way
   // (the same refusal as onLike).
-  await requireAvailableTarget(tapperId, tappedId);
+  await requireAvailableTarget(tapperId, tappedId, playTap ? "play" : "spark");
 
   const pid     = pairId(tapperId, tappedId);
   const pairRef = db.collection("pairs").doc(pid);

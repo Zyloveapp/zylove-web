@@ -3,6 +3,7 @@ import { playPairDataRef, playPairUsers } from './pairPlay'
 import { playIdOf } from './playIds'
 import { HttpsError } from 'firebase-functions/v2/https'
 import { isSuspendedUid } from './userData'
+import { blockedFor, type BlockRecord } from './blockCore'
 
 // Likes per mode (Stage A): who liked whom in which mode, server-only. A
 // match needs a like from each side IN THE SAME MODE — a Spark like never
@@ -75,17 +76,50 @@ export async function clearLikes(a: string, b: string, mode: LikeMode | null): P
   await batch.commit()
 }
 
-// Either person blocked the other (users/{uid}/blockedUsers, server-written).
-export async function blockedEitherWay(a: string, b: string): Promise<boolean> {
-  const [x, y] = await db().getAll(db().doc(`users/${a}/blockedUsers/${b}`), db().doc(`users/${b}/blockedUsers/${a}`))
-  return x.exists || y.exists
+// After a block placed by `blocker` in `mode`: everything the other person
+// liked them with (any mode — they can't reach the blocker now), and the
+// blocker's own likes of them in that mode only. H3: the blocker's likes in
+// the other mode stay (their Sent list there mustn't change, which would
+// say who the block was on). F-062: Play likes in the queue are keyed by the
+// liker's Play ID.
+export async function clearLikesOnBlock(blocker: string, target: string, mode: LikeMode): Promise<void> {
+  const [pb, pt] = await Promise.all([playIdOf(blocker), playIdOf(target)])
+  const batch = db().batch()
+  // Shared records: drop the target's likes, and the blocker's in `mode`.
+  const prune = async (ref: DocumentReference, blockerToo: boolean) => {
+    const v: unknown = (await ref.get()).get('likedBy')
+    if (!Array.isArray(v)) return
+    const keep = v.filter((u) => u !== target && !(blockerToo && u === blocker))
+    if (keep.length !== v.length) batch.update(ref, { likedBy: keep.length ? keep : FieldValue.delete() })
+  }
+  await prune(sparkLikesRef(blocker, target), mode === 'spark')
+  await prune(legacyPlayLikesRef(blocker, target), mode === 'play')
+  if (pb && pt) await prune(await playPairDataRef(blocker, target), mode === 'play')
+  batch.delete(db().doc(`users/${blocker}/likeQueue/${target}`))
+  if (pt) batch.delete(db().doc(`users/${blocker}/likeQueue/${pt}`))
+  if (mode === 'spark') batch.delete(db().doc(`users/${target}/likeQueue/${blocker}`))
+  if (mode === 'play' && pb) batch.delete(db().doc(`users/${target}/likeQueue/${pb}`))
+  await batch.commit()
 }
 
-// F-090: someone the viewer may act on (tap, swipe) — not gone, suspended or
-// blocked either way. Same refusal as onLike.
-export async function requireAvailableTarget(viewer: string, target: string): Promise<void> {
+// The two block records between a and b (users/{uid}/blockedUsers, server-written).
+export async function blockRecords(a: string, b: string): Promise<(BlockRecord | undefined)[]> {
+  const [x, y] = await db().getAll(db().doc(`users/${a}/blockedUsers/${b}`), db().doc(`users/${b}/blockedUsers/${a}`))
+  return [x.data(), y.data()]
+}
+
+// A block between them changes what `viewer` gets in `mode` (blockCore.ts,
+// H3): one placed on the viewer, in both modes; one the viewer placed, only
+// in its own mode.
+export async function blockedEitherWay(viewer: string, other: string, mode: LikeMode): Promise<boolean> {
+  return blockedFor(viewer, await blockRecords(viewer, other), mode)
+}
+
+// F-090: someone the viewer may act on (tap, swipe) in `mode` — not gone,
+// suspended or blocked (as above). Same refusal as onLike.
+export async function requireAvailableTarget(viewer: string, target: string, mode: LikeMode): Promise<void> {
   const root = (await db().doc(`users/${target}`).get()).data()
-  if (!root || (await isSuspendedUid(target, root)) || (await blockedEitherWay(viewer, target))) {
+  if (!root || (await isSuspendedUid(target, root)) || (await blockedEitherWay(viewer, target, mode))) {
     throw new HttpsError('failed-precondition', "That profile isn't available.")
   }
 }

@@ -11,6 +11,7 @@ import { contextOf, endPlayPair, loadMatch, type MatchCtx } from './playMatch'
 import { isPlayMatchId, playIdOf } from './playIds'
 import { logId } from './logSafe'
 import { isDeletedUid } from './userData'
+import { preservedExpiry } from './blockCore'
 
 // Behavioral safety signals feeding behaviorRiskScore.
 //
@@ -140,17 +141,31 @@ async function openReporters(matchId: string, match: DocumentData, a: string, b:
 }
 
 // Deletes preserved chats whose 30 days are up; the delete purges their
-// messages and photos (onMatchBehaviorUpdate → purgeMatchContent).
+// messages and photos (onMatchBehaviorUpdate → purgeMatchContent). H5: a
+// chat kept for both after a block, and still only blocked (not unmatched),
+// goes back to its blocker alone instead, as blocked chats were before.
+export async function expirePreservedChats(): Promise<{ deleted: number; released: number }> {
+  let deleted = 0
+  let released = 0
+  for (const col of ['matches', 'playMatches']) {
+    const due = await getFirestore().collection(col).where('preservedUntil', '<=', Timestamp.now()).limit(500).get()
+    for (const d of due.docs) {
+      if (preservedExpiry(d.data()) === 'release') {
+        await d.ref.update({ preservedFor: FieldValue.delete(), preservedUntil: FieldValue.delete(), preservedForReport: FieldValue.delete() })
+        released++
+      } else {
+        await d.ref.delete()
+        deleted++
+      }
+    }
+  }
+  return { deleted, released }
+}
+
 export const purgePreservedChats = onSchedule(
   { schedule: '30 2 * * *', timeZone: 'America/Chicago', timeoutSeconds: 300, memory: '256MiB' },
   async () => {
-    let deleted = 0
-    for (const col of ['matches', 'playMatches']) {
-      const due = await getFirestore().collection(col).where('preservedUntil', '<=', Timestamp.now()).limit(500).get()
-      for (const d of due.docs) await d.ref.delete()
-      deleted += due.size
-    }
-    logger.info('purgePreservedChats', { deleted })
+    logger.info('purgePreservedChats', await expirePreservedChats())
   },
 )
 
@@ -172,7 +187,9 @@ export const unmatchConnection = onCall(
     if (!ctx.has(uid)) throw new HttpsError('permission-denied', 'Not a participant in this match')
     // F-069: a match the other person blocked is theirs — kept as evidence for
     // as long as they want it; the person they blocked can't take it away.
-    if (match.isBlocked === true && match.blockedBy && match.blockedBy !== ctx.idOf(uid)) {
+    // C1: blockedBy is never rewritten by a later block, and a blocked match
+    // with no blocker recorded is kept too.
+    if (match.isBlocked === true && match.blockedBy !== ctx.idOf(uid)) {
       logger.info('unmatchConnection: blocked by the other person — kept', { matchId: logId(matchId) })
       return { success: true }
     }
