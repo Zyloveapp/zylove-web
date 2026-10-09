@@ -95,7 +95,7 @@ test('F-091: the mobile-era users/{uid}/photos, verification and consent paths t
   expect(await upload(a.uid, `photos/${a.uid}/spark/x.jpg`, 'image/jpeg')).toBe(200)
 })
 
-test('F-091: after a block, the person blocked can\'t read the chat photos (the blocker still can) and nobody can add one', async () => {
+test('F-091: after a block, nobody can add a chat photo; the blocker still reads them, and the person blocked only for the 30-day report window (H5)', async () => {
   const a = await seedUser('Ann')
   const b = await woman('Bea')
   await setPlan(a.uid, 'spark_plus')
@@ -107,10 +107,13 @@ test('F-091: after a block, the person blocked can\'t read the chat photos (the 
   expect(await read(a.uid, photo)).toBe(200)
   expect(await read(b.uid, photo)).toBe(200)
   await callAs(a.uid, 'blockUser', { targetUid: b.uid, matchId: id })
-  expect(await read(b.uid, photo)).toBe(403) // the person blocked
+  expect(await read(b.uid, photo)).toBe(200) // the person blocked, within the window (H5)
   expect(await read(a.uid, photo)).toBe(200) // the blocker's evidence
   expect(await upload(a.uid, `chat-photos/${id}/${a.uid}_2.bin`)).toBe(403)
   expect(await upload(b.uid, `chat-photos/${id}/${b.uid}_2.bin`)).toBe(403)
+  await db.doc(`matches/${id}`).update({ preservedUntil: Timestamp.fromMillis(Date.now() - 1000) })
+  expect(await read(b.uid, photo)).toBe(403) // past it
+  expect(await read(a.uid, photo)).toBe(200)
 })
 
 test('F-091: no chat photos into an unmatched chat (kept read-only), though its keeper still sees them', async () => {
