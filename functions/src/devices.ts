@@ -79,11 +79,37 @@ export const recordDevice = onCall(
   },
 )
 
+// F-097: at most this many NEW values of each kind per account per day
+// (first seen in the last 24 hours) — a script sending made-up device ids
+// can't grow its map, or the sightings index, without bound. Addresses
+// change more often (mobile networks), so they get more room.
+export const NEW_PER_DAY: Record<SightingKind, number> = { device: 5, ip: 20, net: 20 }
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// The sightings to record: those already on the map, plus new ones while
+// their kind has room today. Pure.
+export function withinDailyCap<S extends { kind: SightingKind; hash: string }>(
+  seen: Record<string, { kind: SightingKind; firstSeen: number }>,
+  sightings: S[],
+  now: number,
+): S[] {
+  const room = { ...NEW_PER_DAY }
+  for (const s of Object.values(seen)) if (now - s.firstSeen < DAY_MS && s.kind in room) room[s.kind]--
+  return sightings.filter((s) => {
+    if (seen[s.hash]) return true
+    if (room[s.kind] <= 0) return false
+    room[s.kind]--
+    return true
+  })
+}
+
 export async function recordSightings(uid: string, sightings: { kind: SightingKind; hash: string }[], ua: string): Promise<void> {
   const now = Date.now()
   const mine = db().doc(`userDevices/${uid}`)
   const seen = ((await mine.get()).data()?.seen ?? {}) as Record<string, { kind: SightingKind; firstSeen: number; lastSeen: number; ua?: string }>
-  const fresh = sightings.filter((s) => !(seen[s.hash] && now - seen[s.hash].lastSeen < RESIGHT_MS))
+  const admitted = withinDailyCap(seen, sightings, now)
+  if (admitted.length < sightings.length) logger.warn('recordDevice: daily cap on new devices/addresses reached', { dropped: sightings.length - admitted.length })
+  const fresh = admitted.filter((s) => !(seen[s.hash] && now - seen[s.hash].lastSeen < RESIGHT_MS))
   if (!fresh.length) return
   const batch = db().batch()
   for (const s of fresh) {

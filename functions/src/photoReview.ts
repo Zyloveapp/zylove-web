@@ -4,8 +4,8 @@ import { getStorage } from 'firebase-admin/storage'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { SMS_SECRETS, sendSMS, smsTarget } from './sms'
 import { storagePath } from './storagePath'
-import { requireAdminAudited, audit } from './audit'
-import { accountRef, internalRef, isAdminAuth, userRef } from './userData'
+import { audit, requireAdmin, requireAdminAudited } from './audit'
+import { accountRef, internalRef, userRef } from './userData'
 import { matchView, type BlocklistMatchView } from './blocklistContext'
 import { photoHoldRef, withHoldContext } from './photoHolds'
 
@@ -41,12 +41,6 @@ export interface PendingPhoto {
 const MAX_USERS = 200
 const APPROVED_SMS = '✦ Your photo has been approved on Zylove.'
 const REJECTED_SMS = 'Your photo was not approved. Please upload a different photo.'
-
-function requireAdmin(auth: { uid: string; token?: Record<string, unknown> } | undefined): string {
-  if (!auth) throw new HttpsError('unauthenticated', 'Sign in first.')
-  if (!isAdminAuth(auth)) throw new HttpsError('permission-denied', 'Admins only.')
-  return auth.uid
-}
 
 function pendingOf(data: DocumentData | undefined): PendingEntry[] {
   const raw: unknown = data?.pendingPhotoURLs
@@ -125,12 +119,17 @@ export const listPendingPhotos = onCall(
 export const reviewPendingPhoto = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: SMS_SECRETS, invoker: 'public' },
   async (request): Promise<{ status: 'approved' | 'rejected' }> => {
-    const adminUid = requireAdmin(request.auth)
+    const adminUid = await requireAdmin(request.auth, 'reviewPendingPhoto')
     const { targetUid, photoUrl, action } = (request.data ?? {}) as Record<string, unknown>
-    if (typeof targetUid !== 'string' || !targetUid || typeof photoUrl !== 'string' || !photoUrl) {
+    // F-097: a uid never holds a '/' (it would name another document path).
+    if (typeof targetUid !== 'string' || !targetUid || targetUid.includes('/') || typeof photoUrl !== 'string' || !photoUrl) {
       throw new HttpsError('invalid-argument', 'targetUid and photoUrl are required.')
     }
     if (action !== 'approve' && action !== 'reject') throw new HttpsError('invalid-argument', 'Unknown action.')
+    // F-094: logged before anything changes; the decision (with its mode)
+    // follows once it's made.
+    const verb = action === 'approve' ? 'photo.approve' : 'photo.reject'
+    await audit({ actor: adminUid, action: `${verb}.attempt`, target: targetUid })
 
     const db = getFirestore()
     const rootRef = userRef(targetUid)
@@ -181,7 +180,7 @@ export const reviewPendingPhoto = onCall(
 
     // T&S Phase 1: the one admin audit log (replaces moderationLog). The
     // photo is identified by its mode only, never its URL.
-    await audit({ actor: adminUid, action: action === 'approve' ? 'photo.approve' : 'photo.reject', target: targetUid, detail: { mode } })
+    await audit({ actor: adminUid, action: verb, target: targetUid, detail: { mode } })
     // Decided: the hold's kept context (F-071) goes with it.
     await photoHoldRef(targetUid, photoUrl as string).delete().catch(() => {})
 

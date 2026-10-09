@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
-import { audit, requireAdminAudited } from './audit'
+import { audit, requireAdmin, requireAdminAudited } from './audit'
 import { pauseEvidenceFor, resumeEvidenceFor } from './evidence'
 import { refreshEntry } from './explore'
 import { liftSuspension } from './reports'
@@ -102,6 +102,8 @@ export const adminListAppeals = onCall({ timeoutSeconds: 30, memory: '256MiB', i
 })
 
 export const adminDecideAppeal = onCall({ timeoutSeconds: 30, memory: '256MiB', invoker: 'public' }, async (request) => {
+  // F-094: the admin check comes before anything is read.
+  await requireAdmin(request.auth, 'adminDecideAppeal')
   const f = (request.data ?? {}) as Record<string, unknown>
   const id = typeof f.id === 'string' && !f.id.includes('/') ? f.id : ''
   const decision = f.decision === 'upheld' || f.decision === 'overturned' ? f.decision : null

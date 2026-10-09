@@ -335,7 +335,9 @@ export const getExploreDeck = onCall(
       // trusted from the index (a missed refresh would have shown them).
       uids.length ? db().getAll(...uids.map((u) => db().doc(`userInternal/${u}`))) : Promise.resolve([]),
     ])
-    const playIds = mode === 'play' ? await playIdsOf(uids) : new Map<string, string>()
+    // (Not for a deleted account: those get no Play ID — F-096 — and no card.)
+    const live = uids.filter((_, i) => roots[i]?.exists && roots[i]?.get('isDeleted') !== true)
+    const playIds = mode === 'play' ? await playIdsOf(live) : new Map<string, string>()
     const cards: Card[] = []
     const refs: string[] = []
     deck.forEach((d, i) => {

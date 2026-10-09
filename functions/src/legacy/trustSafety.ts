@@ -11,76 +11,11 @@ import { LEGACY_RUNTIME } from "./legacyOptions";
 import { isPlayId, modeOfId, requireUidOfPlayId, uidNamedIn, uidOfPlayId } from "../playIds";
 import { endPlayPair, loadMatch } from "../playMatch";
 import { setPlayVisibility } from "../playAccess";
-import { internalRef, isSuspendedUid } from "../userData";
+import { internalRef } from "../userData";
 import { setBlocked } from "../explore";
 import { clearLikes } from "../likes";
 import { liftBlock } from "../trust";
 import { queueAdminAlert } from "../adminAlerts";
-
-const REPORT_TIERS = {
-  spam: 1, fake_profile: 1, low_effort: 1, misleading_photos: 1, inappropriate_username: 1,
-  harassment: 2, unsolicited_explicit: 2, threats: 2, hate_speech: 2, stalking: 2, solicitation: 2,
-  minor_in_photos: 3, non_consensual_content: 3, violence: 3, trafficking: 3, criminal_activity: 3,
-} as const;
-
-type ReportCategory = keyof typeof REPORT_TIERS;
-
-// ─── reportUser ───────────────────────────────────────────────────────────────
-// Writes the report record + increments the target's reportCount +
-// suspends on Tier 3. Auto-block happens client-side after this returns
-// (blockedUsers writes are rule-allowed).
-
-export const reportUser = onCall(LEGACY_RUNTIME, async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
-  const db = admin.firestore();
-  const reporterUid = request.auth.uid;
-
-  if (await isSuspendedUid(reporterUid)) {
-    throw new HttpsError("permission-denied", "Account suspended");
-  }
-
-  const { targetUid, category, details, matchId, evidenceMessageIds } = request.data ?? {};
-
-  if (!targetUid || typeof targetUid !== "string") {
-    throw new HttpsError("invalid-argument", "targetUid required");
-  }
-  if (reporterUid === targetUid) {
-    throw new HttpsError("invalid-argument", "Cannot report yourself");
-  }
-  const tier = REPORT_TIERS[category as ReportCategory];
-  if (!tier) throw new HttpsError("invalid-argument", "Unknown report category");
-
-  const reportId = `${reporterUid}_${targetUid}_${Date.now()}`;
-  const record = {
-    reportId,
-    reporterUid,
-    reportedUid: targetUid,
-    category,
-    tier,
-    details: typeof details === "string" ? details.slice(0, 500) : undefined,
-    matchId: typeof matchId === "string" ? matchId : undefined,
-    evidenceMessageIds: Array.isArray(evidenceMessageIds) ? evidenceMessageIds : undefined,
-    reportedAt: Date.now(),
-    status: "pending",
-  };
-
-  const batch = db.batch();
-  batch.set(db.collection("reports").doc(reportId), record);
-  // Report counts and (tier 3) the suspension: server-only (userInternal).
-  batch.set(internalRef(targetUid), {
-    reportCount: admin.firestore.FieldValue.increment(1),
-    [`reportTier${tier}Count`]: admin.firestore.FieldValue.increment(1),
-    ...(tier === 3 && {
-      isSuspended: true,
-      suspendedAt: admin.firestore.FieldValue.serverTimestamp(),
-      suspendReason: `Tier 3 report: ${category}`,
-      suspendedPendingReview: true,
-    }),
-  }, { merge: true });
-  await batch.commit();
-
-  return { success: true, tier };
-});
 
 // ─── requestAccountDeletion ───────────────────────────────────────────────────
 // 30-day grace-period "pause" flow. Sets isSuspended on self + writes
@@ -170,106 +105,6 @@ export const cancelAccountDeletion = onCall(LEGACY_RUNTIME, async (request) => {
   return { success: true };
 });
 
-// ─── submitUnmatch ────────────────────────────────────────────────────────────
-// Server-side consolidation of the 4 client-direct writes previously in
-// UnmatchSheet.tsx (unmatchReasons + scoreEvents + reviewQueue + match delete).
-// Single atomic batch. Caller suspension check + match-participant check.
-
-// Server-side reason table — client cannot spoof scoreImpact or flagForReview
-const UNMATCH_REASONS: Record<string, { scoreImpact: number; flagForReview: boolean }> = {
-  lost_interest:          { scoreImpact:  0,  flagForReview: false },
-  no_longer_available:    { scoreImpact:  0,  flagForReview: false },
-  not_what_i_expected:    { scoreImpact: -2,  flagForReview: false },
-  disrespectful:          { scoreImpact: -5,  flagForReview: true  },
-  inappropriate_messages: { scoreImpact: -8,  flagForReview: true  },
-  fake_profile:           { scoreImpact: -10, flagForReview: true  },
-  harassment:             { scoreImpact: -10, flagForReview: true  },
-  other:                  { scoreImpact:  0,  flagForReview: false },
-};
-
-export const submitUnmatch = onCall(LEGACY_RUNTIME, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError("unauthenticated", "Not signed in");
-
-  const { matchId, partnerUid, reason, mode } = request.data as {
-    matchId: string;
-    partnerUid: string;
-    reason: string;
-    mode: "spark" | "play";
-  };
-
-  if (!matchId || !partnerUid || !reason || !mode) {
-    throw new HttpsError("invalid-argument", "Missing required fields");
-  }
-
-  const db = admin.firestore();
-
-  // Suspension check
-  if (await isSuspendedUid(uid)) {
-    throw new HttpsError("permission-denied", "Account suspended");
-  }
-
-  // Validate caller is a match participant
-  const matchSnap = await db.collection("matches").doc(matchId).get();
-  if (!matchSnap.exists) throw new HttpsError("not-found", "Match not found");
-  const matchUsers: string[] = matchSnap.data()?.users ?? [];
-  if (!matchUsers.includes(uid)) {
-    throw new HttpsError("permission-denied", "Not a match participant");
-  }
-
-  // Lookup reason — reject unknown reasons
-  const reasonData = UNMATCH_REASONS[reason];
-  if (!reasonData) throw new HttpsError("invalid-argument", "Unknown unmatch reason");
-
-  const { scoreImpact, flagForReview } = reasonData;
-  const batch = db.batch();
-
-  // 1. Record unmatch reason
-  const reasonRef = db.collection("unmatchReasons").doc();
-  batch.set(reasonRef, {
-    matchId,
-    reporterUid: uid,
-    reportedUid: partnerUid,
-    reason,
-    scoreImpact,
-    flagForReview,
-    mode,
-    createdAt: admin.firestore.Timestamp.now(),
-  });
-
-  // 2. Score event (only if impact !== 0)
-  if (scoreImpact !== 0) {
-    const scoreRef = db.collection("scoreEvents").doc();
-    batch.set(scoreRef, {
-      uid: partnerUid,
-      delta: scoreImpact,
-      reason: `unmatch_${reason}`,
-      matchId,
-      createdAt: admin.firestore.Timestamp.now(),
-    });
-  }
-
-  // 3. Flag for review if needed
-  if (flagForReview) {
-    const reviewRef = db.collection("reviewQueue").doc();
-    batch.set(reviewRef, {
-      reportedUid: partnerUid,
-      reporterUid: uid,
-      reason,
-      matchId,
-      priority: "normal",
-      createdAt: admin.firestore.Timestamp.now(),
-    });
-  }
-
-  // 4. Delete match doc
-  batch.delete(db.collection("matches").doc(matchId));
-
-  await batch.commit();
-
-  return { success: true };
-});
-
 // ─── blockUser ────────────────────────────────────────────────────────────────
 // Server-side block with mirrored writes on both sides' blockedUsers subcollections.
 // Optionally soft-deletes the match doc if matchId provided.
@@ -321,7 +156,10 @@ export async function blockPair(uid: string, targetUid: string, matchId?: string
   const ctx = matchId ? await loadMatch(matchId) : null;
   if (matchId) {
     const sparkIdOk = ctx?.play || matchId === [uid, targetUid].sort().join("_");
-    if (!ctx || !sparkIdOk || !ctx.users.includes(uid) || !ctx.users.includes(targetUid)) {
+    // F-078: the caller still has the chat (in a kept chat, only whoever it
+    // was kept for — they may still block from it); the target is the other
+    // person it was with.
+    if (!ctx || !sparkIdOk || !ctx.has(uid) || !ctx.pair.includes(targetUid)) {
       throw new HttpsError("permission-denied", "Not your match");
     }
     mode = ctx.play || ctx.data.mode === "play" ? "play" : "spark";

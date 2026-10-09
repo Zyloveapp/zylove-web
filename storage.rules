@@ -40,53 +40,24 @@ service firebase.storage {
               && firestore.get(/databases/(default)/documents/userInternal/$(request.auth.uid)).data.suspendedUntil <= request.time);
     }
 
+    // F-096: not a deleted account (its sign-in can outlive the deletion by
+    // up to an hour). Chat photos need no check: deletion ends every chat.
+    function notDeleted() {
+      return !firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+          || firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('isDeleted', false) != true;
+    }
+
     function noServerMetadata() {
       return request.resource.metadata == null
           || !('zyloveCopy' in request.resource.metadata);
     }
 
-    // ─── Profile photos (mobile-era path) ─────────────────────────────────────
-    // Path: users/{uid}/photos/{filename}
-    // No client reads (see photos/ below).
-
-    match /users/{uid}/photos/{filename} {
-      allow read:   if false;
-      allow create: if isUser(uid)
-                    && isSignedIn()
-                    && isImage()
-                    && isUnderSizeLimit();
-      allow update: if isUser(uid)
-                    && isSignedIn()
-                    && isImage()
-                    && isUnderSizeLimit();
-      allow delete: if isUser(uid) && isSignedIn();
-    }
-
-    // ─── Selfie verification photos ──────────────────────────────────────────
-    // Path: users/{uid}/verification/{filename}
-    // Only the user can write. No one can read (admin SDK only).
-
-    match /users/{uid}/verification/{filename} {
-      allow read:   if false; // Cloud Functions + admin SDK only
-      allow create: if isUser(uid)
-                    && isSignedIn()
-                    && isImage()
-                    && isUnderSizeLimit();
-      allow update, delete: if false;
-    }
-
-    // ─── Consent photos ──────────────────────────────────────────────────────
-    // Path: users/{uid}/consent/{filename}
-    // Write once — no updates or deletes client-side.
-
-    match /users/{uid}/consent/{filename} {
-      allow read:   if false; // Admin SDK only
-      allow create: if isUser(uid)
-                    && isSignedIn()
-                    && isImage()
-                    && isUnderSizeLimit();
-      allow update, delete: if false;
-    }
+    // ─── Mobile-era paths (closed) ───────────────────────────────────────────
+    // users/{uid}/photos, users/{uid}/verification and users/{uid}/consent
+    // took unlimited 10 MB uploads that nothing moderated or used (F-091).
+    // Nothing in the app or the functions writes them any more; whatever is
+    // left there is the server's (scripts/lib/tokenSweep.mjs moves old
+    // users/{uid}/photos files). The catch-all at the end denies them.
 
     // ─── Profile photos (top-level path used by app) ─────────────────────────
     // Path: photos/{uid}/{spark|play}/{filename}
@@ -103,6 +74,7 @@ service firebase.storage {
       // a create).
       allow create: if isUser(uid) && isSignedIn() && isImage() && isUnderSizeLimit()
                     && callerActive()
+                    && notDeleted()
                     // F-062: Play photos go under the Play ID (below), never the uid.
                     && mode == 'spark'
                     && resource == null
@@ -123,6 +95,7 @@ service firebase.storage {
       allow read: if false;
       allow create: if isSignedIn() && isImage() && isUnderSizeLimit()
                     && callerActive()
+                    && notDeleted()
                     && firestore.get(/databases/(default)/documents/playIds/$(request.auth.uid)).data.playId == playId
                     && resource == null
                     && noServerMetadata();
@@ -134,28 +107,47 @@ service firebase.storage {
     // Read/write gated on caller being a participant in the match doc.
     // firestore.get() validates membership server-side — adds one Firestore
     // read per access but eliminates matchId-enumeration risk.
+    // F-091: as the Firestore rules for the chat itself (matchReadable /
+    // matchLive): after a block only the blocker may still read them (their
+    // evidence); new photos only while the match is live. A chat kept
+    // read-only after an unmatch lists only who keeps it (users / players).
 
     // F-062: a Play match (pm_…) is playMatches/{id}, its people named by
     // Play ID (players); the sender's file is named for their Play ID.
     function myPlayId() {
       return firestore.get(/databases/(default)/documents/playIds/$(request.auth.uid)).data.playId;
     }
+    function playMatch(matchId) {
+      return firestore.get(/databases/(default)/documents/playMatches/$(matchId)).data;
+    }
+    function sparkMatch(matchId) {
+      return firestore.get(/databases/(default)/documents/matches/$(matchId)).data;
+    }
     // …with Play access, as the Firestore rules require for Play chats.
     function inPlayMatch(matchId) {
       let n = firestore.get(/databases/(default)/documents/userInternal/$(request.auth.uid)).data;
       return matchId.matches('^pm_[A-Za-z0-9]{20}$')
-        && myPlayId() in firestore.get(/databases/(default)/documents/playMatches/$(matchId)).data.get('players', [])
+        && myPlayId() in playMatch(matchId).get('players', [])
         && n.get('playAccess', false) == true
         && (n.get('playAccessUntil', null) == null || request.time < n.playAccessUntil);
     }
+    function inSparkMatch(matchId) {
+      return sparkMatch(matchId).keys().hasAny(['users'])
+        && request.auth.uid in sparkMatch(matchId).users;
+    }
+    // Firestore's matchReadable: not blocked, or blocked by the reader (a
+    // Play match records the blocker's Play ID).
+    function readable(m, me) {
+      return m.get('isBlocked', false) != true || m.get('blockedBy', '') == me;
+    }
+    // Firestore's matchLive: not blocked, not unmatched.
+    function live(m) {
+      return m.get('isBlocked', false) != true && m.get('unmatchedAt', null) == null;
+    }
     match /chat-photos/{matchId}/{filename} {
-      allow read: if isSignedIn() && (inPlayMatch(matchId) || (
-        firestore.get(
-          /databases/(default)/documents/matches/$(matchId)
-        ).data.keys().hasAny(['users']) &&
-        request.auth.uid in firestore.get(
-          /databases/(default)/documents/matches/$(matchId)
-        ).data.users));
+      allow read: if isSignedIn() && (
+        (inPlayMatch(matchId) && readable(playMatch(matchId), myPlayId()))
+        || (inSparkMatch(matchId) && readable(sparkMatch(matchId), request.auth.uid)));
       allow create: if isSignedIn()
         && callerActive()
         && sparkPlus()
@@ -163,8 +155,9 @@ service firebase.storage {
         && resource == null
         && isUnderSizeLimit()
         && inPlayMatch(matchId)
+        && live(playMatch(matchId))
         && filename.matches(myPlayId() + '_[A-Za-z0-9._-]+')
-        && firestore.get(/databases/(default)/documents/playMatches/$(matchId)).data.get('photoConsent', {}).get('status', '') == 'accepted';
+        && playMatch(matchId).get('photoConsent', {}).get('status', '') == 'accepted';
       // A new file only, named for its sender (Stage A: the other participant
       // can't replace it); the app uploads ciphertext as image/x-zylove-encrypted.
       // Sending photos in chat is Spark+ (Stage C; userInternal entitlement,
@@ -175,14 +168,11 @@ service firebase.storage {
         && request.resource.contentType == 'image/x-zylove-encrypted'
         && resource == null
         && filename.matches(request.auth.uid + '_[A-Za-z0-9._-]+')
-        && isUnderSizeLimit() &&
-        request.auth.uid in firestore.get(
-          /databases/(default)/documents/matches/$(matchId)
-        ).data.users
+        && isUnderSizeLimit()
+        && request.auth.uid in sparkMatch(matchId).users
+        && live(sparkMatch(matchId))
         // T&S Phase 1: only once the other person accepted photo sharing.
-        && firestore.get(
-          /databases/(default)/documents/matches/$(matchId)
-        ).data.get('photoConsent', {}).get('status', '') == 'accepted';
+        && sparkMatch(matchId).get('photoConsent', {}).get('status', '') == 'accepted';
       allow update: if false;
       allow delete: if false;
     }

@@ -50,6 +50,28 @@ export function unlockedAt(messages: { senderId: unknown; sentAt: number; messag
   return at
 }
 
+// F-097: asking again after a "no". Once the other person declines the
+// caller's request, or the exchange the caller asked for is revoked, the
+// caller waits REREQUEST_WAIT_MS before asking again; after MAX_DECLINES
+// declines of their requests in this conversation they can't ask again at
+// all (the other person still can). A fixed wait plus a hard stop, rather
+// than ever-longer waits: two clear answers are enough, and the rule is easy
+// to explain. Declines are counted per requester in contactExchange.declines
+// (kept across requests; a re-match starts a new chat and a new count).
+export const REREQUEST_WAIT_MS = DAY_MS
+export const MAX_DECLINES = 2
+
+// Why `me` can't ask now, or null if they can. Pure.
+export function rerequestRefusal(ce: DocumentData | undefined, me: string, now: number): string | null {
+  if (!ce) return null
+  const declines = typeof ce.declines?.[me] === 'number' ? (ce.declines[me] as number) : 0
+  if (declines >= MAX_DECLINES) return "They've said no to sharing contact details, so you can't ask again in this conversation."
+  if (ce.requestedBy !== me) return null
+  const endedAt = ce.status === 'declined' ? ms(ce.respondedAt) : ce.status === 'revoked' ? ms(ce.revokedAt) : 0
+  if (endedAt && now - endedAt < REREQUEST_WAIT_MS) return 'You can ask to share contact details again 24 hours after the last answer.'
+  return null
+}
+
 // F-062: a Play match (pm_…) too. Everything written on the match or its
 // messages names people as they're known there: `me` is the caller's Play ID
 // in Play, their uid in Spark; `people` likewise.
@@ -94,9 +116,12 @@ export const requestContactExchange = onCall({ timeoutSeconds: 30, memory: '256M
   await requireActive(uid)
   const matchId = matchIdArg(request.data)
   const { ref, match, people, me } = await liveMatch(matchId, uid)
-  const status = (match.contactExchange as DocumentData | undefined)?.status
+  const prev = match.contactExchange as DocumentData | undefined
+  const status = prev?.status
   if (status === 'pending') throw new HttpsError('failed-precondition', 'A contact request is already waiting for an answer.')
   if (status === 'accepted') throw new HttpsError('failed-precondition', 'You already shared contact details here.')
+  const refusal = rerequestRefusal(prev, me, Date.now())
+  if (refusal) throw new HttpsError('failed-precondition', refusal)
   const since = generationOf(match)
   const snap = await ref.collection('messages').select('senderId', 'sentAt', 'messageType', 'nonce').get()
   const unlocked = unlockedAt(
@@ -106,7 +131,8 @@ export const requestContactExchange = onCall({ timeoutSeconds: 30, memory: '256M
   )
   if (unlocked === null) throw new HttpsError('failed-precondition', `Share contact unlocks once you've both sent ${UNLOCK_MESSAGES} messages.`)
   const batch = db().batch()
-  batch.update(ref, { contactExchange: { status: 'pending', requestedBy: me, requestedAt: Date.now() } })
+  const declines = typeof prev?.declines === 'object' && prev.declines !== null ? prev.declines : {}
+  batch.update(ref, { contactExchange: { status: 'pending', requestedBy: me, requestedAt: Date.now(), declines } })
   batch.create(ref.collection('messages').doc(), notice('contact_request', me))
   await batch.commit()
   await recordRequestSignal(uid, Date.now() - unlocked < FAST_AFTER_UNLOCK_MS)
@@ -131,6 +157,8 @@ export const respondContactExchange = onCall({ timeoutSeconds: 30, memory: '256M
       'contactExchange.status': data.accept ? 'accepted' : 'declined',
       'contactExchange.respondedAt': Date.now(),
       'contactExchange.shareBack': shareBack,
+      // F-097: counted against the requester (rerequestRefusal).
+      ...(data.accept ? {} : { [`contactExchange.declines.${ce.requestedBy}`]: FieldValue.increment(1) }),
     })
     tx.create(ref.collection('messages').doc(), notice(data.accept ? 'contact_accepted' : 'contact_declined', me))
   })

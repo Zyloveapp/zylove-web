@@ -40,8 +40,8 @@ import {
   smsEventFor,
 } from './adminAlertsCore'
 import { SMS_SECRETS, adminSmsStatus, smsFromNumber, textAdmin } from './sms'
-import { adminUids, internalRef, isAdminAuth } from './userData'
-import { audit, requireAdminAudited } from './audit'
+import { adminUids, internalRef } from './userData'
+import { audit, requireAdmin, requireAdminAudited } from './audit'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 // Queue docs are deleted once processed; a stuck one goes after a week.
@@ -257,18 +257,12 @@ export const warnExpiringEvidence = onSchedule(
 
 // ─── The settings screen ─────────────────────────────────────────────────────
 
-function requireAdmin(auth: { uid: string; token?: Record<string, unknown> } | undefined): string {
-  if (!auth) throw new HttpsError('unauthenticated', 'Login required')
-  if (!isAdminAuth(auth)) throw new HttpsError('permission-denied', 'Admins only.')
-  return auth.uid
-}
-
 // Saves a change; every change is in the audit log (which toggles, times and
 // counts changed — nothing else). Opting in sends the confirmation text.
 export const adminSetNotificationSettings = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
   async (request) => {
-    const uid = requireAdmin(request.auth)
+    const uid = await requireAdmin(request.auth, 'adminSetNotificationSettings')
     let patch
     try {
       patch = parsePatch(request.data)

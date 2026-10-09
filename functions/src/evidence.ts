@@ -6,7 +6,7 @@ import { defineSecret } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
 import { getStorage } from 'firebase-admin/storage'
 import { Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
-import { requireAdminAudited } from './audit'
+import { requireAdmin, requireAdminAudited } from './audit'
 import { FRANKING_KEY } from './franking'
 import { parseKeys, photoPlaintext, verifyItem, type Verdict } from './frankingCore'
 import { OUTCOME_RETENTION_MS, deletable, expiryFor, open, seal, type Sealed } from './lockerCore'
@@ -99,8 +99,10 @@ export const submitEvidence = onCall(
     // pulled in under it.
     if (!reportedUid || !report || report.reporterUid !== reporter || report.matchId !== matchId) throw new HttpsError('failed-precondition', 'Send the report first.')
     const ctx = await loadMatch(matchId)
-    const people = ctx ? ctx.users : [reporter, reportedUid]
-    if (!people.includes(reporter) || !people.includes(reportedUid)) throw new HttpsError('permission-denied', 'Not your conversation.')
+    // F-078: a live chat the reporter still has (in a kept chat, only whoever
+    // it was kept for), with the reported person its other side.
+    const mine = ctx ? ctx.has(reporter) && ctx.pair.includes(reportedUid) : true
+    if (!mine) throw new HttpsError('permission-denied', 'Not your conversation.')
     // A sender as messages name them (a Play ID in Play) → the account.
     const senderUid = async (id: string | null): Promise<string | null> =>
       id === null ? null : play ? ((ctx?.uidOf(id) ?? (await uidOfPlayId(id))) || '?') : id
@@ -310,6 +312,8 @@ export const adminLockerList = onCall({ timeoutSeconds: 30, memory: '256MiB', in
 })
 
 export const adminLockerDetail = onCall({ timeoutSeconds: 60, memory: '512MiB', invoker: 'public', secrets: [EVIDENCE_LOCKER_KEY] }, async (request) => {
+  // F-094: the admin check comes before anything is read.
+  await requireAdmin(request.auth, 'adminLockerDetail')
   const id = str((request.data as Record<string, unknown> | null)?.id, 64)
   const d = id ? (await db().doc(`evidenceLocker/${id}`).get()).data() : undefined
   await requireAdminAudited(request.auth, { action: 'locker.view', target: d?.reportedUid ?? null, detail: { id } })
@@ -343,6 +347,8 @@ async function decide(id: string, d: DocumentData, decision: 'actioned' | 'no_ac
 }
 
 export const adminLockerDecide = onCall({ timeoutSeconds: 30, memory: '256MiB', invoker: 'public' }, async (request) => {
+  // F-094: the admin check comes before anything is read.
+  await requireAdmin(request.auth, 'adminLockerDecide')
   const f = (request.data ?? {}) as Record<string, unknown>
   const id = str(f.id, 64)
   const decision = f.decision === 'actioned' || f.decision === 'no_action' ? f.decision : null
@@ -358,6 +364,8 @@ export const adminLockerDecide = onCall({ timeoutSeconds: 30, memory: '256MiB', 
 
 // A legal hold (who, when, why): nothing on hold is deleted until released.
 export const adminLockerHold = onCall({ timeoutSeconds: 30, memory: '256MiB', invoker: 'public' }, async (request) => {
+  // F-094: the admin check comes before anything is read.
+  await requireAdmin(request.auth, 'adminLockerHold')
   const f = (request.data ?? {}) as Record<string, unknown>
   const id = str(f.id, 64)
   const hold = f.hold === true

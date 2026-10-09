@@ -96,6 +96,13 @@ export async function loadMatching(uid: string, root?: DocumentData): Promise<Do
   return withFallback(m.data(), r, MATCHING_FIELDS)
 }
 
+// F-096: a deleted account (or no profile at all) — triggers and callables
+// that would otherwise write records for it again skip it.
+export async function isDeletedUid(uid: string): Promise<boolean> {
+  const root = await userRef(uid).get()
+  return !root.exists || root.get('isDeleted') === true
+}
+
 // Suspended (server-only flag in userInternal; older copies on the root doc
 // count until migrated). Deleted accounts count as suspended.
 export async function isSuspendedUid(uid: string, root?: DocumentData): Promise<boolean> {
@@ -178,8 +185,9 @@ export const mirrorPlan = onDocumentWritten({ document: 'userInternal/{uid}', me
   if (!now) return
   const mirror: DocumentData = { hasBillingAccount: typeof now.stripeCustomerId === 'string' && now.stripeCustomerId !== '' }
   for (const f of fields) mirror[f] = now[f] === undefined ? FieldValue.delete() : now[f]
-  // Only for users that exist (a stray internal doc mustn't create a profile).
-  if (!(await userRef(uid).get()).exists) return
+  // Only for users that exist (a stray internal doc mustn't create a profile)
+  // and aren't deleted (F-096: the account doc went with the deletion).
+  if (await isDeletedUid(uid)) return
   await accountRef(uid).set(mirror, { merge: true })
   logger.info('mirrorPlan', { fields: fields.filter(changed) })
 })

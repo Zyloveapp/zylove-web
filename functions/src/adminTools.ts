@@ -19,22 +19,15 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { getStorage } from 'firebase-admin/storage'
-import { isAdminAuth } from './userData'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, getNearestCity } from './cities'
-import { audit, requireAdminAudited } from './audit'
+import { audit, requireAdmin, requireAdminAudited } from './audit'
 import { revokeFounderStatus } from './founderActivity'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const PURGE_AFTER_MS = 365 * DAY_MS // onNightlyPurge's TWELVE_MONTHS_MS
 const RECORD_KEPT_MS = 18 * 30 * DAY_MS // its 18-month recovery-doc sweep
 const BOT_PREFIX = 'zbot-'
-
-function requireAdmin(auth: { uid: string; token?: Record<string, unknown> } | undefined): string {
-  if (!auth) throw new HttpsError('unauthenticated', 'Login required')
-  if (!isAdminAuth(auth)) throw new HttpsError('permission-denied', 'Admins only.')
-  return auth.uid
-}
 
 function ms(v: unknown): number | null {
   if (v instanceof Timestamp) return v.toMillis()
@@ -143,7 +136,7 @@ export const adminListDeletions = onCall(
 export const adminPurgeAccount = onCall(
   { timeoutSeconds: 300, memory: '512MiB', invoker: 'public' },
   async (request): Promise<{ purged: true; keptBannedRecord: boolean }> => {
-    const adminUid = requireAdmin(request.auth)
+    const adminUid = await requireAdmin(request.auth, 'adminPurgeAccount')
     const uid: unknown = request.data?.uid
     if (typeof uid !== 'string' || !uid || uid.includes('/')) throw new HttpsError('invalid-argument', 'uid required')
     if (uid === adminUid) throw new HttpsError('failed-precondition', "You can't purge your own account.")
@@ -157,6 +150,10 @@ export const adminPurgeAccount = onCall(
     ])
     const queued = user.data()?.isDeleted === true || deletionRequest.data()?.status === 'pending' || !records.empty
     if (!queued) throw new HttpsError('failed-precondition', 'This account is not pending deletion.')
+
+    // F-094: logged before anything is removed, and again (with the outcome)
+    // once it's done — a purge that fails partway still leaves a record.
+    await audit({ actor: adminUid, action: 'account.purge.attempt', target: uid })
 
     // Release a founder spot before the user doc goes.
     await revokeFounderStatus(uid).catch((err) =>

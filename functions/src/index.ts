@@ -51,7 +51,7 @@ import { scoreToTier, type ZyloveScoreTier } from './shared/zyloveScore'
 import { keptForReport, recomputeBehaviorRisk, recordVibeSignal } from './behavior'
 import { newTrial, noteTrialHistory, planView, priorTrial, trialExempt } from './trial'
 import { cityIsOpen, launchCityOf, requireTier, tierNow } from './entitlements'
-import { accountRef, internalRef, isAdminAuth, isSuspendedUid, loadInternal, loadMatching, loadSettings, requireActive } from './userData'
+import { accountRef, internalRef, isAdminAuth, isDeletedUid, isSuspendedUid, loadInternal, loadMatching, loadSettings, requireActive } from './userData'
 import { blockedEitherWay, likedInMode, likersInMode, pairIdOf, recordLike } from './likes'
 import { takeRateLimit } from './rateLimits'
 import { takeQuota } from './usage'
@@ -338,6 +338,10 @@ export const initUserDefaults = onCall(
   async (request): Promise<{ success: true }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const uid = request.auth.uid
+    // F-097: nothing filled in (or a trial started) while suspended — the
+    // app calls this on load and ignores a refusal; it runs again once the
+    // account is active.
+    await requireActive(uid)
 
     const ref = getFirestore().collection('users').doc(uid)
     const snap = await ref.get()
@@ -738,7 +742,10 @@ export const recordVibeRating = onCall(
       [`vibeCheckState_${me}.lastRatedAt`]: FieldValue.serverTimestamp(),
       ...(vibe === 'loving_it' ? { warmSignal: true } : {}),
     })
-    const points = adminRepeat ? 0 : VIBE_POINTS[vibe]
+    // F-096: nothing is written for a partner whose account was deleted
+    // (their server records went with it).
+    const partnerGone = await isDeletedUid(otherUid)
+    const points = adminRepeat || partnerGone ? 0 : VIBE_POINTS[vibe]
     if (points !== 0) {
       batch.set(internalRef(otherUid), { zyloveScore: { vibePoints: FieldValue.increment(points) } }, { merge: true })
     }
@@ -747,7 +754,7 @@ export const recordVibeRating = onCall(
     }
     await batch.commit()
     if (adminRepeat) logger.info('recordVibeRating: admin test repeat, no score change', { matchId })
-    if (!adminRepeat && !BOT_PREFIXES.some((p) => otherUid.startsWith(p))) {
+    if (!adminRepeat && !partnerGone && !BOT_PREFIXES.some((p) => otherUid.startsWith(p))) {
       await recordVibeSignal(otherUid, vibe === 'loving_it').catch((err: unknown) =>
         logger.error('recordVibeRating: vibe signal failed', { matchId, message: err instanceof Error ? err.message : String(err) }),
       )
@@ -796,6 +803,10 @@ export const setVisibility = onCall(
     if (!VISIBILITIES.includes(visibility as Visibility)) {
       throw new HttpsError('invalid-argument', "visibility must be 'active', 'hidden' or 'paused'")
     }
+    // F-097: a suspended account can't make itself visible again. Hiding or
+    // pausing stays open to it (it only ever hides them — and "hide instead"
+    // runs while a deletion is pending).
+    if (visibility === 'active') await requireActive(uid)
 
     const db = getFirestore()
     const userRef = db.collection('users').doc(uid)
@@ -1030,8 +1041,11 @@ async function resolveReviewTarget(
   // F-062: a Play match's people are in its server-only record.
   const ctx = await loadMatch(matchId)
   const live = ctx?.data
-  if (ctx && live) {
-    if (!ctx.users.includes(callerId) || !ctx.users.includes(otherUid)) throw notParticipant()
+  // F-078: only while the caller still has the chat — someone who left a
+  // chat kept read-only for the other person reviews it from its
+  // pastConnections record (below), as for any ended generation.
+  if (ctx && live && ctx.has(callerId)) {
+    if (!ctx.pair.includes(otherUid)) throw notParticipant()
     const generation = generationOf(live)
     if (requested === null || requested === generation) {
       return { ended: matchEnded(live), generation, messageCount: (await countMessages(matchId, generation)).total }
@@ -1062,8 +1076,8 @@ async function resolveReviewTarget(
 }
 
 // Queues the reviewed user for the safety team once a category crosses its
-// threshold. One reviewQueue doc per user and category (admin-only; the same
-// collection submitUnmatch writes), never a field on the public users doc.
+// threshold. One reviewQueue doc per user and category (admin-only), never a
+// field on the public users doc.
 async function checkModeration(reviewedUid: string, reviewerUid: string, matchId: string, categories: string[]): Promise<void> {
   const rules = MODERATION_RULES.filter((r) => categories.includes(r.category))
   if (rules.length === 0) return

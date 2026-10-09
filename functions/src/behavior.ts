@@ -9,6 +9,7 @@ import { purgeMatchContent } from './matchCleanup'
 import { clearLikes } from './likes'
 import { contextOf, endPlayPair, loadMatch, type MatchCtx } from './playMatch'
 import { isPlayMatchId, playIdOf } from './playIds'
+import { isDeletedUid } from './userData'
 
 // Behavioral safety signals feeding behaviorRiskScore.
 //
@@ -64,7 +65,11 @@ function nameIn(match: DocumentData, uid: string): Promise<string> {
   return connectionMode(match) === 'play' || match.players ? loadPlayName(uid) : Promise.resolve(displayName(match, uid))
 }
 
+// F-096: never for a deleted account — a match ending as part of the
+// deletion (unmatchedBy is then the deleted account) would otherwise put
+// back the behaviorSignals the deletion removed.
 export async function bump(uid: string, field: string): Promise<void> {
+  if (await isDeletedUid(uid)) return
   await getFirestore()
     .collection(SIGNALS)
     .doc(uid)
@@ -334,6 +339,7 @@ async function matchLifecycle(matchId: string, before: DocumentData | undefined,
 
 // Called by recordVibeRating: keeps the rated person's positive-vibe rate.
 export async function recordVibeSignal(ratedUid: string, positive: boolean): Promise<void> {
+  if (await isDeletedUid(ratedUid)) return // F-096
   const db = getFirestore()
   const ref = db.collection(SIGNALS).doc(ratedUid)
   await db.runTransaction(async (tx) => {
@@ -368,6 +374,7 @@ function riskScore(s: DocumentData, zyloveScore: number | null): number {
 
 // Recomputes one user's behaviorRiskScore; over 60 queues them for review.
 export async function recomputeBehaviorRisk(uid: string): Promise<number> {
+  if (await isDeletedUid(uid)) return 0 // F-096: nothing re-created for a deleted account
   const db = getFirestore()
   const ref = db.collection(SIGNALS).doc(uid)
   const [signals, score] = await Promise.all([ref.get(), db.doc(`users/${uid}/zyloveScore/current`).get()])

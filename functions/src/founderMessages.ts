@@ -14,7 +14,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore, type DocumentData, type WriteBatch } from 'firebase-admin/firestore'
 import { accountRef, isAdminAuth, requireActive } from './userData'
-import { audit } from './audit'
+import { audit, requireAdmin } from './audit'
 import { SMS_SECRETS, textAccount } from './sms'
 import { queueAdminAlert } from './adminAlerts'
 
@@ -53,12 +53,6 @@ function displayName(user: DocumentData | undefined): string {
 // older docs may still carry a public founderStatus.
 function isActiveFounder(id: string, user: DocumentData): boolean {
   return !id.startsWith(BOT_PREFIX) && user.isFounder === true && !FORMER_STATUSES.has(String(user.founderStatus))
-}
-
-function requireAdmin(auth: { uid: string; token?: Record<string, unknown> } | undefined): string {
-  if (!auth) throw new HttpsError('unauthenticated', 'Login required')
-  if (!isAdminAuth(auth)) throw new HttpsError('permission-denied', 'Admins only')
-  return auth.uid
 }
 
 async function activeFounders(): Promise<{ id: string; data: DocumentData }[]> {
@@ -179,7 +173,7 @@ export const sendFounderMessage = onCall(
 export const replyToFounder = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
   async (request): Promise<{ success: true }> => {
-    const adminUid = requireAdmin(request.auth)
+    const adminUid = await requireAdmin(request.auth, 'replyToFounder')
     await audit({ actor: adminUid, action: 'founder.reply', target: typeof request.data?.founderUid === 'string' ? request.data.founderUid : null })
     const data = (request.data ?? {}) as Record<string, unknown>
     const founderUid = parseUid(data.founderUid)
@@ -202,7 +196,7 @@ export const replyToFounder = onCall(
 export const broadcastToFounders = onCall(
   { timeoutSeconds: 300, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ sent: number; failed: number; texted: number; total: number }> => {
-    const adminUid = requireAdmin(request.auth)
+    const adminUid = await requireAdmin(request.auth, 'broadcastToFounders')
     await audit({ actor: adminUid, action: 'founder.broadcast' })
     const body = parseBody(request.data)
     const founders = (await activeFounders()).filter((f) => f.id !== adminUid)
@@ -269,7 +263,7 @@ export interface FounderThreadSummary {
 export const getFounderThreads = onCall(
   { timeoutSeconds: 30, memory: '256MiB', invoker: 'public' },
   async (request): Promise<{ threads: FounderThreadSummary[]; founderCount: number }> => {
-    const adminUid = requireAdmin(request.auth)
+    const adminUid = await requireAdmin(request.auth, 'getFounderThreads')
     await audit({ actor: adminUid, action: 'founder.threads_list' })
     const [snap, founders] = await Promise.all([
       db().collection('founderMessages').orderBy('lastMessageAt', 'desc').get(),
@@ -312,7 +306,7 @@ export const getFounderThread = onCall(
     const asked = (request.data as Record<string, unknown> | null)?.founderUid
     const founderUid = asked === undefined || asked === null ? caller : parseUid(asked)
     if (founderUid !== caller) {
-      requireAdmin(request.auth)
+      await requireAdmin(request.auth, 'getFounderThread')
       await audit({ actor: caller, action: 'founder.thread_view', target: founderUid })
     }
 

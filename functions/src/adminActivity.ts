@@ -17,8 +17,8 @@ import { revokeFounderStatus } from './founderActivity'
 import { SMS_SECRETS } from './sms'
 import { STRIPE_SECRETS, cancelSubscriptionsForDeletion } from './stripe'
 import { liftSuspension, setAuthDisabled } from './reports'
-import { audit, requireAdminAudited } from './audit'
-import { ROOT_SCRUB, clearPrivateData, internalRef, isAdminAuth, loadLocation, moderationCarry, recoveryRecord } from './userData'
+import { audit, requireAdmin, requireAdminAudited } from './audit'
+import { ROOT_SCRUB, clearPrivateData, internalRef, loadLocation, moderationCarry, recoveryRecord } from './userData'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const PAGE_SIZE = 25
@@ -27,12 +27,6 @@ const TZ = 'America/Chicago'
 const BOT_PREFIX = 'zbot-'
 // Same list as initUserDefaults / subscription.ts: complimentary Elite.
 const ELITE_IDENTITIES = new Set(['woman', 'trans_woman', 'nonbinary', 'non_binary', 'genderfluid', 'agender', 'self_describe'])
-
-function requireAdmin(auth: { uid: string; token?: Record<string, unknown> } | undefined): string {
-  if (!auth) throw new HttpsError('unauthenticated', 'Login required')
-  if (!isAdminAuth(auth)) throw new HttpsError('permission-denied', 'Admins only.')
-  return auth.uid
-}
 
 // createdAt / lastActive are a Timestamp (mobile) or epoch ms (web).
 function ms(v: unknown): number | null {
@@ -324,7 +318,7 @@ const ACTIONS: readonly UserAction[] = ['make_founder', 'suspend', 'unsuspend', 
 export const adminUserAction = onCall(
   { timeoutSeconds: 120, memory: '256MiB', invoker: 'public', secrets: [...SMS_SECRETS, ...STRIPE_SECRETS] },
   async (request): Promise<{ ok: true; founder?: FounderResult }> => {
-    const adminUid = requireAdmin(request.auth)
+    const adminUid = await requireAdmin(request.auth, 'adminUserAction')
     const { uid, action } = (request.data ?? {}) as { uid?: unknown; action?: unknown }
     if (typeof uid !== 'string' || !uid || uid.includes('/')) throw new HttpsError('invalid-argument', 'uid required')
     if (!ACTIONS.includes(action as UserAction)) throw new HttpsError('invalid-argument', 'unknown action')
@@ -341,6 +335,10 @@ export const adminUserAction = onCall(
     const reason = typeof (request.data as Record<string, unknown>)?.reason === 'string'
       ? String((request.data as Record<string, unknown>).reason).slice(0, 300) : null
     const log = (detail: Record<string, unknown> = {}) => audit({ actor: adminUid, action: `user.${action}`, target: uid, reason, detail })
+    // F-094: suspend / unsuspend / delete are logged as an attempt before
+    // anything changes, and with their outcome after — a failure partway
+    // still leaves a record.
+    const attempt = () => audit({ actor: adminUid, action: `user.${action}.attempt`, target: uid, reason })
 
     if (action === 'make_founder') {
       const loc = await loadLocation(uid, user)
@@ -352,6 +350,7 @@ export const adminUserAction = onCall(
 
     if (action === 'suspend' || action === 'unsuspend') {
       const suspend = action === 'suspend'
+      await attempt()
       // Suspension lives in the server-only userInternal (Stage 3). Stage A:
       // sign-in follows it, as adminModerate's does (signed-in sessions end).
       if (suspend) {
@@ -367,6 +366,7 @@ export const adminUserAction = onCall(
 
     // delete
     if (user.isDeleted === true) throw new HttpsError('failed-precondition', 'Already deleted.')
+    await attempt()
     const phone = await softDeleteAccount(uid, user, adminUid, { banned: false })
     await log({ recoveryRecord: phone !== null })
     logger.info('adminUserAction: deleted', { recoveryRecord: phone !== null })

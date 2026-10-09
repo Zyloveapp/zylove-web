@@ -162,7 +162,7 @@ const auth = admin.auth()
     // ── Sweep stale deletedAccounts recovery docs (>18 months, not banned) ──
     // Banned recovery docs never expire — they keep blocking re-signup.
     // 18-month window sits comfortably past the 12-month user-doc purge, so
-    // any lineage lookup from restoreAccount/softBlockOnboarding during the
+    // any lineage lookup from restoreAccount during the
     // user-doc's lifetime still finds the recovery doc.
     const EIGHTEEN_MONTHS_MS = 18 * 30 * 24 * 60 * 60 * 1000
     const eighteenMonthsAgo = admin.firestore.Timestamp.fromMillis(
