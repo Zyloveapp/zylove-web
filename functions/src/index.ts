@@ -2182,7 +2182,7 @@ export { requestAccountDeletion, cancelAccountDeletion } from './legacy/trustSaf
 export { onNightlyPurge, processGraceExpiredDeletions } from './legacy/onNightlyPurge'
 // Batch (b): photo moderation, pair rescoring, women's Elite.
 export { onPhotoUpload } from './legacy/onPhotoUpload'
-export { onMatchingPrefsWrite, onPlayProfileWrite, onPrivateProfileWrite, onProfileWrite } from './legacy/onProfileWrite'
+export { onMatchingPrefsWrite, onPlayProfileWrite, onPrivateProfileWrite, onProfileWrite, sweepRescores } from './legacy/onProfileWrite'
 export { claimWomenElite } from './legacy/claimWomenElite'
 // Batch (c): Explore taps and likes, swipes, blocking.
 export { onTap } from './legacy/onTap'
