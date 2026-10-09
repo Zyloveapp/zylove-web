@@ -7,7 +7,7 @@
 // saving the same value doesn't. Rules through the REST API with the owner's
 // ID token (server transforms for the stamps), then the app.
 import { test, expect } from '@playwright/test'
-import { resetEmulators, seedUser, signIn, offline, quietFirstRun, CONTEXT, idTokenFor, db, PROJECT, Timestamp, FieldValue } from './helpers.mjs'
+import { resetEmulators, seedUser, signIn, offline, quietFirstRun, CONTEXT, idTokenFor, db, PROJECT, PHOTO, Timestamp, FieldValue } from './helpers.mjs'
 
 test.beforeEach(resetEmulators)
 
@@ -218,18 +218,24 @@ async function open(browser, user) {
   return { ctx, page, net }
 }
 // "Reimagine my profile" opened at a step (by its index in the refresh flow),
-// with `draft` over the saved profile — what a draft kept on the device does.
+// with `draft` over the saved profile — what a draft kept on the device does
+// (with the published photo it keeps).
 const REFRESH_STEPS = { attractedTo: 2, habits: 7, beliefs: 13, review: 24 }
+// The age the seeded birthday (1995-03-14) gives today: a refresh re-saves it,
+// and the rules refuse an age change once identity is locked.
+const today = new Date()
+const AGE = today.getFullYear() - 1995 - (today.getMonth() < 2 || (today.getMonth() === 2 && today.getDate() < 14) ? 1 : 0)
 async function refreshAt(page, uid, step, draft = {}) {
+  const d = { photos: [{ id: 'p0', file: null, previewUrl: PHOTO }], ...draft }
   await page.evaluate(
     ([u, i, d]) => localStorage.setItem(`zylove_onboarding_draft_refresh_${u}`, JSON.stringify({ v: 1, savedAt: Date.now(), stepIndex: i, data: { draft: d } })),
-    [uid, REFRESH_STEPS[step], draft],
+    [uid, REFRESH_STEPS[step], d],
   )
   await page.goto('/onboarding?refresh=true')
 }
 
 test('F-099 app: a locked field shows the date it can change again and can\'t be changed; a reordered list saves as no change', async ({ browser }) => {
-  const u = await seedUser('Mia', { religion: 'christian', drinkingHabit: 'never', attractedTo: ['women', 'men'] })
+  const u = await seedUser('Mia', { age: AGE, religion: 'christian', drinkingHabit: 'never', attractedTo: ['women', 'men'] })
   await stampAgo(u.uid, ['religion', 'drinkingHabit'], 2)
   const until = dateOf(Date.now() - 2 * DAY + 30 * DAY)
   const { ctx, page, net } = await open(browser, u)
@@ -262,7 +268,7 @@ test('F-099 app: a locked field shows the date it can change again and can\'t be
 })
 
 test('F-099 app: a save refused because a field locked meanwhile shows the date, not a generic error; an allowed change stamps', async ({ browser }) => {
-  const u = await seedUser('Nia', { religion: 'christian', politicalView: 'independent' })
+  const u = await seedUser('Nia', { age: AGE, religion: 'christian', politicalView: 'independent' })
   const { ctx, page, net } = await open(browser, u)
   await refreshAt(page, u.uid, 'review', { religion: 'jewish', politicalView: 'democrat' })
   await expect(page.getByRole('button', { name: 'Save changes' })).toBeVisible({ timeout: 20000 })
