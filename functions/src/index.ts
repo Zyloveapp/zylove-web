@@ -26,7 +26,7 @@ import {
   type ProfileScorecard,
 } from './profileScorecard'
 import { saveReviewHistory } from './reviewHistory'
-import { loadReviewPhotos, photoConsent, type ImageBlock } from './reviewPhotos'
+import { loadReviewPhotos, photoConsent } from './reviewPhotos'
 import {
   GO_DEEPER_FOCUS,
   buildPlayGoDeeperPrompt,
@@ -59,8 +59,9 @@ import { listLikes, resolveLike } from './likerPreview'
 import { performLike } from './legacy/onLike'
 import { takeRateLimit } from './rateLimits'
 import { logId } from './logSafe'
-import { PROFILE_DATA_RULE, hasLinkOrNumber, profileBlock, safeBio, safeStarters } from './aiOutput'
-import { takeQuota } from './usage'
+import { hasLinkOrNumber, safeBio, safeStarters } from './aiOutput'
+import { AiBusy, AiCallFailed, startAiSpend, type AiSpend } from './aiCall'
+import { buildPlayStarterPrompt, buildProfileQuestionPrompt, buildStarterPrompt, playPersonLine, profileForReview } from './profilePrompts'
 import { loadSparkDetails } from './pairSpark'
 import { clientIp, ipRateKey } from './clientIp'
 import { isBotUid, playStatus, requirePlayAccess, requirePlayEntitled } from './playAccess'
@@ -82,13 +83,11 @@ import {
 } from './shared/reviewCategories'
 import { updateSearchName } from './searchName'
 import { NEW_ACCOUNT_MS } from './shared/scamRules'
-import { PLAY_PROMPTS, SPARK_PROMPTS, UNIVERSAL_PROMPTS } from './shared/profile'
 
 initializeApp()
 
 const anthropicKey = defineSecret('ANTHROPIC_API_KEY')
 
-const MODEL = 'claude-sonnet-4-6'
 // Same cap as both profile editors (mobile and web).
 const MAX_BIO_LENGTH = 300
 
@@ -96,16 +95,6 @@ interface BioResponse {
   bio: string
   // The plan's allowance is used up (Stage C).
   limited?: boolean
-}
-
-function extractText(body: unknown): string {
-  if (typeof body !== 'object' || body === null || !('content' in body)) return ''
-  const { content } = body as { content: unknown }
-  if (!Array.isArray(content)) return ''
-  const first: unknown = content[0]
-  if (typeof first !== 'object' || first === null || !('text' in first)) return ''
-  const { text } = first as { text: unknown }
-  return typeof text === 'string' ? text.trim() : ''
 }
 
 // Cuts at the last whole word that fits, so the text never ends mid-word.
@@ -126,39 +115,23 @@ export const generateSparkBio = onCall(
     if (!(await requireActive(request.auth.uid).then(() => true, () => false))) return { bio: '' }
     // Stage B: was unlimited. Over the limit the app falls back to its own template.
     // Stage C: the plan's allowance (usage.ts). Used up: no AI call — the app
-    // shows its own template and the upgrade note.
-    const refund = await takeQuota(request.auth.uid, 'sparkBio').catch(() => null)
-    if (!refund) return { bio: '', limited: true }
+    // shows its own template and the upgrade note. C2: a call that was
+    // answered counts, even if its bio is then dropped (aiCall.ts).
+    let ai: AiSpend
+    try {
+      ai = await startAiSpend(request.auth.uid, 'sparkBio', anthropicKey.value())
+    } catch (err) {
+      return err instanceof AiBusy ? { bio: '' } : { bio: '', limited: true }
+    }
 
     try {
       const input = parseBioRequest(request.data)
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicKey.value(),
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          max_tokens: 400,
-          messages: [{ role: 'user', content: buildBioPrompt(input) }],
-        }),
-      })
-
-      if (!response.ok) {
-        logger.error('generateSparkBio: Anthropic API error', { status: response.status })
-        await refund()
-        return { bio: '' }
-      }
-
+      const reply = await ai.ask({ label: 'generateSparkBio', prompt: buildBioPrompt(input), maxTokens: 400 })
       // F-095: a bio with a link, handle or number is dropped (aiOutput.ts).
-      const bio = safeBio(truncateAtWord(extractText(await response.json()), MAX_BIO_LENGTH))
-      if (!bio) await refund()
-      return { bio }
+      return { bio: safeBio(truncateAtWord(reply, MAX_BIO_LENGTH)) }
     } catch (err) {
-      logger.error('generateSparkBio failed', { message: err instanceof Error ? err.message : String(err) })
-      await refund()
+      if (!(err instanceof AiCallFailed)) logger.error('generateSparkBio failed', { message: err instanceof Error ? err.message : String(err) })
+      await ai.refundIfUnbilled()
       return { bio: '' }
     }
   },
@@ -177,39 +150,17 @@ export const generatePlayBio = onCall(
     await requireActive(request.auth.uid)
     await requirePlayEntitled(request.auth.uid)
     // Stage B: the slot is reserved before the call (parallel calls can't
-    // overrun the limit) and given back if nothing comes of it.
-    const refund = await takeQuota(request.auth.uid, 'playBio')
+    // overrun the limit). C2: given back only if the call failed.
+    const ai = await startAiSpend(request.auth.uid, 'playBio', anthropicKey.value())
 
     try {
       const input = parsePlayBioRequest(request.data)
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicKey.value(),
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          max_tokens: 300,
-          messages: [{ role: 'user', content: buildPlayBioPrompt(input) }],
-        }),
-      })
-
-      if (!response.ok) {
-        logger.error('generatePlayBio: Anthropic API error', { status: response.status })
-        await refund()
-        return { bio: '' }
-      }
-
+      const reply = await ai.ask({ label: 'generatePlayBio', prompt: buildPlayBioPrompt(input), maxTokens: 300 })
       // F-095: a bio with a link, handle or number is dropped (aiOutput.ts).
-      const bio = safeBio(truncateAtWord(extractText(await response.json()), MAX_BIO_LENGTH))
-      // Only successful generations count.
-      if (!bio) await refund()
-      return { bio }
+      return { bio: safeBio(truncateAtWord(reply, MAX_BIO_LENGTH)) }
     } catch (err) {
-      logger.error('generatePlayBio failed', { message: err instanceof Error ? err.message : String(err) })
-      await refund()
+      if (!(err instanceof AiCallFailed)) logger.error('generatePlayBio failed', { message: err instanceof Error ? err.message : String(err) })
+      await ai.refundIfUnbilled()
       return { bio: '' }
     }
   },
@@ -220,29 +171,13 @@ export const generatePlayBio = onCall(
 const GO_DEEPER_TEMPERATURES = [0.9, 1.0] as const
 
 
-// One question from the shared prompt, or '' on any API failure.
-async function askGoDeeper(prompt: string, temperature: number): Promise<string> {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': anthropicKey.value(),
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 100,
-      temperature,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  })
-  if (!response.ok) {
-    logger.error('generatePlayGoDeeper: Anthropic API error', { status: response.status })
-    return ''
-  }
+// One question from the shared prompt ('' when the reply has none). Throws
+// AiCallFailed when the call failed.
+async function askGoDeeper(ai: AiSpend, label: string, prompt: string, temperature: number): Promise<string> {
+  const reply = await ai.ask({ label, prompt, maxTokens: 100, temperature })
   // F-095: a question naming a link, handle or number counts as no question
   // (Go Deeper questions can end up on the profile).
-  const question = cleanGoDeeperQuestion(extractText(await response.json()))
+  const question = cleanGoDeeperQuestion(reply)
   return hasLinkOrNumber(question) ? '' : question
 }
 
@@ -251,8 +186,8 @@ const sameQuestion = (a: string, b: string) => a.toLowerCase().replace(/\W/g, ''
 // Two personal Go Deeper questions written from the user's Play answers, one
 // after the other: each call has its own focus, and the second is shown the
 // first question so it picks a different angle. If they still match, the
-// second is asked once more. Rate limited like generatePlayBio — only a
-// successful pair counts.
+// second is asked once more. Limited like generatePlayBio (the plan's
+// allowance; a call that was answered counts).
 export const generatePlayGoDeeper = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ questions: [string, string] }> => {
@@ -260,22 +195,25 @@ export const generatePlayGoDeeper = onCall(
     await requireActive(request.auth.uid)
     await requirePlayEntitled(request.auth.uid)
     const input = parsePlayGoDeeperRequest(request.data)
-    // Reserved before the calls, given back if they fail (Stage B).
-    const refund = await takeQuota(request.auth.uid, 'playGoDeeper')
+    // Reserved before the calls (Stage B). C2: given back only if no call
+    // was answered — a pair dropped by the filters or the duplicate check
+    // still counts.
+    const ai = await startAiSpend(request.auth.uid, 'playGoDeeper', anthropicKey.value())
+    const label = 'generatePlayGoDeeper'
     let first = ''
     let second = ''
     try {
-      first = await askGoDeeper(buildPlayGoDeeperPrompt(input, { focus: GO_DEEPER_FOCUS[0] }), GO_DEEPER_TEMPERATURES[0])
+      first = await askGoDeeper(ai, label, buildPlayGoDeeperPrompt(input, { focus: GO_DEEPER_FOCUS[0] }), GO_DEEPER_TEMPERATURES[0])
       if (first) {
         const secondPrompt = buildPlayGoDeeperPrompt(input, { focus: GO_DEEPER_FOCUS[1], previousQuestion: first })
-        second = await askGoDeeper(secondPrompt, GO_DEEPER_TEMPERATURES[1])
-        if (second && sameQuestion(first, second)) second = await askGoDeeper(secondPrompt, GO_DEEPER_TEMPERATURES[1])
+        second = await askGoDeeper(ai, label, secondPrompt, GO_DEEPER_TEMPERATURES[1])
+        if (second && sameQuestion(first, second)) second = await askGoDeeper(ai, label, secondPrompt, GO_DEEPER_TEMPERATURES[1])
       }
     } catch (err) {
-      logger.error('generatePlayGoDeeper failed', { message: err instanceof Error ? err.message : String(err) })
+      if (!(err instanceof AiCallFailed)) logger.error('generatePlayGoDeeper failed', { message: err instanceof Error ? err.message : String(err) })
     }
     if (!first || !second || sameQuestion(first, second)) {
-      await refund()
+      await ai.refundIfUnbilled()
       throw new HttpsError('unavailable', "Couldn't generate questions right now.")
     }
     return { questions: [first, second] }
@@ -288,32 +226,36 @@ export const generatePlayGoDeeper = onCall(
 
 // Spark onboarding's Go Deeper: two personal questions from the user's Spark
 // answers, same two-call shape as generatePlayGoDeeper (the second sees the
-// first so it takes a different angle). 3 successful pairs per rolling week.
+// first so it takes a different angle). The plan's allowance (usage.ts).
 export const generateSparkGoDeeper = onCall(
   { timeoutSeconds: 60, memory: '256MiB', secrets: [anthropicKey], invoker: 'public' },
   async (request): Promise<{ questions: [string, string] }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to generate questions.')
     await requireActive(request.auth.uid)
     const input = parseSparkGoDeeperRequest(request.data)
-    // Reserved before the calls, given back if they fail (Stage B).
-    const refund = await takeQuota(request.auth.uid, 'sparkGoDeeper')
+    // Reserved before the calls (Stage B); given back only if no call was
+    // answered (C2, as generatePlayGoDeeper).
+    const ai = await startAiSpend(request.auth.uid, 'sparkGoDeeper', anthropicKey.value())
+    const label = 'generateSparkGoDeeper'
     let first = ''
     let second = ''
     try {
       first = await askGoDeeper(
+        ai,
+        label,
         buildSparkGoDeeperPrompt(input, { focus: SPARK_GO_DEEPER_FOCUS[0] }),
         GO_DEEPER_TEMPERATURES[0],
       )
       if (first) {
         const secondPrompt = buildSparkGoDeeperPrompt(input, { focus: SPARK_GO_DEEPER_FOCUS[1], previousQuestion: first })
-        second = await askGoDeeper(secondPrompt, GO_DEEPER_TEMPERATURES[1])
-        if (second && sameQuestion(first, second)) second = await askGoDeeper(secondPrompt, GO_DEEPER_TEMPERATURES[1])
+        second = await askGoDeeper(ai, label, secondPrompt, GO_DEEPER_TEMPERATURES[1])
+        if (second && sameQuestion(first, second)) second = await askGoDeeper(ai, label, secondPrompt, GO_DEEPER_TEMPERATURES[1])
       }
     } catch (err) {
-      logger.error('generateSparkGoDeeper failed', { message: err instanceof Error ? err.message : String(err) })
+      if (!(err instanceof AiCallFailed)) logger.error('generateSparkGoDeeper failed', { message: err instanceof Error ? err.message : String(err) })
     }
     if (!first || !second || sameQuestion(first, second)) {
-      await refund()
+      await ai.refundIfUnbilled()
       throw new HttpsError('unavailable', "Couldn't generate questions right now.")
     }
     return { questions: [first, second] }
@@ -1334,39 +1276,6 @@ const FALLBACK_STARTERS = [
   'What are you looking forward to this week?',
   "What's your go-to first date spot in Austin?",
 ]
-const STARTER_PROMPT_TEXT = new Map(
-  [...UNIVERSAL_PROMPTS, ...SPARK_PROMPTS, ...PLAY_PROMPTS].map((p) => [p.id, p.text]),
-)
-
-function list(v: unknown): string {
-  const items = Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x !== '') : []
-  return items.length > 0 ? items.join(', ') : 'none listed'
-}
-
-function promptSummary(v: unknown): string {
-  if (!Array.isArray(v)) return 'none'
-  const answered = v
-    .filter((a): a is { promptId?: unknown; answer: string } => typeof a?.answer === 'string' && a.answer.trim() !== '')
-    .map((a) => {
-      const prompt = typeof a.promptId === 'string' ? STARTER_PROMPT_TEXT.get(a.promptId) : undefined
-      return `${prompt ?? 'Prompt'} "${a.answer.trim().slice(0, 200)}"`
-    })
-  return answered.length > 0 ? answered.join('; ') : 'none'
-}
-
-function personLine(user: DocumentData | undefined): string {
-  const name = typeof user?.displayName === 'string' && user.displayName ? user.displayName : 'Someone'
-  return `${name}, interests: ${list(user?.lifestyleTags)}, values: ${list(user?.relationshipValues)}, prompts: ${promptSummary(user?.promptAnswers)}`
-}
-
-function buildStarterPrompt(me: DocumentData | undefined, them: DocumentData | undefined): string {
-  return `Generate 3 short, natural conversation starters for two people who just matched on a dating app.
-${profileBlock('person_a', personLine(me))}
-${profileBlock('person_b', personLine(them))}
-${PROFILE_DATA_RULE}
-Rules: under 15 words each, conversational not formal, based on something specific from their profiles, no generic openers like 'hey' or 'how are you'
-Return as JSON array of 3 strings.`
-}
 
 // Play matches: openers from the Play profiles only (playProfile/data and
 // the Play name), never Spark data — the two modes stay sealed.
@@ -1375,23 +1284,6 @@ const PLAY_FALLBACK_STARTERS = [
   'What caught your eye on my profile?',
   "What's your idea of a good first meet?",
 ]
-
-function playPersonLine(root: DocumentData | undefined, play: DocumentData | undefined): string {
-  const name =
-    [play?.playDisplayName, root?.playDisplayName, play?.displayName].find((n): n is string => typeof n === 'string' && n.trim() !== '') ?? 'Someone'
-  const bio = typeof play?.playBio === 'string' && play.playBio.trim() ? `"${play.playBio.trim().slice(0, 200)}"` : 'none'
-  const spice = typeof play?.spiceLevel === 'string' ? play.spiceLevel : 'unknown'
-  return `${name}, Play bio: ${bio}, spice level: ${spice}, into: ${list(play?.playInterestTags)}, prompts: ${promptSummary(play?.promptAnswers)}`
-}
-
-function buildPlayStarterPrompt(lines: [string, string]): string {
-  return `Generate 3 short, natural opening messages for two adults who just matched in the casual, flirty "Play" side of a dating app.
-${profileBlock('person_a', lines[0])}
-${profileBlock('person_b', lines[1])}
-${PROFILE_DATA_RULE}
-Rules: under 15 words each, playful and confident, flirty but tasteful and respectful — nothing explicit or graphic, consent-minded, based on something specific from their Play profiles, no generic openers like 'hey' or 'how are you'
-Return as JSON array of 3 strings.`
-}
 
 function parseStarters(text: string): string[] | null {
   try {
@@ -1430,7 +1322,13 @@ export const generateConversationStarter = onCall(
     // Spark+/Elite: 5 a day). Used up: stock starters, no AI call.
     const source = (request.data as Record<string, unknown> | null)?.source === 'icebreaker' ? 'icebreaker' : 'nudge'
     if (source === 'icebreaker' && !otherUid.startsWith('zbot-')) await requireTier(callerId, 'spark_plus', 'Break the ice')
-    if (!(await takeQuota(callerId, 'starters').then(() => true, () => false))) return { starters: fallback, limited: true }
+    // C2: a call that was answered counts, whatever its openers (aiCall.ts).
+    let ai: AiSpend
+    try {
+      ai = await startAiSpend(callerId, 'starters', anthropicKey.value())
+    } catch (err) {
+      return err instanceof AiBusy ? { starters: fallback } : { starters: fallback, limited: true }
+    }
 
     try {
       const db = getFirestore()
@@ -1443,110 +1341,18 @@ export const generateConversationStarter = onCall(
       const prompt = play
         ? buildPlayStarterPrompt([playPersonLine(me.data(), myPlay?.data()), playPersonLine(them.data(), theirPlay?.data())])
         : buildStarterPrompt(me.data(), them.data())
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicKey.value(),
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          max_tokens: 300,
-          messages: [{ role: 'user', content: prompt }],
-        }),
-      })
-      if (!response.ok) {
-        logger.error('generateConversationStarter: Anthropic API error', { status: response.status, play })
-        return { starters: fallback }
-      }
+      const reply = await ai.ask({ label: 'generateConversationStarter', prompt, maxTokens: 300 })
       // F-095: openers naming a link, handle, number or another app are dropped.
-      return { starters: safeStarters(parseStarters(extractText(await response.json())), fallback) }
+      return { starters: safeStarters(parseStarters(reply), fallback) }
     } catch (err) {
-      logger.error('generateConversationStarter failed', { play, message: err instanceof Error ? err.message : String(err) })
+      if (!(err instanceof AiCallFailed)) logger.error('generateConversationStarter failed', { play, message: err instanceof Error ? err.message : String(err) })
+      await ai.refundIfUnbilled()
       return { starters: fallback }
     }
   },
 )
 
 // ─── Profile AI: shared helpers ──────────────────────────────────────────────
-
-// One-turn Claude call. Returns '' on any API failure (logged); callers fall back.
-async function askClaude(label: string, prompt: string, maxTokens: number): Promise<string> {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': anthropicKey.value(),
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] }),
-  })
-  if (!response.ok) {
-    logger.error(`${label}: Anthropic API error`, { status: response.status })
-    return ''
-  }
-  return extractText(await response.json())
-}
-
-// A profile review: the photos (if any) first, then the prompt.
-async function askClaudeWithPhotos(label: string, prompt: string, photos: ImageBlock[], maxTokens: number): Promise<string> {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': anthropicKey.value(),
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: maxTokens,
-      messages: [{ role: 'user', content: [...photos, { type: 'text', text: prompt }] }],
-    }),
-  })
-  if (!response.ok) {
-    logger.error(`${label}: Anthropic API error`, { status: response.status })
-    return ''
-  }
-  return extractText(await response.json())
-}
-
-function humanizeKey(key: string): string {
-  return key.replace(/_/g, ' ')
-}
-
-function humanList(v: unknown): string {
-  return strings(v).map(humanizeKey).join(', ') || 'none listed'
-}
-
-interface OwnAnswer {
-  question: string
-  answer: string
-}
-
-// Prompt answers from wherever this profile keeps them: sparkProfile/data's
-// sparkPromptAnswers map (web) or promptAnswers array, else the root doc.
-function ownPromptAnswers(root: DocumentData, spark: DocumentData): OwnAnswer[] {
-  const fromList = (v: unknown) =>
-    Array.isArray(v)
-      ? v
-          .filter((a) => typeof a?.promptId === 'string' && typeof a?.answer === 'string' && a.answer.trim())
-          .map((a) => ({ promptId: a.promptId as string, answer: (a.answer as string).trim() }))
-      : []
-  const map: unknown = spark.sparkPromptAnswers
-  const fromMap =
-    typeof map === 'object' && map !== null && !Array.isArray(map)
-      ? Object.entries(map)
-          .filter((e): e is [string, string] => typeof e[1] === 'string' && e[1].trim() !== '')
-          .map(([promptId, answer]) => ({ promptId, answer: answer.trim() }))
-      : []
-  const raw = fromMap.length > 0 ? fromMap : fromList(spark.promptAnswers).length > 0 ? fromList(spark.promptAnswers) : fromList(root.promptAnswers)
-  const dynamic = typeof spark.dynamicPrompt === 'string' ? spark.dynamicPrompt : typeof root.dynamicPrompt === 'string' ? root.dynamicPrompt : ''
-  return raw.map((a) => ({
-    question: a.promptId === 'dynamic' && dynamic ? dynamic : (STARTER_PROMPT_TEXT.get(a.promptId) ?? humanizeKey(a.promptId)),
-    answer: a.answer,
-  }))
-}
 
 async function loadOwnProfileDocs(uid: string): Promise<{ root: DocumentData; spark: DocumentData }> {
   const db = getFirestore()
@@ -1556,12 +1362,6 @@ async function loadOwnProfileDocs(uid: string): Promise<{ root: DocumentData; sp
   ])
   if (!root.exists) throw new HttpsError('failed-precondition', 'Profile not found')
   return { root: root.data() ?? {}, spark: spark.data() ?? {} }
-}
-
-function ownBio(root: DocumentData, spark: DocumentData): string {
-  // Mobile's editor saves the bio only to sparkProfile/data.
-  const bio = typeof spark.bio === 'string' && spark.bio.trim() ? spark.bio : root.bio
-  return typeof bio === 'string' ? bio.trim() : ''
 }
 
 // ─── generateProfileQuestion ─────────────────────────────────────────────────
@@ -1589,54 +1389,27 @@ export const generateProfileQuestion = onCall(
     const uid = request.auth.uid
     let fallback = DEFAULT_QUESTION
     // Stage C: 3 a day for everyone. Over the limit: the stock question, no AI call.
-    if (!(await takeQuota(uid, 'profileQuestion').then(() => true, () => false))) return { question: fallback }
+    // C2: a call that was answered counts, whatever its question (aiCall.ts).
+    let ai: AiSpend
+    try {
+      ai = await startAiSpend(uid, 'profileQuestion', anthropicKey.value())
+    } catch {
+      return { question: fallback }
+    }
     try {
       const { root, spark } = await loadOwnProfileDocs(uid)
       fallback = QUESTION_FALLBACKS[strings(root.personalityTraits)[0] ?? ''] ?? DEFAULT_QUESTION
-      const answered = ownPromptAnswers(root, spark).map((a) => a.question)
-      const prompt = `Based on this person's dating profile, generate ONE unique, thoughtful question they could answer to help potential matches understand them better. The question should be specific to their actual interests, values and personality — not generic. It should be something that reveals character and sparks conversation.
-
-Profile: Name: ${typeof root.displayName === 'string' ? root.displayName : 'Unknown'}, Personality: ${humanList(root.personalityTraits)}, Values: ${humanList(root.relationshipValues)}, Lifestyle: ${humanList(root.lifestyleTags)}, Bio: ${ownBio(root, spark) || 'none'}, Prompts already answered: ${answered.join(' | ') || 'none'}
-
-Rules: under 12 words, conversational, specific to this person, not a question they already answered, no yes/no questions.
-Return only the question text, nothing else.`
-      return { question: cleanQuestion(await askClaude('generateProfileQuestion', prompt, 100)) ?? fallback }
+      const prompt = buildProfileQuestionPrompt(root, spark)
+      return { question: cleanQuestion(await ai.ask({ label: 'generateProfileQuestion', prompt, maxTokens: 100 })) ?? fallback }
     } catch (err) {
-      logger.error('generateProfileQuestion failed', { message: err instanceof Error ? err.message : String(err) })
+      if (!(err instanceof AiCallFailed)) logger.error('generateProfileQuestion failed', { message: err instanceof Error ? err.message : String(err) })
+      await ai.refundIfUnbilled()
       return { question: fallback }
     }
   },
 )
 
 // ─── reviewProfile ───────────────────────────────────────────────────────────
-
-// The fields a match actually sees — never birthday, contact or location data.
-function profileForReview(root: DocumentData, spark: DocumentData): string {
-  const photoCount = strings(root.photoURLs).length
-  const answers = ownPromptAnswers(root, spark)
-  // §4.A2: what a match sees of gender and pronouns is the server-built line.
-  const genderLine = typeof root.genderLine === 'string' ? root.genderLine : ''
-  return [
-    `Name: ${typeof root.displayName === 'string' ? root.displayName : 'Unknown'}`,
-    typeof root.age === 'number' ? `Age: ${root.age}` : '',
-    genderLine ? `Gender and pronouns shown: ${genderLine}` : '',
-    `Photos: ${photoCount}`,
-    `Bio: ${ownBio(root, spark) || 'none'}`,
-    `Open to: ${humanList(root.openTo)}`,
-    `Personality: ${humanList(root.personalityTraits)}`,
-    `Values: ${humanList(root.relationshipValues)}`,
-    `Lifestyle: ${humanList(root.lifestyleTags)}`,
-    `Habits: ${humanList(root.habitTags)}`,
-    `Weekends: ${humanList(root.weekendVibes)}`,
-    `Love languages (gives): ${humanList(root.loveLangGive)}; (receives): ${humanList(root.loveLangReceive)}`,
-    typeof root.conflictStyle === 'string' ? `Conflict style: ${humanizeKey(root.conflictStyle)}` : '',
-    typeof root.togethernessStyle === 'string' ? `Together time: ${humanizeKey(root.togethernessStyle)}` : '',
-    typeof root.stressResponse === 'string' ? `Under stress: ${humanizeKey(root.stressResponse)}` : '',
-    answers.length > 0 ? `Prompts:\n${answers.map((a) => `- ${a.question} "${a.answer.slice(0, 200)}"`).join('\n')}` : 'Prompts: none',
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
 
 // Scorecard JSON runs past the old prose limit; leave headroom so a long
 // reply isn't cut mid-object (which would fail the parse).
@@ -1653,8 +1426,10 @@ export const reviewProfile = onCall(
   async (request): Promise<{ review: ProfileScorecard }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     await requireActive(request.auth.uid)
-    // Stage B: was unlimited. Reserved before the call, given back if it fails.
-    const refund = await takeQuota(request.auth.uid, 'sparkReview')
+    // Stage B: was unlimited. Reserved before the call. C2: given back only
+    // if the call failed — an answered call counts even when its scorecard
+    // doesn't parse.
+    const ai = await startAiSpend(request.auth.uid, 'sparkReview', anthropicKey.value())
     let review: ProfileScorecard | null = null
     try {
       const { root, spark } = await loadOwnProfileDocs(request.auth.uid)
@@ -1682,13 +1457,14 @@ ${SECOND_PERSON_RULE}
 
 ${scorecardInstructions(SPARK_REVIEW_SECTIONS, { photos: photos.length > 0 })}`
       const maxTokens = photos.length > 0 ? REVIEW_WITH_PHOTOS_MAX_TOKENS : REVIEW_MAX_TOKENS
-      const reply = await askClaudeWithPhotos('reviewProfile', prompt, photos, maxTokens)
+      const reply = await ai.ask({ label: 'reviewProfile', prompt, images: photos, maxTokens, timeoutMs: 100_000 })
       review = parseScorecard(reply, SPARK_REVIEW_SECTIONS, { photos: photos.length > 0 })
+      if (!review) logger.error('reviewProfile: reply was not a valid scorecard', { length: reply.length })
     } catch (err) {
-      logger.error('reviewProfile failed', { message: err instanceof Error ? err.message : String(err) })
+      if (!(err instanceof AiCallFailed)) logger.error('reviewProfile failed', { message: err instanceof Error ? err.message : String(err) })
     }
     if (!review) {
-      await refund()
+      await ai.refundIfUnbilled()
       throw new HttpsError('unavailable', "Couldn't generate review. Try again.")
     }
     await saveReviewHistory(request.auth.uid, 'spark', review)
@@ -1714,28 +1490,31 @@ export const reviewPlayProfile = onCall(
       loadSettings(request.auth.uid),
     ])
     if (!playSnap.exists) throw new HttpsError('failed-precondition', 'Set up your Play profile first.')
-    // Reserved before the call, given back if it fails (Stage B).
-    const refund = await takeQuota(request.auth.uid, 'playReview')
+    // Reserved before the call (Stage B); given back only if the call failed (C2).
+    const ai = await startAiSpend(request.auth.uid, 'playReview', anthropicKey.value())
 
     const play = playSnap.data() ?? {}
     let review: ProfileScorecard | null = null
     try {
       const photos = photoConsent(settings, 'play') ? await loadReviewPhotos(request.auth.uid, play.photoURLs) : []
-      const reply = await askClaudeWithPhotos(
-        'reviewPlayProfile',
-        buildPlayReviewPrompt(play, photos.length),
-        photos,
-        photos.length > 0 ? REVIEW_WITH_PHOTOS_MAX_TOKENS : REVIEW_MAX_TOKENS,
-      )
+      const reply = await ai.ask({
+        label: 'reviewPlayProfile',
+        prompt: buildPlayReviewPrompt(play, photos.length),
+        images: photos,
+        maxTokens: photos.length > 0 ? REVIEW_WITH_PHOTOS_MAX_TOKENS : REVIEW_MAX_TOKENS,
+        timeoutMs: 100_000,
+      })
       review = parseScorecard(reply, PLAY_REVIEW_SECTIONS, { photos: photos.length > 0 })
       if (!review) logger.error('reviewPlayProfile: reply was not a valid scorecard', { length: reply.length })
     } catch (err) {
-      await refund()
-      throw err
+      if (!(err instanceof AiCallFailed)) {
+        await ai.refundIfUnbilled()
+        throw err
+      }
     }
-    // Unparseable replies don't count toward the weekly limit.
+    // C2: an answered call counts even when its scorecard doesn't parse.
     if (!review) {
-      await refund()
+      await ai.refundIfUnbilled()
       throw new HttpsError('unavailable', "Couldn't generate review. Try again.")
     }
     await saveReviewHistory(request.auth.uid, 'play', review)
@@ -2403,7 +2182,7 @@ export { requestAccountDeletion, cancelAccountDeletion } from './legacy/trustSaf
 export { onNightlyPurge, processGraceExpiredDeletions } from './legacy/onNightlyPurge'
 // Batch (b): photo moderation, pair rescoring, women's Elite.
 export { onPhotoUpload } from './legacy/onPhotoUpload'
-export { onMatchingPrefsWrite, onPlayProfileWrite, onPrivateProfileWrite, onProfileWrite } from './legacy/onProfileWrite'
+export { onMatchingPrefsWrite, onPlayProfileWrite, onPrivateProfileWrite, onProfileWrite, sweepRescores } from './legacy/onProfileWrite'
 export { claimWomenElite } from './legacy/claimWomenElite'
 // Batch (c): Explore taps and likes, swipes, blocking.
 export { onTap } from './legacy/onTap'

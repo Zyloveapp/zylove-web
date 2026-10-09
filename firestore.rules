@@ -214,7 +214,11 @@ service cloud.firestore {
         'replyBand', 'newUntil',
         // F-066: the identity lock is set by the server on the first gender
         // write (identityGuardOnUser)
-        'identityLockedAt'
+        'identityLockedAt',
+        // H8: what re-scores a user's pairs is the server's to stamp
+        // (onProfileWrite reacts to the scored fields themselves); a client
+        // could loop it to re-score every pair
+        'profileUpdatedAt'
       ];
     }
 
@@ -244,6 +248,50 @@ service cloud.firestore {
               && !d[key].matches(".*[0-9].*[0-9].*[0-9].*"));
     }
 
+    // H7 (fresh-eyes review 2026-10-09): AI prompts read these profile
+    // fields, so their sizes are bounded (functions/src/promptCaps.ts caps
+    // each piece again — the rules can't see inside a list). Checked only for
+    // the keys a write changes (all of them on a create), so a doc saved over
+    // a limit earlier still takes its other edits. Generous over what the app
+    // writes: a bio of 300, answers of 200, 6 prompts, 25 options or fewer
+    // per Spark list, 115 Play tags.
+    function changedKeys() {
+      return resource == null ? request.resource.data.keys() : request.resource.data.diff(resource.data).affectedKeys();
+    }
+    function textOk(d, changed, k, max) {
+      return !(k in changed) || d.get(k, null) == null || (d[k] is string && d[k].size() <= max);
+    }
+    function listOk(d, changed, k, max) {
+      return !(k in changed) || d.get(k, null) == null || (d[k] is list && d[k].size() <= max);
+    }
+    function mapOk(d, changed, k, max) {
+      return !(k in changed) || d.get(k, null) == null || (d[k] is map && d[k].size() <= max);
+    }
+    function rootSizesOk(d, changed) {
+      return textOk(d, changed, 'bio', 500) && textOk(d, changed, 'dynamicPrompt', 300)
+          && textOk(d, changed, 'conflictStyle', 60) && textOk(d, changed, 'togethernessStyle', 60)
+          && textOk(d, changed, 'stressResponse', 60)
+          && listOk(d, changed, 'promptAnswers', 20) && listOk(d, changed, 'goDeeper', 20)
+          && listOk(d, changed, 'lifestyleTags', 40) && listOk(d, changed, 'relationshipValues', 40)
+          && listOk(d, changed, 'personalityTraits', 40) && listOk(d, changed, 'habitTags', 40)
+          && listOk(d, changed, 'weekendVibes', 40) && listOk(d, changed, 'openTo', 40)
+          && listOk(d, changed, 'loveLangGive', 40) && listOk(d, changed, 'loveLangReceive', 40);
+    }
+    function sparkSizesOk(d, changed) {
+      return textOk(d, changed, 'bio', 500) && textOk(d, changed, 'dynamicPrompt', 300)
+          && listOk(d, changed, 'promptAnswers', 20) && mapOk(d, changed, 'sparkPromptAnswers', 20)
+          && listOk(d, changed, 'goDeeper', 20)
+          && listOk(d, changed, 'lifestyleTags', 40) && listOk(d, changed, 'personalityTags', 40)
+          && listOk(d, changed, 'topValues', 40);
+    }
+    function playSizesOk(d, changed) {
+      return textOk(d, changed, 'playBio', 500) && textOk(d, changed, 'dynamicPrompt', 300)
+          && textOk(d, changed, 'spiceLevel', 40)
+          && listOk(d, changed, 'playInterestTags', 150) && listOk(d, changed, 'playNonNegotiables', 20)
+          && listOk(d, changed, 'promptAnswers', 20) && mapOk(d, changed, 'playPromptAnswers', 20)
+          && listOk(d, changed, 'goDeeper', 20);
+    }
+
     // Published photos (photoURLs) are added only by Cloud Functions after
     // moderation (onPhotoUpload, reviewPendingPhoto): clients may remove or
     // reorder them, never add (getPhotoUrls hands a photo out to others only
@@ -267,7 +315,8 @@ service cloud.firestore {
                     && !request.resource.data.keys().hasAny(serverOnlyUserFields())
                     && request.resource.data.get('photoURLs', []).size() == 0
                     && adultAge(request.resource.data)
-                    && publicNameOk(request.resource.data, 'displayName');
+                    && publicNameOk(request.resource.data, 'displayName')
+                    && rootSizesOk(request.resource.data, changedKeys());
       // Identity-lock fields (age, genderIdentity, matchableAs,
       // identityLockedAt): blocked AFTER identityLockedAt is set (§4.A2:
       // genderIdentity is server-only here now — private/matching). First
@@ -280,6 +329,7 @@ service cloud.firestore {
       allow update: if callerActive() && isUser(uid) && isSignedIn()
                     && !request.resource.data.diff(resource.data).affectedKeys().hasAny(serverOnlyUserFields())
                     && photosOnlyShrink(resource.data, request.resource.data)
+                    && rootSizesOk(request.resource.data, changedKeys())
                     && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['age']) || adultAge(request.resource.data))
                     && (resource.data.get('identityLockedAt', null) == null
                         || !request.resource.data.diff(resource.data).affectedKeys()
@@ -496,7 +546,8 @@ service cloud.firestore {
                                   'uid', 'displayName', 'age', 'pronouns', 'genderIdentity', 'photoURLs', 'bio',
                                   'promptAnswers', 'sparkPromptAnswers', 'lifestyleTags', 'personalityTags', 'topValues',
                                   'intent', 'height', 'bodyType', 'isActive', 'completeness', 'lastUpdated',
-                                  'goDeeper', 'dynamicPrompt']);
+                                  'goDeeper', 'dynamicPrompt'])
+                              && sparkSizesOk(request.resource.data, changedKeys());
         allow delete: if isUser(uid) && isSignedIn() && doc == 'data';
       }
 
@@ -531,10 +582,12 @@ service cloud.firestore {
         allow create: if callerActive() && isUser(uid) && isSignedIn()
                       && request.resource.data.get('photoURLs', []).size() == 0
                       && !request.resource.data.keys().hasAny(playServerFields())
-                      && playNameOk(request.resource.data);
+                      && playNameOk(request.resource.data)
+                      && playSizesOk(request.resource.data, changedKeys());
         allow update: if callerActive() && isUser(uid) && isSignedIn()
                       && photosOnlyShrink(resource.data, request.resource.data)
                       && !request.resource.data.diff(resource.data).affectedKeys().hasAny(playServerFields())
+                      && playSizesOk(request.resource.data, changedKeys())
                       && (resource.data.get('playDisplayName', null) == null
                           ? playNameOk(request.resource.data)
                           : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['playDisplayName']));

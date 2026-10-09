@@ -2,7 +2,6 @@ import {
   deleteField,
   doc,
   getDoc,
-  serverTimestamp,
   writeBatch,
   type FieldValue,
 } from 'firebase/firestore'
@@ -89,11 +88,11 @@ interface GoDeeperFields {
 
 // Root fields the web writes on every save, beyond DatingProfile. Mirrors the
 // mobile onboarding finish(): onboardingComplete gates AuthGuard/mobile
-// routing, and a changed profileUpdatedAt triggers onProfileWrite rescoring.
+// routing. onProfileWrite re-scores from the changed fields (H8: the rules
+// keep profileUpdatedAt for the server).
 interface OnboardingMetaFields {
   sparkVisibility: 'active' | 'hidden' | 'paused'
   onboardingComplete: true
-  profileUpdatedAt: FieldValue
 }
 
 type RootProfileDoc = Omit<DatingProfile, ServerOnlyField> & GoDeeperFields & OnboardingMetaFields
@@ -282,7 +281,6 @@ export async function saveSparkOnboarding(
           ? prevVisibility
           : 'active',
     onboardingComplete: true,
-    profileUpdatedAt: serverTimestamp(),
   }
 
   // Owner-only (private/profile, Stage 2): which modes, the current mode and

@@ -5,6 +5,7 @@
 import { PLAY_NON_NEGOTIABLE_LABELS, PLAY_PROMPT_BANK, PLAY_TAG_LABELS, SPICE_META, type PlayInterestTag } from './shared/dualProfile'
 import { parsePlayBioRequest } from './playBioPrompt'
 import { aboutLine, qaBlocks } from './playGoDeeperPrompt'
+import { capBlock } from './promptCaps'
 import { PLAY_REVIEW_SECTIONS, SECOND_PERSON_RULE, photoReviewSection, scorecardInstructions } from './profileScorecard'
 
 const MAX_BIO = 500
@@ -31,13 +32,9 @@ export function buildPlayReviewPrompt(play: Record<string, unknown>, photoCount 
     .map((pa) => `Q: ${PLAY_PROMPT_BANK.find((p) => p.id === pa.promptId)?.text ?? pa.promptId}\nA: ${pa.answer}`)
     .join('\n\n')
   const none = 'none given'
-
-  return `You are reviewing an adult dating profile on Zylove Play — an adult platform where people are honest about what they want.
-
-Review this profile and give honest, constructive feedback. Be direct but kind.
-
-── THEIR PROFILE ──
-Spice level: ${spice ? `${spice.label} — ${spice.description}` : none}
+  // H7: every piece is capped by the parsing above (tags each once, answers
+  // and Go Deeper by count and length), and the whole block here.
+  const profile = capBlock(`Spice level: ${spice ? `${spice.label} — ${spice.description}` : none}
 Here for: ${tagLabels(r.arrangement) || none}
 Their dynamic: ${tagLabels(r.dynamic) || none}
 Their vibe: ${tagLabels(r.vibe) || none}
@@ -48,7 +45,14 @@ Bio: ${bio || none}
 Prompts:
 ${prompts || none}
 Go Deeper:
-${qaBlocks(r.goDeeper) || none}
+${qaBlocks(r.goDeeper) || none}`)
+
+  return `You are reviewing an adult dating profile on Zylove Play — an adult platform where people are honest about what they want.
+
+Review this profile and give honest, constructive feedback. Be direct but kind.
+
+── THEIR PROFILE ──
+${profile}
 
 IMPORTANT CONTEXT FOR PLAY ARRANGEMENT TAGS:
 In Play mode, arrangement tags are not mutually exclusive and combinations are intentional. Common valid combinations:

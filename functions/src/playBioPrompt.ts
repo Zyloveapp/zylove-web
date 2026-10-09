@@ -44,13 +44,14 @@ function has<T extends object>(record: T, key: unknown): key is keyof T {
 function tags(d: Json, field: string, category: string): PlayInterestTag[] {
   const v = d[field]
   if (!Array.isArray(v)) return []
-  return v.filter((t): t is PlayInterestTag => has(PLAY_TAG_LABELS, t) && PLAY_TAG_LABELS[t].category === category)
+  // Each tag once (H7: a list of one tag repeated was a prompt of any size).
+  return [...new Set(v.filter((t): t is PlayInterestTag => has(PLAY_TAG_LABELS, t) && PLAY_TAG_LABELS[t].category === category))]
 }
 
 // Known keys become their labels; anything else is dropped.
 function labels(v: unknown, record: Record<string, string>): string[] {
   const list = Array.isArray(v) ? v : typeof v === 'string' ? [v] : []
-  return list.filter((k): k is string => has(record, k)).map((k) => record[k])
+  return [...new Set(list.filter((k): k is string => has(record, k)))].map((k) => record[k])
 }
 
 function answers(d: Json): { promptId: string; answer: string }[] {
@@ -63,7 +64,7 @@ function answers(d: Json): { promptId: string; answer: string }[] {
   return entries
     .filter((e): e is [string, string] => typeof e[0] === 'string' && typeof e[1] === 'string' && e[1].trim() !== '')
     .slice(0, MAX_ANSWERS)
-    .map(([promptId, answer]) => ({ promptId, answer: answer.trim().slice(0, MAX_ANSWER) }))
+    .map(([promptId, answer]) => ({ promptId: promptId.slice(0, 40), answer: answer.trim().slice(0, MAX_ANSWER) }))
 }
 
 export function parsePlayBioRequest(raw: unknown): PlayBioRequest {
@@ -76,7 +77,7 @@ export function parsePlayBioRequest(raw: unknown): PlayBioRequest {
     dynamic: tags(d, 'dynamic', 'dynamic'),
     vibe: tags(d, 'vibe', 'vibe'),
     place: tags(d, 'place', 'place'),
-    nonNegotiables: nonNegotiables.filter((k): k is PlayNonNegotiable => has(PLAY_NON_NEGOTIABLE_LABELS, k)),
+    nonNegotiables: [...new Set(nonNegotiables.filter((k): k is PlayNonNegotiable => has(PLAY_NON_NEGOTIABLE_LABELS, k)))],
     promptAnswers: answers(d),
     dynamicPrompt:
       typeof d.dynamicPrompt === 'string' && d.dynamicPrompt.trim() ? d.dynamicPrompt.trim().slice(0, MAX_DYNAMIC_PROMPT) : null,

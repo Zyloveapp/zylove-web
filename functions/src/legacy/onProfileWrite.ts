@@ -4,6 +4,7 @@
 // private/profile and private/matching triggers.
 import * as admin from "firebase-admin";
 import { onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkBreakdownRecord, sparkPairFields } from "./scoring";
 import { UserDoc, PairDoc } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
@@ -11,6 +12,7 @@ import { bothHavePlay, playFields, setPlayScores } from "../pairPlay";
 import { otherUidOf } from "../playPairQueries";
 import { isSuspendedUid, withPrivateProfile } from "../userData";
 import { writeSparkDetails } from "../pairSpark";
+import { requestRescore, sweepPendingRescores } from "../rescoreDebounce";
 
 // The user's scoring view: root + private profile/matching, and with their
 // Play profile on top for Play scoring.
@@ -131,12 +133,38 @@ async function rescorePairs(userId: string, afterRoot: UserDoc): Promise<void> {
   }
 }
 
+// H8: every re-score below goes through rescoreDebounce.ts — at most one per
+// user per 10 minutes, the rest left to sweepRescores — from the user's docs
+// as they are when it runs.
+async function rescoreUser(userId: string): Promise<void> {
+  const root = (await admin.firestore().doc(`users/${userId}`).get()).data() as UserDoc | undefined;
+  if (root) await rescorePairs(userId, root);
+}
+
+// The root doc's fields scoring reads (scoring.ts and tier1/). H8: the
+// re-score follows these, not the client's profileUpdatedAt (now
+// server-only in the rules — a client could loop it); a change of
+// profileUpdatedAt itself (scripts, seeded bots) still counts.
+const SCORED_ROOT_FIELDS = [
+  "profileUpdatedAt",
+  "age", "heightCm", "bodyType", "parentalStatus", "parentalCurrent", "parentalIntent",
+  "lifestyleTags", "relationshipValues", "personalityTraits", "habitTags", "weekendVibes",
+  "loveLangGive", "loveLangReceive", "loveLanguages", "openTo",
+  "conflictStyle", "togethernessStyle", "stressResponse",
+  // Older layouts
+  "traits", "values", "lifestyle", "habits", "physicalPrefs", "seekingPrefs",
+] as const;
+
+function changedAny(before: admin.firestore.DocumentData | undefined, after: admin.firestore.DocumentData, fields: readonly string[]): boolean {
+  return fields.some((f) => JSON.stringify(before?.[f] ?? null) !== JSON.stringify(after[f] ?? null));
+}
+
 export const onProfileWrite = onDocumentUpdated({ document: "users/{userId}", ...LEGACY_RUNTIME }, async (event) => {
-  const before = event.data?.before.data() as UserDoc | undefined;
-  const after  = event.data?.after.data()  as UserDoc | undefined;
+  const before = event.data?.before.data();
+  const after  = event.data?.after.data();
   if (!before || !after) return;
-  if (before.profileUpdatedAt?.isEqual(after.profileUpdatedAt)) return;
-  await rescorePairs(event.params.userId, after);
+  if (!changedAny(before, after, SCORED_ROOT_FIELDS)) return;
+  await requestRescore(event.params.userId, rescoreUser);
 });
 
 // Play profile edits rescore too (Stage 2: the Play fields no longer live
@@ -147,9 +175,17 @@ export const onPlayProfileWrite = onDocumentUpdated({ document: "users/{userId}/
   if (!before || !after) return;
   const stamp = (d: admin.firestore.DocumentData) => JSON.stringify(d.profileUpdatedAt ?? d.lastUpdated ?? null);
   if (stamp(before) === stamp(after)) return;
-  const root = (await admin.firestore().doc(`users/${event.params.userId}`).get()).data() as UserDoc | undefined;
-  if (root) await rescorePairs(event.params.userId, root);
+  await requestRescore(event.params.userId, rescoreUser);
 });
+
+// H8: every 5 minutes, the users whose re-score was held back (a change
+// inside the window, or a run that died) — from their docs as they are now.
+export const sweepRescores = onSchedule(
+  { schedule: "*/5 * * * *", timeZone: "America/Chicago", timeoutSeconds: 540, memory: "256MiB", maxInstances: 1 },
+  async () => {
+    await sweepPendingRescores(rescoreUser);
+  },
+);
 
 // Matching preferences (age range, attraction, dealbreakers, physical
 // preferences — Stage 3's private/matching) and intent (private/profile)
@@ -170,10 +206,8 @@ async function rescoreOnPrivateChange(
   after: admin.firestore.DocumentData | undefined,
 ): Promise<void> {
   if (!after) return;
-  const changed = SCORED_PRIVATE_FIELDS.some((f) => JSON.stringify(before?.[f] ?? null) !== JSON.stringify(after[f] ?? null));
-  if (!changed) return;
-  const root = (await admin.firestore().doc(`users/${userId}`).get()).data() as UserDoc | undefined;
-  if (root) await rescorePairs(userId, root);
+  if (!changedAny(before, after, SCORED_PRIVATE_FIELDS)) return;
+  await requestRescore(userId, rescoreUser);
 }
 
 export const onPrivateProfileWrite = onDocumentWritten({ document: "users/{userId}/private/profile", ...LEGACY_RUNTIME }, async (event) => {

@@ -45,7 +45,8 @@ function labelOf(v: unknown): string {
 
 // Known keys only, as their display labels.
 function labels(v: unknown, record: Record<string, unknown>): string[] {
-  return Array.isArray(v) ? v.filter((k) => has(record, k)).map((k) => labelOf(record[k as string])).filter(Boolean) : []
+  // Each key once (H7: a list of one key repeated was a prompt of any size).
+  return Array.isArray(v) ? [...new Set(v.filter((k) => has(record, k)))].map((k) => labelOf(record[k as string])).filter(Boolean) : []
 }
 
 function one(v: unknown, record: Record<string, unknown>): string | null {
