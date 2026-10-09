@@ -13,6 +13,9 @@ import { atLeast, tierNow } from "../entitlements";
 import { loadSparkDetails, writeSparkDetails } from "../pairSpark";
 import { requireUidOfPlayId } from "../playIds";
 import { requirePlayAccess } from "../playAccess";
+import { requireAvailableTarget } from "../likes";
+import { takeRateLimit } from "../rateLimits";
+import { isUidShape, ownDealbreakers } from "../tapGuards";
 
 export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Login required");
@@ -20,14 +23,20 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
 
   const db       = admin.firestore();
   const tapperId = request.auth.uid;
+  // F-090: every tap reads and may score a pair — a generous cap that someone
+  // browsing never meets, before any Play ID is resolved.
+  await takeRateLimit(tapperId, "tap", { max: 300, windowMs: 10 * 60 * 1000 });
   // F-062: a Play card is known by its Play ID — the answer then carries only
   // Play scores (no pair id, nothing from Spark).
   const playTap = request.data?.tappedPlayId !== undefined;
   if (playTap) await requirePlayAccess(tapperId);
   const tappedId: string = playTap ? await requireUidOfPlayId(request.data.tappedPlayId, tapperId) : request.data?.tappedUserId;
 
-  if (!tappedId || typeof tappedId !== "string" || tappedId.includes("/")) throw new HttpsError("invalid-argument", "tappedUserId required");
+  if (!isUidShape(tappedId)) throw new HttpsError("invalid-argument", "tappedUserId required");
   if (tapperId === tappedId) throw new HttpsError("invalid-argument", "Cannot tap yourself");
+  // F-090: nothing about someone who's gone, suspended or blocked either way
+  // (the same refusal as onLike).
+  await requireAvailableTarget(tapperId, tappedId);
 
   const pid     = pairId(tapperId, tappedId);
   const pairRef = db.collection("pairs").doc(pid);
@@ -59,6 +68,12 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
     await setPlayScores(tapperId, tappedId, fields);
     return playAnswer(fields, full);
   }
+  // F-090: of the triggered dealbreakers, only the tapper's own are shown
+  // (tapGuards.ts ownDealbreakers) — the other person's are their private
+  // matching preferences. A bot's report is shown in full.
+  const myDealbreakers = (await loadMatching(tapperId)).dealbreakers;
+  const visibleDealbreakers = (d: unknown) => (bot ? (Array.isArray(d) ? d : []) : ownDealbreakers(d, myDealbreakers));
+
   // Whether the tapped person has physical preferences to score against
   // (Stage 3: their preferences are private; the app only needs yes/no to
   // hide the physical categories otherwise).
@@ -78,7 +93,7 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
       sparkEnoughInfo: data.sparkEnoughInfo !== false,
       engineVersion: data.engineVersion,
       breakdown:  { ...(details && { spark: details.sparkBreakdown }) },
-      triggeredDealbreakers: details?.triggeredDealbreakers ?? [],
+      triggeredDealbreakers: visibleDealbreakers(details?.triggeredDealbreakers),
       ...(deep && details?.tier1Spark ? { tier1: details.tier1Spark } : {}),
       hasPhysicalPrefs,
       locked: !full,
@@ -133,7 +148,7 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
     sparkEnoughInfo: spark.enoughInfo,
     engineVersion: SCORE_ENGINE_VERSION,
     breakdown: { ...(full && { spark: sparkBreakdown }) },
-    triggeredDealbreakers: full ? triggeredDealbreakers : [],
+    triggeredDealbreakers: full ? visibleDealbreakers(triggeredDealbreakers) : [],
     ...(deep && sparkTier1 ? { tier1: sparkTier1 } : {}),
     hasPhysicalPrefs,
     locked: !full,

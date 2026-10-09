@@ -13,6 +13,7 @@ import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { takeQuota } from "../usage";
 import { loadMatch } from "../playMatch";
+import { logId } from "../logSafe";
 import {
   sendPush,
   getToken,
@@ -184,7 +185,7 @@ async function botReply(matchId: string, eventId: string, message: admin.firesto
     // → silent return) ate every bot reply with no log breadcrumb.
     if (!replyText) {
       console.error("[onBotMessage] Anthropic call returned no content", {
-        matchId,
+        matchId: logId(matchId),
         status: response.status,
         errorType: data?.error?.type,
         errorMessage: data?.error?.message,

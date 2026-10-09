@@ -9,6 +9,7 @@ import { ensurePlayId, isPlayId, uidOfPlayId } from './playIds'
 import { createPlayMatch, matchRefOf } from './playMatch'
 import { playPairDataRef, playPairUsers } from './pairPlay'
 import { publicPlayProfile } from './playProfiles'
+import { logId } from './logSafe'
 
 // Demonstration profiles like back. When a real person likes a bot, the like
 // lands in the bot's like queue (users/{bot}/likeQueue/{liker}, written by
@@ -275,7 +276,7 @@ async function likeBack(pendingRef: FirebaseFirestore.DocumentReference, pending
     lastSenderId: botUid,
     hasUnread: true,
   })
-  logger.info('botLikeBack: matched and opened', { matchId, mode })
+  logger.info('botLikeBack: matched and opened', { matchId: logId(matchId), mode })
 }
 
 // Every minute, so a like-back lands 5–6 minutes after the like.
