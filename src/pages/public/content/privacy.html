@@ -152,9 +152,9 @@
           </tbody>
         </table>
         <h3>Biometric data</h3>
-<p>
-  On mobile, Zylove uses your device's biometric authentication (Face ID or Touch ID) to verify your identity when switching between Spark and Play modes. <strong>We never store biometric data.</strong> Authentication is handled entirely by your device's operating system (Apple Secure Enclave / Android Keystore). Zylove receives only a pass/fail result.
-</p>
+        <p>
+          <strong>We don't collect biometric data.</strong> Zylove doesn't use Face ID, Touch ID or any other biometric check.
+        </p>
         <h3>Photos</h3>
         <p>
           Photos you upload are stored securely in Google Firebase Storage and associated with your account.
@@ -181,7 +181,7 @@
           <li>Suspend an account until a person reviews it when two people report it as a scam within 30 days — only if those two accounts are each at least 48 hours old and not linked to each other by device or network. This is never a ban</li>
           <li>In cities where we turn it on, limit likes and chat photos during a new account's first week</li>
           <li>Let you appeal a suspension once: a person reviews your appeal and the decision is recorded</li>
-          <li>Verify age (18+) before granting access to the platform</li>
+          <li>Make sure everyone is 18 or older: your age is checked when you sign up and again by our servers</li>
         </ul>
         <h3>To power AI features</h3>
         <ul>
@@ -198,7 +198,6 @@
         </p>
         <h3>To communicate with you</h3>
         <ul>
-          <li>Send push notifications (match alerts, message notifications) — you control these</li>
           <li>Send text messages (SMS) — only the kinds described under <a href="#text-messages">Text messages</a> below</li>
           <li>Respond to support and safety inquiries</li>
         </ul>
@@ -336,11 +335,11 @@
         </p>
         <h3>Screenshot protection</h3>
         <p>
-          Zylove cannot block screenshots on web browsers. We encourage users to only share what they are comfortable with. On mobile, screenshot prevention is available.
+          Zylove cannot block screenshots on web browsers. We encourage users to only share what they are comfortable with.
         </p>
-        <h3>Biometric re-authentication</h3>
+        <h3>Play PIN</h3>
         <p>
-          On mobile, switching between Spark and Play requires biometric verification (Face ID / Touch ID). On web, a 4-digit Play PIN privacy lock is required, with automatic session lock after 2 minutes of inactivity. The PIN is checked by our servers, which keep only a salted hash of it and limit wrong attempts. It hides Play from other people using your device; it is not a substitute for keeping your account secure — whoever controls your phone number can reset it by text.
+          Switching to Play requires a 4-digit Play PIN privacy lock, with automatic session lock after 2 minutes of inactivity. The PIN is checked by our servers, which keep only a salted hash of it and limit wrong attempts. It hides Play from other people using your device; it is not a substitute for keeping your account secure — whoever controls your phone number can reset it by text.
         </p>
         <h3>Infrastructure security</h3>
         <p>
@@ -377,9 +376,9 @@
           <li>Photo fingerprints (perceptual hashes — not images): while the photo exists. For an account banned for scams or fraud, its fingerprints, ID, display name, whether it was banned for a scam and its report counts are kept as long as the ban stands, so the same photos can be recognized if they're uploaded again, and deleted if the ban is overturned</li>
           <li>Ended connections (names, dates and message counts — never messages), so you can still report or review someone: 90 days after the match ends</li>
           <li>Your opt-out from texts (your phone number and when you replied STOP): for as long as we need it to honor your opt-out</li>
-          <li>Free-trial history (a one-way hash of your phone number and your trial dates), so each number gets one free trial: kept after you delete your account</li>
-          <li>Feature-use counters (how many times you used limited features in each period), daily notification counters, and a log that an account was deleted (account ID, date and reason): kept after you delete your account</li>
-          <li>What you send us through the website's contact, waitlist and founding-member forms (name, email and message): until we've dealt with it, and no longer than needed for that</li>
+          <li>Free-trial history (a one-way hash of your phone number and your trial dates), so each number gets one free trial: kept for as long as we offer free trials, including after you delete your account</li>
+          <li>Feature-use counters (how many times you used limited features in each period), daily notification counters, and a log that an account was deleted (account ID, date and reason): 2 years</li>
+          <li>What you send us through the website's contact, waitlist and founding-member forms (name, email and message): 12 months</li>
           <li>Anonymized, aggregated data may be retained indefinitely for product improvement</li>
         </ul>
         <p>
@@ -437,7 +436,7 @@
       <section id="children">
         <h2><span class="section-num">09</span> Children</h2>
         <p>
-          Zylove is strictly for users aged <strong>18 and older</strong>. We do not knowingly collect personal information from anyone under 18. Age is verified during onboarding and enforced by our age consent screen.
+          Zylove is strictly for users aged <strong>18 and older</strong>. We do not knowingly collect personal information from anyone under 18. Your age is checked when you sign up and again by our servers.
         </p>
         <p>
           If you believe a minor has created an account, please report it immediately via the in-app report function or by emailing <a href="mailto:support@zylove.app">support@zylove.app</a>. We will investigate and remove the account within 24 hours.
