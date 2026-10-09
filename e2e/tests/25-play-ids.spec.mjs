@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test'
 import { createRequire } from 'node:module'
 import {
   resetEmulators, seedUser, callAs, likeAs, idTokenFor, db, fnLib, signIn, offline, quietFirstRun, CONTEXT, PROJECT,
-  playIdOf, playMatchOf, FieldValue, sortedPair, PHOTO, setPlan,
+  playIdOf, playMatchOf, FieldValue, sortedPair, PHOTO, setPlan, likeIdOf,
 } from './helpers.mjs'
 import { applyF062, planF062, summary } from '../../scripts/lib/f062.mjs'
 
@@ -79,20 +79,25 @@ test('no uid in anything a Play user reads or gets back: deck, likes, like queue
   await expect(callAs(a.uid, 'onLike', { likedUserId: b.uid, mode: 'play' })).rejects.toThrow(/isn't available/)
   await expect(callAs(a.uid, 'onTap', { tappedPlayId: b.uid })).rejects.toThrow(/isn't available/)
 
-  // B's like queue: keyed by A's Play ID, nothing of A's account.
+  // B's like queue (§4.A3): server-only; the app gets A's like by an opaque
+  // like id, and its preview from A's Play profile — no uid, no Play ID.
   const queue = await restQuery(b.uid, `users/${b.uid}`, { from: [{ collectionId: 'likeQueue' }], where: eq('mode', 'play') })
-  expect(queue.status).toBe(200)
-  expect(queue.text).toContain(`likeQueue/${aPlay}`)
-  expect(queue.text).toContain('Ember')
-  expectNoUid(queue.text, [a.uid], 'likeQueue')
-  expect(queue.text).not.toMatch(/Adam/)
+  expect(queue.status).toBe(403)
+  const likes = await callAs(b.uid, 'getLikes', { mode: 'play' })
+  expect(likes.likes).toHaveLength(1)
+  expectNoUid(JSON.stringify(likes), [a.uid, aPlay], 'getLikes')
+  const preview = await callAs(b.uid, 'getLikerPreview', { likeId: likes.likes[0].likeId })
+  expect(preview.preview.firstName).toBe('Ember')
+  expectNoUid(JSON.stringify(preview), [a.uid, aPlay], 'getLikerPreview')
+  expect(JSON.stringify(preview)).not.toMatch(/Adam/)
   expectNoUid(JSON.stringify(await callAs(b.uid, 'getLikeCount', { mode: 'play' })), [a.uid], 'getLikeCount')
   expectNoUid(JSON.stringify(await callAs(a.uid, 'getSentSparks', { mode: 'play' })), others, 'getSentSparks')
   await callAs(b.uid, 'recordPlayReveal', { playId: aPlay })
   expectNoUid(JSON.stringify(await callAs(a.uid, 'getCuriousVisitors', { mode: 'play' })), others, 'getCuriousVisitors')
 
   // Like back → a Play match with its own id, Play IDs only.
-  const back = await callAs(b.uid, 'likeBack', { likerUid: aPlay, mode: 'play' })
+  const back = await callAs(b.uid, 'likeBack', { likeId: await likeIdOf(b.uid, aPlay) })
+  expect(back.partnerId).toBe(aPlay) // who it was, once linked: the Play ID
   expect(back.matchId).toMatch(/^pm_[A-Za-z0-9]{20}$/)
   expect(await playMatchOf(a.uid, b.uid)).toBe(back.matchId)
   expect((await db.doc(`matches/${sortedPair(a.uid, b.uid)}`).get()).exists).toBe(false)
