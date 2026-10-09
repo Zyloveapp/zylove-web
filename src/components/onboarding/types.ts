@@ -79,6 +79,8 @@ export interface OnboardingDraft {
   pronouns: string
   // F-018: hide gender on the profile (still used for matching).
   genderHidden: boolean
+  // §4.A2: man / woman isn't shown unless they choose to show it.
+  showGender: boolean
   attractedTo: AttractedTo[]
   relationshipStatus: RelationshipStatus | null
   openTo: OpenTo[]
@@ -137,6 +139,7 @@ export const INITIAL_DRAFT: OnboardingDraft = {
   matchableAs: [],
   pronouns: '',
   genderHidden: false,
+  showGender: false,
   attractedTo: [],
   relationshipStatus: null,
   openTo: [],

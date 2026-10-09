@@ -32,7 +32,7 @@ import {
 } from '../types/playDescriptors'
 import { parseBirthday, type OnboardingDraft, type PhotoDraft } from '../components/onboarding/types'
 import { loadPrivateProfile, privateProfileDoc } from './privateProfile'
-import { addMatching } from './privateMatching'
+import { addMatching, genderFields, matchingDoc } from './privateMatching'
 
 export type PlayTagCategory = 'arrangement' | 'acts' | 'dynamic' | 'vibe' | 'place'
 
@@ -285,8 +285,6 @@ export async function savePlayOnlyOnboarding(
   const prompts = answeredPrompts(play)
   const bio = play.bio.trim()
   const newPhotos = d.photos.map((p) => p.file).filter((f): f is File => f !== null)
-  const pronouns = d.pronouns.trim()
-  const selfDescribe = d.genderSelfDescribe.trim()
   const now = Date.now()
 
   // Private key goes to IndexedDB now; the public key rides in the batch below.
@@ -309,9 +307,6 @@ export async function savePlayOnlyOnboarding(
       uid,
       ...(!renamingSpark && { displayName: sparkName }),
       age,
-      ...(!identityLocked && { genderIdentity }),
-      ...(!identityLocked && genderIdentity === 'self_describe' && selfDescribe && { genderSelfDescribe: selfDescribe }),
-      ...(pronouns && { pronouns }),
       relationshipStatus: 'prefer_not_to_say',
       openTo: [],
       onboardingComplete: true,
@@ -356,6 +351,9 @@ export async function savePlayOnlyOnboarding(
     ageMax: d.ageMax,
     ...(!identityLocked && OFF_MAP_GENDER_IDENTITIES.includes(genderIdentity) && d.matchableAs.length > 0 && { matchableAs: d.matchableAs }),
   })
+  // §4.A2: gender and pronouns are owner-only too (the server builds the
+  // public genderLine from them).
+  batch.set(matchingDoc(uid), genderFields(d, genderIdentity, identityLocked), { merge: true })
   // Owner-only (users/{uid}/private/identity): legal name once, birthday
   // until identity is locked.
   await addIdentity(batch, uid, d.legalName, !identityLocked && birthday ? birthday.iso : null)

@@ -35,7 +35,7 @@ import { loadOwnProfile } from './profile'
 import { changeDisplayName } from './displayNames'
 import { addIdentity, loadIdentity } from './privateIdentity'
 import { loadPrivateProfile, privateProfileDoc } from './privateProfile'
-import { matchingDoc } from './privateMatching'
+import { genderFields, matchingDoc } from './privateMatching'
 
 // ─── Legal acceptance ────────────────────────────────────────────────────────
 
@@ -75,6 +75,13 @@ type ServerOnlyField =
   | 'seekingBodyTypes'
   | 'seekingTraits'
   | 'dealbreakers'
+  // §4.A2: owner-only (private/matching); others see the server's genderLine.
+  | 'genderIdentity'
+  | 'genderSelfDescribe'
+  | 'pronouns'
+  | 'genderHidden'
+  | 'showGender'
+  | 'genderLine'
 
 interface GoDeeperFields {
   conflictStyle?: ConflictStyle
@@ -96,9 +103,6 @@ type RootProfileDoc = Omit<DatingProfile, ServerOnlyField> & GoDeeperFields & On
 // Optional root fields: written only when answered, deleted on re-onboarding
 // when cleared, never written as null.
 type OptionalRootField =
-  | 'genderSelfDescribe'
-  | 'pronouns'
-  | 'genderHidden'
   | 'heightCm'
   | 'bodyType'
   | 'parentalCurrent'
@@ -109,9 +113,6 @@ type OptionalRootField =
 type OptionalRootFields = Pick<RootProfileDoc, OptionalRootField>
 
 const OPTIONAL_ROOT_FIELDS: OptionalRootField[] = [
-  'genderSelfDescribe',
-  'pronouns',
-  'genderHidden',
   'heightCm',
   'bodyType',
   'parentalCurrent',
@@ -216,7 +217,6 @@ export async function saveSparkOnboarding(
     uid,
     displayName: renaming ? priorName : newName,
     age,
-    ...(!identityLocked && { genderIdentity }),
     relationshipStatus,
     openTo: d.openTo,
     lifestyleTags: d.lifestyleTags,
@@ -240,14 +240,10 @@ export async function saveSparkOnboarding(
     // on the public doc (the rules refuse them there).
     religion: d.religion ?? deleteField(),
     politicalView: d.politicalView ?? deleteField(),
+    ...genderFields(d, genderIdentity, identityLocked),
   }
 
   const optional: Partial<OptionalRootFields> = {
-    ...(genderIdentity === 'self_describe' && d.genderSelfDescribe.trim() && {
-      genderSelfDescribe: d.genderSelfDescribe.trim(),
-    }),
-    ...(d.pronouns.trim() && { pronouns: d.pronouns.trim() }),
-    ...(d.genderHidden && { genderHidden: true }),
     ...(heightCm !== null && { heightCm }),
     ...(d.bodyType && { bodyType: d.bodyType }),
     ...(d.parentalCurrent && { parentalCurrent: d.parentalCurrent }),
@@ -313,7 +309,6 @@ export async function saveSparkOnboarding(
     if (!birthday) throw new Error('Onboarding incomplete: birthday')
     const profile: RootProfileDoc = {
       ...coreFields,
-      genderIdentity,
       ...optional,
       bio,
       locationLabel: '',
@@ -332,8 +327,6 @@ export async function saveSparkOnboarding(
     uid,
     displayName: coreFields.displayName,
     age,
-    ...(optional.pronouns && { pronouns: optional.pronouns }),
-    genderIdentity,
     photoURLs,
     ...(bio && { bio }),
     promptAnswers,
@@ -345,7 +338,7 @@ export async function saveSparkOnboarding(
     ...(heightCm !== null && { height: heightCm }),
     ...(d.bodyType && { bodyType: d.bodyType }),
     isActive: hasPhotos,
-    completeness: computeSparkCompleteness({ ...coreFields, ...optional, bio }),
+    completeness: computeSparkCompleteness({ ...coreFields, ...optional, bio, pronouns: d.pronouns.trim() }),
     lastUpdated: now,
   }
   const sparkRef = doc(db, `users/${uid}/sparkProfile/data`)
@@ -464,6 +457,7 @@ export async function loadRefreshDraft(uid: string): Promise<RefreshDraft | null
     matchableAs: arr(p.matchableAs),
     pronouns: str(p.pronouns) ?? '',
     genderHidden: p.genderHidden === true,
+    showGender: p.showGender === true,
     attractedTo: arr(p.attractedTo),
     relationshipStatus: str(p.relationshipStatus),
     openTo: arr(p.openTo),

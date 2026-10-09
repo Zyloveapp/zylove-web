@@ -436,6 +436,12 @@ export interface DatingProfile {
   // F-018: "Don't show on my profile". Gender is still used for matching and
   // stays identity-locked; only the profile display hides it.
   genderHidden?: boolean
+  // §4.A2: show "Man" / "Woman" on the profile (off by default: implied).
+  showGender?: boolean
+  // §4.A2: the only gender others can read — built server-side from the
+  // owner-only fields above (users/{uid}/private/matching), e.g.
+  // "Trans woman · she/her"; empty when hidden. Server-only.
+  genderLine?: string
   attractedTo: AttractedTo[]
   // Off-map identities (genderfluid / agender / self_describe) declare which
   // attraction categories they want to be surfaced to. Consulted by

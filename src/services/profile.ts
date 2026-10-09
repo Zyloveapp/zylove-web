@@ -3,7 +3,7 @@ import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { loadIdentity } from './privateIdentity'
 import { loadPrivateProfile } from './privateProfile'
-import { loadMatching } from './privateMatching'
+import { loadMatching, matchingDoc } from './privateMatching'
 import { displayAge, type DiscoverProfile } from './discover'
 import type { SparkBioRequest } from './bio'
 import type { PromptAnswer } from '../types/dualProfile'
@@ -110,13 +110,17 @@ export interface SparkEdits {
   pronouns: string
   // F-018: hide gender on the profile (it stays locked and used for matching).
   genderHidden: boolean
+  // §4.A2: show "Man" / "Woman" (otherwise implied and left off).
+  showGender: boolean
   bio: string
   prompts: PromptAnswer[]
 }
 
 // Writes the root doc (Discover and the profile view read it) and
 // sparkProfile/data (both editors load from it) so the two never disagree.
-// A changed profileUpdatedAt triggers onProfileWrite rescoring.
+// A changed profileUpdatedAt triggers onProfileWrite rescoring. §4.A2:
+// pronouns and the gender display choices go to the owner-only
+// private/matching; the server rewrites the public genderLine from them.
 export async function saveSparkEdits(uid: string, e: SparkEdits): Promise<void> {
   const bio = e.bio.trim()
   const promptAnswers = e.prompts
@@ -124,9 +128,12 @@ export async function saveSparkEdits(uid: string, e: SparkEdits): Promise<void> 
     .filter((p) => p.answer)
   const pronouns = e.pronouns.trim()
   const batch = writeBatch(db)
+  batch.set(
+    matchingDoc(uid),
+    { pronouns: pronouns || deleteField(), genderHidden: e.genderHidden || deleteField(), showGender: e.showGender || deleteField() },
+    { merge: true },
+  )
   batch.update(doc(db, 'users', uid), {
-    pronouns: pronouns || deleteField(),
-    genderHidden: e.genderHidden || deleteField(),
     bio,
     promptAnswers,
     profileUpdatedAt: serverTimestamp(),
@@ -187,7 +194,8 @@ export async function regenerateBio(p: DiscoverProfile, displayName: string, pro
   const request: SparkBioRequest = {
     displayName: displayName.trim() || p.displayName || '',
     genderIdentity: p.genderHidden === true ? null : str(gender),
-    pronouns: str(p.pronouns),
+    // §4.A2: hiding takes the pronouns off the profile too.
+    pronouns: p.genderHidden === true ? null : str(p.pronouns),
     age: displayAge(p),
     heightCm: typeof p.heightCm === 'number' && p.heightCm > 0 ? p.heightCm : null,
     bodyType: str(p.bodyType),

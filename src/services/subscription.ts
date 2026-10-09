@@ -28,7 +28,6 @@ export interface TierFields {
   trialStartedAt?: unknown
   trialEndsAt?: unknown
   trialExpired?: unknown
-  genderIdentity?: unknown
   isFounder?: unknown
   // Stripe state, written by the stripeWebhook function.
   subscriptionStatus?: unknown
@@ -254,7 +253,6 @@ export function subscribeTierFields(uid: string, onChange: (fields: TierFields) 
         trialStartedAt: d.trialStartedAt,
         trialEndsAt: d.trialEndsAt,
         trialExpired: d.trialExpired,
-        genderIdentity: d.genderIdentity,
         isFounder: d.isFounder,
         subscriptionStatus: d.subscriptionStatus,
         marketCityId: d.marketCityId,

@@ -124,7 +124,8 @@ export default function EditPlayProfile() {
         setLoaded({
           uid,
           original: current,
-          identity: { genderIdentity: data?.genderIdentity, attractedTo: matching.attractedTo },
+          // §4.A2: gender is owner-only (private/matching) like attraction.
+          identity: { genderIdentity: matching.genderIdentity, attractedTo: matching.attractedTo },
           displayName: typeof data?.displayName === 'string' ? data.displayName : '',
           nameLockedUntil: nextNameChange(play?.playDisplayNameUpdatedAt ?? data?.playDisplayNameUpdatedAt),
         })

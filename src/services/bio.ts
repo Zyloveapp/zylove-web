@@ -60,7 +60,8 @@ function toRequest(d: OnboardingDraft): SparkBioRequest {
   return {
     displayName: d.displayName.trim(),
     genderIdentity: d.genderHidden ? null : d.genderIdentity,
-    pronouns: d.pronouns.trim() || null,
+    // §4.A2: hiding takes the pronouns off the profile too.
+    pronouns: d.genderHidden ? null : d.pronouns.trim() || null,
     age: parseBirthday(d.birthdayRaw)?.age ?? null,
     heightCm: d.height ? feetInchesToCm(d.height.feet, d.height.inches) : null,
     bodyType: d.bodyType,
