@@ -31,3 +31,18 @@ profiles.json
 *.dump.json
 dryrun*.txt
 scratch/
+
+# Secrets and credentials (F-092). None are committed; this keeps it so.
+.env
+.env.*
+!.env.example
+functions/.env*
+*.pem
+service-account*.json
+*-service-account*.json
+.secret.local
+functions/.secret.local
+# Committed on purpose: the e2e suite's demo-project config (no production
+# keys) and the template for its test-only secrets.
+!e2e/env/.env
+!e2e/.env.test.example

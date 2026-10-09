@@ -58,3 +58,16 @@ export async function cityStats(): Promise<CityStats> {
   const { data } = await httpsCallable<void, CityStats>(functions, 'adminCityStats', { timeout: 120_000 })()
   return data
 }
+
+// CSP violation counts per day (functions/src/cspReports.ts, F-082): what the
+// Report-Only script policy would block, by directive and blocked host.
+export interface CspDayCounts {
+  day: string // YYYY-MM-DD, UTC
+  total: number
+  counts: { directive: string; host: string; n: number }[]
+}
+
+export async function cspReports(): Promise<CspDayCounts[]> {
+  const { data } = await httpsCallable<void, { days: CspDayCounts[] }>(functions, 'adminCspReports')()
+  return data.days
+}

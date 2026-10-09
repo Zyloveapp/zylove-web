@@ -2389,6 +2389,8 @@ export {
 } from './adminAlerts'
 // The /contact form (server-side, rate limited) and the admin inbox.
 export { adminDeleteContactMessage, adminListContactMessages, adminSetContactHandled, submitContactMessage } from './contactMessages'
+// F-082: CSP violation reports (aggregated counts only) and their admin view.
+export { adminCspReports, cspReport } from './cspReports'
 // T&S Phase 5: duplicate photos.
 export { photoHashOnDelete } from './photoHashTrigger'
 // F-062: private Play IDs — the public Play profile and the Play chat key.

@@ -39,7 +39,7 @@ import {
   parsePatch,
   smsEventFor,
 } from './adminAlertsCore'
-import { SMS_SECRETS, adminSmsStatus, smsFromNumber, textAdmin } from './sms'
+import { SMS_FROM_SECRETS, SMS_SECRETS, adminSmsStatus, smsFromNumber, textAdmin } from './sms'
 import { adminUids, internalRef, isAdminAuth } from './userData'
 import { audit, requireAdminAudited } from './audit'
 
@@ -297,8 +297,9 @@ export const adminSetNotificationSettings = onCall(
 
 // Where texts go (last 4 digits only), whether that number replied STOP and
 // the number to text START to.
+// Sends nothing, so it binds only the sending number (F-093).
 export const adminNotificationStatus = onCall(
-  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
+  { timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: SMS_FROM_SECRETS },
   async (request) => {
     const uid = await requireAdminAudited(request.auth, { action: 'adminNotify.status', target: null })
     const { phone, optedOut } = await adminSmsStatus(uid)

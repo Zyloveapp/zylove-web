@@ -23,6 +23,9 @@ export const SMS_SECRETS = [twilioAccountSid, twilioAuthToken, twilioFromNumber]
 // The inbound webhook checks Twilio's signature with the auth token.
 export const TWILIO_AUTH_TOKEN = twilioAuthToken
 
+// Just the sending number (shown, never used to send): F-093.
+export const SMS_FROM_SECRETS = [twilioFromNumber]
+
 // Lookup only needs the account credentials.
 export const LOOKUP_SECRETS = [twilioAccountSid, twilioAuthToken]
 

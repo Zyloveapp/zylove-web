@@ -14,7 +14,6 @@ import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase
 import { getNearestCity } from './cities'
 import { claimFounderSpot, type FounderResult } from './founders'
 import { revokeFounderStatus } from './founderActivity'
-import { SMS_SECRETS } from './sms'
 import { STRIPE_SECRETS, cancelSubscriptionsForDeletion } from './stripe'
 import { liftSuspension, setAuthDisabled } from './reports'
 import { audit, requireAdminAudited } from './audit'
@@ -322,7 +321,7 @@ const ACTIONS: readonly UserAction[] = ['make_founder', 'suspend', 'unsuspend', 
 //   when there's a phone, anonymized user doc, Auth removed), after
 //   releasing any founder spot — it then shows in the deletion queue.
 export const adminUserAction = onCall(
-  { timeoutSeconds: 120, memory: '256MiB', invoker: 'public', secrets: [...SMS_SECRETS, ...STRIPE_SECRETS] },
+  { timeoutSeconds: 120, memory: '256MiB', invoker: 'public', secrets: STRIPE_SECRETS },
   async (request): Promise<{ ok: true; founder?: FounderResult }> => {
     const adminUid = requireAdmin(request.auth)
     const { uid, action } = (request.data ?? {}) as { uid?: unknown; action?: unknown }

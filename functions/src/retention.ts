@@ -51,6 +51,8 @@ export const RETENTION: RetentionEntry[] = [
   { collection: 'usage', field: 'updatedAt', kind: 'timestamp', maxAgeMs: 2 * YEAR_MS },
   { collection: 'notificationCaps', field: 'updatedAt', kind: 'timestamp', maxAgeMs: 2 * YEAR_MS },
   { collection: 'purgeLog', field: 'purgedAt', kind: 'timestamp', maxAgeMs: 2 * YEAR_MS },
+  // CSP violation counts per day (cspReports.ts; no personal data), by last write.
+  { collection: 'cspReports', field: 'updatedAt', kind: 'timestamp', maxAgeMs: 90 * DAY_MS },
 ]
 
 export function cutoffMs(entry: RetentionEntry, now: number): number {

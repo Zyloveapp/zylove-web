@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import CspReportsPanel from '../../components/admin/CspReportsPanel'
 import ProbationPanel from '../../components/admin/ProbationPanel'
 import { cityStats, type CityRow, type CityStats } from '../../services/adminTools'
 
@@ -121,6 +122,7 @@ export default function AdminCities() {
         </p>
       )}
       <ProbationPanel />
+      <CspReportsPanel />
     </div>
   )
 }
