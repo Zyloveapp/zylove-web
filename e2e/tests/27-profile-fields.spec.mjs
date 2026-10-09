@@ -124,7 +124,8 @@ test('F-018: onboarding — gender can be hidden, height is optional, beliefs ar
 
   // Gender: the hide option.
   await page.getByRole('button', { name: 'Non-binary', exact: true }).click()
-  await page.getByRole('checkbox', { name: /Don't show on my profile/ }).check()
+  // §4.A2: hiding takes the pronouns off too; man / woman get "Show on my profile".
+  await page.getByRole('checkbox', { name: /Don't show my gender or pronouns on my profile/ }).check()
   await shots(page, 'onboarding-gender')
   await page.setViewportSize(LAPTOP)
   await next()

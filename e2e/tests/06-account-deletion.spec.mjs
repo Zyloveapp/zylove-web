@@ -50,10 +50,9 @@ test('deletion: delete account from Settings → soft-deleted, recovery doc, aut
   expect(restored.genderIdentity).toBeUndefined()
   expect(restored.genderLine).toBe('')
   expect((await db.doc(`users/${newUid}/private/matching`).get()).data()?.genderIdentity).toBe('man')
-  expect(old?.genderIdentity).toBeUndefined()
   // F-029: the deleted account's public doc kept nothing private.
   const old = await userDoc(me.uid)
-  for (const f of ['birthday', 'locationLat', 'subscriptionTier', 'reportCount', 'smsNotificationsEnabled']) expect(old?.[f]).toBeUndefined()
+  for (const f of ['birthday', 'locationLat', 'subscriptionTier', 'reportCount', 'smsNotificationsEnabled', 'genderIdentity', 'genderLine']) expect(old?.[f]).toBeUndefined()
   expect((await db.doc(`deletedAccounts/${me.phone}`).get()).exists).toBe(false)
   expect(net.errors).toEqual([])
   await ctx.close()
