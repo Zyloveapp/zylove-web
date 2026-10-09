@@ -57,6 +57,13 @@ export function friendlyError(err: unknown, fallback = GENERIC): string {
   // F-099: a field changed too recently — the date it can change again.
   if (err instanceof FieldLockedError) return err.message
   if (err instanceof FirebaseError) {
+    // A refusal from our sign-in / sign-up checks (functions onBeforeSignIn,
+    // onBeforeCreate) arrives as auth/internal-error with our message inside:
+    // "…returned an error: {"error":{"message":"…"}}". Show that message.
+    if (err.code === 'auth/internal-error') {
+      const inner = /"message"\s*:\s*"([^"]{1,200})"/.exec(err.message)?.[1]
+      if (inner && !/^(internal|INTERNAL)/.test(inner) && !inner.includes('ZYLOVE_SUSPENDED')) return inner
+    }
     const mapped = BY_CODE[err.code]
     // Our callables throw HttpsErrors whose message is written for users
     // ("Already rated this conversation…"); keep those for the

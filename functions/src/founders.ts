@@ -25,7 +25,10 @@ import { onDocumentUpdated } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { FieldPath, FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, getNearestCity } from './cities'
-import { textAccount } from './sms'
+import { LOOKUP_SECRETS, lookupLineType, textAccount } from './sms'
+import { founderGate, founderPhoneHash, type GateRefusal } from './founderGate'
+import { takeRateLimit } from './rateLimits'
+import { getAuth } from 'firebase-admin/auth'
 import { accountRef, internalRef, loadLocation, requireActive } from './userData'
 import { eliteByMatching } from './identity'
 
@@ -34,7 +37,7 @@ export const DEFAULT_FOUNDER_TARGET = 50
 // Everyone else counts toward the other half.
 const BOT_PREFIX = 'zbot-'
 
-type Ineligible = 'outside_coverage' | 'already_assigned' | 'cohort_full' | 'no_profile'
+type Ineligible = 'outside_coverage' | 'already_assigned' | 'cohort_full' | 'no_profile' | GateRefusal
 export type FounderResult =
   | { eligible: true; cohortNumber: number; cityId: string; cityName: string }
   | { eligible: false; reason: Ineligible }
@@ -70,13 +73,18 @@ export async function textFounder(uid: string, body: string): Promise<boolean> {
 // ~3 miles), so this is a launch-period gate, not proof of residence. It's the
 // stored location (userLocations), never coordinates sent with the call.
 export const assignFounderBadge = onCall(
-  { timeoutSeconds: 60, memory: '256MiB', invoker: 'public' },
+  { timeoutSeconds: 60, memory: '256MiB', invoker: 'public', secrets: LOOKUP_SECRETS },
   async (request): Promise<FounderResult> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     await requireActive(request.auth.uid) // F-097: not while suspended
+    // F-115: each attempt can cost a Lookup.
+    await takeRateLimit(request.auth.uid, 'founderClaim', { max: 5, windowMs: 24 * 60 * 60 * 1000 })
     const loc = await loadLocation(request.auth.uid)
     if (!loc) return { eligible: false, reason: 'outside_coverage' }
-    return claimFounderSpot(request.auth.uid, loc.lat, loc.lng, 'assignFounderBadge')
+    // F-115: the sign-in number's line type (null: unknown — let through).
+    const phone = typeof request.auth.token.phone_number === 'string' ? request.auth.token.phone_number : null
+    const lineType = phone ? await lookupLineType(phone, 6000) : null
+    return claimFounderSpot(request.auth.uid, loc.lat, loc.lng, 'assignFounderBadge', { gate: true, lineType })
   },
 )
 
@@ -84,9 +92,20 @@ export const assignFounderBadge = onCall(
 // user's founder fields and lifecycle record. Shared by the user's own
 // claim and the admin dashboard's "Make founder" (which passes the user's
 // saved location).
-export async function claimFounderSpot(uid: string, lat: number, lng: number, source: string): Promise<FounderResult> {
+// opts.gate: the user's own claim — the F-114/F-115/F-116 checks
+// (founderGate.ts). The admin dashboard's "Make founder" passes none.
+export async function claimFounderSpot(
+  uid: string,
+  lat: number,
+  lng: number,
+  source: string,
+  opts: { gate?: boolean; lineType?: string | null } = {},
+): Promise<FounderResult> {
   const city = getNearestCity(lat, lng)
   if (!city) return { eligible: false, reason: 'outside_coverage' }
+  // F-116: one spot per phone number, recorded by its hash.
+  const phone = (await getAuth().getUser(uid).catch(() => null))?.phoneNumber ?? null
+  const phoneHash = phone ? founderPhoneHash(phone) : null
 
   const db = getFirestore()
   const cityRef = db.doc(`config/city_${city.id}`)
@@ -96,17 +115,30 @@ export async function claimFounderSpot(uid: string, lat: number, lng: number, so
   const recordRef = db.doc(`founderRecords/${uid}`)
   const isAustin = city.id === 'austin'
 
+  const historyRef = phoneHash ? db.doc(`founderHistory/${phoneHash}`) : null
   const claim = await db.runTransaction(async (tx): Promise<Claim> => {
-    const [citySnap, userSnap, launchSnap, recordSnap, matchingSnap] = await Promise.all([
+    const [citySnap, userSnap, launchSnap, recordSnap, matchingSnap, internalSnap, historySnap] = await Promise.all([
       tx.get(cityRef),
       tx.get(userRef),
       isAustin ? tx.get(launchRef) : Promise.resolve(null),
       tx.get(recordRef),
       tx.get(db.doc(`users/${uid}/private/matching`)),
+      tx.get(internalRef(uid)),
+      historyRef ? tx.get(historyRef) : Promise.resolve(null),
     ])
     const user = userSnap.data()
     if (!user || user.onboardingComplete !== true) return { eligible: false, reason: 'no_profile' }
     if (user.isFounder === true) return { eligible: false, reason: 'already_assigned' }
+    if (opts.gate) {
+      const refusal = founderGate({
+        accountCreatedAt: internalSnap.get('accountCreatedAt'),
+        lineType: opts.lineType ?? null,
+        recordStatus: recordSnap.data()?.status,
+        history: historySnap?.data(),
+        uid,
+      })
+      if (refusal) return { eligible: false, reason: refusal }
+    }
     // Revoked founders may claim again; converted ones (Spark+ for good)
     // already had their turn.
     if (recordSnap.data()?.status === 'converted') return { eligible: false, reason: 'already_assigned' }
@@ -157,8 +189,10 @@ export async function claimFounderSpot(uid: string, lat: number, lng: number, so
     )
     // members is recounted after the transaction (refreshCityMembers).
     tx.set(statsRef, { capacity, cityName: city.name, state: city.state }, { merge: true })
+    if (historyRef) tx.set(historyRef, { status: 'active', uid, cityId: city.id, at: FieldValue.serverTimestamp() })
     tx.set(recordRef, {
       uid,
+      ...(phoneHash ? { phoneHash } : {}),
       cityId: city.id,
       cityName: city.name,
       bucket,

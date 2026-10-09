@@ -12,6 +12,7 @@ import { getAuth } from 'firebase-admin/auth'
 import { loadPlayName } from './playName'
 import { smsSafeName } from './smsName'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
+import { isUsNumber } from './phoneRegion'
 import { internalRef, loadAccount, loadSettings, userRef } from './userData'
 
 const twilioAccountSid = defineSecret('TWILIO_ACCOUNT_SID')
@@ -33,7 +34,7 @@ export const LOOKUP_SECRETS = [twilioAccountSid, twilioAuthToken]
 // Twilio Lookup v2 line type ('mobile', 'landline', 'fixedVoip',
 // 'nonFixedVoip', 'tollFree', 'personal', …) or null when unknown or the
 // lookup failed. Callers treat null as "allow". ~$0.01 per call.
-export async function lookupLineType(phoneNumber: string): Promise<string | null> {
+export async function lookupLineType(phoneNumber: string, timeoutMs = 8000): Promise<string | null> {
   try {
     const sid = twilioAccountSid.value()
     const token = twilioAuthToken.value()
@@ -44,7 +45,7 @@ export async function lookupLineType(phoneNumber: string): Promise<string | null
     const url = `https://lookups.twilio.com/v2/PhoneNumbers/${encodeURIComponent(phoneNumber)}?Fields=line_type_intelligence`
     const res = await fetch(url, {
       headers: { Authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}` },
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(timeoutMs),
     })
     if (!res.ok) {
       logger.warn('lookupLineType: Twilio Lookup error', { status: res.status })
@@ -155,6 +156,11 @@ async function deliver(to: string, body: string): Promise<Delivery> {
     }
     if (!E164.test(to)) {
       logger.warn('sendSMS: recipient is not an E.164 number, skipping')
+      return 'failed'
+    }
+    // F-122: US numbers only (no international or premium-rate sends).
+    if (!isUsNumber(to)) {
+      logger.warn('sendSMS: not a US number, skipping')
       return 'failed'
     }
     if ((await optOutRef(to).get()).exists) {

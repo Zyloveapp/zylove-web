@@ -8,6 +8,8 @@ import { accountRef, identityRef, internalRef, isDeletedUid, locationRef, userRe
 import { takeRateLimit } from './rateLimits'
 import { isPlayId, uidOfPlayId } from './playIds'
 import { hiddenInMode } from './blockCore'
+import { distanceAllowed, isHiddenVisibility, matchIsLive } from './distanceCore'
+import { tierNow } from './entitlements'
 import {
   SMS_CONSENT_SOURCES,
   SMS_CONSENT_TEXTS,
@@ -30,6 +32,9 @@ import {
 const GRID_DEG = 0.015
 const MAX_CHANGES_PER_DAY = 3
 const DAY_MS = 24 * 60 * 60 * 1000
+// F-125 (M14): every setLocation call, moved or not — each one can reach
+// the reverse geocoder (OpenStreetMap asks for at most 1 request a second).
+const SET_LOCATION_PER_HOUR = 10
 export const LOCATION_LIMIT_MESSAGE = 'You can update your location again tomorrow'
 
 function snap(v: number): number {
@@ -84,12 +89,19 @@ export const setLocation = onCall(
     const data = (request.data ?? {}) as Record<string, unknown>
     const lat = snap(coord(data.lat, 90))
     const lng = snap(coord(data.lng, 180))
+    await takeRateLimit(uid, 'setLocation', { max: SET_LOCATION_PER_HOUR, windowMs: 60 * 60 * 1000 })
 
     const existing = (await locationRef(uid).get()).data()
     const account = (await accountRef(uid).get()).data()
     const savedLabel: unknown = account?.location?.label
-    if (existing?.lat === lat && existing?.lng === lng && typeof savedLabel === 'string') {
-      return { changed: false, label: savedLabel, marketCityId: typeof existing.marketCityId === 'string' ? existing.marketCityId : null }
+    // F-125: the same grid cell changes nothing, label or not (a spot with no
+    // city name used to go back to the geocoder on every call).
+    if (existing?.lat === lat && existing?.lng === lng) {
+      return {
+        changed: false,
+        label: typeof savedLabel === 'string' ? savedLabel : null,
+        marketCityId: typeof existing.marketCityId === 'string' ? existing.marketCityId : null,
+      }
     }
 
     const now = Date.now()
@@ -101,7 +113,12 @@ export const setLocation = onCall(
 
     const label = (await reverseGeocode(lat, lng)) ?? (typeof savedLabel === 'string' ? savedLabel : null)
     const locked: unknown = existing?.marketCityId
-    const marketCityId = typeof locked === 'string' ? locked : (getNearestCity(lat, lng)?.id ?? null)
+    // F-114 (M3): someone already linked to a far city (locked on their first
+    // save) can't later claim a launch market by sending other coordinates —
+    // that turned a waiting (Free) account into pre-launch Elite and opened
+    // the founder claim. The market is decided once, from the first save.
+    const linkedAlready = typeof existing?.linkedCityId === 'string'
+    const marketCityId = typeof locked === 'string' ? locked : linkedAlready ? null : (getNearestCity(lat, lng)?.id ?? null)
     // Stage C (decision 1): outside every launch radius, linked to the
     // nearest launch or major city — locked like the market, so moving later
     // can't change which city's opening their free period waits for.
@@ -175,36 +192,58 @@ function coordsFrom(loc: DocumentData | undefined, root: DocumentData | undefine
 // Of `uids`, those `uid` may get a distance for (getDistances) — in `mode`
 // only (F-065): people from the caller's Spark deck, matches and likes for a
 // Spark call, from Play's for a Play call, so neither vouches for the other.
+// F-117/F-118: the current deck, live matches, and likers for paid plans
+// only; hidden or paused profiles only to a live match (distanceCore.ts).
 async function visibleTo(uid: string, uids: string[], mode: 'spark' | 'play'): Promise<Set<string>> {
   const db = getFirestore()
-  const [state, matches, queue] = await Promise.all([
+  const [state, matches, queue, plan] = await Promise.all([
     db.doc(`exploreState/${uid}`).get(),
     mode === 'spark'
-      ? db.collection('matches').where('users', 'array-contains', uid).select('users').get()
+      ? db.collection('matches').where('users', 'array-contains', uid).get()
       : // F-062: Play matches' people are in their server-only records.
-        db.collection('playMatchMembers').where('users', 'array-contains', uid).select('users').get(),
+        db.collection('playMatchMembers').where('users', 'array-contains', uid).get(),
     db.collection(`users/${uid}/likeQueue`).select().get(),
+    tierNow(uid),
   ])
   const st = state.data() ?? {}
   const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
   // Play likes are keyed by the liker's Play ID; Spark likes by uid.
-  const likers = await Promise.all(
-    queue.docs.filter((d) => isPlayId(d.id) === (mode === 'play')).map(async (d) => (isPlayId(d.id) ? await uidOfPlayId(d.id) : d.id)),
+  const likers = new Set(
+    (await Promise.all(
+      queue.docs.filter((d) => isPlayId(d.id) === (mode === 'play')).map(async (d) => (isPlayId(d.id) ? await uidOfPlayId(d.id) : d.id)),
+    )).filter((u): u is string => !!u),
   )
-  const known = new Set<string>([
-    ...list(st[mode]?.deck), ...list(st[mode]?.acted),
-    ...matches.docs.flatMap((d) => list(d.get('users'))),
-    ...likers.filter((u): u is string => !!u),
-  ])
+  // Play: playMatchMembers names the match; whether it's live is on the match.
+  const liveMatched = new Set<string>()
+  if (mode === 'spark') {
+    for (const d of matches.docs) if (matchIsLive(d.data())) for (const u of list(d.get('users'))) liveMatched.add(u)
+  } else if (matches.docs.length) {
+    const live = await db.getAll(...matches.docs.map((d) => db.doc(`playMatches/${d.id}`)))
+    matches.docs.forEach((d, i) => {
+      if (live[i].exists && matchIsLive(live[i].data() ?? {})) for (const u of list(d.get('users'))) liveMatched.add(u)
+    })
+  }
+  const deck = new Set(list(st[mode]?.deck))
   // H3: blocks placed on the caller, and theirs in this mode only.
   const blocked = new Set(hiddenInMode(st, mode))
-  const candidates = uids.filter((u) => known.has(u) && !blocked.has(u))
+  const candidates = uids.filter((u) => !blocked.has(u) && (deck.has(u) || liveMatched.has(u) || likers.has(u)))
   if (!candidates.length) return new Set()
-  const [internals, roots] = await Promise.all([
+  const [internals, roots, plays] = await Promise.all([
     db.getAll(...candidates.map((u) => db.doc(`userInternal/${u}`))),
     db.getAll(...candidates.map(userRef)),
+    mode === 'play' ? db.getAll(...candidates.map((u) => db.doc(`users/${u}/playProfile/data`))) : Promise.resolve(null),
   ])
-  return new Set(candidates.filter((_, i) => internals[i].get('isSuspended') !== true && roots[i].get('isDeleted') !== true && roots[i].exists))
+  const callerPaid = plan !== 'free'
+  return new Set(
+    candidates.filter((u, i) => {
+      if (internals[i].get('isSuspended') === true || roots[i].get('isDeleted') === true || !roots[i].exists) return false
+      const visibility = mode === 'play' ? plays?.[i]?.get('playVisibility') : roots[i].get('sparkVisibility')
+      return distanceAllowed(
+        { inDeck: deck.has(u), liveMatch: liveMatched.has(u), liker: likers.has(u) },
+        { callerPaid, targetHidden: isHiddenVisibility(visibility) },
+      )
+    }),
+  )
 }
 
 export const getDistances = onCall(
@@ -299,7 +338,16 @@ export const grantSmsConsent = onCall(
       { merge: true },
     )
     await optOutRef(phone).delete()
+    // F-122: one confirmation text a day per number — opting in again (up to
+    // 5 an hour) used to text each time. Within the day it was already sent.
+    const lastConfirmed: unknown = (await accountRef(uid).get()).data()?.smsConsentConfirmed
+    const recent =
+      typeof lastConfirmed === 'object' && lastConfirmed !== null &&
+      (lastConfirmed as Record<string, unknown>).phone === phone &&
+      Date.now() - Number((lastConfirmed as Record<string, unknown>).at) < DAY_MS
+    if (recent) return { ok: true, confirmation: 'sent', from: null }
     const confirmation = await sendConsentConfirmation(phone)
+    if (confirmation === 'sent') await accountRef(uid).set({ smsConsentConfirmed: { phone, at: Date.now() } }, { merge: true })
     return { ok: true, confirmation, from: confirmation === 'opted_out' ? smsFromNumber() : null }
   },
 )

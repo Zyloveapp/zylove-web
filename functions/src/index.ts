@@ -34,6 +34,7 @@ import {
   parsePlayGoDeeperRequest,
 } from './playGoDeeperPrompt'
 import { SPARK_GO_DEEPER_FOCUS, buildSparkGoDeeperPrompt, parseSparkGoDeeperRequest } from './sparkGoDeeperPrompt'
+import { BLOCKED_LINE_TYPES } from './signupGuard'
 import { LOOKUP_SECRETS, SMS_SECRETS, claimSparkSmsSlot, decideMessageSms, lookupLineType, nameFor, sendSMS, smsTarget } from './sms'
 
 export { assignFounderBadge, onLaunchConfigUpdated } from './founders'
@@ -1859,6 +1860,7 @@ export {
   sendFounderMessage,
 } from './founderMessages'
 export { acceptPhotoConsent, getBlockedUsers, onBeforeSignIn, unblockMember } from './trust'
+export { onBeforeCreate } from './signupGuard'
 export { adminGetReports, adminModerate, liftExpiredSuspensions, reportAndBan, submitReport } from './reports'
 
 // ─── SMS notifications ───────────────────────────────────────────────────────
@@ -2005,18 +2007,6 @@ export const smsOnPlayMatch = onDocumentCreated(
 
 // ─── validatePhoneNumber ─────────────────────────────────────────────────────
 
-// Twilio Lookup v2 reports camelCase types; the other spellings are kept in
-// case older/alternate values show up.
-const BLOCKED_LINE_TYPES = new Set([
-  'landline',
-  'fixedVoip',
-  'nonFixedVoip',
-  'tollFree',
-  'voip',
-  'virtual',
-  'toll-free',
-  'non-fixed-voip',
-])
 
 const PHONE_ATTEMPT_LIMIT = 5
 const PHONE_ATTEMPT_WINDOW_MS = 60 * 60 * 1000
@@ -2067,15 +2057,18 @@ async function phoneHasAccount(phoneNumber: string): Promise<boolean> {
 
 const PHONE_LOOKUP_DAILY_BUDGET = 1000
 
-// Runs before the OTP is sent so VoIP / virtual / landline numbers can't sign
-// up. Callable without auth (it gates sign-in). Order: every limit first —
-// per number, then per caller address — so the answer can't be used to probe
-// which numbers have accounts (F-072: the address limit used to come after
-// the account check, so once a caller was over it "allowed" meant "has an
-// account"). Then existing accounts skip the paid Lookup (the same
-// { allowed: true } a new mobile number gets), then the daily Lookup budget,
-// then the Lookup itself. Fails open on a Lookup or Firestore error, but not
-// once the budget is spent.
+// Runs before the OTP is sent, to tell someone early that a VoIP / virtual /
+// landline number won't work. Callable without auth (it gates sign-in).
+// Advisory only (F-120/F-121): the real check is onBeforeCreate
+// (signupGuard.ts), on the server, after the phone is verified.
+//   - The answer never depends on whether the number has an account (F-120,
+//     M9): over a limit, or once the daily Lookup budget is spent, it skips
+//     the Lookup and answers { allowed: true } for every number — refusing
+//     new numbers then said which ones had accounts.
+//   - Nobody can be locked out (F-121, M10): a number over its limit (anyone
+//     could call this with someone else's number) still gets allowed: true;
+//     the limits only stop the paid Lookup.
+//   - Per address, an IPv6 caller is counted by its /64 (clientIp.ts).
 export const PHONE_IP_LIMIT = 30
 
 export const validatePhoneNumber = onCall(
@@ -2092,29 +2085,21 @@ export const validatePhoneNumber = onCall(
       logger.warn('validatePhoneNumber: rate limit check failed', { message: err instanceof Error ? err.message : String(err) })
       return true
     })
-    if (!underLimit) {
-      logger.info('validatePhoneNumber: rate limited')
-      return { allowed: false, reason: 'rate_limited' }
-    }
     // Stage B (F-054): also per caller address (new random numbers each time
-    // got past the per-number limit). F-072: for every number, existing
-    // accounts included, and before the account check.
+    // got past the per-number limit). 30 an hour — several people can share
+    // one address (a carrier's NAT).
     const ipKey = ipRateKey(clientIp(request.rawRequest as never))
-    // 30 an hour: existing accounts count now, and several people can share
-    // one address (a carrier's NAT) — still a hard ceiling per real address,
-    // which can't be spoofed since F-073.
     const perIp = await takeRateLimit(ipKey, 'phoneLookup', { max: PHONE_IP_LIMIT, windowMs: 60 * 60 * 1000 }).then(() => true, () => false)
-    if (!perIp) {
-      logger.info('validatePhoneNumber: rate limited (address)')
-      return { allowed: false, reason: 'rate_limited' }
+    if (!underLimit || !perIp) {
+      logger.info('validatePhoneNumber: over a limit — no Lookup', { number: underLimit, address: perIp })
+      return { allowed: true }
     }
 
-    // Existing users are never refused by the budget, and don't cost a Lookup.
+    // Existing users don't cost a Lookup (same answer as a new mobile number).
     if (await phoneHasAccount(phoneNumber)) return { allowed: true }
 
-    // A daily Lookup budget (Stage B). F-072: past it, new numbers get the
-    // generic "try again later" — allowing them unchecked let VoIP numbers
-    // through once someone had spent the budget.
+    // A daily Lookup budget (Stage B). Past it: no Lookup, allowed: true, as
+    // for everyone (onBeforeCreate still checks the line type at sign-up).
     const day = new Date().toISOString().slice(0, 10)
     const budgetRef = getFirestore().doc(`rateLimits/_phoneLookup_${day}`)
     const spent = await getFirestore()
@@ -2126,8 +2111,8 @@ export const validatePhoneNumber = onCall(
       })
       .catch(() => true)
     if (!spent) {
-      logger.warn('validatePhoneNumber: daily Lookup budget reached — refusing new numbers')
-      return { allowed: false, reason: 'rate_limited' }
+      logger.warn('validatePhoneNumber: daily Lookup budget reached — skipping the Lookup')
+      return { allowed: true }
     }
 
     const lineType = await lookupLineType(phoneNumber)

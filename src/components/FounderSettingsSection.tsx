@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { subscribeAccountView } from '../services/subscription'
 import { useNavigate } from 'react-router-dom'
 import { parseThreadMeta, type FounderThreadMeta } from '../services/founderMessages'
-import { claimFounderBadge, founderOffer, spotsRemaining, type FounderOffer } from '../services/founders'
+import { claimFounderBadge, founderOffer, founderRefusalMessage, spotsRemaining, type FounderOffer } from '../services/founders'
 import FounderInviteModal from './FounderInvite'
 import FounderCelebration from './FounderCelebration'
 
@@ -104,7 +104,7 @@ function BecomeFounder({ uid }: { uid: string }) {
       setTimeout(() => setCelebrate(null), CELEBRATION_MS)
       return
     }
-    setError(result.reason === 'cohort_full' ? 'Someone just took the last spot.' : "This spot isn't available to you.")
+    setError(founderRefusalMessage(result.reason))
   }
 
   if (celebrate) return <FounderCelebration number={celebrate.number} cityName={celebrate.cityName} />

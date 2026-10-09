@@ -159,3 +159,18 @@ export async function founderHeartbeat(uid: string): Promise<void> {
     // Next load tries again.
   }
 }
+
+// Why a founder claim was refused, for people (functions/src/founders.ts and
+// founderGate.ts: F-114 too_new, F-115 not_mobile, F-116 not_available).
+export function founderRefusalMessage(reason: string): string {
+  switch (reason) {
+    case 'cohort_full':
+      return 'Someone just took the last spot.'
+    case 'too_new':
+      return 'Founder spots open to accounts at least a day old. Come back tomorrow to claim yours.'
+    case 'not_mobile':
+      return 'Founder spots need a mobile number. VoIP, landline and virtual numbers can’t claim one.'
+    default:
+      return "This spot isn't available to you."
+  }
+}
