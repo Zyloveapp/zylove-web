@@ -67,6 +67,10 @@ async function checkAge(uid: string, root?: DocumentData): Promise<void> {
 // Sets identityLockedAt once a gender is known (private/matching, or an old
 // copy on the public doc) — in a transaction, so it's set once.
 async function lockIdentity(uid: string): Promise<void> {
+  // A plain read first: the transaction (which holds both docs) only when
+  // there's a lock to set.
+  const [r, m] = await Promise.all([userRef(uid).get(), matchingRef(uid).get()])
+  if (!r.exists || r.get('isDeleted') === true || r.get('identityLockedAt') != null || genderOf(m.data(), r.data()) == null) return
   await getFirestore().runTransaction(async (tx) => {
     const [now, matching] = await Promise.all([tx.get(userRef(uid)), tx.get(matchingRef(uid))])
     const root = now.data()
@@ -108,8 +112,11 @@ export const identityGuardOnMatching = onDocumentWritten({ document: 'users/{uid
   const after = event.data?.after.data()
   if (!after) return
   const before = event.data?.before.data()
-  if (after.genderIdentity != null) await lockIdentity(uid)
-  if (LINE_FIELDS.some((k) => JSON.stringify(before?.[k] ?? null) !== JSON.stringify(after[k] ?? null))) await refreshGenderLine(uid)
+  const changed = (k: string) => JSON.stringify(before?.[k] ?? null) !== JSON.stringify(after[k] ?? null)
+  // Only when the gender is new (a profile created later locks from
+  // identityGuardOnUser) — not a transaction on every preference edit.
+  if (after.genderIdentity != null && changed('genderIdentity')) await lockIdentity(uid)
+  if (LINE_FIELDS.some(changed)) await refreshGenderLine(uid)
 })
 
 export const identityGuardOnIdentity = onDocumentWritten({ document: 'users/{uid}/private/identity', memory: '256MiB' }, async (event) => {

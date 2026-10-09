@@ -112,6 +112,9 @@ export async function seedUser(name, overrides = {}, { play = null, legacy = LEG
     smsNotificationsEnabled: { spark: false, play: false },
     ...overrides,
   }
+  // §4.A2: the line the server would build, at once (saves the suite a
+  // trigger round-trip and a second public-doc write per seeded user).
+  if (!legacy && process.env.SEED_A2_LEGACY !== "1") doc.genderLine = fnLib('genderLine').buildGenderLine(doc)
   await db.doc(`users/${uid}`).set(doc)
   if (!legacy) await migrateUser({ db, auth: adminAuth, FieldValue, Timestamp }, uid, doc)
   await db.doc(`users/${uid}/sparkProfile/data`).set({
