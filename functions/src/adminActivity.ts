@@ -18,7 +18,7 @@ import { claimFounderSpot, type FounderResult } from './founders'
 import { revokeFounderStatus } from './founderActivity'
 import { STRIPE_SECRETS, cancelSubscriptionsForDeletion } from './stripe'
 import { liftSuspension, setAuthDisabled } from './reports'
-import { audit, requireAdmin, requireAdminAudited } from './audit'
+import { audit, requireAdmin, requireAdminAudited, requireLiveAdmin } from './audit'
 import { ROOT_SCRUB, clearPrivateData, internalRef, loadLocation, moderationCarry, recoveryRecord } from './userData'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -337,6 +337,7 @@ export const adminUserAction = onCall(
   { timeoutSeconds: 120, memory: '256MiB', invoker: 'public', secrets: STRIPE_SECRETS },
   async (request): Promise<{ ok: true; founder?: FounderResult }> => {
     const adminUid = await requireAdmin(request.auth, 'adminUserAction')
+    await requireLiveAdmin(adminUid)
     const { uid, action } = (request.data ?? {}) as { uid?: unknown; action?: unknown }
     if (typeof uid !== 'string' || !uid || uid.includes('/')) throw new HttpsError('invalid-argument', 'uid required')
     if (!ACTIONS.includes(action as UserAction)) throw new HttpsError('invalid-argument', 'unknown action')

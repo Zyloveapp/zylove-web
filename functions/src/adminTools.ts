@@ -21,8 +21,9 @@ import { getAuth } from 'firebase-admin/auth'
 import { getStorage } from 'firebase-admin/storage'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, getNearestCity } from './cities'
-import { audit, requireAdmin, requireAdminAudited } from './audit'
+import { audit, requireAdmin, requireAdminAudited, requireLiveAdmin } from './audit'
 import { revokeFounderStatus } from './founderActivity'
+import { isAdminUid } from './userData'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const PURGE_AFTER_MS = 365 * DAY_MS // onNightlyPurge's TWELVE_MONTHS_MS
@@ -140,6 +141,9 @@ export const adminPurgeAccount = onCall(
     const uid: unknown = request.data?.uid
     if (typeof uid !== 'string' || !uid || uid.includes('/')) throw new HttpsError('invalid-argument', 'uid required')
     if (uid === adminUid) throw new HttpsError('failed-precondition', "You can't purge your own account.")
+    await requireLiveAdmin(adminUid)
+    // Low: never another admin's account (as adminUserAction and adminModerate).
+    if (await isAdminUid(uid)) throw new HttpsError('failed-precondition', "Not on an admin's account.")
 
     const db = getFirestore()
     const userRef = db.doc(`users/${uid}`)

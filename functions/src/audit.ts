@@ -1,4 +1,5 @@
 import { HttpsError } from 'firebase-functions/v2/https'
+import { getAuth } from 'firebase-admin/auth'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
@@ -57,6 +58,14 @@ export async function requireAdmin(auth: { uid: string; token?: Record<string, u
     throw new HttpsError('permission-denied', 'Admins only.')
   }
   return auth.uid
+}
+
+// Low (fresh-eyes review): for destructive admin actions, the claim as it
+// is now on the Auth record, not the one in the caller's ID token — a
+// removed claim lives on in a token for up to an hour.
+export async function requireLiveAdmin(uid: string): Promise<void> {
+  const user = await getAuth().getUser(uid).catch(() => null)
+  if (user?.customClaims?.admin !== true) throw new HttpsError('permission-denied', 'Admins only.')
 }
 
 // Admins only — and every admin call is logged before it returns anything.

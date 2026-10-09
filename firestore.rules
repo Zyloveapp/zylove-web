@@ -114,6 +114,13 @@ service cloud.firestore {
           || get(/databases/$(database)/documents/userInternal/$(request.auth.uid)).data.get('messagesMutedUntil', null) == null
           || get(/databases/$(database)/documents/userInternal/$(request.auth.uid)).data.messagesMutedUntil < request.time;
     }
+    // Low (fresh-eyes review): a typing doc is { typingAt, uid } (src/services/typing.ts),
+    // nothing else — it took any content up to 1 MB, readable by the partner.
+    function typingShapeOk() {
+      return request.resource == null
+          || (request.resource.data.keys().hasOnly(['typingAt', 'uid'])
+              && request.resource.data.uid is string && request.resource.data.uid.size() <= 128);
+    }
     function profileVisible(uid) {
       return get(/databases/$(database)/documents/users/$(uid)).data.get('isDeleted', false) != true
           && notSuspended(uid);
@@ -904,7 +911,8 @@ service cloud.firestore {
         allow write: if callerActive() && isSignedIn()
                      && request.auth.uid == typingUid
                      && isMatchParticipant(matchId)
-                     && matchLive(matchDoc(matchId));
+                     && matchLive(matchDoc(matchId))
+                     && typingShapeOk();
       }
     }
 
@@ -1049,7 +1057,8 @@ service cloud.firestore {
         allow write: if callerActive() && isSignedIn()
                      && typingId == myPlayId()
                      && isPlayParticipant(matchId)
-                     && matchLive(playMatchDoc(matchId));
+                     && matchLive(playMatchDoc(matchId))
+                     && typingShapeOk();
       }
     }
 
@@ -1178,8 +1187,9 @@ service cloud.firestore {
 
     // ─── FCM Tokens ──────────────────────────────────────────────────────────
 
+    // Unused (no web push); was any-content owner writes. Low (fresh-eyes review).
     match /fcmTokens/{uid} {
-      allow read, write: if isUser(uid) && isSignedIn();
+      allow read, write: if false;
     }
 
     // ─── App Config (read-only for all signed-in users) ──────────────────────

@@ -112,7 +112,14 @@ export async function applyPlan({ db, auth, FieldValue, Timestamp }, plan) {
   }
   if (plan.onRoot.length) batch.update(db.doc(`users/${uid}`), Object.fromEntries(plan.onRoot.map((f) => [f, FieldValue.delete()])))
   await batch.commit()
-  if (plan.admin && !plan.deleted) {
+  // Low (fresh-eyes review): a users/{uid}.isAdmin field becomes an admin
+  // claim only for uids listed in ADMIN_UIDS (comma-separated) — the field
+  // was once client-writable, so it alone is no proof.
+  const allowed = (process.env.ADMIN_UIDS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+  if (plan.admin && !plan.deleted && !allowed.includes(uid)) {
+    console.warn(`stage1a: ${uid} has isAdmin on its user doc but isn't in ADMIN_UIDS — no admin claim set`)
+  }
+  if (plan.admin && !plan.deleted && allowed.includes(uid)) {
     // Only a missing auth user is skipped; anything else must fail loudly.
     const user = await auth.getUser(uid).catch((err) => {
       if (err?.code === 'auth/user-not-found') return null

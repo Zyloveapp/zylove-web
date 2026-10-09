@@ -181,7 +181,10 @@ export const revokeContactExchange = onCall({ timeoutSeconds: 60, memory: '256Mi
   const cards = await ref.collection('messages').where('messageType', '==', 'contact_card').get()
   const batch = db().batch()
   for (const d of cards.docs) batch.update(d.ref, { ciphertext: '', nonce: 'revoked', revokedAt: Date.now() })
-  batch.create(ref.collection('messages').doc(), notice('contact_revoked', me))
+  // Low (fresh-eyes review): taking cards back always works (it removes your
+  // details), but a chat that has ended — blocked or unmatched — gets no
+  // new notice in it.
+  if (match.isBlocked !== true && match.unmatchedAt == null) batch.create(ref.collection('messages').doc(), notice('contact_revoked', me))
   await batch.commit()
   return { ok: true, cardsRemoved: cards.size }
 })

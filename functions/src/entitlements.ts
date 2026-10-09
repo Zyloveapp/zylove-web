@@ -49,6 +49,8 @@ export function launchCityOf(loc: DocumentData | undefined): string | null {
   return ids.find((id) => ZYLOVE_CITIES.some((c) => c.id === id)) ?? null
 }
 
+export const PAST_DUE_GRACE_MS = 14 * 24 * 60 * 60 * 1000
+
 export function computeEntitlement(
   // marketOpen: whether their market (the launch city they're in) has
   // opened; linkedCityOpen: whether the linked (far) city — when it's a
@@ -70,8 +72,15 @@ export function computeEntitlement(
   // §4.A2: the gender is in private/matching (the root's old copy until migrated).
   if (root.identityLockedAt != null && eliteByMatching(matching.genderIdentity ?? root.genderIdentity, matching.matchableAs)) return e('elite', 'identity')
   if (root.isFounder === true) return e('elite', 'founder')
-  if (plan.subscriptionTier === 'elite') return e('elite', 'paid')
-  if (plan.subscriptionTier === 'spark_plus') return e('spark_plus', 'paid')
+  // Low (fresh-eyes review): a payment that keeps failing ends paid access
+  // after PAST_DUE_GRACE_MS (Stripe may be set to leave it past_due).
+  const pastDueSince = plan.subscriptionStatus === 'past_due' ? toMillis(plan.pastDueSince ?? plan.subscriptionUpdatedAt) : null
+  const lapsed = pastDueSince !== null && now - pastDueSince > PAST_DUE_GRACE_MS
+  // While past due, the entitlement ends with the grace period (`until`, which
+  // the rules and tierNow check to the second — nothing else re-runs this).
+  const paidUntil = pastDueSince !== null ? pastDueSince + PAST_DUE_GRACE_MS : null
+  if (!lapsed && plan.subscriptionTier === 'elite') return e('elite', 'paid', paidUntil)
+  if (!lapsed && plan.subscriptionTier === 'spark_plus') return e('spark_plus', 'paid', paidUntil)
   if (plan.trialStartedAt != null) {
     const ends = toMillis(plan.trialEndsAt)
     return plan.trialExpired !== true && ends !== null && ends > now ? e('elite', 'trial', ends) : e('free', 'free')

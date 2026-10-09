@@ -160,6 +160,10 @@ export const onPhotoUpload = onObjectFinalized(
       }
       if (clean.bytes.length !== raw.length) {
         await file.save(clean.bytes, { contentType: clean.contentType, resumable: false, metadata: { metadata: { zyloveCopy: '1' } } })
+      } else if (event.data.contentType !== clean.contentType) {
+        // Low (fresh-eyes review): the type the bytes really are, not the one
+        // the uploader claimed (a metadata update — not a new upload event).
+        await file.setMetadata({ contentType: clean.contentType })
       }
       // T&S Phase 5: its perceptual hash — a duplicate on another account
       // counts against whichever had it later (F-087); a match with a banned

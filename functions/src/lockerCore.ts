@@ -34,7 +34,8 @@ export function seal(keys: ReturnType<typeof parseKeys>, value: unknown): Sealed
 export function open<T>(keys: ReturnType<typeof parseKeys>, s: Sealed): T {
   const k = keys.find((x) => x.v === s.v)
   if (!k) throw new Error(`no locker key ${s.v}`)
-  const d = createDecipheriv('aes-256-gcm', Buffer.from(k.key, 'hex'), Buffer.from(s.iv, 'base64'))
+  // Low (Semgrep): a full 16-byte tag only — a shorter one would be easier to forge.
+  const d = createDecipheriv('aes-256-gcm', Buffer.from(k.key, 'hex'), Buffer.from(s.iv, 'base64'), { authTagLength: 16 })
   d.setAuthTag(Buffer.from(s.tag, 'base64'))
   return JSON.parse(Buffer.concat([d.update(Buffer.from(s.data, 'base64')), d.final()]).toString('utf8')) as T
 }
