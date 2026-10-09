@@ -125,7 +125,9 @@ test('F-066: the rules refuse an under-18 birthday or age; the server locks iden
   // The lock: the first gender write gets it at once (server-set).
   const n = await seedUser('Nia', { genderIdentity: null })
   await db.doc(`users/${n.uid}`).update({ identityLockedAt: FieldValue.delete() })
-  expect(await patch(n.uid, `users/${n.uid}`, { genderIdentity: 'woman' })).toBe(200)
+  // §4.A2: gender is written to private/matching (refused on the public doc).
+  expect(await patch(n.uid, `users/${n.uid}`, { genderIdentity: 'woman' })).toBe(403)
+  expect(await patch(n.uid, `users/${n.uid}/private/matching`, { genderIdentity: 'woman' })).toBe(200)
   await expect.poll(async () => (await db.doc(`users/${n.uid}`).get()).get('identityLockedAt') != null, { timeout: 20000 }).toBe(true)
   // A client can't set or clear it.
   expect(await patch(n.uid, `users/${n.uid}`, { identityLockedAt: 'x' })).toBe(403)
@@ -141,8 +143,11 @@ test('F-066: identity-based Elite needs the lock', async () => {
   const w = await seedUser('Wren', { genderIdentity: 'woman', attractedTo: ['men'] })
   const ent = fnLib('entitlements')
   const root = (await db.doc(`users/${w.uid}`).get()).data()
-  expect(ent.computeEntitlement({ root, plan: {}, matching: {} }).source).toBe('identity')
-  expect(ent.computeEntitlement({ root: { ...root, identityLockedAt: null }, plan: {}, matching: {} }).source).not.toBe('identity')
+  // §4.A2: the gender comes from private/matching.
+  const matching = (await db.doc(`users/${w.uid}/private/matching`).get()).data()
+  expect(matching.genderIdentity).toBe('woman')
+  expect(ent.computeEntitlement({ root, plan: {}, matching }).source).toBe('identity')
+  expect(ent.computeEntitlement({ root: { ...root, identityLockedAt: null }, plan: {}, matching }).source).not.toBe('identity')
 })
 
 // ─── F-067: suspension escape ─────────────────────────────────────────────────
@@ -261,13 +266,14 @@ test('F-077: a pending photo consent can only name its sender; a request from be
   expect(await errOf(callAs(a.uid, 'acceptPhotoConsent', { matchId: id }))).toMatch(/No matching photo request/)
 })
 
-test('§4.A1: religion and politics are refused on the public doc, kept in private/matching, and never on a deck card; a hidden gender is off the card too', async () => {
+test('§4.A1: religion and politics are refused on the public doc, kept in private/matching, and never on a deck card; nor is gender (§4.A2)', async () => {
   const a = await seedUser('Ivy')
   expect(await patch(a.uid, `users/${a.uid}`, { religion: 'catholic' })).toBe(403)
   expect(await patch(a.uid, `users/${a.uid}/private/matching`, { religion: 'catholic', politicalView: 'moderate' })).toBe(200)
   const card = fnLib('explore').sparkCardProfile({ displayName: 'X', religion: 'jewish', politicalView: 'liberal', genderIdentity: 'trans_woman', genderSelfDescribe: 'x', genderHidden: true })
-  expect(card).toEqual({ displayName: 'X', genderHidden: true })
-  expect(fnLib('explore').sparkCardProfile({ genderIdentity: 'non_binary' })).toEqual({ genderIdentity: 'non_binary' })
+  expect(card).toEqual({ displayName: 'X' })
+  // §4.A2: an old public copy never goes out either; the server-built line does.
+  expect(fnLib('explore').sparkCardProfile({ genderIdentity: 'non_binary', pronouns: 'they/them', genderLine: 'Non-binary · they/them' })).toEqual({ genderLine: 'Non-binary · they/them' })
 })
 
 // ─── Migration ────────────────────────────────────────────────────────────────

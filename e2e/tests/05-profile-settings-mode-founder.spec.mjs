@@ -23,7 +23,10 @@ test('profile: own profile renders, edit pronouns saves; other profile renders',
   await page.getByPlaceholder('e.g. she/her, they/them').fill('he/him')
   await page.getByRole('button', { name: 'Save Spark profile' }).click()
   await expect(page.getByText(/Saved ✦/)).toBeVisible()
-  await expect.poll(async () => (await userDoc(me.uid)).pronouns).toBe('he/him')
+  // §4.A2: pronouns are owner-only; others see them in the server-built line.
+  await expect.poll(async () => (await db.doc(`users/${me.uid}/private/matching`).get()).data()?.pronouns).toBe('he/him')
+  await expect.poll(async () => (await userDoc(me.uid)).genderLine, { timeout: 20000 }).toBe('he/him')
+  expect((await userDoc(me.uid)).pronouns).toBeUndefined()
   await page.goto(`/profile/${other.uid}`)
   await expect(page.getByRole('heading', { name: 'Morgan, 30' })).toBeVisible()
   await expect(page.getByRole('button', { name: /Send a Spark/ })).toBeVisible()
