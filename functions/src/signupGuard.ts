@@ -55,7 +55,10 @@ export const onBeforeCreate = beforeUserCreated(
     const emulator = process.env.FUNCTIONS_EMULATOR === 'true'
     // Lookup only for a US number (no point paying to refuse a foreign one).
     const early = signupDecision(phone, null, { emulator })
-    const lineType = early.ok && phone ? await lookupLineType(phone, 4000) : null
+    // 2.5 s: a blocking function has 7 s in all (cold start included), and a
+    // slow Lookup must count as no answer — let in — never as a timed-out
+    // sign-up (Firebase refuses those).
+    const lineType = early.ok && phone ? await lookupLineType(phone, 2500) : null
     const decision = early.ok ? signupDecision(phone, lineType, { emulator }) : early
     if (!decision.ok) {
       logger.info('onBeforeCreate: refused', { reason: decision.reason, lineType })
