@@ -13,7 +13,7 @@ export const FOUNDER_CAPACITY_PER_CITY = 100
 export const FOUNDER_BENEFITS = (cityName: string) => [
   "Elite access, free, for as long as you're a founder",
   `A ${cityName} Founder badge`,
-  'Direct line to the founder',
+  'Influence with the creator of Zylove to make it better',
   'First in line for new features',
 ]
 

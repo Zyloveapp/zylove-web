@@ -55,7 +55,7 @@ const FEATURES = [
 ]
 
 // Short forms of FOUNDER_BENEFITS (config/founderCopy) for the chips.
-const FOUNDING_BENEFITS = ['Elite access, free', 'City Founder badge', 'Direct line to the founder', 'First in line for new features']
+const FOUNDING_BENEFITS = ['Elite access, free', 'City Founder badge', 'Influence with the creator of Zylove to make it better', 'First in line for new features']
 
 const STATS = [
   { value: '2', label: 'modes' },

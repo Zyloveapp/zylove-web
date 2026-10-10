@@ -8,7 +8,7 @@ import { cityList, useOpenCities } from '../../services/openCities'
 const BENEFITS = [
   { title: 'Elite access, free', body: "No trial, no billing — free for as long as you're a founder." },
   { title: 'Founder badge', body: 'Your city\'s Founder badge on your profile. You were here at the very beginning.' },
-  { title: 'Direct line to the founder', body: 'A real voice. A real conversation. Your feedback shapes the product.' },
+  { title: 'Influence with the creator of Zylove to make it better', body: 'A real voice. A real conversation. Your feedback shapes the product.' },
   { title: 'First in line for new features', body: 'New features reach founders first.' },
 ]
 
