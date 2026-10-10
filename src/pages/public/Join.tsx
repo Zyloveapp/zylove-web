@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import PublicLayout from '../../components/public/PublicLayout'
 import FoundingCounter from '../../components/public/FoundingCounter'
 import { FOUNDER_CAPACITY_PER_CITY, FOUNDER_TERMS_SHORT } from '../../config/founderCopy'
+import { cityList, useOpenCities } from '../../services/openCities'
 
 // Same offer as FOUNDER_BENEFITS (config/founderCopy), with a line of detail each.
 const BENEFITS = [
@@ -22,6 +23,8 @@ const STATS = [
 // open), so this page sends people to sign up rather than collecting
 // applications.
 export default function Join() {
+  // UPDATE 6: name the open (Founding/Live) cities.
+  const openCities = useOpenCities()
   return (
     <PublicLayout title="Founding circle · Zylove">
       <section className="text-center">
@@ -31,7 +34,7 @@ export default function Join() {
         </h1>
         <p className="mx-auto mt-4 max-w-xl text-white/60">
           Dating fatigue is real. The apps aren't working. <strong className="text-white">Zylove is built differently</strong> — and
-          we're launching city by city. Each city starts with {FOUNDER_CAPACITY_PER_CITY} founding members (50 women and 50 men) who
+          we're launching in {cityList(openCities)} first. Each city starts with {FOUNDER_CAPACITY_PER_CITY} founding members (50 women and 50 men) who
           help shape what that actually means.
         </p>
       </section>

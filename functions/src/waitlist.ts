@@ -60,7 +60,7 @@ const interestRef = (cityId: string, uid: string) => db().doc(`founderInterest/$
 
 export type AreaView =
   | { status: 'member' }
-  | { status: 'admitted'; cityName: string | null; via: string | null; headStartUntil: number | null }
+  | { status: 'admitted'; cityName: string | null; via: string | null; headStartUntil: number | null; cityLive: boolean }
   | {
       status: 'waitlisted'
       cityId: string
@@ -87,13 +87,16 @@ export function hasTextConsent(account: DocumentData | undefined, phone: string 
 
 async function view(uid: string, admission: DocumentData | undefined, phone: string | null): Promise<AreaView> {
   if (admission?.status === 'admitted') {
-    const hs = (await internalRef(uid).get()).get('founderHeadStart') as DocumentData | undefined
+    const [internalSnap, citySnap] = await Promise.all([internalRef(uid).get(), db().doc(`config/city_${String(admission.cityId)}`).get()])
+    const hs = internalSnap.get('founderHeadStart') as DocumentData | undefined
     const until = hs?.cityId === admission.cityId && hs?.until instanceof Timestamp ? hs.until.toMillis() : null
     return {
       status: 'admitted',
       cityName: cityName(admission.cityId),
       via: typeof admission.via === 'string' ? admission.via : null,
       headStartUntil: until !== null && until > Date.now() ? until : null,
+      // The activation headline: "is live" for a Live city, "is open" for a Founding one.
+      cityLive: cityStatus(String(admission.cityId), citySnap.data()) === 'live',
     }
   }
   if (admission?.status !== 'waitlisted') return { status: 'unknown' }
@@ -289,6 +292,10 @@ export const onCityStatusChanged = onDocumentWritten(
     const before = cityStatus(city.id, event.data?.before.data())
     const after = cityStatus(city.id, event.data?.after.data())
     if (before === after) return
+    // UPDATE 6: the sign-in and Join pages name the open cities — public,
+    // since signed-out visitors can't read config/.
+    const open = availableCities(await loadCityConfigs()).map((c) => ({ id: c.id, name: c.name, state: c.state }))
+    await db().doc('publicStats/openCities').set({ cities: open, updatedAt: FieldValue.serverTimestamp() })
     if (!admitsSignups(before) && admitsSignups(after)) {
       const config = event.data?.after.data()
       const admitted = await admitWaitlist(city.id, foundingPeriod(city.id, config), config)
@@ -392,3 +399,37 @@ export const waitlistTextSweep = onSchedule(
     if (sent) logger.info('waitlistTextSweep', { sent })
   },
 )
+
+// ─── sweepUnansweredWaitlist ─────────────────────────────────────────────────
+
+// Matthew (UPDATE 5): someone who reached the waitlist screen and never
+// answered the text question is removed after 7 days — the same deletion as
+// "Remove me" (deleteWaitlistedAccount). Not anyone who consented, was let in,
+// or has a profile.
+export const UNANSWERED_MS = 7 * 24 * 60 * 60 * 1000
+
+export function unansweredExpired(entry: DocumentData, account: DocumentData | undefined, now = Date.now()): boolean {
+  const joined = entry.joinedAt instanceof Timestamp ? entry.joinedAt.toMillis() : null
+  return entry.admittedAt == null && joined !== null && now - joined > UNANSWERED_MS && account?.smsConsent == null
+}
+
+export const sweepUnansweredWaitlist = onSchedule(
+  { schedule: '45 3 * * *', timeZone: 'America/Chicago', timeoutSeconds: 540, memory: '256MiB' },
+  async () => {
+    const removed = await removeUnanswered()
+    if (removed) logger.info('sweepUnansweredWaitlist', { removed })
+  },
+)
+
+export async function removeUnanswered(now = Date.now()): Promise<number> {
+  const waiting = await db().collection('cityWaitlist').where('admittedAt', '==', null).get()
+  let removed = 0
+  for (const d of waiting.docs) {
+    const [account, root, internal] = await Promise.all([accountRef(d.id).get(), userRef(d.id).get(), internalRef(d.id).get()])
+    if (root.get('onboardingComplete') === true || internal.get('admission')?.status !== 'waitlisted') continue
+    if (!unansweredExpired(d.data(), account.data(), now)) continue
+    await deleteWaitlistedAccount(d.id).catch((err: unknown) => logger.error('sweepUnansweredWaitlist: delete failed', { message: String(err) }))
+    removed++
+  }
+  return removed
+}

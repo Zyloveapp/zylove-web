@@ -17,6 +17,7 @@ import {
   optOutRef,
   sendConsentConfirmation,
   smsFromNumber,
+  WAITLIST_CONFIRMATION,
   type Delivery,
   type SmsConsentSource,
 } from './sms'
@@ -305,7 +306,7 @@ export const getDistances = onCall(
 // the person texts START to it.
 export const grantSmsConsent = onCall(
   { timeoutSeconds: 20, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
-  async (request): Promise<{ ok: true; confirmation: Delivery | 'none'; from: string | null }> => {
+  async (request): Promise<{ ok: true; confirmation: Delivery; from: string | null }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const uid = request.auth.uid
     const phone: unknown = request.auth.token.phone_number
@@ -333,9 +334,6 @@ export const grantSmsConsent = onCall(
       { merge: true },
     )
     await optOutRef(phone).delete()
-    // The waitlist's opt-in: no confirmation text (the screen confirms it;
-    // Matthew, 2026-10-09) — its one text is the activation notice.
-    if (source === 'waitlist') return { ok: true, confirmation: 'none', from: null }
     // F-122: one confirmation text a day per number — opting in again (up to
     // 5 an hour) used to text each time. Within the day it was already sent.
     const lastConfirmed: unknown = (await accountRef(uid).get()).data()?.smsConsentConfirmed
@@ -344,7 +342,8 @@ export const grantSmsConsent = onCall(
       (lastConfirmed as Record<string, unknown>).phone === phone &&
       Date.now() - Number((lastConfirmed as Record<string, unknown>).at) < DAY_MS
     if (recent) return { ok: true, confirmation: 'sent', from: null }
-    const confirmation = await sendConsentConfirmation(phone)
+    // The waitlist's opt-in gets its own plain confirmation (no city).
+    const confirmation = await sendConsentConfirmation(phone, source === 'waitlist' ? WAITLIST_CONFIRMATION : undefined)
     if (confirmation === 'sent') await accountRef(uid).set({ smsConsentConfirmed: { phone, at: Date.now() } }, { merge: true })
     return { ok: true, confirmation, from: confirmation === 'opted_out' ? smsFromNumber() : null }
   },

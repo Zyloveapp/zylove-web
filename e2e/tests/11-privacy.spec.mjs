@@ -110,7 +110,7 @@ test('privacy: getDistances returns whole miles and a market flag — never coor
   await expect(callAs(a.uid, 'getDistances', { uids: Array.from({ length: 201 }, (_, i) => `u${i}`) })).rejects.toThrow(/invalid-argument|INVALID_ARGUMENT/)
 })
 
-test('location: setLocation snaps, labels, locks the market, and allows 3 moves a day', async () => {
+test('location: setLocation snaps, labels, follows the market where you are, and allows 3 moves a day', async () => {
   const a = await seedUser('Jay')
   // ~1-mile grid (Stage 3): the saved 3-mile point is off-grid, so the first save is a move.
   const snap = (v) => Math.round(Math.round(v / 0.015) * 0.015 * 1000) / 1000
@@ -119,7 +119,7 @@ test('location: setLocation snaps, labels, locks the market, and allows 3 moves 
   expect(await callAs(a.uid, 'setLocation', { lat: 30.4 + 0.002, lng: -97.7 + 0.002 })).toMatchObject({ changed: false })
   for (const [lat, lng] of [[30.5, -97.7], [32.78, -96.8]]) expect(await callAs(a.uid, 'setLocation', { lat, lng })).toMatchObject({ changed: true }) // the last is Dallas
   const loc = (await db.doc(`userLocations/${a.uid}`).get()).data()
-  expect(loc).toMatchObject({ lat: snap(32.78), lng: snap(-96.8), marketCityId: 'austin' }) // market stays locked to Austin
+  expect(loc).toMatchObject({ lat: snap(32.78), lng: snap(-96.8), marketCityId: 'dallas' }) // the market is where you are now (Austin-only launch)
   await expect(callAs(a.uid, 'setLocation', { lat: 30.25, lng: -97.75 })).rejects.toThrow(/You can update your location again tomorrow/)
   const u = await userDoc(a.uid)
   expect(u.locationLat).toBeUndefined()

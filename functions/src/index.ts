@@ -1833,7 +1833,7 @@ export { computeBehaviorScore, getPastConnections, onMatchBehaviorUpdate, onPlay
 export { markChatPhotoViewed, sweepChatPhotos } from './photos'
 export { checkTrialStatus, onMarketOpened } from './trial'
 // Austin-only launch: the city waitlist (location check, leave, admin city status, unlock texts).
-export { adminSetCityStatus, checkArea, joinFounderLine, leaveWaitlist, onCityStatusChanged, waitlistTextSweep } from './waitlist'
+export { adminSetCityStatus, checkArea, joinFounderLine, leaveWaitlist, onCityStatusChanged, sweepUnansweredWaitlist, waitlistTextSweep } from './waitlist'
 export { mirrorPlan } from './userData'
 export { acknowledgeLegalUpdate, recordTermsAcceptance } from './legal'
 export { getPhotoUrls, getReviewPdfUrl } from './photoAccess'

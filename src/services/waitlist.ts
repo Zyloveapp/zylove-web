@@ -8,7 +8,7 @@ import type { LatLng } from './location'
 
 export type AreaView =
   | { status: 'member' }
-  | { status: 'admitted'; cityName: string | null; via: string | null; headStartUntil: number | null }
+  | { status: 'admitted'; cityName: string | null; via: string | null; headStartUntil: number | null; cityLive: boolean }
   | {
       status: 'waitlisted'
       cityId: string

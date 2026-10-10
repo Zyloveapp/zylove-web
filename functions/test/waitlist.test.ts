@@ -14,8 +14,8 @@ import {
   type CityConfigs,
 } from '../src/cityStatus'
 import { computeEntitlement } from '../src/entitlements'
-import { hasTextConsent } from '../src/waitlist'
-import { SMS_CONSENT_SOURCES, SMS_CONSENT_TEXTS, WAITLIST_ACTIVATED_TEXT, waitlistTextConfig } from '../src/sms'
+import { UNANSWERED_MS, hasTextConsent, unansweredExpired } from '../src/waitlist'
+import { SMS_CONSENT_SOURCES, SMS_CONSENT_TEXTS, WAITLIST_ACTIVATED_TEXT, WAITLIST_CONFIRMATION, waitlistTextConfig } from '../src/sms'
 
 const AUSTIN = { lat: 30.2672, lng: -97.7431 }
 const DALLAS = { lat: 32.7767, lng: -96.797 }
@@ -96,4 +96,14 @@ test('the activation text is a plain account notice; texting is on by default, b
   assert.deepEqual(waitlistTextConfig(undefined), { enabled: true, batchSize: 200, dailyCap: 2000 })
   assert.deepEqual(waitlistTextConfig({ enabled: false, batchSize: 50, dailyCap: 500 }), { enabled: false, batchSize: 50, dailyCap: 500 })
   assert.deepEqual(waitlistTextConfig({ batchSize: -1, dailyCap: 'x' }), { enabled: true, batchSize: 200, dailyCap: 2000 })
+})
+
+test('the waitlist opt-in confirmation is a plain account notice (no city); never-answered waitlisters go after 7 days', () => {
+  assert.equal(WAITLIST_CONFIRMATION, "Zylove: You'll get account notifications from Zylove. Msg frequency varies. Msg & data rates may apply. Reply HELP for help, STOP to opt out.")
+  const now = Date.now()
+  const old = { joinedAt: Timestamp.fromMillis(now - UNANSWERED_MS - 1000), admittedAt: null }
+  assert.equal(unansweredExpired(old, undefined, now), true)
+  assert.equal(unansweredExpired(old, { smsConsent: { phone: '+15550100001' } }, now), false, 'consented')
+  assert.equal(unansweredExpired({ ...old, admittedAt: Timestamp.now() }, undefined, now), false, 'let in')
+  assert.equal(unansweredExpired({ ...old, joinedAt: Timestamp.fromMillis(now - 6 * 864e5) }, undefined, now), false, 'under 7 days')
 })

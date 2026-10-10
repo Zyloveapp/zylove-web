@@ -16,6 +16,8 @@ const AUSTIN = { lat: 30.25, lng: -97.75 }
 const DALLAS = { lat: 32.78, lng: -96.8 }
 const BOISE = { lat: 43.62, lng: -116.2 } // outside every launch city
 const WAITLIST_VERSION = 'waitlist-2026-10-09'
+const CONFIRMATION = "Zylove: You'll get account notifications from Zylove. Msg frequency varies. Msg & data rates may apply. Reply HELP for help, STOP to opt out."
+const ACTIVATED = 'Zylove: Your account is now active. Sign in at zylove.app to finish your profile. Reply STOP to opt out.'
 
 const DOCS = `projects/${PROJECT}/databases/(default)/documents`
 const BASE = `http://127.0.0.1:8390/v1/${DOCS}`
@@ -93,7 +95,7 @@ test('inside Austin: a new account goes straight on to onboarding; no profile ca
   await ctx.close()
 })
 
-test('outside: waitlisted for the nearest city with no profile; staying on it needs text consent; no text on joining', async ({ browser }) => {
+test('outside: waitlisted for the nearest city with no profile; staying on it needs text consent; one confirmation text', async ({ browser }) => {
   const phone = ownPhone(952)
   const { ctx, page } = await device(browser, DALLAS)
   await signIn(page, phone, { expectPath: /\/onboarding/ })
@@ -123,7 +125,8 @@ test('outside: waitlisted for the nearest city with no profile; staying on it ne
   expect(consent).toMatchObject({ phone, source: 'waitlist', textVersion: WAITLIST_VERSION })
   expect(consent.text).toBe('Text me account notifications from Zylove, including when my account is activated. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.')
   expect(consent.grantedAt).toBeTruthy()
-  expect(textsTo(phone)).toEqual([]) // no confirmation text: the screen confirms it
+  // One plain confirmation text (UPDATE 5).
+  await expect.poll(() => textsTo(phone).map((t) => t.body), { timeout: 10000 }).toEqual([CONFIRMATION])
 
   // Founder interest (needs the consent just given).
   await page.getByRole('button', { name: 'I\'m interested' }).click()
@@ -156,14 +159,31 @@ test('no text consent: "Remove me" removes the account and every record with the
   await ctx.close()
 })
 
+test('nightly: a waitlisted account that never answered the text question is removed after 7 days; others stay', async () => {
+  const silent = await newAccount()
+  const recent = await newAccount()
+  const yes = await newAccount()
+  for (const a of [silent, recent, yes]) await callAs(a.uid, 'checkArea', DALLAS)
+  await callAs(yes.uid, 'grantSmsConsent', { textVersion: WAITLIST_VERSION, source: 'waitlist' })
+  const eightDays = Timestamp.fromMillis(Date.now() - 8 * 864e5)
+  for (const a of [silent, yes]) await db.doc(`cityWaitlist/${a.uid}`).update({ joinedAt: eightDays })
+  expect(await fnLib('waitlist').removeUnanswered()).toBe(1)
+  expect(await adminAuth.getUserByPhoneNumber(silent.phone).then(() => 'there', () => 'gone')).toBe('gone')
+  for (const path of [`cityWaitlist/${silent.uid}`, `userInternal/${silent.uid}`]) expect((await db.doc(path).get()).exists, path).toBe(false)
+  for (const a of [recent, yes]) expect((await db.doc(`cityWaitlist/${a.uid}`).get()).exists).toBe(true)
+})
+
 // ─── Unlock / lock ───────────────────────────────────────────────────────────
 
 test('unlock: everyone waiting is admitted and consenters get one plain account notice; their next sign-in shows the activation screen', async ({ browser }) => {
   const yes = await newAccount()
   const no = await newAccount()
   for (const a of [yes, no]) expect((await callAs(a.uid, 'checkArea', DALLAS)).status).toBe('waitlisted')
-  expect((await callAs(yes.uid, 'grantSmsConsent', { textVersion: WAITLIST_VERSION, source: 'waitlist' })).confirmation).toBe('none')
-  expect(textsTo(yes.phone)).toEqual([])
+  expect((await callAs(yes.uid, 'grantSmsConsent', { textVersion: WAITLIST_VERSION, source: 'waitlist' })).confirmation).toBe('sent')
+  expect(textsTo(yes.phone).map((t) => t.body)).toEqual([CONFIRMATION])
+  // Opting in again the same day: no second confirmation (one a day).
+  expect((await callAs(yes.uid, 'grantSmsConsent', { textVersion: WAITLIST_VERSION, source: 'waitlist' })).confirmation).toBe('sent')
+  expect(textsTo(yes.phone)).toHaveLength(1)
 
   const admin = await seedUser('Ada', { isAdmin: true })
   expect(await callAs(admin.uid, 'adminSetCityStatus', { cityId: 'dallas', status: 'founding' })).toMatchObject({ from: 'locked', status: 'founding' })
@@ -174,7 +194,7 @@ test('unlock: everyone waiting is admitted and consenters get one plain account 
     expect((await internalDoc(a.uid)).admission).toMatchObject({ status: 'admitted', cityId: 'dallas', via: 'unlock' })
     expect((await callAs(a.uid, 'checkArea')).status).toBe('admitted')
   }
-  expect(textsTo(yes.phone).map((t) => t.body)).toEqual(['Zylove: Your account is now active. Sign in at zylove.app to finish your profile. Reply STOP to opt out.'])
+  expect(textsTo(yes.phone).map((t) => t.body)).toEqual([CONFIRMATION, ACTIVATED])
   expect(textsTo(no.phone)).toEqual([])
   expect((await db.doc('config/waitlistTexts').get()).get('sentToday')).toBe(1)
   // Admitted: a profile may be created now.
@@ -186,7 +206,8 @@ test('unlock: everyone waiting is admitted and consenters get one plain account 
 
   const { ctx, page } = await device(browser, DALLAS)
   await signIn(page, yes.phone, { expectPath: /\/onboarding/ })
-  await expect(page.getByRole('heading', { name: 'Dallas is live — and you\'re in.' })).toBeVisible({ timeout: 20000 })
+  // Unlocked into its founding period: "open" ("live" once it's Live).
+  await expect(page.getByRole('heading', { name: 'Dallas is open — and you\'re in.' })).toBeVisible({ timeout: 20000 })
   await expect(page.getByText('Finish your profile and start connecting today, Zylove style.')).toBeVisible()
   await page.getByRole('button', { name: 'Let\'s go' }).click()
   await expect(page.getByText('Before you join Zylove')).toBeVisible({ timeout: 20000 })

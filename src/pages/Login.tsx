@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { cityList, useOpenCities } from '../services/openCities'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { signInWithEmailAndPassword, type ConfirmationResult } from 'firebase/auth'
 import { checkPhoneNumber, clearRecaptcha, confirmOtp, initRecaptcha, sendOtp, warmRecaptchaEnterprise } from '../services/auth'
@@ -316,6 +317,8 @@ function SignInCard() {
 // Landing page with sign-in built in, served at / and /login. Signed-in
 // users go straight to Discover.
 export default function Login() {
+  // UPDATE 6: name the open (Founding/Live) cities.
+  const openCities = useOpenCities()
   const user = useAuthStore((s) => s.user)
   const loading = useAuthStore((s) => s.loading)
   usePageTitle('Zylove · Match your energy.')
@@ -345,7 +348,11 @@ export default function Login() {
             <SignInCard />
           </div>
 
-          <p className="mt-5 text-sm text-[#7C9BFF]">Launching city by city · {FOUNDER_CAPACITY_PER_CITY} founding members per city</p>
+          <p className="mt-5 text-sm text-[#7C9BFF]">
+            {openCities.length === 1
+              ? `Now launching in ${cityList(openCities)} · ${FOUNDER_CAPACITY_PER_CITY} founding members`
+              : `Now open in ${cityList(openCities)}`}
+          </p>
           <a href="#features" className="mt-3 text-sm text-white/40 transition-colors hover:text-white/70">
             Learn more ↓
           </a>

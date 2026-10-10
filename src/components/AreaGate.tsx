@@ -190,7 +190,7 @@ export default function AreaGate({ onAdmitted, onSignOut }: { onAdmitted: () => 
   if (area.status === 'admitted') {
     const a = area as Admitted
     return (
-      <Screen title={`${a.cityName ?? 'Your city'} is live — and you're in.`}>
+      <Screen title={`${a.cityName ?? 'Your city'} is ${a.cityLive ? 'live' : 'open'} — and you're in.`}>
         <p className="mt-2 text-white/70">Finish your profile and start connecting today, Zylove style.</p>
         {a.headStartUntil !== null && (
           <p className={`${card} text-sm text-white/80`}>

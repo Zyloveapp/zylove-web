@@ -128,9 +128,9 @@ export const SMS_CONFIRMATION =
 
 // ─── City waitlist (Austin-only launch) ───────────────────────────────────────
 
-// The one waitlist text: a plain account-status notice when a city unlock
-// activates the account (no confirmation text on joining — the screen
-// confirms it). config/waitlistTexts (server-only):
+// Waitlist texts: one confirmation on opting in (WAITLIST_CONFIRMATION), and a
+// plain account-status notice when a city unlock activates the account.
+// The activation notices follow config/waitlistTexts (server-only):
 //   enabled     false switches it off (default on; the admin's Unlock is the
 //               trigger)
 //   batchSize   texts per run (default 200; runs every 30 minutes)
@@ -151,6 +151,11 @@ export function waitlistTextConfig(d: Record<string, unknown> | undefined): Wait
 export async function loadWaitlistTextConfig(): Promise<WaitlistTextConfig> {
   return waitlistTextConfig((await getFirestore().doc('config/waitlistTexts').get()).data())
 }
+
+// The waitlist opt-in's one confirmation (Matthew, UPDATE 5: a plain account
+// notice, no city) — under the same one-a-day limit as SMS_CONFIRMATION.
+export const WAITLIST_CONFIRMATION =
+  "Zylove: You'll get account notifications from Zylove. Msg frequency varies. Msg & data rates may apply. Reply HELP for help, STOP to opt out."
 
 export const WAITLIST_ACTIVATED_TEXT = 'Zylove: Your account is now active. Sign in at zylove.app to finish your profile. Reply STOP to opt out.'
 
@@ -250,8 +255,8 @@ export async function sendSMS(target: SmsTarget, body: string): Promise<boolean>
 
 // The opt-in confirmation, straight after consent was recorded (the master
 // switch and quiet hours don't apply: they just asked for texts).
-export async function sendConsentConfirmation(phone: string): Promise<Delivery> {
-  return deliver(phone, SMS_CONFIRMATION)
+export async function sendConsentConfirmation(phone: string, body: string = SMS_CONFIRMATION): Promise<Delivery> {
+  return deliver(phone, body)
 }
 
 // Admin alert texts (adminAlerts.ts) go to an admin's own verified sign-in

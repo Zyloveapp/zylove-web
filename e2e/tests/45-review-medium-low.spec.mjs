@@ -68,15 +68,20 @@ test('M1: contact details in a bio or Play prompt are masked; the city label is 
 
 // ─── M3 (F-114) ──────────────────────────────────────────────────────────────
 
-test('M3: a far-linked account can\'t move into a launch market; a brand-new account can\'t claim a founder spot', async () => {
+test('M3: the market follows where you are now (Austin-only launch); a brand-new account can\'t claim a founder spot', async () => {
   const far = await seedUser('Far')
   await db.doc(`userLocations/${far.uid}`).delete()
   await callAs(far.uid, 'setLocation', { lat: 41.26, lng: -95.94 }) // Omaha → linked
   const linked = (await db.doc(`userLocations/${far.uid}`).get()).data()
   expect(linked.marketCityId).toBeNull()
   expect(typeof linked.linkedCityId).toBe('string')
-  await callAs(far.uid, 'setLocation', { lat: 30.25, lng: -97.75 }) // claims Austin
-  expect((await db.doc(`userLocations/${far.uid}`).get()).data().marketCityId).toBeNull()
+  // Matthew (2026-10-09): no permanent first-save lock — the deck is the
+  // people where you are. Pre-launch Elite and founder claims need a Founding
+  // city there (spec 46), and moves stay limited.
+  await callAs(far.uid, 'setLocation', { lat: 30.25, lng: -97.75 })
+  const moved = (await db.doc(`userLocations/${far.uid}`).get()).data()
+  expect(moved.marketCityId).toBe('austin')
+  expect(moved.linkedCityId).toBeUndefined()
 
   const fresh = await seedUser('Fresh')
   await daysOld(fresh.uid, 0)
