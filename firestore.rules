@@ -106,6 +106,29 @@ service cloud.firestore {
       return !exists(/databases/$(database)/documents/userInternal/$(request.auth.uid))
           || suspensionInactive(get(/databases/$(database)/documents/userInternal/$(request.auth.uid)).data);
     }
+    // Austin-only launch: a new profile only after the location check
+    // admitted the account (functions/src/waitlist.ts checkArea — inside a
+    // Founding or Live city, or its city unlocked). Waitlisted accounts get
+    // no profile. The same userInternal doc callerActive() reads.
+    function admitted() {
+      return exists(/databases/$(database)/documents/userInternal/$(request.auth.uid))
+          && get(/databases/$(database)/documents/userInternal/$(request.auth.uid)).data.get('admission', {}).get('status', '') == 'admitted';
+    }
+    // F-123 (M12): an account sending too fast has its messages paused for
+    // an hour (functions/src/trustSignals.ts noteMessageRate). The same
+    // userInternal doc callerActive() reads.
+    function messagesAllowed() {
+      return !exists(/databases/$(database)/documents/userInternal/$(request.auth.uid))
+          || get(/databases/$(database)/documents/userInternal/$(request.auth.uid)).data.get('messagesMutedUntil', null) == null
+          || get(/databases/$(database)/documents/userInternal/$(request.auth.uid)).data.messagesMutedUntil < request.time;
+    }
+    // Low (fresh-eyes review): a typing doc is { typingAt, uid } (src/services/typing.ts),
+    // nothing else — it took any content up to 1 MB, readable by the partner.
+    function typingShapeOk() {
+      return request.resource == null
+          || (request.resource.data.keys().hasOnly(['typingAt', 'uid'])
+              && request.resource.data.uid is string && request.resource.data.uid.size() <= 128);
+    }
     function profileVisible(uid) {
       return get(/databases/$(database)/documents/users/$(uid)).data.get('isDeleted', false) != true
           && notSuspended(uid);
@@ -228,7 +251,11 @@ service cloud.firestore {
         // H8: what re-scores a user's pairs is the server's to stamp
         // (onProfileWrite reacts to the scored fields themselves); a client
         // could loop it to re-score every pair
-        'profileUpdatedAt'
+        'profileUpdatedAt',
+        // F-112 (M1): the city label is the server's (setLocation, from the
+        // snapped location). Clients could write any text there, and the app
+        // shows it as "📍 …" when there's no distance.
+        'locationLabel'
       ];
     }
 
@@ -321,7 +348,7 @@ service cloud.firestore {
                      || isUser(uid)
                      || (resource.data.get('isDeleted', false) != true && notSuspended(uid) && notBlockedFrom(uid)));
       allow list: if false;
-      allow create: if callerActive() && isUser(uid) && isSignedIn()
+      allow create: if callerActive() && isUser(uid) && isSignedIn() && admitted()
                     && !request.resource.data.keys().hasAny(serverOnlyUserFields())
                     && request.resource.data.get('photoURLs', []).size() == 0
                     && adultAge(request.resource.data)
@@ -847,7 +874,7 @@ service cloud.firestore {
                     && (resource.data.get('photoExpiresAt', null) == null
                         || resource.data.photoExpiresAt > request.time
                         || resource.data.senderId == request.auth.uid);
-        allow create: if callerActive() && isSignedIn()
+        allow create: if callerActive() && isSignedIn() && messagesAllowed()
                       && isMatchParticipant(matchId)
                       && matchLive(matchDoc(matchId))
                       && request.resource.data.senderId == request.auth.uid
@@ -892,7 +919,8 @@ service cloud.firestore {
         allow write: if callerActive() && isSignedIn()
                      && request.auth.uid == typingUid
                      && isMatchParticipant(matchId)
-                     && matchLive(matchDoc(matchId));
+                     && matchLive(matchDoc(matchId))
+                     && typingShapeOk();
       }
     }
 
@@ -1000,7 +1028,7 @@ service cloud.firestore {
                     && (resource.data.get('photoExpiresAt', null) == null
                         || resource.data.photoExpiresAt > request.time
                         || resource.data.senderId == myPlayId());
-        allow create: if callerActive() && isSignedIn()
+        allow create: if callerActive() && isSignedIn() && messagesAllowed()
                       && isPlayParticipant(matchId)
                       && matchLive(playMatchDoc(matchId))
                       && request.resource.data.senderId == myPlayId()
@@ -1037,7 +1065,8 @@ service cloud.firestore {
         allow write: if callerActive() && isSignedIn()
                      && typingId == myPlayId()
                      && isPlayParticipant(matchId)
-                     && matchLive(playMatchDoc(matchId));
+                     && matchLive(playMatchDoc(matchId))
+                     && typingShapeOk();
       }
     }
 
@@ -1166,8 +1195,9 @@ service cloud.firestore {
 
     // ─── FCM Tokens ──────────────────────────────────────────────────────────
 
+    // Unused (no web push); was any-content owner writes. Low (fresh-eyes review).
     match /fcmTokens/{uid} {
-      allow read, write: if isUser(uid) && isSignedIn();
+      allow read, write: if false;
     }
 
     // ─── App Config (read-only for all signed-in users) ──────────────────────

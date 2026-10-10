@@ -25,7 +25,7 @@ import { LEGACY_RUNTIME } from './legacyOptions'
 import { stripPhotoMetadata } from '../photoMetadata'
 import { takeRateLimit } from '../rateLimits'
 import { accountRef, internalRef } from '../userData'
-import { recordPhotoSignal, webMatches } from '../photoChecks'
+import { recordPhotoSignal, takeSightengineBudget, webMatches } from '../photoChecks'
 import { checkPhoto } from '../photoHashes'
 import { photoHoldRef } from '../photoHolds'
 import { photoPathForLog, redactPlayPaths } from '../logSafe'
@@ -160,6 +160,10 @@ export const onPhotoUpload = onObjectFinalized(
       }
       if (clean.bytes.length !== raw.length) {
         await file.save(clean.bytes, { contentType: clean.contentType, resumable: false, metadata: { metadata: { zyloveCopy: '1' } } })
+      } else if (event.data.contentType !== clean.contentType) {
+        // Low (fresh-eyes review): the type the bytes really are, not the one
+        // the uploader claimed (a metadata update — not a new upload event).
+        await file.setMetadata({ contentType: clean.contentType })
       }
       // T&S Phase 5: its perceptual hash — a duplicate on another account
       // counts against whichever had it later (F-087); a match with a banned
@@ -210,6 +214,8 @@ export const onPhotoUpload = onObjectFinalized(
       form.append('api_user', sightengineUser.value())
       form.append('api_secret', sightengineSecret.value())
 
+      // F-124: the project's daily Sightengine budget; spent → held for review.
+      if (!(await takeSightengineBudget())) throw new Error('sightengine_budget')
       const response = await fetch('https://api.sightengine.com/1.0/check.json', {
         method: 'POST',
         body: form,
@@ -223,7 +229,7 @@ export const onPhotoUpload = onObjectFinalized(
       // web this image appears. Review signals only — they never change the
       // moderation outcome below, and a failure here is just logged.
       await (async () => {
-        const web = await webMatches(event.data.bucket, filePath)
+        const web = await webMatches(event.data.bucket, filePath, uid)
         const ai = typeof result.type?.ai_generated === 'number' ? result.type.ai_generated : null
         const deepfake = typeof result.type?.deepfake === 'number' ? result.type.deepfake : null
         await recordPhotoSignal(uid, { path: photoRef, ai, deepfake, web })

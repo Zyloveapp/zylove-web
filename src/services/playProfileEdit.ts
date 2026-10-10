@@ -1,6 +1,7 @@
 import { arrayRemove, doc, updateDoc } from 'firebase/firestore'
 import { db } from './firebase'
 import { answeredGoDeeper, answeredPrompts, descriptorFields, type PlayDraft } from './playOnboarding'
+import { checkProfileText } from './profileText'
 
 // The Edit Play profile page (/edit-play-profile): section-by-section edits
 // of a saved Play profile. Only changed fields are written, to
@@ -52,6 +53,7 @@ export function hasPlayChanges(before: PlayDraft, after: PlayDraft): boolean {
 export async function savePlayEdits(uid: string, before: PlayDraft, after: PlayDraft): Promise<void> {
   const { playProfile } = changes(before, after)
   if (Object.keys(playProfile).length === 0) return
+  checkProfileText(after.bio, ...answeredPrompts(after).map((p) => p.answer))
   // lastUpdated changing makes onPlayProfileWrite rescore the Play pairs.
   await updateDoc(doc(db, `users/${uid}/playProfile/data`), { ...playProfile, lastUpdated: Date.now() })
 }

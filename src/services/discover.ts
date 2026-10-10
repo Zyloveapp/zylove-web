@@ -96,11 +96,16 @@ interface DeckCard {
   sameMarket: boolean
 }
 
+// Austin-only launch: where the member is now is outside every Founding or
+// Live city (founders excepted) — no deck there.
+export class NotLiveHereError extends Error {}
+
 export async function fetchCandidates(uid: string, mode: Mode): Promise<DiscoverProfile[]> {
   const { data } = await httpsCallable<
     { mode: Mode },
-    { cards: DeckCard[]; photoUrls: Record<string, string>; expiresAt: number; exhausted: boolean }
+    { cards: DeckCard[]; photoUrls: Record<string, string>; expiresAt: number; exhausted: boolean; notLive?: boolean }
   >(functions, 'getExploreDeck')({ mode })
+  if (data.notLive) throw new NotLiveHereError("Zylove isn't live here yet.")
   primePhotoUrls(data.photoUrls, data.expiresAt)
   const idOf = (c: DeckCard) => c.playId ?? c.uid ?? ''
   primeDistances(data.cards.flatMap((c) => (c.distanceMiles === null ? [] : [[idOf(c), { miles: c.distanceMiles, sameMarket: c.sameMarket }] as const])))

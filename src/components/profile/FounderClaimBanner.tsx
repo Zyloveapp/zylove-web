@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { claimFounderBadge, dismissFounderInvite, founderOffer, type FounderOffer } from '../../services/founders'
+import { claimFounderBadge, dismissFounderInvite, founderOffer, founderRefusalMessage, type FounderOffer } from '../../services/founders'
 import FounderInviteModal from '../FounderInvite'
 import FounderCelebration from '../FounderCelebration'
 
@@ -53,8 +53,9 @@ export default function FounderClaimBanner({
       }, CELEBRATION_MS)
       return
     }
-    setError(result.reason === 'cohort_full' ? 'Someone just took the last spot.' : "This spot isn't available to you.")
-    setFull(true)
+    setError(founderRefusalMessage(result.reason))
+    // Too new: the spot can still be claimed tomorrow.
+    if (result.reason !== 'too_new') setFull(true)
   }
 
   if (celebrate) return <FounderCelebration number={celebrate.number} cityName={celebrate.cityName} />

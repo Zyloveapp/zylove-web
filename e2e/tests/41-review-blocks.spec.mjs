@@ -159,7 +159,9 @@ test('H3: blocking a uid leaves every Play answer about their Play ID unchanged 
   const sentBefore = (await callAs(x.uid, 'getSentSparks', { mode: 'play' })).sent.map((s) => s.playId)
   expect(sentBefore).toEqual([uPlay])
   const playBefore = await probes(x, u, 'play', photos.play)
-  expect(playBefore).toEqual({ ...OPEN, deck: false })
+  // F-117: liked, so out of the deck — and no longer a distance either (only
+  // the current deck, live matches and likers who liked you get one).
+  expect(playBefore).toEqual({ ...OPEN, deck: false, distance: false })
 
   await callAs(x.uid, 'blockUser', { targetUid: u.uid })
   expect((await mirrors(x.uid, u.uid))[0]).toMatchObject({ blockedBy: x.uid, mode: 'spark', modes: ['spark'] })

@@ -31,7 +31,7 @@ import { STRIPE_SECRETS } from './stripe'
 import { phoneHash, reportGeneration } from './trust'
 import { takeRateLimit } from './rateLimits'
 import { softDeleteAccount } from './adminActivity'
-import { audit, requireAdmin, requireAdminAudited } from './audit'
+import { audit, requireAdmin, requireAdminAudited, requireLiveAdmin } from './audit'
 import { markBannedDevices } from './devices'
 import { blocklistPhotosOf, unblockPhotosOf } from './photoHashes'
 import { reportCounts } from './blocklistContext'
@@ -535,6 +535,7 @@ export const adminModerate = onCall(
   { timeoutSeconds: 120, memory: '256MiB', invoker: 'public', secrets: [...SMS_SECRETS, ...STRIPE_SECRETS] },
   async (request): Promise<{ ok: true; resolved?: number; texted?: boolean; phoneBanned?: boolean }> => {
     const adminUid = await requireAdmin(request.auth, 'adminModerate')
+    await requireLiveAdmin(adminUid)
     const data = (request.data ?? {}) as Record<string, unknown>
     // H6: the reports name the uid the account had then; a deleted and
     // restored account lives on under a new one. The action reaches the

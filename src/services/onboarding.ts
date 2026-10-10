@@ -33,6 +33,7 @@ import { addIdentity, loadIdentity } from './privateIdentity'
 import { loadPrivateProfile, privateProfileDoc } from './privateProfile'
 import { genderFields, matchingDoc } from './privateMatching'
 import { FieldLockedError, explainRefusal, limitedPatch, loadFieldStates, lockedChanges } from './fieldLocks'
+import { checkProfileText } from './profileText'
 
 // ─── Legal acceptance ────────────────────────────────────────────────────────
 
@@ -54,6 +55,8 @@ export async function recordLegalAcceptance(): Promise<void> {
 type ServerOnlyField =
   | 'isSuspended'
   | 'reportCount'
+  // F-112: the server's (setLocation).
+  | 'locationLabel'
   | 'verificationStatus'
   | 'subscriptionTier'
   | 'geohash'
@@ -187,6 +190,7 @@ export async function saveSparkOnboarding(
   // F-018: height is optional; none given = no height on the profile.
   const heightCm = d.height ? feetInchesToCm(d.height.feet, d.height.inches) : null
   const bio = d.bio.trim()
+  checkProfileText(bio, ...promptAnswers.map((p) => p.answer))
 
   // Only already-published photos (profile refresh) are written here; new
   // ones go through moderation after the commit.
@@ -322,7 +326,6 @@ export async function saveSparkOnboarding(
       ...coreFields,
       ...optional,
       bio,
-      locationLabel: '',
       phoneVerified: false,
       publicKey: keys.publicKey,
       createdAt: now,

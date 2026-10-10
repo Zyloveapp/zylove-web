@@ -1,7 +1,8 @@
 // TEST HARNESS ONLY (preloaded into emulator function processes via
 // NODE_OPTIONS). Answers requests to api.anthropic.com with a canned reply so
 // AI paths (bot replies, openers, bios) run offline, and the T&S Phase 2
-// photo checks (Sightengine for e2e-* photos, Vision, the metadata token).
+// photo checks (Sightengine for e2e-* photos, Vision, the metadata token),
+// and Twilio (texts logged, not sent; Lookup).
 // Every other request is untouched.
 const realFetch = globalThis.fetch
 if (realFetch && !globalThis.__anthropicStub) {
@@ -38,6 +39,22 @@ if (realFetch && !globalThis.__anthropicStub) {
       const page = { url: 'https://stock.example/photo-page', fullMatchingImages: [{ url: 'https://stock.example/photo.jpg' }] }
       const webDetection = stolen ? { fullMatchingImages: [{ url: 'https://stock.example/photo.jpg' }], pagesWithMatchingImages: [page] } : {}
       return new Response(JSON.stringify({ responses: [{ webDetection }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    // Twilio (run.sh gives the emulator test-only TWILIO_ACCOUNT_SID and
+    // TWILIO_FROM_NUMBER): every text "sent" is logged to
+    // .cache/sms-sent.jsonl ({to, body}) for the specs to read, and answered
+    // 201. Lookup says mobile, except +1555019xxxx (a VoIP number).
+    if (url.startsWith('https://api.twilio.com/') && url.endsWith('/Messages.json')) {
+      const form = new URLSearchParams(String(init?.body ?? ''))
+      try {
+        require('node:fs').appendFileSync(require('node:path').join(__dirname, '.cache', 'sms-sent.jsonl'), `${JSON.stringify({ to: form.get('To'), body: form.get('Body'), at: Date.now() })}\n`)
+      } catch {}
+      return new Response(JSON.stringify({ sid: `SM${Date.now()}`, status: 'queued' }), { status: 201, headers: { 'Content-Type': 'application/json' } })
+    }
+    if (url.startsWith('https://lookups.twilio.com/')) {
+      const phone = decodeURIComponent(url.split('/PhoneNumbers/')[1]?.split('?')[0] ?? '')
+      const type = /^\+1555019\d{4}$/.test(phone) ? 'nonFixedVoip' : 'mobile'
+      return new Response(JSON.stringify({ phone_number: phone, line_type_intelligence: { type } }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
     if (url.startsWith('https://api.anthropic.com/')) {
       // Every prompt is logged for the specs (spec 43: how big a prompt got),

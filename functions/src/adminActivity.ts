@@ -18,7 +18,7 @@ import { claimFounderSpot, type FounderResult } from './founders'
 import { revokeFounderStatus } from './founderActivity'
 import { STRIPE_SECRETS, cancelSubscriptionsForDeletion } from './stripe'
 import { liftSuspension, setAuthDisabled } from './reports'
-import { audit, requireAdmin, requireAdminAudited } from './audit'
+import { audit, requireAdmin, requireAdminAudited, requireLiveAdmin } from './audit'
 import { ROOT_SCRUB, clearPrivateData, internalRef, loadLocation, moderationCarry, recoveryRecord } from './userData'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -125,17 +125,27 @@ export const adminGetActivity = onCall(
     const db = getFirestore()
     const now = Date.now()
 
-    const [users, internals, locations, sparkDocs, playDocs, messages, matches, signals, privateDocs] = await Promise.all([
-      db.collection('users').get(),
-      db.collection('userInternal').get(),
+    // F-123 (M12): only the fields used, and messages from the chart window
+    // only (the all-time total is a count) — every message ever, and whole
+    // user docs, used to be read on each load.
+    const since = Timestamp.fromMillis(now - CHART_DAYS * DAY_MS)
+    const [users, internals, locations, sparkDocs, playDocs, messages, matches, signals, privateDocs, messageCount] = await Promise.all([
+      db.collection('users').select(
+        'createdAt', 'displayName', 'genderIdentity', 'isDeleted', 'isFounder', 'isSuspended', 'locationLabel', 'matchableAs',
+        'onboardingComplete', 'onboardingPath', 'photoURLs', 'playVisibility', 'sparkVisibility',
+      ).get(),
+      db.collection('userInternal').select(
+        'accountCreatedAt', 'lastActive', 'isSuspended', 'subscriptionStatus', 'subscriptionTier', 'trialEndsAt', 'trialExpired', 'trialStartedAt',
+      ).get(),
       db.collection('userLocations').get(),
       db.collectionGroup('sparkProfile').select().get(),
       db.collectionGroup('playProfile').select().get(),
-      db.collectionGroup('messages').select('senderId', 'sentAt', 'messageType', 'nonce').get(),
+      db.collectionGroup('messages').where('sentAt', '>=', since).select('senderId', 'sentAt', 'messageType', 'nonce').get(),
       db.collection('matches').select('users').get(),
       db.collection('behaviorSignals').select('matchCount').get(),
       // §4.A2: gender (and matchableAs) live in the owner-only private/matching.
       db.collectionGroup('private').select('genderIdentity', 'matchableAs').get(),
+      db.collectionGroup('messages').count().get(),
     ])
     // F-062: Play chats name senders by Play ID; their matches' people are
     // in the server-only records.
@@ -155,7 +165,9 @@ export const adminGetActivity = onCall(
       if (!activeDays.has(day)) activeDays.set(day, new Set())
       activeDays.get(day)!.add(uid)
     }
-    let totalMessages = 0
+    // All-time (every message doc, system notes included); per person and per
+    // day: the chart window.
+    const totalMessages = messageCount.data().count
     for (const m of messages.docs) {
       const col = m.ref.parent.parent?.parent.id
       if (col !== 'matches' && col !== 'playMatches') continue
@@ -163,7 +175,6 @@ export const adminGetActivity = onCall(
       if (d.nonce === 'system' || d.messageType === 'consent_request' || typeof d.senderId !== 'string') continue
       const sender = col === 'playMatches' ? ownerOf.get(d.senderId) : d.senderId
       if (!sender) continue
-      totalMessages++
       sentBy.set(sender, (sentBy.get(sender) ?? 0) + 1)
       const at = ms(d.sentAt)
       if (at !== null && now - at <= CHART_DAYS * DAY_MS) markActive(dayKey(at), sender)
@@ -205,7 +216,8 @@ export const adminGetActivity = onCall(
         ...internalOf.get(doc.id),
         ...(typeof loc?.lat === 'number' && { locationLat: loc.lat, locationLng: loc.lng }),
       }
-      const joinedAt = ms(u.createdAt)
+      // Low: the server's account age, not the client-written createdAt.
+      const joinedAt = ms(u.accountCreatedAt) ?? ms(u.createdAt)
       const lastActiveAt = ms(u.lastActive)
       const tier = tierOf(u, now)
       const status = statusOf(u)
@@ -325,6 +337,7 @@ export const adminUserAction = onCall(
   { timeoutSeconds: 120, memory: '256MiB', invoker: 'public', secrets: STRIPE_SECRETS },
   async (request): Promise<{ ok: true; founder?: FounderResult }> => {
     const adminUid = await requireAdmin(request.auth, 'adminUserAction')
+    await requireLiveAdmin(adminUid)
     const { uid, action } = (request.data ?? {}) as { uid?: unknown; action?: unknown }
     if (typeof uid !== 'string' || !uid || uid.includes('/')) throw new HttpsError('invalid-argument', 'uid required')
     if (!ACTIONS.includes(action as UserAction)) throw new HttpsError('invalid-argument', 'unknown action')

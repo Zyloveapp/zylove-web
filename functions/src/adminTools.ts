@@ -20,9 +20,11 @@ import { logger } from 'firebase-functions'
 import { getAuth } from 'firebase-admin/auth'
 import { getStorage } from 'firebase-admin/storage'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
+import { cityStatus, type CityStatus } from './cityStatus'
 import { ZYLOVE_CITIES, getNearestCity } from './cities'
-import { audit, requireAdmin, requireAdminAudited } from './audit'
+import { audit, requireAdmin, requireAdminAudited, requireLiveAdmin } from './audit'
 import { revokeFounderStatus } from './founderActivity'
+import { isAdminUid } from './userData'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const PURGE_AFTER_MS = 365 * DAY_MS // onNightlyPurge's TWELVE_MONTHS_MS
@@ -140,6 +142,9 @@ export const adminPurgeAccount = onCall(
     const uid: unknown = request.data?.uid
     if (typeof uid !== 'string' || !uid || uid.includes('/')) throw new HttpsError('invalid-argument', 'uid required')
     if (uid === adminUid) throw new HttpsError('failed-precondition', "You can't purge your own account.")
+    await requireLiveAdmin(adminUid)
+    // Low: never another admin's account (as adminUserAction and adminModerate).
+    if (await isAdminUid(uid)) throw new HttpsError('failed-precondition', "Not on an admin's account.")
 
     const db = getFirestore()
     const userRef = db.doc(`users/${uid}`)
@@ -229,6 +234,10 @@ export interface CityRow {
   name: string
   state: string
   live: boolean // config/city_{id}.botsActive === false
+  status: CityStatus // Austin-only launch (cityStatus.ts)
+  waitlist: number // still waiting (cityWaitlist, not yet admitted)
+  founderInterest: number // in the city's founder line (founderInterest/{id}/requests)
+  members: number // real members (onboarded) placed in it
   women: number
   men: number
   target: number // per half
@@ -254,7 +263,7 @@ export const adminCityStats = onCall(
     await requireAdminAudited(request.auth, { action: 'cities.view' })
     const db = getFirestore()
     const now = Date.now()
-    const [configs, users, internals, locations] = await Promise.all([
+    const [configs, users, internals, locations, waitlist, interest] = await Promise.all([
       db.getAll(...ZYLOVE_CITIES.map((c) => db.doc(`config/city_${c.id}`))),
       db
         .collection('users')
@@ -265,6 +274,8 @@ export const adminCityStats = onCall(
         .get(),
       db.collection('userInternal').select('subscriptionTier', 'subscriptionStatus').get(),
       db.collection('userLocations').select('lat', 'lng').get(),
+      db.collection('cityWaitlist').select('cityId', 'admittedAt').get(),
+      Promise.all(ZYLOVE_CITIES.map((c) => db.collection(`founderInterest/${c.id}/requests`).count().get())),
     ])
     // Plan from userInternal, coordinates from userLocations (root copies
     // still count for accounts not yet migrated).
@@ -287,6 +298,10 @@ export const adminCityStats = onCall(
         name: c.name,
         state: c.state,
         live: d.botsActive === false,
+        status: cityStatus(c.id, configs[i].data()),
+        waitlist: 0,
+        founderInterest: interest[i]?.data().count ?? 0,
+        members: 0,
         women: typeof d.womenCount === 'number' ? d.womenCount : 0,
         men: typeof d.menCount === 'number' ? d.menCount : 0,
         target: typeof d.founderTarget === 'number' ? d.founderTarget : 50,
@@ -317,10 +332,15 @@ export const adminCityStats = onCall(
         outsideCities++
         continue
       }
+      row.members++
       if (tier === 'spark_plus') row.sparkPlus++
       if (tier === 'elite') row.elite++
       const created = ms(u.createdAt)
       if (created !== null && now - created <= 7 * DAY_MS) row.newSignups7d++
+    }
+    for (const w of waitlist.docs) {
+      const row = rows.get(String(w.get('cityId')))
+      if (row && w.get('admittedAt') == null) row.waitlist++
     }
     // Last founder by founderCityId, wherever they are now.
     for (const doc of users.docs) {

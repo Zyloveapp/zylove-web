@@ -4,6 +4,7 @@ import { logger } from 'firebase-functions'
 import { getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { distanceMiles } from './cities'
 import { marketFor } from './trial'
+import { configsAt, foundingPeriod, servingCityAt } from './cityStatus'
 // H2: the one reading of gender (identity.ts → gender.ts), shared with
 // identity Elite and the founding circle.
 import { categoriesOf } from './identity'
@@ -242,7 +243,7 @@ function isLocal(me: DocumentData, c: DocumentData): boolean {
 
 export const getExploreDeck = onCall(
   { timeoutSeconds: 30, invoker: 'public' },
-  async (request): Promise<{ cards: Card[]; photoUrls: Record<string, string>; expiresAt: number; exhausted: boolean }> => {
+  async (request): Promise<{ cards: Card[]; photoUrls: Record<string, string>; expiresAt: number; exhausted: boolean; notLive?: boolean }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const uid = request.auth.uid
     const mode: Mode = (request.data as Record<string, unknown> | null)?.mode === 'play' ? 'play' : 'spark'
@@ -264,6 +265,15 @@ export const getExploreDeck = onCall(
     ])
     const loc = await loadLocation(uid, root)
     const myMarket = loc ? marketFor(loc) : null
+    // Austin-only launch: the deck is the people near where you are now.
+    // Outside every Founding/Live city: "Zylove isn't live here yet" — except
+    // founders (founder access works anywhere: whoever is there) and members
+    // kept on their old access (keepAccess, entitlements.ts).
+    const area = loc ? await configsAt(loc.lat, loc.lng) : new Map<string, DocumentData | undefined>()
+    if (loc && !servingCityAt(loc.lat, loc.lng, area) && root.isFounder !== true) {
+      const kept = (await loadInternal(uid, root)).keepAccess === true
+      if (!kept) return { cards: [], photoUrls: {}, expiresAt: 0, exhausted: true, notLive: true }
+    }
     // Your own preferences even when you're not discoverable yourself.
     const matching = await loadMatching(uid, root)
     const me: DocumentData = {
@@ -278,10 +288,9 @@ export const getExploreDeck = onCall(
       marketCityId: myMarket?.id ?? null,
       marketName: myMarket?.name ?? null,
     }
-    // Founding period (as the app's inFoundingPeriod): no launch city, or its
-    // founding circle hasn't filled (bots still on) — everyone, any distance,
-    // bots included.
-    const founding = myMarket ? (await db().doc(`config/city_${myMarket.id}`).get()).data()?.botsActive !== false : true
+    // Founding period: AI profiles (any distance) only while the city you're
+    // in is Founding — none in a Locked or Live city, or outside every city.
+    const founding = myMarket ? foundingPeriod(myMarket.id, area.get(myMarket.id)) && area.get(myMarket.id)?.botsActive !== false : false
 
     const state = stateSnap.data() ?? {}
     const m = state[mode] ?? {}

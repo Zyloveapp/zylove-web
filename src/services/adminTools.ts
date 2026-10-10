@@ -39,6 +39,10 @@ export interface CityRow {
   name: string
   state: string
   live: boolean
+  status: CityStatus // Austin-only launch: locked (waitlist only), founding, live
+  waitlist: number // still waiting for this city
+  founderInterest: number // in its founder line
+  members: number
   women: number
   men: number
   target: number // per half
@@ -57,6 +61,14 @@ export interface CityStats {
 export async function cityStats(): Promise<CityStats> {
   const { data } = await httpsCallable<void, CityStats>(functions, 'adminCityStats', { timeout: 120_000 })()
   return data
+}
+
+export type CityStatus = 'locked' | 'founding' | 'live'
+
+// Unlock (→ founding), Go live, Lock (functions/src/waitlist.ts
+// adminSetCityStatus; re-checks the live admin claim).
+export async function setCityStatus(cityId: string, status: CityStatus): Promise<void> {
+  await httpsCallable<{ cityId: string; status: CityStatus }, unknown>(functions, 'adminSetCityStatus')({ cityId, status })
 }
 
 // CSP violation counts per day (functions/src/cspReports.ts, F-082): what the

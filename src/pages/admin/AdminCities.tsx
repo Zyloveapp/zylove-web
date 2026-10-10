@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import CspReportsPanel from '../../components/admin/CspReportsPanel'
 import ProbationPanel from '../../components/admin/ProbationPanel'
-import { cityStats, type CityRow, type CityStats } from '../../services/adminTools'
+import { cityStats, setCityStatus, type CityRow, type CityStats, type CityStatus } from '../../services/adminTools'
+import { friendlyError } from '../../services/errors'
 
 const REFRESH_MS = 60_000
 
@@ -53,6 +54,9 @@ export default function AdminCities() {
     }
   }, [load])
 
+  // The city status change waiting for confirmation.
+  const [pending, setPending] = useState<{ city: CityRow; to: CityStatus } | null>(null)
+
   const t = stats?.totals
   return (
     <div className="mx-auto max-w-5xl px-4 py-6 text-white">
@@ -93,11 +97,14 @@ export default function AdminCities() {
 
       {stats && (
         <div className="mt-6 overflow-x-auto rounded-2xl border border-white/10 bg-white/5">
-          <table className="w-full min-w-[820px] text-left text-sm">
+          <table className="w-full min-w-[1180px] text-left text-sm">
             <thead className="text-xs uppercase tracking-wider text-white/40">
               <tr>
                 <th className="px-4 py-3 font-semibold">City</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
+                <th className="px-4 py-3 text-right font-semibold">Waitlist</th>
+                <th className="px-4 py-3 text-right font-semibold">Founder interest</th>
+                <th className="px-4 py-3 text-right font-semibold">Members</th>
                 <th className="px-4 py-3 font-semibold">Women</th>
                 <th className="px-4 py-3 font-semibold">Men</th>
                 <th className="px-4 py-3 text-right font-semibold">Total</th>
@@ -105,11 +112,12 @@ export default function AdminCities() {
                 <th className="px-4 py-3 text-right font-semibold">Elite</th>
                 <th className="px-4 py-3 text-right font-semibold">New (7d)</th>
                 <th className="px-4 py-3 text-right font-semibold">Last founder</th>
+                <th className="px-4 py-3 font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {stats.cities.map((c) => (
-                <CityTableRow key={c.id} city={c} />
+                <CityTableRow key={c.id} city={c} onChange={(to) => setPending({ city: c, to })} />
               ))}
             </tbody>
           </table>
@@ -120,6 +128,17 @@ export default function AdminCities() {
           Elite includes complimentary Elite (women and other non-male identities, founders). Cities by members' saved
           location; bots excluded.
         </p>
+      )}
+      {pending && (
+        <ConfirmStatus
+          city={pending.city}
+          to={pending.to}
+          onClose={() => setPending(null)}
+          onDone={() => {
+            setPending(null)
+            load()
+          }}
+        />
       )}
       <ProbationPanel />
       <CspReportsPanel />
@@ -151,7 +170,7 @@ function Progress({ value, max, color }: { value: number; max: number; color: st
   )
 }
 
-function CityTableRow({ city: c }: { city: CityRow }) {
+function CityTableRow({ city: c, onChange }: { city: CityRow; onChange: (to: CityStatus) => void }) {
   const total = c.women + c.men
   return (
     <tr className={total === 0 ? 'text-white/50' : undefined}>
@@ -159,12 +178,11 @@ function CityTableRow({ city: c }: { city: CityRow }) {
         {c.name} <span className="text-white/40">{c.state}</span>
       </td>
       <td className="px-4 py-3">
-        {c.live ? (
-          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-300">🟢 Live</span>
-        ) : (
-          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-300">🟡 Building</span>
-        )}
+        <StatusBadge status={c.status} />
       </td>
+      <td className="px-4 py-3 text-right tabular-nums">{c.waitlist}</td>
+      <td className="px-4 py-3 text-right tabular-nums">{c.founderInterest}</td>
+      <td className="px-4 py-3 text-right tabular-nums">{c.members}</td>
       <td className="px-4 py-3">
         <Progress value={c.women} max={c.target} color="bg-[#E03131]" />
       </td>
@@ -178,6 +196,111 @@ function CityTableRow({ city: c }: { city: CityRow }) {
       <td className="px-4 py-3 text-right tabular-nums">{c.elite}</td>
       <td className="px-4 py-3 text-right tabular-nums">{c.newSignups7d}</td>
       <td className="px-4 py-3 text-right text-white/60">{shortDate(c.lastFounderAt)}</td>
+      <td className="px-4 py-3">
+        <div className="flex gap-2">
+          {ACTIONS[c.status].map((a) => (
+            <button
+              key={a.to}
+              type="button"
+              onClick={() => onChange(a.to)}
+              className="rounded-lg border border-white/15 px-2 py-1 text-xs font-semibold text-white/80 hover:bg-white/5"
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+      </td>
     </tr>
+  )
+}
+
+// Austin-only launch (functions/src/cityStatus.ts).
+const STATUS_LABEL: Record<CityStatus, { text: string; className: string }> = {
+  locked: { text: '🔒 Locked', className: 'bg-white/10 text-white/60' },
+  founding: { text: '🌱 Founding', className: 'bg-amber-500/15 text-amber-300' },
+  live: { text: '✅ Live', className: 'bg-emerald-500/15 text-emerald-300' },
+}
+
+function StatusBadge({ status }: { status: CityStatus }) {
+  const s = STATUS_LABEL[status]
+  return <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${s.className}`}>{s.text}</span>
+}
+
+const ACTIONS: Record<CityStatus, { to: CityStatus; label: string }[]> = {
+  locked: [
+    { to: 'founding', label: 'Unlock' },
+    { to: 'live', label: 'Go live' },
+  ],
+  founding: [
+    { to: 'live', label: 'Go live' },
+    { to: 'locked', label: 'Lock' },
+  ],
+  live: [{ to: 'locked', label: 'Lock' }],
+}
+
+const CONFIRM: Record<CityStatus, { title: (city: string) => string; body: string; button: string }> = {
+  founding: {
+    title: (city) => `Unlock ${city}?`,
+    body: 'Sign-ups open with the founder circle and AI profiles. Everyone waiting for this city is let in and sent an "account active" text. The first in its founder line get a 72-hour head start on founding spots.',
+    button: 'Unlock',
+  },
+  live: {
+    title: (city) => `Take ${city} live?`,
+    body: "Full launch: AI profiles are retired from this city's decks and chats, and free trials start. This can't be undone back to founding.",
+    button: 'Go live',
+  },
+  locked: {
+    title: (city) => `Lock ${city}?`,
+    body: 'New sign-ups here go to the waitlist. Existing members keep their profiles, matches and chats.',
+    button: 'Lock',
+  },
+}
+
+function ConfirmStatus({ city, to, onClose, onDone }: { city: CityRow; to: CityStatus; onClose: () => void; onDone: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const c = CONFIRM[to]
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !busy && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [busy, onClose])
+  async function confirm() {
+    setBusy(true)
+    setError(null)
+    try {
+      await setCityStatus(city.id, to)
+      onDone()
+    } catch (err) {
+      setError(friendlyError(err, "Couldn't change the city's status."))
+      setBusy(false)
+    }
+  }
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="city-status-title"
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 backdrop-blur-sm lg:items-center lg:p-4"
+    >
+      <div className="w-full rounded-t-2xl border border-white/10 bg-gray-950 p-6 text-white lg:max-w-sm lg:rounded-2xl">
+        <h2 id="city-status-title" className="text-lg font-bold">
+          {c.title(city.name)}
+        </h2>
+        <p className="mt-2 text-sm text-white/60">{c.body}</p>
+        {error && <p role="alert" className="mt-3 text-sm text-red-400">{error}</p>}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void confirm()}
+          className="mt-5 w-full rounded-xl bg-red-600 py-3 font-semibold text-white hover:opacity-90 disabled:opacity-50"
+        >
+          {busy ? 'Saving…' : c.button}
+        </button>
+        <button type="button" disabled={busy} onClick={onClose} className="mt-2 w-full py-2 text-sm text-white/50 hover:text-white">
+          Cancel
+        </button>
+      </div>
+    </div>
   )
 }

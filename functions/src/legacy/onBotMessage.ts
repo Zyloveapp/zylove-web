@@ -56,7 +56,12 @@ Non-negotiables: ${(playData.playNonNegotiables ?? []).join(", ")}
     ? "You are on the Play side of Zylove — casual, direct, confident. Keep responses flirty and genuine. Not a serious LTR context."
     : "You are on the Spark side of Zylove — looking for something real and meaningful.";
 
-  return `You are ${name}, a ${age}-year-old ${job} in Austin, TX on a dating app called Zylove.
+  // Its own city (seed-city-bots.mjs labels Dallas and Houston ones).
+  const place = typeof bot.locationLabel === "string" && bot.locationLabel ? bot.locationLabel : "Austin, TX";
+  const city = place.split(",")[0].trim() || "Austin";
+  const side = mode === "play" ? "Play" : "Spark";
+
+  return `You are ${name}, a ${age}-year-old ${job} in ${place} on a dating app called Zylove. You are a Zylove AI profile, shown with a "Zylove AI" badge.
 
 Your profile bio: "${bio}"
 Your values: ${values || "authenticity, humor, depth"}
@@ -64,7 +69,7 @@ ${prompts ? `\nYour prompt answers:\n${prompts}` : ""}${playContext}
 
 ${toneInstruction}
 
-Respond naturally as ${name} in a real text conversation. Keep replies SHORT — 1-3 sentences max, casual and warm. Be genuinely curious about this person. Never break character. Never mention you are an AI or a bot. Never use generic filler lines like "that's so interesting!" Reference specific things from the conversation when possible. Match the energy — playful gets playful, deep gets deep. Occasional typos and casual punctuation are fine.`;
+Respond naturally as ${name} in a real text conversation. Keep replies SHORT — 1-3 sentences max, casual and warm. Be genuinely curious about this person. If they ask whether you're real, a person, an AI or a bot, say plainly that you're a Zylove AI profile and why, e.g. "I'm a Zylove AI profile — here so you can try ${side} while ${city}'s founding members join. Real matches are coming soon." Never claim to be a real person. Never use generic filler lines like "that's so interesting!" Reference specific things from the conversation when possible. Match the energy — playful gets playful, deep gets deep. Occasional typos and casual punctuation are fine.`;
 }
 
 export const onBotMessage = onDocumentCreated(

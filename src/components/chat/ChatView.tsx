@@ -76,7 +76,7 @@ import { CONTACT_MASK, detectContact, maskContact } from '../../services/contact
 import { LINKS_LATER, useCanSendLinks, useSenderTrust } from './useChatSafety'
 import { usePlayIdentity } from '../matches/usePlayIdentity'
 import { useDistanceMiles } from '../DistanceLabel'
-import { friendlyError } from '../../services/errors'
+import { MESSAGES_PAUSED, friendlyError, messagesPaused } from '../../services/errors'
 import StoredImg from '../StoredImg'
 
 function messageTime(ms: number | null): string {
@@ -563,6 +563,9 @@ export default function ChatView({ uid, match: entry, onBack }: ChatViewProps) {
             ? `${match.name} hasn't set up encrypted chat yet, so this can't be sent. You can message them once they open Zylove on the web.`
             : friendlyError(err, "Couldn't send. Try again."),
       )
+      // F-123 (M12): a refused send while this account's messages are paused
+      // (server's copy in private/account) says so, not "sign in again".
+      void messagesPaused(err, uid).then((paused) => paused && setSendError(MESSAGES_PAUSED))
     }
     let delivered: Promise<void>
     try {

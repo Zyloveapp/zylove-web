@@ -12,6 +12,7 @@ import { getAuth } from 'firebase-admin/auth'
 import { loadPlayName } from './playName'
 import { smsSafeName } from './smsName'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
+import { isUsNumber } from './phoneRegion'
 import { internalRef, loadAccount, loadSettings, userRef } from './userData'
 
 const twilioAccountSid = defineSecret('TWILIO_ACCOUNT_SID')
@@ -33,7 +34,7 @@ export const LOOKUP_SECRETS = [twilioAccountSid, twilioAuthToken]
 // Twilio Lookup v2 line type ('mobile', 'landline', 'fixedVoip',
 // 'nonFixedVoip', 'tollFree', 'personal', …) or null when unknown or the
 // lookup failed. Callers treat null as "allow". ~$0.01 per call.
-export async function lookupLineType(phoneNumber: string): Promise<string | null> {
+export async function lookupLineType(phoneNumber: string, timeoutMs = 8000): Promise<string | null> {
   try {
     const sid = twilioAccountSid.value()
     const token = twilioAuthToken.value()
@@ -44,7 +45,7 @@ export async function lookupLineType(phoneNumber: string): Promise<string | null
     const url = `https://lookups.twilio.com/v2/PhoneNumbers/${encodeURIComponent(phoneNumber)}?Fields=line_type_intelligence`
     const res = await fetch(url, {
       headers: { Authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}` },
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(timeoutMs),
     })
     if (!res.ok) {
       logger.warn('lookupLineType: Twilio Lookup error', { status: res.status })
@@ -110,15 +111,58 @@ const TWILIO_UNSUBSCRIBED = 21610
 export const SMS_CONSENT_TEXTS: Record<string, string> = {
   '2026-10-07':
     'Text me match, message and account notifications from Zylove. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help. See SMS Terms.',
+  // Austin-only launch: the waitlist screen's opt-in (required to join) —
+  // account notifications, the activation notice among them (A2P: the
+  // campaign's account-notice use case; Matthew, UPDATE 2026-10-09).
+  'waitlist-2026-10-09':
+    'Text me account notifications from Zylove, including when my account is activated. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.',
   legacy:
     "Get Zylove updates by text. Turn on texts to be notified when founder spots open, get match alerts and never miss a message. We'll text you when something important happens — a new Spark, a message, a match. Standard rates apply. You can turn this off anytime. Message frequency varies. Reply STOP to opt out, HELP for help.",
 }
-export const SMS_CONSENT_SOURCES = ['settings', 'onboarding'] as const
+export const SMS_CONSENT_SOURCES = ['settings', 'onboarding', 'waitlist'] as const
 export type SmsConsentSource = (typeof SMS_CONSENT_SOURCES)[number]
 
 // Sent once, right after someone opts in.
 export const SMS_CONFIRMATION =
   "Zylove: You're signed up for match, message and account notifications. Msg frequency varies. Msg & data rates may apply. Reply HELP for help, STOP to opt out."
+
+// ─── City waitlist (Austin-only launch) ───────────────────────────────────────
+
+// Waitlist texts: one confirmation on opting in (WAITLIST_CONFIRMATION), and a
+// plain account-status notice when a city unlock activates the account.
+// The activation notices follow config/waitlistTexts (server-only):
+//   enabled     false switches it off (default on; the admin's Unlock is the
+//               trigger)
+//   batchSize   texts per run (default 200; runs every 30 minutes)
+//   dailyCap    texts per day across runs (default 2,000 — under the
+//               low-volume campaign's daily carrier caps)
+export interface WaitlistTextConfig {
+  enabled: boolean
+  batchSize: number
+  dailyCap: number
+}
+
+const posInt = (v: unknown, d: number) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : d)
+
+export function waitlistTextConfig(d: Record<string, unknown> | undefined): WaitlistTextConfig {
+  return { enabled: d?.enabled !== false, batchSize: posInt(d?.batchSize, 200), dailyCap: posInt(d?.dailyCap, 2000) }
+}
+
+export async function loadWaitlistTextConfig(): Promise<WaitlistTextConfig> {
+  return waitlistTextConfig((await getFirestore().doc('config/waitlistTexts').get()).data())
+}
+
+// The waitlist opt-in's one confirmation (Matthew, UPDATE 5: a plain account
+// notice, no city) — under the same one-a-day limit as SMS_CONFIRMATION.
+export const WAITLIST_CONFIRMATION =
+  "Zylove: You'll get account notifications from Zylove. Msg frequency varies. Msg & data rates may apply. Reply HELP for help, STOP to opt out."
+
+export const WAITLIST_ACTIVATED_TEXT = 'Zylove: Your account is now active. Sign in at zylove.app to finish your profile. Reply STOP to opt out.'
+
+// One waitlist text (US only, opt-outs honoured — deliver's own checks).
+export async function textWaitlister(phone: string, body: string): Promise<Delivery> {
+  return deliver(phone, body)
+}
 
 // ─── Opt-outs ────────────────────────────────────────────────────────────────
 
@@ -155,6 +199,11 @@ async function deliver(to: string, body: string): Promise<Delivery> {
     }
     if (!E164.test(to)) {
       logger.warn('sendSMS: recipient is not an E.164 number, skipping')
+      return 'failed'
+    }
+    // F-122: US numbers only (no international or premium-rate sends).
+    if (!isUsNumber(to)) {
+      logger.warn('sendSMS: not a US number, skipping')
       return 'failed'
     }
     if ((await optOutRef(to).get()).exists) {
@@ -206,8 +255,8 @@ export async function sendSMS(target: SmsTarget, body: string): Promise<boolean>
 
 // The opt-in confirmation, straight after consent was recorded (the master
 // switch and quiet hours don't apply: they just asked for texts).
-export async function sendConsentConfirmation(phone: string): Promise<Delivery> {
-  return deliver(phone, SMS_CONFIRMATION)
+export async function sendConsentConfirmation(phone: string, body: string = SMS_CONFIRMATION): Promise<Delivery> {
+  return deliver(phone, body)
 }
 
 // Admin alert texts (adminAlerts.ts) go to an admin's own verified sign-in

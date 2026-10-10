@@ -1,11 +1,11 @@
-import { doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore'
+import { Timestamp, doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
-import { db, functions } from './firebase'
+import { auth, db, functions } from './firebase'
 import { requestLocation, saveUserLocation } from './location'
 import { loadAccountView, marketOf } from './subscription'
 import { loadMatching } from './privateMatching'
 import { loadSettingsView } from './privateSettings'
-import { cityConfigPath, type ZyloveCity } from '../config/cities'
+import { cityConfigPath, cityInFoundingPeriod, type ZyloveCity } from '../config/cities'
 
 export type FounderResult =
   | { eligible: true; cohortNumber: number; cityId?: string; cityName?: string }
@@ -40,8 +40,21 @@ export async function spotsRemaining(cityId: string, bucket: Bucket): Promise<nu
     cityId === 'austin' ? getDoc(doc(db, 'config/launch')) : Promise.resolve(null),
   ])
   const c = city.data() ?? {}
+  // Austin-only launch: claims only in a Founding city (the server refuses the rest).
+  if (!cityInFoundingPeriod(cityId, c)) return 0
+  // UPDATE 3: during a just-unlocked city's 72-hour head start, only the
+  // waitlist's first in line (their private/account.founderHeadStart) may claim.
+  const ends = c.founderHeadStartUntil
+  if (ends instanceof Timestamp && ends.toMillis() > Date.now() && !(await hasHeadStart(cityId))) return 0
   const target = typeof c.founderTarget === 'number' ? c.founderTarget : DEFAULT_FOUNDER_TARGET
   return Math.max(0, target - Math.max(count(c[key]), count(launch?.data()?.[key])))
+}
+
+async function hasHeadStart(cityId: string): Promise<boolean> {
+  const uid = auth.currentUser?.uid
+  if (!uid) return false
+  const hs = (await getDoc(doc(db, 'users', uid, 'private', 'account'))).get('founderHeadStart')
+  return hs?.cityId === cityId && hs?.until instanceof Timestamp && hs.until.toMillis() > Date.now()
 }
 
 export async function spotOpen(cityId: string, bucket: Bucket): Promise<boolean> {
@@ -157,5 +170,24 @@ export async function founderHeartbeat(uid: string): Promise<void> {
     localStorage.setItem(heartbeatKey(uid), String(Date.now()))
   } catch {
     // Next load tries again.
+  }
+}
+
+// Why a founder claim was refused, for people (functions/src/founders.ts and
+// founderGate.ts: F-114 too_new, F-115 not_mobile, F-116 not_available).
+export function founderRefusalMessage(reason: string): string {
+  switch (reason) {
+    case 'cohort_full':
+      return 'Someone just took the last spot.'
+    case 'too_new':
+      return 'Founder spots open to accounts at least a day old. Come back tomorrow to claim yours.'
+    case 'not_mobile':
+      return 'Founder spots need a mobile number. VoIP, landline and virtual numbers can’t claim one.'
+    case 'head_start':
+      return 'Founding spots here go to the waitlist’s first in line for a few days. Check back soon.'
+    case 'not_founding':
+      return 'Founder spots can only be claimed while you’re in a city in its founding period.'
+    default:
+      return "This spot isn't available to you."
   }
 }

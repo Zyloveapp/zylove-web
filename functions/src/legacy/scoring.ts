@@ -484,13 +484,56 @@ export function sparkBreakdownFor(stored: unknown, viewerUid: string): Record<st
   return { ...rest, physicalPrefs: finite(own) ? own : null };
 }
 
-// The pair-doc fields for a Spark result (the headline everyone sees).
-export function sparkPairFields(result: ReturnType<typeof calculateSparkScore>): {
+// ─── F-119 (M8): each person's own view ──────────────────────────────────────
+// The other person's dealbreakers are their private matching preferences.
+// The pair score used to apply both people's: the breakdown's dealbreaker
+// bar read 0 when only theirs fired, and the headline dropped to the cap, so
+// toggling your own public habits showed which dealbreakers they'd set. Each
+// person now sees the pair scored with their own dealbreakers only (the other
+// side's left out); the shared values stay for the match doc, which both read.
+export interface SparkView {
+  score: number;
+  // The breakdown's dealbreaker bar: 100, or 0 when one of yours fired.
+  dealbreakers: number;
+  // Deep Fit as this person may see it (null: none).
+  tier1: DeepFitRecord | null;
+}
+
+const withoutDealbreakers = (u: UserDoc): UserDoc => ({ ...(u as object), dealbreakers: [] } as unknown as UserDoc);
+
+export function sparkViews(a: UserDoc, b: UserDoc, uidA: string, uidB: string): Record<string, SparkView> {
+  const view = (r: ReturnType<typeof calculateSparkScore>): SparkView => ({
+    score: r.score,
+    dealbreakers: r.breakdown.dealbreakers,
+    tier1: deepFitRecord(r.tier1, uidA, uidB),
+  });
+  return {
+    [uidA]: view(calculateSparkScore(a, withoutDealbreakers(b))),
+    [uidB]: view(calculateSparkScore(withoutDealbreakers(a), b)),
+  };
+}
+
+// The headline `viewer` sees for a pair doc (older docs: the shared one).
+export function sparkScoreFor(pair: { sparkScore?: unknown; sparkScoreFor?: unknown } | undefined, viewer: string): number | null {
+  const own = (pair?.sparkScoreFor as Record<string, unknown> | undefined)?.[viewer];
+  if (typeof own === "number") return own;
+  return typeof pair?.sparkScore === "number" ? pair.sparkScore : null;
+}
+
+// The pair-doc fields for a Spark result (the headline everyone sees), and
+// with `views`, each person's own (F-119).
+export function sparkPairFields(result: ReturnType<typeof calculateSparkScore>, views?: Record<string, SparkView>): {
   sparkScore: number;
   sparkEnoughInfo: boolean;
   engineVersion: number;
+  sparkScoreFor?: Record<string, number>;
 } {
-  return { sparkScore: result.score, sparkEnoughInfo: result.enoughInfo, engineVersion: SCORE_ENGINE_VERSION };
+  return {
+    sparkScore: result.score,
+    sparkEnoughInfo: result.enoughInfo,
+    engineVersion: SCORE_ENGINE_VERSION,
+    ...(views && { sparkScoreFor: Object.fromEntries(Object.entries(views).map(([u, v]) => [u, v.score])) }),
+  };
 }
 
 // ─── Play scoring ─────────────────────────────────────────────────────────────

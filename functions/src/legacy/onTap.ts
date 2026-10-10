@@ -3,7 +3,7 @@
 // settings (legacyOptions.ts) are new.
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkBreakdownFor, sparkBreakdownRecord, sparkPairFields } from "./scoring";
+import { calculateSparkScore, calculatePlayScore, deepFitRecord, SCORE_ENGINE_VERSION, sparkBreakdownFor, sparkBreakdownRecord, sparkPairFields, sparkScoreFor, sparkViews } from "./scoring";
 import { UserDoc, PairDoc, pairId } from "./types";
 import { LEGACY_RUNTIME } from "./legacyOptions";
 import { bothHavePlay, loadPlayScores, playFields, playTapAnswer, setPlayScores } from "../pairPlay";
@@ -90,7 +90,7 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
     const details = full ? await loadSparkDetails(pid, tapperId, data) : null;
     return {
       pairId:     pid,
-      sparkScore: data.sparkScore,
+      sparkScore: sparkScoreFor(data, tapperId) ?? data.sparkScore,
       sparkEnoughInfo: data.sparkEnoughInfo !== false,
       engineVersion: data.engineVersion,
       breakdown:  { ...(details && { spark: details.sparkBreakdown }) },
@@ -115,7 +115,11 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
   const tappedDoc  = await withPrivateProfile(tappedId, tappedSnap.data() ?? {}) as UserDoc;
 
   const spark = calculateSparkScore(tapperDoc, tappedDoc);
-  const { score: sparkScore, triggeredDealbreakers } = spark;
+  const { triggeredDealbreakers } = spark;
+  // F-119: each person's own score, dealbreaker bar and Deep Fit.
+  const views = sparkViews(tapperDoc, tappedDoc, tapperId, tappedId);
+  const mine = views[tapperId];
+  const sparkScore = mine.score;
   const sparkBreakdown = sparkBreakdownRecord(spark, tapperId, tappedId);
   const sparkTier1 = deepFitRecord(spark.tier1, tapperId, tappedId);
 
@@ -126,7 +130,7 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
     // Re-score from an older engine: keep everything else on the pair
     // (likes, reveals, match state).
     batch.update(pairRef, {
-      ...sparkPairFields(spark),
+      ...sparkPairFields(spark, views),
       scoreCalculatedAt: admin.firestore.Timestamp.now(),
       scoreVersion:      admin.firestore.FieldValue.increment(1),
     });
@@ -135,13 +139,13 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
       userA,
       userB,
       createdAt:         admin.firestore.Timestamp.now(),
-      ...sparkPairFields(spark),
+      ...sparkPairFields(spark, views),
       scoreCalculatedAt: admin.firestore.Timestamp.now(),
       scoreVersion:      1,
     };
     batch.set(pairRef, pairData);
   }
-  writeSparkDetails(batch, pid, { breakdown: sparkBreakdown, dealbreakers: triggeredDealbreakers, tier1: sparkTier1 }, false);
+  writeSparkDetails(batch, pid, { breakdown: sparkBreakdown, dealbreakers: triggeredDealbreakers, tier1: sparkTier1, views }, false);
   await batch.commit();
 
   return {
@@ -150,9 +154,9 @@ export const onTap = onCall(LEGACY_RUNTIME, async (request) => {
     sparkEnoughInfo: spark.enoughInfo,
     engineVersion: SCORE_ENGINE_VERSION,
     // F-098: the physical bar is the tapper's own direction.
-    breakdown: { ...(full && { spark: sparkBreakdownFor(sparkBreakdown, tapperId) }) },
+    breakdown: { ...(full && { spark: { ...sparkBreakdownFor(sparkBreakdown, tapperId), dealbreakers: mine.dealbreakers } }) },
     triggeredDealbreakers: full ? visibleDealbreakers(triggeredDealbreakers) : [],
-    ...(deep && sparkTier1 ? { tier1: sparkTier1 } : {}),
+    ...(deep && mine.tier1 ? { tier1: mine.tier1 } : {}),
     hasPhysicalPrefs,
     locked: !full,
   };

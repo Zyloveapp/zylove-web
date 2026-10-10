@@ -141,6 +141,9 @@ export const createCheckoutSession = onCall(
       await billingRef(uid).set({ stripeCustomerId: customerId }, { merge: true })
     }
 
+    // Low (fresh-eyes review): two checkouts at once (two tabs, a double tap)
+    // get the same session, so they can't make two subscriptions.
+    const bucket = Math.floor(Date.now() / (10 * 60 * 1000))
     const session = await stripe().checkout.sessions.create({
       mode: 'subscription',
       customer: customerId,
@@ -151,7 +154,7 @@ export const createCheckoutSession = onCall(
       metadata: { uid, tier },
       subscription_data: { metadata: { uid, tier } },
       allow_promotion_codes: true,
-    })
+    }, { idempotencyKey: `zylove-checkout-${uid}-${tier}-${bucket}` })
     if (!session.url) throw new HttpsError('internal', 'Checkout is unavailable right now')
     logger.info('createCheckoutSession', { tier })
     return { url: session.url }
@@ -212,6 +215,7 @@ async function applySubscription(eventSub: Stripe.Subscription, deletedEvent: bo
         {
           ...(tier ? { subscriptionTier: tier } : {}),
           subscriptionStatus: 'active',
+          pastDueSince: FieldValue.delete(),
           stripeSubscriptionId: sub.id,
           trialExpired: false,
           subscriptionUpdatedAt: now,
@@ -221,10 +225,14 @@ async function applySubscription(eventSub: Stripe.Subscription, deletedEvent: bo
       )
       break
     }
-    case 'past_due':
-      // Stripe is retrying the charge; access stays until it gives up.
-      await ref.set({ subscriptionStatus: 'past_due', subscriptionUpdatedAt: now }, { merge: true })
+    case 'past_due': {
+      // Stripe is retrying the charge; access stays until it gives up, or
+      // for PAST_DUE_GRACE_MS from the first failure (pastDueSince, kept
+      // across the retries; entitlements.ts).
+      const already = (await ref.get()).data()?.pastDueSince
+      await ref.set({ subscriptionStatus: 'past_due', subscriptionUpdatedAt: now, ...(already ? {} : { pastDueSince: now }) }, { merge: true })
       break
+    }
     case 'canceled':
     case 'unpaid':
     case 'incomplete_expired':

@@ -1,7 +1,7 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { getAuth } from 'firebase-admin/auth'
 import { FieldValue, Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
-import { audit, requireAdmin, requireAdminAudited } from './audit'
+import { audit, requireAdmin, requireAdminAudited, requireLiveAdmin } from './audit'
 import { linkedAccounts } from './devices'
 import { refreshEntry } from './explore'
 import { FLAG_RETENTION_MS, type Features, type Reason } from './trustScore'
@@ -252,6 +252,7 @@ export const adminTrustAction = onCall({ timeoutSeconds: 60, memory: '256MiB', i
   const days = action === 'suspend' ? Number(data.days) : null
   if (action === 'suspend' && !SUSPEND_DAYS.includes(days as number)) throw new HttpsError('invalid-argument', 'days must be 30, 60 or 90.')
   const adminUid = await requireAdminAudited(request.auth, { action: `trust.${action}`, target: uid, reason, detail: days ? { days } : {} })
+  await requireLiveAdmin(adminUid)
   if (isBot(uid)) throw new HttpsError('failed-precondition', 'Not for curated profiles.')
   if (uid === adminUid) throw new HttpsError('failed-precondition', 'Not on your own account.')
   if (action !== 'dismiss' && (await isAdminUid(uid))) throw new HttpsError('failed-precondition', 'Not on an admin account.')

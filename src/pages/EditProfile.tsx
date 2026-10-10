@@ -21,6 +21,7 @@ import { InspirationPills } from '../components/onboarding/Inspirations'
 import { impliedGender, profileGenderLabel, promptQuestion } from '../components/discover/labels'
 import { goDeeperAnswerRows, goDeeperAnswers, goDeeperComplete } from '../components/profile/goDeeper'
 import StoredImg from '../components/StoredImg'
+import { friendlyError } from '../services/errors'
 
 const inputClass =
   'w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-white placeholder:text-white/30 focus:border-white/30 focus:outline-none'
@@ -115,6 +116,7 @@ export default function EditProfile() {
   const [picker, setPicker] = useState<Picker | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveState, setSaveState] = useState<'saved' | 'error' | null>(null)
+  const [saveErrorText, setSaveErrorText] = useState("Couldn't save. Try again.")
   const [nameError, setNameError] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   useEffect(() => {
@@ -205,7 +207,8 @@ export default function EditProfile() {
       await saveSparkEdits(uid, { pronouns, genderHidden, showGender, bio, prompts })
       setSaveState('saved')
       setTimeout(() => navigate('/profile'), 1200)
-    } catch {
+    } catch (err) {
+      setSaveErrorText(friendlyError(err, "Couldn't save. Try again."))
       setSaveState('error')
     } finally {
       setSaving(false)
@@ -460,7 +463,7 @@ export default function EditProfile() {
           {saveState === 'saved' && (
             <p className="mb-2 text-center text-sm text-emerald-400">Saved ✦ — Your Spark profile has been updated.</p>
           )}
-          {saveState === 'error' && <p className="mb-2 text-center text-sm text-red-400">Couldn't save. Try again.</p>}
+          {saveState === 'error' && <p className="mb-2 text-center text-sm text-red-400">{saveErrorText}</p>}
           {nameError && <p className="mb-2 text-center text-sm text-red-400">{nameError}</p>}
           <button
             type="button"

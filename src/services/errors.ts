@@ -1,6 +1,7 @@
 import { FirebaseError } from 'firebase/app'
 import { BRAND } from '../brand/zylove'
 import { FieldLockedError } from './fieldLocks'
+import { ProfileTextError } from './profileText'
 
 // Plain-English messages for errors shown to users. Never put a raw Firebase
 // code (storage/unauthorized, permission-denied, auth/…) in front of someone.
@@ -56,7 +57,16 @@ export function friendlyError(err: unknown, fallback = GENERIC): string {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return NETWORK
   // F-099: a field changed too recently — the date it can change again.
   if (err instanceof FieldLockedError) return err.message
+  // F-112: contact details in profile text, refused before saving.
+  if (err instanceof ProfileTextError) return err.message
   if (err instanceof FirebaseError) {
+    // A refusal from our sign-in / sign-up checks (functions onBeforeSignIn,
+    // onBeforeCreate) arrives as auth/internal-error with our message inside:
+    // "…returned an error: {"error":{"message":"…"}}". Show that message.
+    if (err.code === 'auth/internal-error') {
+      const inner = /"message"\s*:\s*"([^"]{1,200})"/.exec(err.message)?.[1]
+      if (inner && !/^(internal|INTERNAL)/.test(inner) && !inner.includes('ZYLOVE_SUSPENDED')) return inner
+    }
     const mapped = BY_CODE[err.code]
     // Our callables throw HttpsErrors whose message is written for users
     // ("Already rated this conversation…"); keep those for the
@@ -71,3 +81,20 @@ export function friendlyError(err: unknown, fallback = GENERIC): string {
 }
 
 export const SUPPORT_EMAIL = BRAND.supportEmail
+
+// F-123 (M12): an account sending very fast has its messages paused for an
+// hour; the rules then refuse sends as permission-denied. The server keeps a
+// read-only copy of the pause in private/account (messagesMutedUntil).
+export const MESSAGES_PAUSED = "You're sending messages very fast — try again in an hour."
+
+export async function messagesPaused(err: unknown, uid: string): Promise<boolean> {
+  if (!(err instanceof FirebaseError) || err.code !== 'permission-denied') return false
+  try {
+    const { db } = await import('./firebase')
+    const { Timestamp, doc, getDoc } = await import('firebase/firestore')
+    const until: unknown = (await getDoc(doc(db, 'users', uid, 'private', 'account'))).get('messagesMutedUntil')
+    return until instanceof Timestamp && until.toMillis() > Date.now()
+  } catch {
+    return false
+  }
+}

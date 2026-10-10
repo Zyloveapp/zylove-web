@@ -369,7 +369,7 @@ test('rules: a suspended user with a still-valid session is refused — messages
       profile: await commit(token, [patch(`users/${a.uid}`, { bio: `bio ${n}` })]),
       // (swipes: no client writes for anyone since F-075 — recordSwipe only.)
       match: await commit(token, [patch(`matches/${id}`, { hasUnread: n % 2 === 0 })]),
-      typing: await commit(token, [patch(`matches/${id}/typing/${a.uid}`, { at: n })]),
+      typing: await commit(token, [patch(`matches/${id}/typing/${a.uid}`, { uid: a.uid, typingAt: n })]),
       profilePhoto: await upload(token, `photos/${a.uid}/spark/p${n}.jpg`, 'image/jpeg'),
       chatPhoto: await upload(token, `chat-photos/${id}/${a.uid}_${n}.bin`, 'image/x-zylove-encrypted'),
     }

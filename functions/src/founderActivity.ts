@@ -18,6 +18,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { logger } from 'firebase-functions'
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 import { SMS_SECRETS } from './sms'
+import { revokedPlan } from './founderGate'
 import { bucketFor, num, refreshCityMembers, textFounder, type Bucket, type FounderStatus } from './founders'
 import { CLEAR_TRIAL, cityOpen, hasEliteIdentity, hasPaidSubscription, newTrial, planView } from './trial'
 import { accountRef, internalRef, loadInternal, matchingRef } from './userData'
@@ -92,8 +93,12 @@ export async function revokeFounderStatus(uid: string): Promise<{ cityId: string
   const planRef = internalRef(uid)
   const launchRef = db.doc('config/launch')
 
+  // F-116: the number's trial history (by the hash kept on the record).
+  const before = (await recordRef.get()).data() as (FounderRecord & { phoneHash?: string }) | undefined
+  const prior = before?.phoneHash ? ((await db.doc(`trialHistory/${before.phoneHash}`).get()).data() ?? null) : null
+  const started: { trial: ReturnType<typeof newTrial> | null } = { trial: null }
   const opened = await db.runTransaction(async (tx) => {
-    const record = (await tx.get(recordRef)).data() as FounderRecord | undefined
+    const record = (await tx.get(recordRef)).data() as (FounderRecord & { phoneHash?: string }) | undefined
     if (!record || (record.status !== 'active' && record.status !== 'pending_revocation')) return null
     const cityRef = db.doc(`config/city_${record.cityId}`)
     const isAustin = record.cityId === 'austin'
@@ -124,11 +129,21 @@ export async function revokeFounderStatus(uid: string): Promise<{ cityId: string
         { merge: true },
       )
     }
+    // F-116: the number can't claim a spot again.
+    if (record.phoneHash) tx.set(db.doc(`founderHistory/${record.phoneHash}`), { status: 'revoked', uid, revokedAt: FieldValue.serverTimestamp() }, { merge: true })
     if (user) {
       // Not paying (checked below), so exempt only by identity: Elite.
-      const plan = hasEliteIdentity(user)
-        ? { subscriptionTier: 'elite' }
-        : { subscriptionTier: 'free', ...(cityOpen(citySnap.data()) ? newTrial() : CLEAR_TRIAL) }
+      // F-116: otherwise the trial rules (revokedPlan) — it used to be a
+      // fresh 30-day trial on every revocation.
+      const decision = revokedPlan({ internal: planSnap.data(), prior, cityOpen: cityOpen(citySnap.data()) })
+      const trialFields =
+        decision.kind === 'keep' ? {}
+        : decision.kind === 'paid' ? { hadPaidPlan: true, ...CLEAR_TRIAL }
+        : decision.kind === 'prior' ? { trialStartedAt: decision.trialStartedAt, trialEndsAt: decision.trialEndsAt, trialExpired: decision.trialEndsAt.toMillis() <= Date.now() }
+        : decision.kind === 'new' ? newTrial()
+        : CLEAR_TRIAL
+      if (decision.kind === 'new') started.trial = trialFields as ReturnType<typeof newTrial>
+      const plan = hasEliteIdentity(user) ? { subscriptionTier: 'elite' } : { subscriptionTier: 'free', ...trialFields }
       tx.update(userRef, { isFounder: false })
       tx.set(accountRef(uid), { founderStatus: 'revoked' }, { merge: true })
       if (!hasPaidSubscription(planView(user, planSnap.data()))) tx.set(planRef, plan, { merge: true })
@@ -139,6 +154,10 @@ export async function revokeFounderStatus(uid: string): Promise<{ cityId: string
   if (opened) {
     logger.info('revokeFounderStatus', opened)
     await refreshCityMembers(opened.cityId)
+  }
+  // F-116: a trial started here is on record for the number, like any other.
+  if (started.trial && before?.phoneHash) {
+    await db.doc(`trialHistory/${before.phoneHash}`).set({ trialStartedAt: started.trial.trialStartedAt, trialEndsAt: started.trial.trialEndsAt, updatedAt: FieldValue.serverTimestamp() }, { merge: true })
   }
   return opened
 }

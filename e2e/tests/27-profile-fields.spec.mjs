@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { resetEmulators, seedUser, signIn, offline, quietFirstRun, CONTEXT, FIXTURE, db, userDoc, likeAs } from './helpers.mjs'
+import { resetEmulators, seedUser, signIn, offline, quietFirstRun, CONTEXT, FIXTURE, db, userDoc, likeAs, adminAuth } from './helpers.mjs'
 
 // F-018: religion and politics never shown to other members; gender can be
 // hidden; height optional; anonymous Spark likers show no personal details.
@@ -108,6 +108,9 @@ test('F-018: onboarding — gender can be hidden, height is optional, beliefs ar
   const ctx = await browser.newContext({ ...CONTEXT, geolocation: { latitude: 41.26, longitude: -95.94 } })
   const page = await ctx.newPage()
   await offline(page)
+  // Austin-only launch: Omaha is waitlisted, so this account is let in first (spec 46).
+  const pre = await adminAuth.createUser({ phoneNumber: phone })
+  await db.doc(`userInternal/${pre.uid}`).set({ admission: { status: 'admitted', cityId: 'austin', via: 'e2e' } })
   await signIn(page, phone, { expectPath: /\/onboarding/ })
   const next = () => page.getByRole('button', { name: /^(Next|Continue →)$/ }).click()
 

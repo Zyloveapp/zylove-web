@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { signOutAndWipe } from '../services/signOut'
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
+import AreaGate from '../components/AreaGate'
 import { doc, getDoc } from 'firebase/firestore'
 import { useAuthStore } from '../store/authStore'
 import { db } from '../services/firebase'
@@ -298,6 +299,9 @@ export default function Onboarding() {
   // (re-saving from a blank draft would replace their photos and answers).
   const [firstRunCheck, setFirstRunCheck] = useState<{ uid: string; status: 'ok' | 'done' | 'error' } | null>(null)
   const [firstRunAttempt, setFirstRunAttempt] = useState(0)
+  // Austin-only launch: the location check (AreaGate) comes before any step.
+  const [admittedUid, setAdmittedUid] = useState<string | null>(null)
+  const onAdmitted = useCallback(() => setAdmittedUid(user?.uid ?? null), [user?.uid])
   const [setupLoad, setSetupLoad] = useState<{ uid: string; locked: boolean } | 'error' | null>(null)
   const [refreshLoad, setRefreshLoad] = useState<
     { uid: string; locked: boolean; extraPrompts: PromptAnswer[] } | 'error' | null
@@ -547,6 +551,8 @@ export default function Onboarding() {
         </div>
       )
     }
+    // A new account: inside a Founding or Live city, or waitlisted.
+    if (admittedUid !== uid) return <AreaGate onAdmitted={onAdmitted} onSignOut={signOutOfOnboarding} />
   }
 
   if (refresh && refreshLoad === 'error') {

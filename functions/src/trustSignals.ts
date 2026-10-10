@@ -6,6 +6,7 @@ import { generationOf } from './matchGeneration'
 import { loadMatch } from './playMatch'
 import { recordScamTrap } from './scamTraps'
 import { isDeletedUid } from './userData'
+import { takeRateLimit } from './rateLimits'
 
 // T&S Phase 1 — behaviour signals that need no message content.
 //
@@ -82,6 +83,7 @@ async function countMessage(
     const match = ctx?.data
     const users = ctx?.users ?? []
     const sender = typeof m.senderId === 'string' ? ctx?.uidOf(m.senderId) : null
+    if (typeof sender === 'string' && !/^(zbot|seed)-/.test(sender)) await noteMessageRate(sender)
     const recipient = users.find((u) => u !== sender)
     const botChat = match?.isBot === true || users.some((u) => /^(zbot|seed)-/.test(u))
     // T&S Phase 2: what a person sends a curated profile is plaintext — the
@@ -115,6 +117,28 @@ async function countMessage(
     }
     await Promise.all(writes)
     await dropHash()
+}
+
+// F-123 (M12): how fast one account sends messages, across all its chats.
+// Past MESSAGE_BURST in 10 minutes or MESSAGE_DAY in a day, its messages are
+// paused for MESSAGE_MUTE_MS: the rules refuse new ones while
+// userInternal.messagesMutedUntil is ahead (each message fires about seven
+// triggers, and two colluding accounts could otherwise write without limit).
+export const MESSAGE_BURST = 150
+export const MESSAGE_DAY = 1500
+export const MESSAGE_MUTE_MS = 60 * 60 * 1000
+
+async function noteMessageRate(uid: string): Promise<void> {
+  try {
+    await takeRateLimit(uid, 'messagesBurst', { max: MESSAGE_BURST, windowMs: 10 * 60 * 1000 })
+    await takeRateLimit(uid, 'messagesDay', { max: MESSAGE_DAY, windowMs: 24 * 60 * 60 * 1000 })
+  } catch {
+    const until = Timestamp.fromMillis(Date.now() + MESSAGE_MUTE_MS)
+    await db().doc(`userInternal/${uid}`).set({ messagesMutedUntil: until }, { merge: true })
+    // The owner's read-only copy, so the app can say why a send was refused.
+    await db().doc(`users/${uid}/private/account`).set({ messagesMutedUntil: until }, { merge: true })
+    logger.warn('trustSignals: messages paused for a sending burst')
+  }
 }
 
 // The same opener (by on-device hash) to many people within a day.
