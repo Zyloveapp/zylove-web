@@ -98,7 +98,9 @@ export async function queueAdminAlert(type: AdminEvent, input: AlertInput = {}):
         expiresAt: Timestamp.fromMillis(Date.now() + QUEUE_TTL_MS),
       })
   } catch (err) {
-    logger.error('queueAdminAlert failed', { type, message: err instanceof Error ? err.message : String(err) })
+    // `error`, not `message`: an error-level entry's message is replaced by a
+    // stack trace, which hid the real cause.
+    logger.error('queueAdminAlert failed', { type, error: err instanceof Error ? err.message : String(err) })
   }
 }
 
@@ -187,8 +189,11 @@ export const flushAdminAlerts = onSchedule(
 // A new account, once the phone is verified: phone sign-in only creates the
 // Auth user after the code is confirmed, so abandoned code requests never
 // count. Accounts with no phone (admin-made test accounts) don't either.
+// Runs as the compute service account like every gen-2 function: gen-1's
+// default (the App Engine account) has no project roles, so its queue write
+// was refused and new-account alerts never went out (found 2026-10-10).
 export const adminAlertOnAccountCreated = functionsV1
-  .runWith({ memory: '256MB' })
+  .runWith({ memory: '256MB', serviceAccount: '606092248648-compute@developer.gserviceaccount.com' })
   .auth.user()
   .onCreate(async (user) => {
     if (!user.phoneNumber) return
