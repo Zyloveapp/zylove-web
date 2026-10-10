@@ -48,10 +48,9 @@ export function planView(root: DocumentData | undefined, internal: DocumentData 
   return { ...(root ?? {}), ...(internal ?? {}) }
 }
 
-// The user's launch market: userLocations/{uid}.marketCityId, locked the first
-// time they save a location (setLocation), so moving their location later
-// can't take them off a market's trial clock. Older records without it fall
-// back to the nearest city.
+// The user's launch market: userLocations/{uid}.marketCityId — the launch
+// city they're in now (setLocation; Austin-only launch: no longer locked to
+// the first save). Older records without it fall back to the nearest city.
 export function marketFor(loc: { lat: number; lng: number; marketCityId: string | null } | null): ZyloveCity | null {
   if (!loc) return null
   if (loc.marketCityId) return ZYLOVE_CITIES.find((c) => c.id === loc.marketCityId) ?? null

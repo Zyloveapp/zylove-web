@@ -17,6 +17,7 @@ import {
   passProfile,
   prefetchCompatibility,
   takeDeck,
+  NotLiveHereError,
   type DiscoverProfile,
 } from '../services/discover'
 
@@ -24,6 +25,7 @@ interface QueueState {
   key: string
   profiles: DiscoverProfile[]
   error: boolean
+  notLive?: boolean
 }
 
 function Spinner() {
@@ -70,8 +72,10 @@ function Explore() {
       .then((profiles) => {
         if (!cancelled) setQueue({ key, profiles, error: false })
       })
-      .catch(() => {
-        if (!cancelled) setQueue({ key, profiles: [], error: true })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        if (err instanceof NotLiveHereError) setQueue({ key, profiles: [], error: false, notLive: true })
+        else setQueue({ key, profiles: [], error: true })
       })
     return () => {
       cancelled = true
@@ -144,6 +148,17 @@ function Explore() {
     return (
       <div className="flex min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] items-center justify-center bg-gray-950">
         <Spinner />
+      </div>
+    )
+  }
+
+  // Outside every open city: matches and chats stay; no deck here.
+  if (queue.notLive) {
+    return (
+      <div className="flex min-h-[calc(100dvh-7rem)] lg:min-h-[calc(100dvh-7.5rem)] flex-col items-center justify-center bg-gray-950 px-6 text-center text-white">
+        <span className="mb-6 text-6xl text-[#1B4FD8]">✦</span>
+        <h1 className="text-2xl font-semibold">Zylove isn't live here yet</h1>
+        <p className="mt-3 text-white/50">Your matches and chats are still here. Explore shows people near you once you're back in a Zylove city.</p>
       </div>
     )
   }

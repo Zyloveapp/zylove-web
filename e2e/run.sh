@@ -37,6 +37,12 @@ grep -E '^[A-Z_][A-Z0-9_]*=' "$E/.env.test" > "$E/web-fn/.secret.local"
 # T&S Phase 4: fixed TEST-ONLY franking and evidence-locker keys (never the
 # production ones, which only Matthew sets) unless .env.test defines its own.
 grep -q '^FRANKING_KEY=' "$E/web-fn/.secret.local" || echo "FRANKING_KEY=v1:$(printf 'e2e-franking-key' | shasum -a 256 | cut -c1-64)" >> "$E/web-fn/.secret.local"
+# Twilio: TEST-ONLY account id and sender, answered by stub-anthropic.cjs
+# (nothing reaches Twilio); texts land in .cache/sms-sent.jsonl.
+perl -ni -e 'print unless /^TWILIO_(ACCOUNT_SID|FROM_NUMBER)=\s*$/' "$E/web-fn/.secret.local"
+grep -q '^TWILIO_ACCOUNT_SID=.' "$E/web-fn/.secret.local" || echo "TWILIO_ACCOUNT_SID=ACe2e00000000000000000000000000000" >> "$E/web-fn/.secret.local"
+grep -q '^TWILIO_FROM_NUMBER=.' "$E/web-fn/.secret.local" || echo "TWILIO_FROM_NUMBER=+15550000000" >> "$E/web-fn/.secret.local"
+: > "$C/sms-sent.jsonl"
 grep -q '^EVIDENCE_LOCKER_KEY=' "$E/web-fn/.secret.local" || echo "EVIDENCE_LOCKER_KEY=v1:$(printf 'e2e-locker-key' | shasum -a 256 | cut -c1-64)" >> "$E/web-fn/.secret.local"
 # Every other secret a function declares, empty: the emulator otherwise asks
 # Secret Manager for it on each cold start, fails (no credentials here), and

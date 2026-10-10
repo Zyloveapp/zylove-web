@@ -40,6 +40,8 @@ test('F-079: the first displayName must be a name — on create and on the first
   // Create: a brand-new profile.
   const uid = `e2e-fresh-${Date.now()}`
   await adminAuth.createUser({ uid })
+  // Austin-only launch: admitted by the location check (else every create is refused).
+  await db.doc(`userInternal/${uid}`).set({ admission: { status: 'admitted', cityId: 'austin' } })
   for (const bad of ['visit bit.ly/x', 'A', 'x'.repeat(21), 'call 5125550134', 'Ann  Marie', ' Ann', '@ann', 'Ann😀']) {
     expect(await create(uid, 'users', uid, { uid, displayName: bad }), bad).toBe(403)
   }

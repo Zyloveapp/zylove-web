@@ -85,6 +85,8 @@ function SignInCard() {
 
   // Dev-only shortcut past phone auth. Defined behind the DEV check so the
   // handler and its credentials are dropped from production builds entirely.
+  // Email/Password (and Anonymous) sign-in are disabled in production
+  // (2026-10-09, phone only), so this works only against the Auth emulator.
   const handleDevLogin = import.meta.env.DEV
     ? async () => {
         const email = import.meta.env.VITE_DEV_EMAIL

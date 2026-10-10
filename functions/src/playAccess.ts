@@ -3,6 +3,7 @@ import { onDocumentWritten } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
 import { Timestamp, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import { cityIsOpen, computeEntitlement, launchCityOf, type Entitlement } from './entitlements'
+import { foundingPeriod } from './cityStatus'
 import { accountRef, internalRef, userRef } from './userData'
 
 // Play access (Stage 2, F-004). Play data is sealed: reading another
@@ -85,7 +86,11 @@ export async function refreshPlayAccess(uid: string): Promise<PlayFlags> {
     // Their launch city (the market, else a far user's linked launch city):
     // has it opened?
     const city = launchCityOf(loc.data())
-    const open = city ? cityIsOpen((await tx.get(db.doc(`config/city_${city}`))).data()) : false
+    const cityConfig = city ? (await tx.get(db.doc(`config/city_${city}`))).data() : undefined
+    const open = city ? cityIsOpen(cityConfig) : false
+    // Austin-only launch: the market's founding period (Locked cities have none).
+    const marketId: unknown = loc.data()?.marketCityId
+    const marketFounding = typeof marketId === 'string' && marketId === city ? foundingPeriod(marketId, cityConfig) : false
     // The whole entitlement, stored with the Play flags it decides.
     const ent = computeEntitlement({
       root: root.data(),
@@ -95,6 +100,7 @@ export async function refreshPlayAccess(uid: string): Promise<PlayFlags> {
       loc: loc.data(),
       marketOpen: open,
       linkedCityOpen: open,
+      marketFounding,
     })
     const flags = computeFlags(root.data(), internal.data(), play.data(), ent)
     // A deleted account's server record is gone for good (clearPrivateData):

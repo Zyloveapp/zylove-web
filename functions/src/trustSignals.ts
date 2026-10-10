@@ -133,7 +133,10 @@ async function noteMessageRate(uid: string): Promise<void> {
     await takeRateLimit(uid, 'messagesBurst', { max: MESSAGE_BURST, windowMs: 10 * 60 * 1000 })
     await takeRateLimit(uid, 'messagesDay', { max: MESSAGE_DAY, windowMs: 24 * 60 * 60 * 1000 })
   } catch {
-    await db().doc(`userInternal/${uid}`).set({ messagesMutedUntil: Timestamp.fromMillis(Date.now() + MESSAGE_MUTE_MS) }, { merge: true })
+    const until = Timestamp.fromMillis(Date.now() + MESSAGE_MUTE_MS)
+    await db().doc(`userInternal/${uid}`).set({ messagesMutedUntil: until }, { merge: true })
+    // The owner's read-only copy, so the app can say why a send was refused.
+    await db().doc(`users/${uid}/private/account`).set({ messagesMutedUntil: until }, { merge: true })
     logger.warn('trustSignals: messages paused for a sending burst')
   }
 }

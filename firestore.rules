@@ -106,6 +106,14 @@ service cloud.firestore {
       return !exists(/databases/$(database)/documents/userInternal/$(request.auth.uid))
           || suspensionInactive(get(/databases/$(database)/documents/userInternal/$(request.auth.uid)).data);
     }
+    // Austin-only launch: a new profile only after the location check
+    // admitted the account (functions/src/waitlist.ts checkArea — inside a
+    // Founding or Live city, or its city unlocked). Waitlisted accounts get
+    // no profile. The same userInternal doc callerActive() reads.
+    function admitted() {
+      return exists(/databases/$(database)/documents/userInternal/$(request.auth.uid))
+          && get(/databases/$(database)/documents/userInternal/$(request.auth.uid)).data.get('admission', {}).get('status', '') == 'admitted';
+    }
     // F-123 (M12): an account sending too fast has its messages paused for
     // an hour (functions/src/trustSignals.ts noteMessageRate). The same
     // userInternal doc callerActive() reads.
@@ -340,7 +348,7 @@ service cloud.firestore {
                      || isUser(uid)
                      || (resource.data.get('isDeleted', false) != true && notSuspended(uid) && notBlockedFrom(uid)));
       allow list: if false;
-      allow create: if callerActive() && isUser(uid) && isSignedIn()
+      allow create: if callerActive() && isUser(uid) && isSignedIn() && admitted()
                     && !request.resource.data.keys().hasAny(serverOnlyUserFields())
                     && request.resource.data.get('photoURLs', []).size() == 0
                     && adultAge(request.resource.data)

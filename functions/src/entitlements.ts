@@ -55,7 +55,18 @@ export function computeEntitlement(
   // marketOpen: whether their market (the launch city they're in) has
   // opened; linkedCityOpen: whether the linked (far) city — when it's a
   // launch city — has.
-  input: { root?: DocumentData; plan?: DocumentData; matching?: DocumentData; loc?: DocumentData; marketOpen?: boolean; linkedCityOpen?: boolean },
+  // marketFounding: whether their market is in its founding period
+  // (cityStatus.ts foundingPeriod — Founding, not Locked; omitted counts as
+  // founding).
+  input: {
+    root?: DocumentData
+    plan?: DocumentData
+    matching?: DocumentData
+    loc?: DocumentData
+    marketOpen?: boolean
+    linkedCityOpen?: boolean
+    marketFounding?: boolean
+  },
   now = Date.now(),
 ): Entitlement {
   const { root, plan = {}, matching = {}, loc } = input
@@ -94,7 +105,15 @@ export function computeEntitlement(
   // this), which also looks up the phone's trial history. Pre-launch here
   // had no end: an account that never called initUserDefaults kept it.
   const market = typeof loc?.marketCityId === 'string' && ZYLOVE_CITIES.some((c) => c.id === loc.marketCityId)
-  if (market) return input.marketOpen === true ? e('free', 'waiting') : e('elite', 'prelaunch')
+  // Austin-only launch: pre-launch Elite only inside a Founding city — a
+  // Locked city gives nothing (nobody outside an open city gets free Elite).
+  // keepAccess (userInternal, server-only; set only by
+  // scripts/waitlist-keep-access.mjs once Matthew approves): a member who
+  // had pre-launch before the change keeps it.
+  if (market) {
+    if (input.marketOpen === true) return e('free', 'waiting')
+    return input.marketFounding !== false || plan.keepAccess === true ? e('elite', 'prelaunch') : e('free', 'waiting')
+  }
   // Linked from further away: Free until that city opens, and then until
   // their trial starts.
   return e('free', 'waiting')

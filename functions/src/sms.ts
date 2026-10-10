@@ -111,15 +111,53 @@ const TWILIO_UNSUBSCRIBED = 21610
 export const SMS_CONSENT_TEXTS: Record<string, string> = {
   '2026-10-07':
     'Text me match, message and account notifications from Zylove. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help. See SMS Terms.',
+  // Austin-only launch: the waitlist screen's opt-in (required to join) —
+  // account notifications, the activation notice among them (A2P: the
+  // campaign's account-notice use case; Matthew, UPDATE 2026-10-09).
+  'waitlist-2026-10-09':
+    'Text me account notifications from Zylove, including when my account is activated. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.',
   legacy:
     "Get Zylove updates by text. Turn on texts to be notified when founder spots open, get match alerts and never miss a message. We'll text you when something important happens — a new Spark, a message, a match. Standard rates apply. You can turn this off anytime. Message frequency varies. Reply STOP to opt out, HELP for help.",
 }
-export const SMS_CONSENT_SOURCES = ['settings', 'onboarding'] as const
+export const SMS_CONSENT_SOURCES = ['settings', 'onboarding', 'waitlist'] as const
 export type SmsConsentSource = (typeof SMS_CONSENT_SOURCES)[number]
 
 // Sent once, right after someone opts in.
 export const SMS_CONFIRMATION =
   "Zylove: You're signed up for match, message and account notifications. Msg frequency varies. Msg & data rates may apply. Reply HELP for help, STOP to opt out."
+
+// ─── City waitlist (Austin-only launch) ───────────────────────────────────────
+
+// The one waitlist text: a plain account-status notice when a city unlock
+// activates the account (no confirmation text on joining — the screen
+// confirms it). config/waitlistTexts (server-only):
+//   enabled     false switches it off (default on; the admin's Unlock is the
+//               trigger)
+//   batchSize   texts per run (default 200; runs every 30 minutes)
+//   dailyCap    texts per day across runs (default 2,000 — under the
+//               low-volume campaign's daily carrier caps)
+export interface WaitlistTextConfig {
+  enabled: boolean
+  batchSize: number
+  dailyCap: number
+}
+
+const posInt = (v: unknown, d: number) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : d)
+
+export function waitlistTextConfig(d: Record<string, unknown> | undefined): WaitlistTextConfig {
+  return { enabled: d?.enabled !== false, batchSize: posInt(d?.batchSize, 200), dailyCap: posInt(d?.dailyCap, 2000) }
+}
+
+export async function loadWaitlistTextConfig(): Promise<WaitlistTextConfig> {
+  return waitlistTextConfig((await getFirestore().doc('config/waitlistTexts').get()).data())
+}
+
+export const WAITLIST_ACTIVATED_TEXT = 'Zylove: Your account is now active. Sign in at zylove.app to finish your profile. Reply STOP to opt out.'
+
+// One waitlist text (US only, opt-outs honoured — deliver's own checks).
+export async function textWaitlister(phone: string, body: string): Promise<Delivery> {
+  return deliver(phone, body)
+}
 
 // ─── Opt-outs ────────────────────────────────────────────────────────────────
 

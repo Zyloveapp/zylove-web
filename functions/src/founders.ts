@@ -23,9 +23,10 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { onDocumentUpdated } from 'firebase-functions/v2/firestore'
 import { logger } from 'firebase-functions'
-import { FieldPath, FieldValue, getFirestore } from 'firebase-admin/firestore'
+import { FieldPath, FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 import { ZYLOVE_CITIES, getNearestCity } from './cities'
 import { LOOKUP_SECRETS, lookupLineType, textAccount } from './sms'
+import { foundingPeriod } from './cityStatus'
 import { founderGate, founderPhoneHash, type GateRefusal } from './founderGate'
 import { takeRateLimit } from './rateLimits'
 import { getAuth } from 'firebase-admin/auth'
@@ -37,7 +38,7 @@ export const DEFAULT_FOUNDER_TARGET = 50
 // Everyone else counts toward the other half.
 const BOT_PREFIX = 'zbot-'
 
-type Ineligible = 'outside_coverage' | 'already_assigned' | 'cohort_full' | 'no_profile' | GateRefusal
+type Ineligible = 'outside_coverage' | 'already_assigned' | 'cohort_full' | 'no_profile' | 'not_founding' | 'head_start' | GateRefusal
 export type FounderResult =
   | { eligible: true; cohortNumber: number; cityId: string; cityName: string }
   | { eligible: false; reason: Ineligible }
@@ -146,6 +147,19 @@ export async function claimFounderSpot(
     // A missing city doc is created with the defaults (init-cities.mjs
     // normally makes them first).
     const config = citySnap.data() ?? {}
+    // Austin-only launch: a spot is claimed only while physically inside a
+    // Founding city (the location saved now — setLocation). Not a Locked or
+    // Live one. The admin's "Make founder" (no gate) is a deliberate grant.
+    if (opts.gate && !foundingPeriod(city.id, citySnap.data())) return { eligible: false, reason: 'not_founding' }
+    // UPDATE 3: a city just unlocked from its waitlist — for 72 hours only
+    // the first in its founder line may claim there (waitlist.ts). First
+    // dibs, not a reservation: the halves below still decide.
+    const headStartEnds: unknown = config.founderHeadStartUntil
+    if (opts.gate && headStartEnds instanceof Timestamp && headStartEnds.toMillis() > Date.now()) {
+      const mine = internalSnap.get('founderHeadStart') as { cityId?: unknown; until?: unknown } | undefined
+      const ok = mine?.cityId === city.id && mine?.until instanceof Timestamp && mine.until.toMillis() > Date.now()
+      if (!ok) return { eligible: false, reason: 'head_start' }
+    }
     const target = num(config.founderTarget, DEFAULT_FOUNDER_TARGET)
     // Austin founder codes (mobile) only count in config/launch, so Austin
     // goes by whichever count is higher; the city doc catches up on write.
@@ -183,7 +197,7 @@ export async function claimFounderSpot(
         founderSeq: cohortNumber,
         // Both halves full: this city is live, its bots go, and its trials
         // start (trial.ts onMarketOpened).
-        ...(fills && { botsActive: false, discoveryOpenedAt: FieldValue.serverTimestamp() }),
+        ...(fills && { botsActive: false, discoveryOpenedAt: FieldValue.serverTimestamp(), status: 'live' }),
       },
       { merge: true },
     )

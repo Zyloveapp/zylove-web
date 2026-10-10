@@ -15,8 +15,8 @@ function isCuratedPlayId(playId: string): Promise<boolean> {
   return p
 }
 
-// Zylove's curated launch profiles (bots) are labelled wherever they appear —
-// Explore cards, profiles, chats, likes — not only by the Explore banner
+// Zylove's AI launch profiles (bots) are labelled "Zylove AI" wherever they
+// appear — Explore cards, profiles, chats, likes — not only by the Explore banner
 // (Stage C). They're removed from a city once its founding circle is full.
 // `curated` when the caller already knows (a bot match).
 export default function CuratedBadge({ uid, curated, className = '' }: { uid: string | null | undefined; curated?: boolean; className?: string }) {
@@ -34,10 +34,10 @@ export default function CuratedBadge({ uid, curated, className = '' }: { uid: st
   if (!show) return null
   return (
     <span
-      title="A Zylove curated profile — shown while your city's community is being built, not a real member."
+      title="A Zylove AI profile — here so you can try Zylove while your city's founding members join. Not a real person."
       className={`inline-block shrink-0 rounded-full border border-white/20 bg-white/10 px-2 py-0.5 text-xs font-semibold text-white/70 ${className}`}
     >
-      Zylove curated
+      Zylove AI
     </span>
   )
 }

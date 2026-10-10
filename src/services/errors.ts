@@ -81,3 +81,20 @@ export function friendlyError(err: unknown, fallback = GENERIC): string {
 }
 
 export const SUPPORT_EMAIL = BRAND.supportEmail
+
+// F-123 (M12): an account sending very fast has its messages paused for an
+// hour; the rules then refuse sends as permission-denied. The server keeps a
+// read-only copy of the pause in private/account (messagesMutedUntil).
+export const MESSAGES_PAUSED = "You're sending messages very fast — try again in an hour."
+
+export async function messagesPaused(err: unknown, uid: string): Promise<boolean> {
+  if (!(err instanceof FirebaseError) || err.code !== 'permission-denied') return false
+  try {
+    const { db } = await import('./firebase')
+    const { Timestamp, doc, getDoc } = await import('firebase/firestore')
+    const until: unknown = (await getDoc(doc(db, 'users', uid, 'private', 'account'))).get('messagesMutedUntil')
+    return until instanceof Timestamp && until.toMillis() > Date.now()
+  } catch {
+    return false
+  }
+}

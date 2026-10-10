@@ -116,3 +116,15 @@ export const MAJOR_CITIES: ZyloveCity[] = [
 export function anyCityById(id: unknown): ZyloveCity | null {
   return cityById(id) ?? MAJOR_CITIES.find((c) => c.id === id) ?? null
 }
+
+// Austin-only launch: a city's founding period (mirror of
+// functions/src/cityStatus.ts foundingPeriod) — founder spots, AI profiles and
+// pre-launch Elite only then. config/city_{id}.status, else the old flags:
+// open → live; Austin founding, the rest locked.
+export function cityInFoundingPeriod(id: string, config: Record<string, unknown> | undefined): boolean {
+  const open = config?.discoveryOpenedAt != null || config?.botsActive === false
+  const stored = config?.status
+  const status = stored === 'locked' || stored === 'founding' || stored === 'live' ? stored : open ? 'live' : id === 'austin' ? 'founding' : 'locked'
+  const serves = status !== 'locked' || config?.unlockedAt != null || (id === 'austin' && stored === 'locked')
+  return serves && !open && status !== 'live'
+}

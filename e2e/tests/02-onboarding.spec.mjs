@@ -12,6 +12,10 @@ test('onboarding: new user completes Spark onboarding', async ({ browser }) => {
   const ctx = await browser.newContext({ ...CONTEXT, geolocation: { latitude: 41.26, longitude: -95.94 } }) // Omaha: no founder invite
   const page = await ctx.newPage()
   const net = await offline(page)
+  // Austin-only launch: Omaha is waitlisted, so this account is let in first
+  // (as a city unlock would; spec 46 covers the location check itself).
+  const pre = await adminAuth.createUser({ phoneNumber: phone })
+  await db.doc(`userInternal/${pre.uid}`).set({ admission: { status: 'admitted', cityId: 'austin', via: 'e2e' } })
   await signIn(page, phone, { expectPath: /\/onboarding/ })
   const uid = (await adminAuth.getUserByPhoneNumber(phone)).uid
 

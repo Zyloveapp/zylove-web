@@ -71,8 +71,7 @@ async function reverseGeocode(lat: number, lng: number): Promise<string | null> 
 // ─── setLocation ─────────────────────────────────────────────────────────────
 
 // Saves the caller's location: snapped to the grid, labelled ("Austin, TX"),
-// and their launch market locked the first time it resolves to one (so a
-// later move can't take them off a market's trial clock). A position in the
+// with the launch market it's in (or the city it's linked to). A position in the
 // same grid cell as the saved one changes nothing and isn't counted; real
 // moves are limited to MAX_CHANGES_PER_DAY, which also keeps anyone from
 // walking their own location around to triangulate someone else.
@@ -112,18 +111,14 @@ export const setLocation = onCall(
     if (moved && recent.length >= MAX_CHANGES_PER_DAY) throw new HttpsError('resource-exhausted', LOCATION_LIMIT_MESSAGE)
 
     const label = (await reverseGeocode(lat, lng)) ?? (typeof savedLabel === 'string' ? savedLabel : null)
-    const locked: unknown = existing?.marketCityId
-    // F-114 (M3): someone already linked to a far city (locked on their first
-    // save) can't later claim a launch market by sending other coordinates —
-    // that turned a waiting (Free) account into pre-launch Elite and opened
-    // the founder claim. The market is decided once, from the first save.
-    const linkedAlready = typeof existing?.linkedCityId === 'string'
-    const marketCityId = typeof locked === 'string' ? locked : linkedAlready ? null : (getNearestCity(lat, lng)?.id ?? null)
+    // Austin-only launch (Matthew, 2026-10-09): the market is where you are
+    // now — the deck is always the people near you. (F-114's first-save lock
+    // is gone: pre-launch Elite and founder claims now need a Founding city
+    // where you are, cityStatus.ts, and moves stay limited — above.)
+    const marketCityId = getNearestCity(lat, lng)?.id ?? null
     // Stage C (decision 1): outside every launch radius, linked to the
-    // nearest launch or major city — locked like the market, so moving later
-    // can't change which city's opening their free period waits for.
-    const linkedLocked: unknown = existing?.linkedCityId
-    const linkedCityId = marketCityId ? null : typeof linkedLocked === 'string' ? linkedLocked : getLinkedCity(lat, lng).id
+    // nearest launch or major city.
+    const linkedCityId = marketCityId ? null : getLinkedCity(lat, lng).id
     const updatedAt = Timestamp.now()
 
     await locationRef(uid).set({
@@ -310,7 +305,7 @@ export const getDistances = onCall(
 // the person texts START to it.
 export const grantSmsConsent = onCall(
   { timeoutSeconds: 20, memory: '256MiB', invoker: 'public', secrets: SMS_SECRETS },
-  async (request): Promise<{ ok: true; confirmation: Delivery; from: string | null }> => {
+  async (request): Promise<{ ok: true; confirmation: Delivery | 'none'; from: string | null }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required')
     const uid = request.auth.uid
     const phone: unknown = request.auth.token.phone_number
@@ -338,6 +333,9 @@ export const grantSmsConsent = onCall(
       { merge: true },
     )
     await optOutRef(phone).delete()
+    // The waitlist's opt-in: no confirmation text (the screen confirms it;
+    // Matthew, 2026-10-09) — its one text is the activation notice.
+    if (source === 'waitlist') return { ok: true, confirmation: 'none', from: null }
     // F-122: one confirmation text a day per number — opting in again (up to
     // 5 an hour) used to text each time. Within the day it was already sent.
     const lastConfirmed: unknown = (await accountRef(uid).get()).data()?.smsConsentConfirmed

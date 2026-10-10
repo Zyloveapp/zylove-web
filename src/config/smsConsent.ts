@@ -7,4 +7,10 @@ export const SMS_CONSENT_VERSION = '2026-10-07'
 export const SMS_CONSENT_TEXT =
   'Text me match, message and account notifications from Zylove. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help. See SMS Terms.'
 
-export type SmsConsentSource = 'settings' | 'onboarding'
+export type SmsConsentSource = 'settings' | 'onboarding' | 'waitlist'
+
+// Austin-only launch: the waitlist screen's opt-in (required to stay on it) —
+// account notifications, the activation notice among them.
+export const WAITLIST_CONSENT_VERSION = 'waitlist-2026-10-09'
+export const WAITLIST_CONSENT_TEXT =
+  'Text me account notifications from Zylove, including when my account is activated. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.'
