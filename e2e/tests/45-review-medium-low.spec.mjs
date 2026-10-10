@@ -93,13 +93,15 @@ test('M3: the market follows where you are now (Austin-only launch); a brand-new
 // ─── M4 / M5 (F-115, F-116) ──────────────────────────────────────────────────
 
 test('M5: a revoked founder keeps their old trial, gets no new one, and can\'t claim again (not even on a new account)', async () => {
-  await db.doc('config/city_austin').set({ discoveryOpenedAt: Timestamp.now(), botsActive: false }, { merge: true })
   const f = await seedUser('Fay')
   await daysOld(f.uid, 3)
   const started = Timestamp.fromMillis(Date.now() - 40 * 864e5)
   const ended = Timestamp.fromMillis(Date.now() - 10 * 864e5)
   await db.doc(`userInternal/${f.uid}`).set({ trialStartedAt: started, trialEndsAt: ended, trialExpired: true }, { merge: true })
+  // Claimed while Austin is founding (spots only then — Austin-only launch);
+  // the city has opened by the time the spot is revoked.
   expect((await callAs(f.uid, 'assignFounderBadge')).eligible).toBe(true)
+  await db.doc('config/city_austin').set({ discoveryOpenedAt: Timestamp.now(), botsActive: false }, { merge: true })
   await fnLib('founderActivity').revokeFounderStatus(f.uid)
   const plan = await internalDoc(f.uid)
   expect(plan.trialStartedAt.toMillis()).toBe(started.toMillis()) // not a fresh 30 days
